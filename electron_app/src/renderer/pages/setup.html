@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Database Setup</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f172a;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .card {
+      background: #1e293b;
+      padding: 30px;
+      border-radius: 10px;
+      width: 360px;
+    }
+    input, button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 10px;
+      border-radius: 6px;
+      border: none;
+    }
+    button {
+      background: #38bdf8;
+      cursor: pointer;
+      font-weight: bold;
+    }
+    .error {
+      color: #ef4444;
+      font-size: 14px;
+      margin-top: 5px;
+    }
+    .success {
+      color: #22c55e;
+      font-size: 14px;
+      margin-top: 5px;
+    }
+    .status {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 6px;
+      text-align: center;
+      display: none;
+    }
+    .loading {
+      display: inline-block;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .auth-selector {
+      display: flex;
+      gap: 15px;
+      margin-bottom: 20px;
+      padding: 12px;
+      background: #0f172a;
+      border-radius: 6px;
+    }
+    .auth-option {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+    }
+    .auth-option input[type="radio"] {
+      width: auto;
+      margin: 0;
+      margin-right: 8px;
+      cursor: pointer;
+      accent-color: #38bdf8;
+    }
+    .auth-option label {
+      margin: 0;
+      cursor: pointer;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>Database Setup</h2>
+
+  <div class="auth-selector">
+    <div class="auth-option">
+      <input type="radio" id="sqlAuth" name="authType" value="sql" checked />
+      <label for="sqlAuth">SQL Authentication</label>
+    </div>
+    <div class="auth-option">
+      <input type="radio" id="windowsAuth" name="authType" value="windows" />
+      <label for="windowsAuth">Windows Auth</label>
+    </div>
+  </div>
+
+  <div id="sqlAuthDiv">
+    <input id="host" placeholder="Server (localhost\SQLEXPRESS or IP)" />
+    <input id="user" placeholder="Username (sa or domain\user)" />
+    <input id="password" type="password" placeholder="Password" />
+    <input id="database" placeholder="Database Name" />
+  </div>
+
+  <div id="windowsAuthDiv" style="display: none;">
+    <input id="hostWin" placeholder="Server (e.g., 192.168.103.163)" />
+    <input id="portWin" placeholder="Port (e.g., 9400 or 1433)" type="number" />
+    <input id="databaseWin" placeholder="Database Name" />
+  </div>
+  
+  <div id="errorMsg" class="error"></div>
+  <div id="statusMsg" class="status"></div>
+
+  <button onclick="testAndSave()">Test Connection & Continue</button>
+</div>
+
+<script>
+  // Reset form state on page load
+  window.addEventListener('load', () => {
+    // Clear all input values
+    document.getElementById('host').value = '';
+    document.getElementById('user').value = '';
+    document.getElementById('password').value = '';
+    document.getElementById('database').value = '';
+    document.getElementById('hostWin').value = '';
+    document.getElementById('portWin').value = '';
+    document.getElementById('databaseWin').value = '';
+
+    // Hide status messages
+    document.getElementById('errorMsg').textContent = '';
+    document.getElementById('statusMsg').style.display = 'none';
+    document.getElementById('statusMsg').textContent = '';
+
+    // Reset radio button to SQL auth
+    document.getElementById('sqlAuth').checked = true;
+    document.getElementById('sqlAuthDiv').style.display = 'block';
+    document.getElementById('windowsAuthDiv').style.display = 'none';
+
+    // Ensure button is fully enabled
+    const button = document.querySelector('button');
+    button.disabled = false;
+    button.style.opacity = '1';
+    button.style.cursor = 'pointer';
+    button.style.pointerEvents = 'auto';
+
+    // Ensure all inputs are enabled
+    document.querySelectorAll('input, button').forEach(elem => {
+      elem.style.pointerEvents = 'auto';
+      if (elem.tagName !== 'BUTTON') {
+        elem.disabled = false;
+      }
+    });
+  });
+
+  // Toggle between authentication methods
+  document.querySelectorAll('input[name="authType"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+      const authType = document.querySelector('input[name="authType"]:checked').value;
+      document.getElementById('sqlAuthDiv').style.display = authType === 'sql' ? 'block' : 'none';
+      document.getElementById('windowsAuthDiv').style.display = authType === 'windows' ? 'block' : 'none';
+    });
+  });
+
+  async function testAndSave() {
+    const authType = document.querySelector('input[name="authType"]:checked').value;
+    const errorMsg = document.getElementById('errorMsg');
+    const statusMsg = document.getElementById('statusMsg');
+    const button = event.target;
+
+    errorMsg.textContent = '';
+    let config, testRes;
+
+    if (authType === 'sql') {
+      config = {
+        server: document.getElementById('host').value.trim(),
+        user: document.getElementById('user').value.trim(),
+        password: document.getElementById('password').value,
+        database: document.getElementById('database').value.trim(),
+        authType: 'sql'
+      };
+
+      // Validation
+      if (!config.server) {
+        errorMsg.textContent = 'Server is required';
+        return;
+      }
+      if (!config.user) {
+        errorMsg.textContent = 'Username is required';
+        return;
+      }
+      if (!config.password) {
+        errorMsg.textContent = 'Password is required';
+        return;
+      }
+      if (!config.database) {
+        errorMsg.textContent = 'Database name is required';
+        return;
+      }
+    } else {
+      const server = document.getElementById('hostWin').value.trim();
+      const port = document.getElementById('portWin').value.trim();
+      
+      config = {
+        server: port ? `${server},${port}` : server,
+        database: document.getElementById('databaseWin').value.trim(),
+        authType: 'windows'
+      };
+
+      // Validation
+      if (!server) {
+        errorMsg.textContent = 'Server is required';
+        return;
+      }
+      if (!config.database) {
+        errorMsg.textContent = 'Database name is required';
+        return;
+      }
+    }
+
+    // Show loading
+    statusMsg.style.display = 'block';
+    statusMsg.style.background = '#1e40af';
+    statusMsg.innerHTML = '<span class="loading">⏳</span> Testing connection...';
+    button.disabled = true;
+
+    try {
+      // Test connection first
+      if (authType === 'sql') {
+        testRes = await window.api.testDbConnection(config);
+      } else {
+        testRes = await window.api.testWindowsAuth(config);
+      }
+
+      if (!testRes.success) {
+        statusMsg.style.display = 'block';
+        statusMsg.style.background = '#7f1d1d';
+        statusMsg.textContent = '❌ ' + testRes.message;
+        button.disabled = false;
+        return;
+      }
+
+      // Connection successful, show success and save
+      statusMsg.style.background = '#166534';
+      statusMsg.innerHTML = '<span>✅</span> ' + testRes.message;
+
+      setTimeout(async () => {
+        // Now save the config
+        const res = await window.api.saveConfig(config);
+
+        if (res.success) {
+          window.location.replace('reporting.html');
+        } else {
+          statusMsg.style.background = '#7f1d1d';
+          statusMsg.textContent = '❌ ' + res.message;
+          button.disabled = false;
+        }
+      }, 1000);
+
+    } catch (err) {
+      statusMsg.style.display = 'block';
+      statusMsg.style.background = '#7f1d1d';
+      statusMsg.textContent = '❌ Error: ' + err.message;
+      button.disabled = false;
+    }
+  }
+</script>
+
+</body>
+</html>

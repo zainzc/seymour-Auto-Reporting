@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Webhook Setup</title>
+  <style>
+    body {
+      font-family: Arial;
+      background: #0f172a;
+      color: white;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .card {
+      background: #1e293b;
+      padding: 30px;
+      border-radius: 10px;
+      width: 360px;
+    }
+    input, button {
+      width: 100%;
+      padding: 10px;
+      margin-top: 10px;
+      border-radius: 6px;
+      border: none;
+    }
+    button {
+      background: #22c55e;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .error {
+      color: #ef4444;
+      font-size: 14px;
+      margin-top: 5px;
+    }
+    .success {
+      color: #22c55e;
+      font-size: 14px;
+      margin-top: 5px;
+    }
+    .status {
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 6px;
+      text-align: center;
+      display: none;
+    }
+    .loading {
+      display: inline-block;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h2>Webhook Setup</h2>
+
+  <input id="webhook" placeholder="https://example.com/webhook" />
+  
+  <div id="errorMsg" class="error"></div>
+  <div id="statusMsg" class="status"></div>
+
+  <button onclick="testAndSaveWebhook()">Test & Save Webhook</button>
+</div>
+
+<script>
+  async function testAndSaveWebhook() {
+    const url = webhook.value.trim();
+    const errorMsg = document.getElementById('errorMsg');
+    const statusMsg = document.getElementById('statusMsg');
+    const button = event.target;
+
+    // Validation
+    errorMsg.textContent = '';
+
+    if (!url) {
+      errorMsg.textContent = 'Webhook URL is required';
+      return;
+    }
+
+    // Validate URL format
+    try {
+      new URL(url);
+    } catch {
+      errorMsg.textContent = 'Invalid URL format. Must start with http:// or https://';
+      return;
+    }
+
+    // Show loading
+    statusMsg.style.display = 'block';
+    statusMsg.style.background = '#1e40af';
+    statusMsg.innerHTML = '<span class="loading">⏳</span> Testing webhook with sample data...';
+    button.disabled = true;
+
+    try {
+      // Test webhook with a POST request and sample data
+      const testData = {
+        test: true,
+        timestamp: new Date().toISOString(),
+        message: 'Webhook validation test'
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(testData)
+      });
+
+      // Check if response is successful (2xx status code)
+      if (!response.ok) {
+        throw new Error(`Server returned status ${response.status}`);
+      }
+
+      // Don't require JSON - just check for successful response
+      // (webhook services might return HTML or other formats)
+      
+      // Show success
+      statusMsg.style.background = '#166534';
+      statusMsg.innerHTML = '<span>✅</span> Webhook accepted data successfully!';
+
+      setTimeout(async () => {
+        // Now save the webhook
+        const res = await window.api.saveWebhook(url);
+
+        if (res.success) {
+          window.location.replace('dashboard.html');
+        } else {
+          statusMsg.style.background = '#7f1d1d';
+          statusMsg.textContent = '❌ ' + res.message;
+          button.disabled = false;
+        }
+      }, 1000);
+
+    } catch (err) {
+      statusMsg.style.display = 'block';
+      statusMsg.style.background = '#7f1d1d';
+      statusMsg.textContent = '❌ Webhook test failed: ' + err.message;
+      button.disabled = false;
+    }
+  }
+</script>
+
+</body>
+</html>

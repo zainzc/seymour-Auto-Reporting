@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Seymour Auto Reporting</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #0f172a;
+      color: white;
+      padding: 30px;
+      margin: 0;
+    }
+    
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 30px;
+      padding-bottom: 20px;
+      border-bottom: 2px solid #1e293b;
+    }
+    
+    h1 {
+      margin: 0;
+      font-size: 28px;
+    }
+    
+    .back-btn {
+      padding: 10px 20px;
+      background: #475569;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+      color: white;
+    }
+    
+    .back-btn:hover {
+      background: #64748b;
+    }
+    
+    .card {
+      background: #1e293b;
+      padding: 25px;
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    
+    .data-type-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-top: 15px;
+    }
+    
+    .data-type-btn {
+      padding: 20px;
+      background: #334155;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      cursor: pointer;
+      text-align: center;
+      font-size: 16px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+    
+    .data-type-btn.active {
+      background: #38bdf8;
+      border-color: #0ea5e9;
+      color: #0f172a;
+    }
+    
+    .data-type-btn.disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+    
+    .mode-selector {
+      display: flex;
+      gap: 15px;
+      margin: 20px 0;
+    }
+    
+    .mode-btn {
+      flex: 1;
+      padding: 15px;
+      background: #334155;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: 600;
+      color: white;
+      transition: all 0.2s;
+    }
+    
+    .mode-btn.active {
+      background: #22c55e;
+      border-color: #16a34a;
+      color: #0f172a;
+    }
+    
+    .mode-content {
+      display: none;
+    }
+    
+    .mode-content.active {
+      display: block;
+    }
+    
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #cbd5e1;
+    }
+    
+    input[type="date"],
+    select {
+      width: 100%;
+      padding: 12px;
+      background: #0f172a;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      color: white;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    
+    input[type="date"]::-webkit-calendar-picker-indicator {
+      filter: invert(1) brightness(100);
+      cursor: pointer;
+    }
+    
+    input[type="date"]:focus,
+    select:focus {
+      outline: none;
+      border-color: #38bdf8;
+    }
+    
+    .date-range {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+    }
+    
+    .action-btn {
+      width: 100%;
+      padding: 15px;
+      background: #38bdf8;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 16px;
+      font-weight: bold;
+      color: #0f172a;
+      transition: all 0.2s;
+    }
+    
+    .action-btn:hover {
+      background: #0ea5e9;
+    }
+    
+    .action-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .action-btn.success {
+      background: #22c55e;
+    }
+    
+    .action-btn.danger {
+      background: #ef4444;
+    }
+    
+    .schedule-controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin-top: 20px;
+    }
+    
+    .status-box {
+      margin-top: 20px;
+      padding: 15px;
+      background: #0f172a;
+      border-radius: 6px;
+      border-left: 4px solid #3b82f6;
+    }
+    
+    .status-box.success {
+      border-left-color: #22c55e;
+    }
+    
+    .status-box.error {
+      border-left-color: #ef4444;
+    }
+    
+    .status-box.hidden {
+      display: none;
+    }
+    
+    .info-text {
+      color: #94a3b8;
+      font-size: 13px;
+      margin-top: 5px;
+    }
+    
+    .schedule-info {
+      background: #0f172a;
+      padding: 15px;
+      border-radius: 6px;
+      margin-top: 15px;
+    }
+    
+    .schedule-info h4 {
+      margin: 0 0 10px 0;
+      color: #38bdf8;
+    }
+    
+    .schedule-info p {
+      margin: 5px 0;
+      font-size: 14px;
+    }
+    
+    .loading {
+      display: inline-block;
+    }
+    
+    .loading::after {
+      content: '';
+      animation: dots 1.5s steps(4, end) infinite;
+    }
+    
+    @keyframes dots {
+      0%, 20% { content: ''; }
+      40% { content: '.'; }
+      60% { content: '..'; }
+      80%, 100% { content: '...'; }
+    }
+    .help-icon {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      background: #475569;
+      color: white;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 18px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: help;
+      margin-left: 8px;
+      position: relative;
+    }
+    .help-icon:hover {
+      background: #64748b;
+    }
+    .help-tooltip {
+      display: none;
+      position: absolute;
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 8px;
+      padding: 15px;
+      width: 400px;
+      max-width: 90vw;
+      top: 25px;
+      left: 0;
+      z-index: 1000;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .help-icon:hover .help-tooltip {
+      display: block;
+    }
+    .help-tooltip strong {
+      color: #38bdf8;
+    }
+    .help-tooltip code {
+      background: #0f172a;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+      color: #22c55e;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1 id="app-title" style="cursor: default; user-select: none;">Seymour Auto Reporting</h1>
+  <div style="display: flex; gap: 15px;">
+    <div id="google-status" style="padding: 10px 15px; background: #334155; border-radius: 6px; font-size: 14px; display: flex; align-items: center; gap: 10px;">
+      <span id="google-indicator" style="width: 10px; height: 10px; border-radius: 50%; background: #ef4444;"></span>
+      <span id="google-text">Not Connected</span>
+      <button id="google-btn" class="back-btn" style="margin: 0;" onclick="toggleGoogleAuth()">Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- Data Type Selection -->
+<div class="card">
+  <h3>Select Data Type</h3>
+  <div class="data-type-grid">
+    <div class="data-type-btn active" id="btn-invoices" onclick="selectDataType('invoices')">
+      Invoices
+    </div>
+    <div class="data-type-btn disabled" id="btn-quotes">
+      Quotes
+    </div>
+    <div class="data-type-btn disabled" id="btn-workorders">
+      Work Orders
+    </div>
+    <div class="data-type-btn disabled" id="btn-inventory">
+      Inventory
+    </div>
+  </div>
+</div>
+
+<!-- Mode Selection -->
+<div class="card" id="mode-card">
+  <h3>Execution Mode</h3>
+  <div class="mode-selector">
+    <button class="mode-btn active" id="btn-manual" onclick="selectMode('manual')">
+      Manual Export (Excel)
+    </button>
+    <button class="mode-btn" id="btn-scheduled" onclick="selectMode('scheduled')">
+      Scheduled Download (Google Sheets)
+    </button>
+  </div>
+
+  <!-- Manual Export Mode -->
+  <div class="mode-content active" id="manual-mode">
+    <div class="form-group">
+      <label>Date Range</label>
+      <div class="date-range">
+        <div>
+          <input type="date" id="manual-date-from" />
+          <div class="info-text">From Date</div>
+        </div>
+        <div>
+          <input type="date" id="manual-date-to" />
+          <div class="info-text">To Date</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>Salesperson</label>
+      <select id="manual-salesperson">
+        <option value="ALL">ALL</option>
+      </select>
+      <div class="info-text">Filter by salesperson (default: ALL)</div>
+    </div>
+
+    <button class="action-btn" id="btn-export" onclick="exportToExcel()">
+      Export Now to .xls
+    </button>
+
+    <div class="status-box hidden" id="manual-status"></div>
+  </div>
+
+  <!-- Scheduled Mode -->
+  <div class="mode-content" id="scheduled-mode">
+    <div class="form-group">
+      <label>Schedule Frequency</label>
+      <select id="schedule-frequency" onchange="updateScheduleInfo()">
+        <option value="nightly">Nightly (Previous Day)</option>
+        <option value="weekly">Weekly (Last Completed Week)</option>
+      </select>
+    </div>
+
+    <div class="form-group" id="week-start-group" style="display: none;">
+      <label>Week Start Day</label>
+      <select id="week-start-day">
+        <option value="1">Monday</option>
+        <option value="2">Tuesday</option>
+        <option value="3">Wednesday</option>
+        <option value="4">Thursday</option>
+        <option value="5">Friday</option>
+        <option value="6">Saturday</option>
+        <option value="0">Sunday</option>
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>End Date (Optional)</label>
+      <input type="date" id="schedule-end-date" />
+      <div class="info-text">Schedule will auto-deactivate on this date</div>
+    </div>
+
+    <div class="form-group">
+      <label>
+        Google Sheet ID <span style="color: #ef4444;">*</span>
+        <span class="help-icon">?
+          <span class="help-tooltip">
+            <strong>How to find your Google Sheet ID:</strong><br><br>
+            1. Open your Google Sheet in a browser<br>
+            2. Look at the URL in the address bar<br>
+            3. The Sheet ID is the long string between <code>/d/</code> and <code>/edit</code><br><br>
+            <strong>Example URL:</strong><br>
+            https://docs.google.com/spreadsheets/d/<code>1ABC-xyz123_EXAMPLE-ID</code>/edit<br><br>
+            <strong>Copy only the ID part</strong> (the green text above)<br>
+            ⚠️ Don't paste the full URL, just the ID
+          </span>
+        </span>
+      </label>
+      <input type="text" id="spreadsheet-id" placeholder="e.g., 1ABC-xyz123_EXAMPLE-ID" style="background: #0f172a; border: 1px solid #475569; border-radius: 6px; padding: 12px; color: white; width: 100%; box-sizing: border-box; font-family: monospace;" />
+      <div class="info-text">Hover over the <strong>?</strong> icon above for detailed instructions</div>
+    </div>
+
+    <div class="form-group">
+      <label>Destination</label>
+      <select disabled>
+        <option>Google Sheets - RAW Tab (Fixed)</option>
+      </select>
+      <div class="info-text">Data will overwrite the RAW tab only</div>
+    </div>
+
+    <div class="schedule-controls">
+      <button class="action-btn success" onclick="saveSchedule()">
+        Save Schedule
+      </button>
+      <button class="action-btn danger" onclick="cancelSchedule()">
+        Cancel Schedule
+      </button>
+    </div>
+
+    <div class="status-box hidden" id="scheduled-status"></div>
+
+    <div class="schedule-info" id="current-schedule" style="display: none;">
+      <h4>Current Schedule</h4>
+      <p id="schedule-details"></p>
+      <button class="action-btn" style="background: #f59e0b; margin-top: 15px;" onclick="testScheduleNow()">
+        Test Schedule Now
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+    console.log('Reporting script loaded');
+    console.log('window.oauth2API:', window.oauth2API);
+  let currentDataType = 'invoices';
+  let currentMode = 'manual';
+
+  // Initialize
+  window.addEventListener('load', async () => {
+    await loadSalespeople();
+    await loadCurrentSchedule();
+    await loadSavedSheetId();
+    setDefaultDates();
+  });
+
+  function setDefaultDates() {
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    const lastMonth = new Date(today);
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+
+    document.getElementById('manual-date-from').value = formatDate(lastMonth);
+    document.getElementById('manual-date-to').value = formatDate(yesterday);
+  }
+
+  function formatDate(date) {
+    return date.toISOString().split('T')[0];
+  }
+
+  function selectDataType(type) {
+    if (type !== 'invoices') return; // Only invoices enabled
+    currentDataType = type;
+  }
+
+  function selectMode(mode) {
+    currentMode = mode;
+
+    // Update mode buttons
+    document.getElementById('btn-manual').classList.toggle('active', mode === 'manual');
+    document.getElementById('btn-scheduled').classList.toggle('active', mode === 'scheduled');
+
+    // Update mode content
+    document.getElementById('manual-mode').classList.toggle('active', mode === 'manual');
+    document.getElementById('scheduled-mode').classList.toggle('active', mode === 'scheduled');
+  }
+
+  async function loadSalespeople() {
+    try {
+      const salespeople = await window.reportingAPI.getSalespeople();
+      const select = document.getElementById('manual-salesperson');
+      
+      salespeople.forEach(sp => {
+        const option = document.createElement('option');
+        option.value = sp;
+        option.textContent = sp;
+        select.appendChild(option);
+      });
+    } catch (err) {
+      console.error('Failed to load salespeople:', err);
+    }
+  }
+
+  async function exportToExcel() {
+    const btn = document.getElementById('btn-export');
+    const status = document.getElementById('manual-status');
+
+    const dateFrom = document.getElementById('manual-date-from').value;
+    const dateTo = document.getElementById('manual-date-to').value;
+    const salesperson = document.getElementById('manual-salesperson').value;
+
+    if (!dateFrom || !dateTo) {
+      showStatus(status, 'error', 'Please select date range');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading">Exporting</span>';
+    showStatus(status, 'info', 'Generating Excel file...');
+
+    try {
+      const result = await window.reportingAPI.exportToExcel({
+        dataType: currentDataType,
+        dateFrom,
+        dateTo,
+        salesperson
+      });
+
+      if (result.success) {
+        showStatus(status, 'success', result.message);
+      } else {
+        showStatus(status, 'error', result.message);
+      }
+    } catch (err) {
+      showStatus(status, 'error', `Export failed: ${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = 'Export Now to .xls';
+    }
+  }
+
+  async function saveSchedule() {
+    const status = document.getElementById('scheduled-status');
+    const frequency = document.getElementById('schedule-frequency').value;
+    const endDate = document.getElementById('schedule-end-date').value;
+    const weekStartDay = document.getElementById('week-start-day').value;
+    const spreadsheetId = document.getElementById('spreadsheet-id').value.trim();
+
+    if (!spreadsheetId) {
+      showStatus(status, 'error', 'Google Sheet ID is required');
+      return;
+    }
+
+    showStatus(status, 'info', 'Saving schedule...');
+
+    try {
+      const result = await window.reportingAPI.saveSchedule({
+        dataType: currentDataType,
+        frequency,
+        weekStartDay: frequency === 'weekly' ? parseInt(weekStartDay) : null,
+        endDate: endDate || null,
+        spreadsheetId
+      });
+
+      if (result.success) {
+        showStatus(status, 'success', result.message);
+        await loadCurrentSchedule();
+      } else {
+        showStatus(status, 'error', result.message);
+      }
+    } catch (err) {
+      showStatus(status, 'error', `Failed to save: ${err.message}`);
+    }
+  }
+
+  async function cancelSchedule() {
+    const status = document.getElementById('scheduled-status');
+    
+    if (!confirm('Are you sure you want to cancel the active schedule?')) {
+      return;
+    }
+
+    try {
+      const result = await window.reportingAPI.cancelSchedule();
+      
+      if (result.success) {
+        showStatus(status, 'success', result.message);
+        document.getElementById('current-schedule').style.display = 'none';
+        
+        // Completely reset the spreadsheet ID field
+        const spreadsheetInput = document.getElementById('spreadsheet-id');
+        spreadsheetInput.disabled = false;
+        spreadsheetInput.readOnly = false;
+        spreadsheetInput.value = '';
+        spreadsheetInput.removeAttribute('disabled');
+        spreadsheetInput.removeAttribute('readonly');
+        spreadsheetInput.style.pointerEvents = 'auto';
+        spreadsheetInput.style.opacity = '1';
+        
+        // Reload saved sheet ID if available
+        await loadSavedSheetId();
+        
+        // Force focus to ensure it's interactive
+        setTimeout(() => {
+          spreadsheetInput.focus();
+          spreadsheetInput.blur();
+        }, 100);
+      } else {
+        showStatus(status, 'error', result.message);
+      }
+    } catch (err) {
+      showStatus(status, 'error', `Failed to cancel: ${err.message}`);
+    }
+  }
+
+  async function testScheduleNow() {
+    const status = document.getElementById('scheduled-status');
+    showStatus(status, 'info', 'Testing schedule... this may take a moment');
+
+    try {
+      const result = await window.reportingAPI.testSchedule();
+      
+      if (result.success) {
+        showStatus(status, 'success', result.message);
+        console.log('Schedule test executed successfully');
+      } else {
+        showStatus(status, 'error', result.message);
+      }
+    } catch (err) {
+      showStatus(status, 'error', `Test failed: ${err.message}`);
+    }
+  }
+
+  async function loadCurrentSchedule() {
+    try {
+      const schedule = await window.reportingAPI.getCurrentSchedule();
+      
+      if (schedule && schedule.active) {
+        const details = document.getElementById('schedule-details');
+        details.innerHTML = `
+          <strong>Frequency:</strong> ${schedule.frequency}<br>
+          ${schedule.weekStartDay ? `<strong>Week Starts:</strong> ${getDayName(schedule.weekStartDay)}<br>` : ''}
+          ${schedule.endDate ? `<strong>Ends:</strong> ${schedule.endDate}<br>` : ''}
+          ${schedule.spreadsheetId ? `<strong>Sheet ID:</strong> ${schedule.spreadsheetId.substring(0, 20)}...<br>` : ''}
+          <strong>Last Run:</strong> ${schedule.lastRun || 'Never'}
+        `;
+        document.getElementById('current-schedule').style.display = 'block';
+        
+        // Pre-fill the spreadsheet ID field if available
+        if (schedule.spreadsheetId) {
+          document.getElementById('spreadsheet-id').value = schedule.spreadsheetId;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load schedule:', err);
+    }
+  }
+
+  function updateScheduleInfo() {
+    const frequency = document.getElementById('schedule-frequency').value;
+    const weekStartGroup = document.getElementById('week-start-group');
+    weekStartGroup.style.display = frequency === 'weekly' ? 'block' : 'none';
+  }
+
+  async function loadSavedSheetId() {
+    try {
+      const savedId = await window.reportingAPI.getSavedSheetId();
+      if (savedId) {
+        document.getElementById('spreadsheet-id').value = savedId;
+      }
+    } catch (err) {
+      console.error('Failed to load saved sheet ID:', err);
+    }
+  }
+
+  function getDayName(day) {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return days[day];
+  }
+
+  function showStatus(element, type, message) {
+    element.className = `status-box ${type}`;
+    element.textContent = message;
+  }
+
+  function goBack() {
+    window.location.href = 'dashboard.html';
+  }
+
+  // OAuth2 Functions
+  async function initGoogleStatus() {
+    try {
+      const isAuthenticated = await window.oauth2API.isAuthenticated();
+      if (isAuthenticated) {
+        const userInfo = await window.oauth2API.getUserInfo();
+        updateGoogleStatusUI(true, userInfo?.email);
+      } else {
+        updateGoogleStatusUI(false);
+      }
+    } catch (err) {
+      console.error('Failed to check Google authentication:', err);
+      updateGoogleStatusUI(false);
+    }
+  }
+
+  function updateGoogleStatusUI(isConnected, email = null) {
+    const indicator = document.getElementById('google-indicator');
+    const text = document.getElementById('google-text');
+    const btn = document.getElementById('google-btn');
+
+    if (isConnected) {
+      indicator.style.background = '#10b981';
+      text.textContent = email ? `Connected: ${email}` : 'Connected to Google';
+      btn.textContent = 'Disconnect';
+    } else {
+      indicator.style.background = '#ef4444';
+      text.textContent = 'Not Connected';
+      btn.textContent = 'Connect';
+    }
+  }
+
+let isDisconnecting = false;
+
+  async function toggleGoogleAuth() {
+    console.log('toggleGoogleAuth called');
+    const btn = document.getElementById('google-btn');
+    if (btn.disabled) return; // Prevent multiple calls
+    btn.disabled = true;
+    try {
+      const isAuthenticated = await window.oauth2API.isAuthenticated();
+      
+      if (isAuthenticated) {
+        // Disconnect
+        if (isDisconnecting) return; // Prevent multiple disconnects
+        isDisconnecting = true;
+        console.log('Disconnecting from Google...');
+        await window.oauth2API.disconnect();
+        updateGoogleStatusUI(false);
+        console.log('✅ Disconnected successfully');
+        isDisconnecting = false;
+        // After disconnect, re-check status
+        setTimeout(() => {
+          btn.disabled = false;
+          initGoogleStatus();
+        }, 100);
+      } else {
+        // Connect
+        console.log('Starting Google authentication...');
+        const authUrl = await window.oauth2API.getAuthUrl();
+        console.log('Opening auth URL:', authUrl);
+        // Open browser (try openExternal, fallback to window.open)
+        try {
+          if (window.oauth2API.openExternal) {
+            await window.oauth2API.openExternal(authUrl);
+          } else {
+            window.open(authUrl, '_blank');
+          }
+        } catch (e) {
+          console.error('openExternal failed, using window.open:', e);
+          window.open(authUrl, '_blank');
+        }
+        // Listen for authorization callback (only once)
+        const handleAuthorized = async () => {
+          try {
+            console.log('OAuth2 authorization callback received');
+            // Wait a moment for tokens to be saved
+            await new Promise(resolve => setTimeout(resolve, 500));
+            const isAuthNow = await window.oauth2API.isAuthenticated();
+            if (isAuthNow) {
+              const userInfo = await window.oauth2API.getUserInfo();
+              updateGoogleStatusUI(true, userInfo?.email);
+            } else {
+              updateGoogleStatusUI(false);
+            }
+          } catch (err) {
+            console.error('Failed to update UI after authorization:', err);
+            updateGoogleStatusUI(false);
+          } finally {
+            btn.disabled = false;
+          }
+        };
+        window.oauth2API.onAuthorized(handleAuthorized);
+        // Re-enable button after a short delay if no callback
+        setTimeout(() => { btn.disabled = false; }, 5000);
+      }
+    } catch (err) {
+      console.error('OAuth2 error:', err);
+      alert('Authentication failed: ' + err.message);
+      const btn = document.getElementById('google-btn');
+      btn.disabled = false;
+    }
+  }
+
+  // Global listener for authorization events
+  window.oauth2API.onAuthorized(async () => {
+    console.log('Global oauth2-authorized event received');
+    try {
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const isAuthNow = await window.oauth2API.isAuthenticated();
+      if (isAuthNow) {
+        const userInfo = await window.oauth2API.getUserInfo();
+        updateGoogleStatusUI(true, userInfo?.email);
+      } else {
+        updateGoogleStatusUI(false);
+      }
+    } catch (err) {
+      console.error('Error updating status on oauth2-authorized:', err);
+      updateGoogleStatusUI(false);
+    }
+  });
+
+  // Initialize Google status when page loads
+  window.addEventListener('DOMContentLoaded', initGoogleStatus);
+
+  // Secret developer access to main dashboard
+  let clickCount = 0;
+  let clickTimer = null;
+  document.getElementById('app-title').addEventListener('click', () => {
+    clickCount++;
+    if (clickCount === 5) {
+      window.location.href = 'dashboard.html';
+      clickCount = 0;
+    }
+    // Reset counter after 2 seconds of no clicks
+    clearTimeout(clickTimer);
+    clickTimer = setTimeout(() => {
+      clickCount = 0;
+    }, 2000);
+  });
+
+</script>
+
+</body>
+</html>

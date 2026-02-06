@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Seymour AutoSync</title>
+  <style>
+    body {
+      font-family: Arial;
+      background: #0f172a;
+      color: white;
+      padding: 30px;
+    }
+    button {
+      padding: 10px 15px;
+      background: #38bdf8;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+    .tables-section {
+      background: #1e293b;
+      padding: 20px;
+      border-radius: 6px;
+      margin: 20px 0;
+    }
+    #tablesList {
+      max-height: 300px;
+      overflow-y: auto;
+      padding-right: 10px;
+    }
+    #tablesList::-webkit-scrollbar {
+      width: 8px;
+    }
+    #tablesList::-webkit-scrollbar-track {
+      background: #0f172a;
+      border-radius: 4px;
+    }
+    #tablesList::-webkit-scrollbar-thumb {
+      background: #475569;
+      border-radius: 4px;
+    }
+    #tablesList::-webkit-scrollbar-thumb:hover {
+      background: #64748b;
+    }
+    .table-item {
+      display: flex;
+      align-items: center;
+      padding: 10px;
+      margin: 5px 0;
+      background: #0f172a;
+      border-radius: 4px;
+    }
+    .table-item input {
+      margin-right: 10px;
+      width: 20px;
+      height: 20px;
+      cursor: pointer;
+    }
+    pre {
+      background: #1e293b;
+      padding: 15px;
+      border-radius: 6px;
+      margin-top: 15px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .query-section {
+      background: #1e293b;
+      padding: 20px;
+      border-radius: 6px;
+      margin: 20px 0;
+    }
+    textarea {
+      width: 100%;
+      min-height: 100px;
+      background: #0f172a;
+      color: white;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      padding: 12px;
+      font-family: 'Courier New', monospace;
+      font-size: 14px;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+    textarea:focus {
+      outline: none;
+      border-color: #38bdf8;
+    }
+    .query-controls {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      margin-top: 10px;
+    }
+    .query-controls select {
+      padding: 10px 15px;
+      background: #334155;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      color: white;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .query-controls select:focus {
+      outline: none;
+      border-color: #38bdf8;
+    }
+    .query-info {
+      color: #94a3b8;
+      font-size: 14px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 15px;
+      background: #0f172a;
+    }
+    th, td {
+      border: 1px solid #475569;
+      padding: 10px;
+      text-align: left;
+    }
+    th {
+      background: #334155;
+      font-weight: bold;
+    }
+    td {
+      font-size: 13px;
+    }
+    .error {
+      color: #ef4444;
+      background: #1e293b;
+      padding: 15px;
+      border-radius: 6px;
+      margin-top: 15px;
+    }
+    .success {
+      color: #22c55e;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Seymour AutoSync</h1>
+
+<div>
+  <button onclick="loadTables()">Load Tables</button>
+  <button onclick="sync()">Sync Selected</button>
+  <button onclick="goToReporting()" style="background: #22c55e;">📊 Auto Reporting</button>
+  <button onclick="reset()" style="background: #ef4444;">Reset Setup</button>
+</div>
+
+<div class="tables-section" id="tablesContainer">
+  <h3>Available Tables</h3>
+  <div id="tablesList">Loading...</div>
+</div>
+
+<div class="query-section">
+  <h3>SQL Query Editor</h3>
+  <textarea id="sqlQuery" placeholder="Enter your SELECT query here...">SELECT * FROM orders</textarea>
+  <div class="query-controls">
+    <button onclick="runQuery()">▶ Run Query</button>
+    <button onclick="clearResults()" style="background: #475569;">Clear Results</button>
+    <select id="rowLimit">
+      <option value="100">Limit: 100 rows</option>
+      <option value="500">Limit: 500 rows</option>
+      <option value="1000" selected>Limit: 1000 rows</option>
+      <option value="all">No Limit (All)</option>
+    </select>
+    <span class="query-info" id="queryInfo"></span>
+  </div>
+  <div id="queryResults"></div>
+</div>
+
+<script>
+  const output = document.getElementById('output');
+
+  // Check if webhook is configured on page load
+  window.addEventListener('load', async () => {
+    try {
+      const webhook = await window.api.getWebhookConfig?.();
+      if (!webhook) {
+        // No webhook configured, redirect to setup
+        window.location.href = 'webhook.html';
+        return;
+      }
+    } catch (err) {
+      console.error('Failed to check webhook:', err);
+    }
+  });
+
+  async function loadTables() {
+    try {
+      const tables = await window.api.getTables();
+      const tablesList = document.getElementById('tablesList');
+      tablesList.innerHTML = '';
+      
+      if (tables.length === 0) {
+        tablesList.textContent = 'No tables found';
+        return;
+      }
+
+      tables.forEach(table => {
+        const div = document.createElement('div');
+        div.className = 'table-item';
+        div.innerHTML = `
+          <input type="checkbox" id="table-${table}" value="${table}" />
+          <label for="table-${table}">${table}</label>
+        `;
+        tablesList.appendChild(div);
+      });
+    } catch (err) {
+      alert('Error loading tables: ' + err.message);
+    }
+  }
+
+  async function sync() {
+    try {
+      const checkboxes = document.querySelectorAll('#tablesList input[type="checkbox"]:checked');
+      const selectedTables = Array.from(checkboxes).map(cb => cb.value);
+
+      if (selectedTables.length === 0) {
+        alert('Please select at least one table');
+        return;
+      }
+
+      const res = await window.api.syncTables(selectedTables);
+      alert(`Synced ${res.count} table(s) successfully!`);
+    } catch (err) {
+      alert('Error syncing: ' + err.message);
+    }
+  }
+
+  async function reset() {
+    if (confirm('Are you sure? This will clear all settings.')) {
+      await window.api.resetConfig();
+    }
+  }
+
+  function goToReporting() {
+    window.location.href = 'reporting.html';
+  }
+
+  async function runQuery() {
+    const sqlQuery = document.getElementById('sqlQuery').value.trim();
+    const resultsDiv = document.getElementById('queryResults');
+    const infoSpan = document.getElementById('queryInfo');
+    const rowLimit = document.getElementById('rowLimit').value;
+
+    if (!sqlQuery) {
+      resultsDiv.innerHTML = '<div class="error">Please enter a SQL query</div>';
+      return;
+    }
+
+    // Validate it's a SELECT query
+    if (!sqlQuery.toLowerCase().startsWith('select')) {
+      resultsDiv.innerHTML = '<div class="error">Only SELECT queries are allowed</div>';
+      return;
+    }
+
+    resultsDiv.innerHTML = '<div style="color: #94a3b8; padding: 15px;">Executing query...</div>';
+    infoSpan.textContent = '';
+
+    try {
+      const startTime = Date.now();
+      const result = await window.api.executeQuery(sqlQuery, rowLimit);
+      const executionTime = Date.now() - startTime;
+
+      if (result.rows.length === 0) {
+        resultsDiv.innerHTML = '<div style="color: #94a3b8; padding: 15px;">No results found</div>';
+        infoSpan.innerHTML = `<span class="success">✓ Query executed (0 rows, ${executionTime}ms)</span>`;
+        return;
+      }
+
+      // Build table
+      const columns = Object.keys(result.rows[0]);
+      let html = '<table><thead><tr>';
+      columns.forEach(col => {
+        html += `<th>${col}</th>`;
+      });
+      html += '</tr></thead><tbody>';
+
+      result.rows.forEach(row => {
+        html += '<tr>';
+        columns.forEach(col => {
+          const value = row[col];
+          const displayValue = value === null ? '<i>NULL</i>' : value;
+          html += `<td>${displayValue}</td>`;
+        });
+        html += '</tr>';
+      });
+
+      html += '</tbody></table>';
+      resultsDiv.innerHTML = html;
+      
+      const limitInfo = result.limited ? ' (limited)' : '';
+      infoSpan.innerHTML = `<span class="success">✓ ${result.rows.length} row(s) returned${limitInfo} (${executionTime}ms)</span>`;
+    } catch (err) {
+      resultsDiv.innerHTML = `<div class="error"><strong>Error:</strong> ${err.message}</div>`;
+      infoSpan.textContent = '';
+    }
+  }
+
+  function clearResults() {
+    document.getElementById('queryResults').innerHTML = '';
+    document.getElementById('queryInfo').textContent = '';
+  }
+
+  // Load tables on page load
+  loadTables();
+</script>
+
+</body>
+</html>
