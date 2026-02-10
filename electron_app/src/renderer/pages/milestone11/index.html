@@ -298,7 +298,10 @@
 <body>
 
 <div class="header">
-  <h1 id="app-title" style="cursor: default; user-select: none;">Seymour Auto Reporting</h1>
+  <div style="display: flex; align-items: center; gap: 15px;">
+    <button class="back-btn" onclick="goToMainDashboard()" style="font-size: 14px;">← Back</button>
+    <h1 id="app-title" style="cursor: default; user-select: none; margin: 0;">Seymour Auto Reporting</h1>
+  </div>
   <div style="display: flex; gap: 15px;">
     <div id="google-status" style="padding: 10px 15px; background: #334155; border-radius: 6px; font-size: 14px; display: flex; align-items: center; gap: 10px;">
       <span id="google-indicator" style="width: 10px; height: 10px; border-radius: 50%; background: #ef4444;"></span>
@@ -694,7 +697,7 @@
   }
 
   function goBack() {
-    window.location.href = 'dashboard.html';
+    window.location.href = '../seymour-autosync/index.html';
   }
 
   // OAuth2 Functions
@@ -822,13 +825,18 @@ let isDisconnecting = false;
   // Initialize Google status when page loads
   window.addEventListener('DOMContentLoaded', initGoogleStatus);
 
-  // Secret developer access to main dashboard
+  // Navigate to main dashboard
+  function goToMainDashboard() {
+    window.location.href = '../main-dashboard.html';
+  }
+
+  // Secret developer access to AutoSync dashboard
   let clickCount = 0;
   let clickTimer = null;
   document.getElementById('app-title').addEventListener('click', () => {
     clickCount++;
     if (clickCount === 5) {
-      window.location.href = 'dashboard.html';
+      window.location.href = '../seymour-autosync/index.html';
       clickCount = 0;
     }
     // Reset counter after 2 seconds of no clicks

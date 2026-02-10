@@ -1,0 +1,707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 1: Powerlink → Google Sheets - Seymour Auto</title>
+  <link rel="stylesheet" href="../../styles/index.css">
+  <style>
+    body {
+      background: #0f172a;
+      color: white;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+
+    .header {
+      margin-bottom: 30px;
+    }
+
+    h1 {
+      font-size: 28px;
+      margin: 0 0 10px 0;
+    }
+
+    .subtitle {
+      color: #94a3b8;
+      font-size: 14px;
+    }
+
+    .phase-badge {
+      display: inline-block;
+      background: #8b5cf6;
+      color: white;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 15px;
+    }
+
+    .card {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      border: 1px solid #334155;
+    }
+
+    .card-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0 0 20px 0;
+      color: #f1f5f9;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 500;
+      color: #e2e8f0;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid #475569;
+      border-radius: 6px;
+      background: #334155;
+      color: white;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+
+    .form-group input:focus {
+      outline: none;
+      border-color: #3b82f6;
+      background: #1e293b;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 16px;
+    }
+
+    .info-text {
+      font-size: 13px;
+      color: #64748b;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: 500;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .btn-primary:hover {
+      background: #2563eb;
+    }
+
+    .btn-secondary {
+      background: #6b7280;
+      color: white;
+    }
+
+    .btn-secondary:hover {
+      background: #4b5563;
+    }
+
+    .btn-danger {
+      background: #ef4444;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #dc2626;
+    }
+
+    .status-box {
+      margin-top: 15px;
+      padding: 12px 16px;
+      border-radius: 6px;
+      font-size: 14px;
+      display: none;
+    }
+
+    .status-box.success {
+      background: #065f46;
+      border: 1px solid #10b981;
+      color: #d1fae5;
+    }
+
+    .status-box.error {
+      background: #7f1d1d;
+      border: 1px solid #ef4444;
+      color: #fecaca;
+    }
+
+    .status-box.info {
+      background: #1e3a8a;
+      border: 1px solid #3b82f6;
+      color: #dbeafe;
+    }
+
+    .schedule-status {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      margin-bottom: 20px;
+      padding: 16px;
+      background: #0f172a;
+      border-radius: 8px;
+      border: 1px solid #334155;
+    }
+
+    .status-indicator {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #6b7280;
+      transition: background-color 0.3s;
+    }
+
+    .status-indicator.active {
+      background: #10b981;
+      box-shadow: 0 0 10px rgba(16, 185, 129, 0.4);
+    }
+
+    .logs-container {
+      max-height: 400px;
+      overflow-y: auto;
+      background: #0f172a;
+      border-radius: 6px;
+      padding: 16px;
+      border: 1px solid #334155;
+    }
+
+    .log-entry {
+      padding: 12px;
+      border-bottom: 1px solid #334155;
+      border-left: 3px solid #374151;
+    }
+
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+
+    .log-entry.success {
+      border-left-color: #10b981;
+    }
+
+    .log-entry.error {
+      border-left-color: #ef4444;
+    }
+
+    .log-time {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+
+    .log-message {
+      font-size: 14px;
+      color: #f3f4f6;
+      margin-bottom: 4px;
+    }
+
+    .log-details {
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    .back-link {
+      display: inline-block;
+      color: #64748b;
+      text-decoration: none;
+      font-size: 14px;
+      margin-bottom: 30px;
+      transition: color 0.2s;
+    }
+
+    .back-link:hover {
+      color: #3b82f6;
+    }
+
+    .requirements-box {
+      background: #1e3a8a;
+      border: 1px solid #3b82f6;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+
+    .requirements-title {
+      font-weight: 600;
+      color: #dbeafe;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .requirements-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .requirements-list li {
+      color: #bfdbfe;
+      font-size: 13px;
+      padding: 4px 0;
+      padding-left: 20px;
+      position: relative;
+    }
+
+    .requirements-list li::before {
+      content: '✓';
+      position: absolute;
+      left: 0;
+      color: #60a5fa;
+      font-weight: bold;
+    }
+
+    .google-auth-status {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      background: #0f172a;
+      border-radius: 6px;
+      border: 1px solid #334155;
+      margin-bottom: 20px;
+    }
+
+    .auth-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #6b7280;
+    }
+
+    .auth-indicator.connected {
+      background: #10b981;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <a href="../main-dashboard.html" class="back-link">← Back to Main Dashboard</a>
+
+  <div class="header">
+    <div class="phase-badge">Phase 1</div>
+    <h1>Powerlink → Google Sheets Integration</h1>
+    <p class="subtitle">Automated 24-hour inventory data pipeline with full dataset refresh</p>
+  </div>
+
+  <!-- Phase 1 Requirements -->
+  <div class="card">
+    <h2 class="card-title">📋 Phase 1 Requirements</h2>
+    <div class="requirements-box">
+      <div class="requirements-title">
+        ⚙️ Implementation Specifications
+      </div>
+      <ul class="requirements-list">
+        <li>Extract current inventory data from Powerlink (SQL Database)</li>
+        <li>Write to predefined Google Sheets file on fixed 24-hour schedule</li>
+        <li>Strictly adhere to provided worksheet names and column ordering</li>
+        <li>Full dataset refresh (overwrite) - no append or partial updates</li>
+        <li>Google Sheets file serves as canonical raw inventory dataset</li>
+        <li>Decouple operational data extraction from downstream enrichment logic</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- Google Authentication Status -->
+  <div class="card">
+    <h2 class="card-title">🔐 Google Authentication</h2>
+    <div class="google-auth-status" id="auth-status">
+      <div class="auth-indicator" id="auth-indicator"></div>
+      <span id="auth-text">Checking Google authentication...</span>
+    </div>
+    <div class="btn-group">
+      <button class="btn btn-primary" id="auth-btn" onclick="handleGoogleAuth()" style="display: none;">Connect to Google</button>
+    </div>
+  </div>
+
+  <!-- Configuration -->
+  <div class="card">
+    <h2 class="card-title">📊 Google Sheets Configuration</h2>
+
+    <div class="form-group">
+      <label for="sheets-url">Google Sheets URL</label>
+      <input 
+        type="url" 
+        id="sheets-url" 
+        placeholder="https://docs.google.com/spreadsheets/d/your-spreadsheet-id/edit"
+      />
+      <p class="info-text">
+        Enter the complete Google Sheets URL. The system will extract the spreadsheet ID automatically.
+      </p>
+    </div>
+
+    <div class="form-group">
+      <label for="worksheet-name">Target Worksheet Name</label>
+      <input 
+        type="text" 
+        id="worksheet-name" 
+        placeholder="Inventory_Data"
+      />
+      <p class="info-text">
+        Enter the exact name of the worksheet tab where inventory data will be written.
+      </p>
+    </div>
+
+    <div class="btn-group">
+      <button class="btn btn-secondary" onclick="testConnection()">Test Connection</button>
+      <button class="btn btn-primary" onclick="saveConfiguration()">Save Configuration</button>
+    </div>
+
+    <div id="config-status" class="status-box"></div>
+  </div>
+
+  <!-- Schedule Control -->
+  <div class="card">
+    <h2 class="card-title">⏰ 24-Hour Schedule Control</h2>
+
+    <div class="schedule-status">
+      <div id="schedule-indicator" class="status-indicator"></div>
+      <div>
+        <div id="schedule-text" style="font-weight: 500;">Schedule Inactive</div>
+        <div id="schedule-details" class="info-text">Configure Google Sheets connection and start the schedule</div>
+      </div>
+    </div>
+
+    <div class="btn-group">
+      <button class="btn btn-primary" id="btn-start" onclick="startSchedule()">Start 24-Hour Schedule</button>
+      <button class="btn btn-danger" id="btn-stop" onclick="stopSchedule()" style="display: none;">Stop Schedule</button>
+      <button class="btn btn-secondary" onclick="testPushNow()">Test Push Now</button>
+    </div>
+
+    <div id="schedule-status" class="status-box"></div>
+  </div>
+
+  <!-- Execution Logs -->
+  <div class="card">
+    <h2 class="card-title">📈 Execution History</h2>
+    <div id="logs-container" class="logs-container">
+      <p class="info-text">No execution logs yet</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentSpreadsheetId = null;
+  let currentWorksheetName = null;
+
+  // Load status on page load
+  window.addEventListener('load', async () => {
+    await checkGoogleAuth();
+    await loadSheetsConfig();
+    await loadScheduleStatus();
+    await loadExecutionLogs();
+  });
+
+  async function checkGoogleAuth() {
+    try {
+      const isAuth = await window.oauth2API.isAuthenticated();
+      const indicator = document.getElementById('auth-indicator');
+      const text = document.getElementById('auth-text');
+      const btn = document.getElementById('auth-btn');
+
+      if (isAuth) {
+        indicator.classList.add('connected');
+        text.textContent = 'Connected to Google - Ready to access Google Sheets';
+        btn.style.display = 'none';
+      } else {
+        indicator.classList.remove('connected');
+        text.textContent = 'Not connected to Google - Authentication required';
+        btn.style.display = 'inline-block';
+      }
+    } catch (error) {
+      console.error('Failed to check Google authentication:', error);
+    }
+  }
+
+  async function handleGoogleAuth() {
+    try {
+      const result = await window.oauth2API.authenticate();
+      if (result.success) {
+        await checkGoogleAuth();
+        showStatus(document.getElementById('config-status'), 'success', 'Successfully connected to Google!');
+      }
+    } catch (error) {
+      showStatus(document.getElementById('config-status'), 'error', 'Failed to connect to Google');
+    }
+  }
+
+  async function loadSheetsConfig() {
+    try {
+      const status = await window.inventorySheetsAPI.getStatus();
+      if (status.spreadsheetId && status.worksheetName) {
+        currentSpreadsheetId = status.spreadsheetId;
+        currentWorksheetName = status.worksheetName;
+        
+        // Show only the spreadsheet ID in the URL field for security
+        document.getElementById('sheets-url').value = `https://docs.google.com/spreadsheets/d/${status.spreadsheetId}/edit`;
+        document.getElementById('worksheet-name').value = status.worksheetName;
+      }
+    } catch (err) {
+      console.error('Failed to load Google Sheets config:', err);
+    }
+  }
+
+  async function loadScheduleStatus() {
+    try {
+      const status = await window.inventorySheetsAPI.getStatus();
+      updateScheduleUI(status);
+    } catch (err) {
+      console.error('Failed to load schedule status:', err);
+    }
+  }
+
+  function updateScheduleUI(status) {
+    const indicator = document.getElementById('schedule-indicator');
+    const text = document.getElementById('schedule-text');
+    const details = document.getElementById('schedule-details');
+    const btnStart = document.getElementById('btn-start');
+    const btnStop = document.getElementById('btn-stop');
+
+    if (status.active) {
+      indicator.classList.add('active');
+      text.textContent = 'Schedule Active - Phase 1 Pipeline Running';
+      details.textContent = 'Inventory data will be written to Google Sheets daily at midnight (full refresh)';
+      btnStart.style.display = 'none';
+      btnStop.style.display = 'inline-block';
+    } else {
+      indicator.classList.remove('active');
+      text.textContent = 'Schedule Inactive';
+      details.textContent = 'Configure Google Sheets and start the schedule to enable automated data pipeline';
+      btnStart.style.display = 'inline-block';
+      btnStop.style.display = 'none';
+    }
+
+    if (status.lastExecution) {
+      const lastTime = new Date(status.lastExecution.timestamp).toLocaleString();
+      details.textContent += ` • Last run: ${lastTime}`;
+    }
+  }
+
+  async function loadExecutionLogs() {
+    try {
+      const logs = await window.inventorySheetsAPI.getLogs();
+      displayLogs(logs);
+    } catch (err) {
+      console.error('Failed to load logs:', err);
+    }
+  }
+
+  function displayLogs(logs) {
+    const container = document.getElementById('logs-container');
+    
+    if (!logs || logs.length === 0) {
+      container.innerHTML = '<p class="info-text">No execution logs yet</p>';
+      return;
+    }
+
+    container.innerHTML = logs.map(log => `
+      <div class="log-entry ${log.success ? 'success' : 'error'}">
+        <div class="log-time">${new Date(log.timestamp).toLocaleString()}</div>
+        <div class="log-message">${log.message}</div>
+        <div class="log-details">
+          ${log.recordCount ? `${log.recordCount} records` : ''} 
+          ${log.duration ? `• ${log.duration}ms` : ''}
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function testConnection() {
+    const sheetsUrl = document.getElementById('sheets-url').value.trim();
+    const worksheetName = document.getElementById('worksheet-name').value.trim();
+    const statusDiv = document.getElementById('config-status');
+
+    if (!sheetsUrl) {
+      showStatus(statusDiv, 'error', 'Please enter a Google Sheets URL');
+      return;
+    }
+
+    if (!worksheetName) {
+      showStatus(statusDiv, 'error', 'Please enter a worksheet name');
+      return;
+    }
+
+    showStatus(statusDiv, 'info', 'Testing Google Sheets connection...');
+
+    try {
+      // Validate and extract spreadsheet ID
+      const urlResult = await window.inventorySheetsAPI.validateUrl(sheetsUrl);
+      if (!urlResult.success) {
+        showStatus(statusDiv, 'error', urlResult.message);
+        return;
+      }
+
+      const spreadsheetId = urlResult.spreadsheetId;
+      const result = await window.inventorySheetsAPI.testConnection(spreadsheetId, worksheetName);
+      
+      if (result.success) {
+        showStatus(statusDiv, 'success', result.message);
+        currentSpreadsheetId = spreadsheetId;
+        currentWorksheetName = worksheetName;
+      } else {
+        showStatus(statusDiv, 'error', result.message);
+      }
+    } catch (err) {
+      showStatus(statusDiv, 'error', `Test failed: ${err.message}`);
+    }
+  }
+
+  async function saveConfiguration() {
+    const sheetsUrl = document.getElementById('sheets-url').value.trim();
+    const worksheetName = document.getElementById('worksheet-name').value.trim();
+    const statusDiv = document.getElementById('config-status');
+
+    if (!sheetsUrl || !worksheetName) {
+      showStatus(statusDiv, 'error', 'Please enter both Google Sheets URL and worksheet name');
+      return;
+    }
+
+    if (!currentSpreadsheetId) {
+      showStatus(statusDiv, 'error', 'Please test the connection first to validate the configuration');
+      return;
+    }
+
+    showStatus(statusDiv, 'info', 'Saving configuration...');
+
+    try {
+      const result = await window.inventorySheetsAPI.saveConfig(currentSpreadsheetId, currentWorksheetName);
+      
+      if (result.success) {
+        showStatus(statusDiv, 'success', 'Google Sheets configuration saved successfully');
+      } else {
+        showStatus(statusDiv, 'error', result.message);
+      }
+    } catch (err) {
+      showStatus(statusDiv, 'error', `Failed to save: ${err.message}`);
+    }
+  }
+
+  async function startSchedule() {
+    const statusDiv = document.getElementById('schedule-status');
+
+    if (!currentSpreadsheetId || !currentWorksheetName) {
+      showStatus(statusDiv, 'error', 'Please configure and save Google Sheets settings first');
+      return;
+    }
+
+    showStatus(statusDiv, 'info', 'Starting 24-hour schedule...');
+
+    try {
+      const result = await window.inventorySheetsAPI.startSchedule(currentSpreadsheetId, currentWorksheetName);
+      
+      if (result.success) {
+        showStatus(statusDiv, 'success', 'Phase 1 schedule started! Inventory data will be written to Google Sheets daily at midnight with full dataset refresh.');
+        await loadScheduleStatus();
+      } else {
+        showStatus(statusDiv, 'error', result.message);
+      }
+    } catch (err) {
+      showStatus(statusDiv, 'error', `Failed to start: ${err.message}`);
+    }
+  }
+
+  async function stopSchedule() {
+    const statusDiv = document.getElementById('schedule-status');
+    
+    if (!confirm('Are you sure you want to stop the Phase 1 automated inventory pipeline?')) {
+      return;
+    }
+
+    showStatus(statusDiv, 'info', 'Stopping schedule...');
+
+    try {
+      const result = await window.inventorySheetsAPI.stopSchedule();
+      
+      if (result.success) {
+        showStatus(statusDiv, 'success', 'Schedule stopped successfully');
+        await loadScheduleStatus();
+      } else {
+        showStatus(statusDiv, 'error', result.message);
+      }
+    } catch (err) {
+      showStatus(statusDiv, 'error', `Failed to stop: ${err.message}`);
+    }
+  }
+
+  async function testPushNow() {
+    const statusDiv = document.getElementById('schedule-status');
+
+    if (!currentSpreadsheetId || !currentWorksheetName) {
+      showStatus(statusDiv, 'error', 'Please configure Google Sheets settings first');
+      return;
+    }
+
+    if (!confirm('This will overwrite all data in the Google Sheet with current Powerlink inventory data. Continue?')) {
+      return;
+    }
+
+    showStatus(statusDiv, 'info', 'Fetching inventory data from Powerlink and writing to Google Sheets... This may take a moment.');
+
+    try {
+      const result = await window.inventorySheetsAPI.pushNow(currentSpreadsheetId, currentWorksheetName);
+      
+      if (result.success) {
+        showStatus(statusDiv, 'success', `${result.message} - Full dataset refresh completed.`);
+        await loadExecutionLogs();
+      } else {
+        showStatus(statusDiv, 'error', result.message);
+      }
+    } catch (err) {
+      showStatus(statusDiv, 'error', `Push failed: ${err.message}`);
+    }
+  }
+
+  function showStatus(element, type, message) {
+    element.className = `status-box ${type}`;
+    element.textContent = message;
+    element.style.display = 'block';
+
+    if (type === 'success') {
+      setTimeout(() => {
+        element.style.display = 'none';
+      }, 5000);
+    }
+  }
+</script>
+
+</body>
+</html>

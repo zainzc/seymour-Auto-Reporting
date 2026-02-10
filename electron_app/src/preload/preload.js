@@ -39,13 +39,14 @@ contextBridge.exposeInMainWorld('oauth2API', {
   openExternal: (url) => shell.openExternal(url)
 });
 
-// Inventory Webhook API
-contextBridge.exposeInMainWorld('inventoryWebhookAPI', {
-  testConnection: (url) => ipcRenderer.invoke('inventory-webhook-test', url),
-  saveConfig: (url) => ipcRenderer.invoke('inventory-webhook-save-config', url),
-  startSchedule: (url) => ipcRenderer.invoke('inventory-webhook-start', url),
-  stopSchedule: () => ipcRenderer.invoke('inventory-webhook-stop'),
-  pushNow: (url) => ipcRenderer.invoke('inventory-webhook-push-now', url),
-  getStatus: () => ipcRenderer.invoke('inventory-webhook-get-status'),
-  getLogs: () => ipcRenderer.invoke('inventory-webhook-get-logs')
+// Inventory Google Sheets API - Phase 1
+contextBridge.exposeInMainWorld('inventorySheetsAPI', {
+  testConnection: (spreadsheetId, worksheetName) => ipcRenderer.invoke('inventory-sheets-test', spreadsheetId, worksheetName),
+  validateUrl: (sheetsUrl) => ipcRenderer.invoke('inventory-sheets-validate-url', sheetsUrl),
+  saveConfig: (spreadsheetId, worksheetName) => ipcRenderer.invoke('inventory-sheets-save-config', spreadsheetId, worksheetName),
+  startSchedule: (spreadsheetId, worksheetName) => ipcRenderer.invoke('inventory-sheets-start', spreadsheetId, worksheetName),
+  stopSchedule: () => ipcRenderer.invoke('inventory-sheets-stop'),
+  pushNow: (spreadsheetId, worksheetName) => ipcRenderer.invoke('inventory-sheets-push-now', spreadsheetId, worksheetName),
+  getStatus: () => ipcRenderer.invoke('inventory-sheets-get-status'),
+  getLogs: () => ipcRenderer.invoke('inventory-sheets-get-logs')
 });

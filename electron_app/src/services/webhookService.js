@@ -30,7 +30,8 @@ async function sendToWebhook(webhookUrl, data) {
       data: data
     }, {
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-powerlink-token': '9f2d3w38b-powerlink-secret-2026'
       },
       timeout: 60000 // 60 second timeout
     });
@@ -87,7 +88,8 @@ async function testWebhook(webhookUrl) {
       message: 'Test connection from Seymour Auto Reporting'
     }, {
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-powerlink-token': '9f2d3w38b-powerlink-secret-2026'
       },
       timeout: 10000
     });

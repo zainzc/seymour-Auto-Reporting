@@ -1,48 +1,49 @@
 const cron = require('node-cron');
 const { getAllInventory } = require('./inventoryService');
-const { sendToWebhook } = require('./webhookService');
+const { writeInventoryToSheets } = require('./googleSheetsInventoryService');
 const { saveInventoryConfig, getInventoryConfig } = require('../config/configStore');
 
 /**
- * Inventory Schedule Service
- * Manages 24-hour automated inventory webhook push
+ * Inventory Schedule Service - Phase 1: Powerlink → Google Sheets Integration
+ * Manages 24-hour automated inventory data push to Google Sheets
  */
 
 let scheduledTask = null;
 let isScheduleActive = false;
 
 /**
- * Start the 24-hour inventory webhook schedule
- * Runs daily at midnight
- * @param {string} webhookUrl - n8n webhook URL
+ * Start the 24-hour inventory Google Sheets schedule
+ * Runs daily at midnight - Phase 1 requirement
+ * @param {string} spreadsheetId - Google Sheets spreadsheet ID
+ * @param {string} worksheetName - Target worksheet name
  * @returns {boolean} True if started successfully
  */
-function startInventorySchedule(webhookUrl) {
+function startInventorySchedule(spreadsheetId, worksheetName) {
   try {
     // Stop any existing schedule first
     stopInventorySchedule();
 
-    if (!webhookUrl) {
-      console.error('❌ Cannot start schedule: Webhook URL not provided');
+    if (!spreadsheetId || !worksheetName) {
+      console.error('❌ Cannot start schedule: Spreadsheet ID and worksheet name are required');
       return false;
     }
 
-    // Schedule to run daily at midnight (00:00)
+    // Schedule to run daily at midnight (00:00) - Phase 1 requirement
     // Cron format: minute hour day month dayOfWeek
     scheduledTask = cron.schedule('0 0 * * *', async () => {
-      console.log('🔄 Running scheduled inventory webhook push...');
-      await executeInventoryPush(webhookUrl);
+      console.log('🔄 Running scheduled inventory Google Sheets push...');
+      await executeInventoryPush(spreadsheetId, worksheetName);
     });
 
     isScheduleActive = true;
     
     // Save configuration
-    saveInventoryConfig('webhookUrl', webhookUrl);
+    saveInventoryConfig('spreadsheetId', spreadsheetId);
+    saveInventoryConfig('worksheetName', worksheetName);
     saveInventoryConfig('scheduleActive', true);
     saveInventoryConfig('lastScheduleStart', new Date().toISOString());
-
-    console.log('✅ Inventory webhook schedule started: Daily at midnight');
     
+    console.log('✅ Inventory Google Sheets schedule started: Daily at midnight');
     return true;
   } catch (error) {
     console.error('❌ Failed to start inventory schedule:', error.message);
@@ -51,7 +52,7 @@ function startInventorySchedule(webhookUrl) {
 }
 
 /**
- * Stop the inventory webhook schedule
+ * Stop the inventory Google Sheets schedule
  */
 function stopInventorySchedule() {
   if (scheduledTask) {
@@ -62,23 +63,25 @@ function stopInventorySchedule() {
   isScheduleActive = false;
   saveInventoryConfig('scheduleActive', false);
   
-  console.log('⏹️ Inventory webhook schedule stopped');
+  console.log('⏹️ Inventory Google Sheets schedule stopped');
 }
 
 /**
- * Execute inventory webhook push
- * @param {string} webhookUrl - n8n webhook URL
+ * Execute inventory Google Sheets push - Phase 1 implementation
+ * Fully refreshes the dataset (overwrite) as required
+ * @param {string} spreadsheetId - Google Sheets spreadsheet ID
+ * @param {string} worksheetName - Target worksheet name
  * @returns {Promise<Object>} Execution result
  */
-async function executeInventoryPush(webhookUrl) {
+async function executeInventoryPush(spreadsheetId, worksheetName) {
   const startTime = new Date();
   
   try {
-    console.log('📦 Fetching inventory data...');
+    console.log('📦 Fetching inventory data from Powerlink...');
     const inventoryData = await getAllInventory();
     
-    console.log(`📤 Sending ${inventoryData.length} records to webhook...`);
-    const result = await sendToWebhook(webhookUrl, inventoryData);
+    console.log(`📊 Writing ${inventoryData.length} records to Google Sheets (full refresh)...`);
+    const result = await writeInventoryToSheets(spreadsheetId, worksheetName, inventoryData);
     
     const endTime = new Date();
     const duration = endTime - startTime;
@@ -136,7 +139,8 @@ function logExecution(success, message, recordCount, duration) {
 function getScheduleStatus() {
   return {
     active: isScheduleActive,
-    webhookUrl: getInventoryConfig('webhookUrl'),
+    spreadsheetId: getInventoryConfig('spreadsheetId'),
+    worksheetName: getInventoryConfig('worksheetName'),
     lastExecution: getInventoryConfig('lastExecution'),
     lastScheduleStart: getInventoryConfig('lastScheduleStart')
   };
@@ -155,11 +159,12 @@ function getExecutionLogs() {
  */
 function initializeSchedule() {
   const wasActive = getInventoryConfig('scheduleActive');
-  const webhookUrl = getInventoryConfig('webhookUrl');
+  const spreadsheetId = getInventoryConfig('spreadsheetId');
+  const worksheetName = getInventoryConfig('worksheetName');
   
-  if (wasActive && webhookUrl) {
-    console.log('🔄 Restoring inventory webhook schedule...');
-    startInventorySchedule(webhookUrl);
+  if (wasActive && spreadsheetId && worksheetName) {
+    console.log('🔄 Restoring inventory Google Sheets schedule...');
+    startInventorySchedule(spreadsheetId, worksheetName);
   }
 }
 

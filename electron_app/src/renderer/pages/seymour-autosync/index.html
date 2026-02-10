@@ -149,10 +149,10 @@
 <h1>Seymour AutoSync</h1>
 
 <div>
+  <button onclick="goToMainDashboard()" style="background: #64748b;">← Back</button>
   <button onclick="loadTables()">Load Tables</button>
   <button onclick="sync()">Sync Selected</button>
-  <button onclick="goToReporting()" style="background: #f59e0b;">📊 Auto Reporting</button>
-  <button onclick="goToInventoryWebhook()" style="background: #8b5cf6;">🔗 Inventory Webhook</button>
+  <button onclick="goToReporting()" style="background: #22c55e;">📊 Auto Reporting</button>
   <button onclick="reset()" style="background: #ef4444;">Reset Setup</button>
 </div>
 
@@ -181,18 +181,10 @@
 <script>
   const output = document.getElementById('output');
 
-  // Check if webhook is configured on page load
+  // Removed auto-redirect to webhook page
+  // Now only prompts when user clicks "Sync Selected" button
   window.addEventListener('load', async () => {
-    try {
-      const webhook = await window.api.getWebhookConfig?.();
-      if (!webhook) {
-        // No webhook configured, redirect to setup
-        window.location.href = 'webhook.html';
-        return;
-      }
-    } catch (err) {
-      console.error('Failed to check webhook:', err);
-    }
+    // Load page normally without checking webhook
   });
 
   async function loadTables() {
@@ -231,7 +223,21 @@
       }
 
       const res = await window.api.syncTables(selectedTables);
-      alert(`Synced ${res.count} table(s) successfully!`);
+      
+      // Check if webhook needs to be configured
+      if (res.needsWebhook) {
+        const configure = confirm(res.message);
+        if (configure) {
+          window.location.href = '../shared/webhook.html';
+        }
+        return;
+      }
+      
+      if (res.success) {
+        alert(`Synced ${res.count} table(s) successfully!`);
+      } else {
+        alert('Error: ' + res.message);
+      }
     } catch (err) {
       alert('Error syncing: ' + err.message);
     }
@@ -240,15 +246,17 @@
   async function reset() {
     if (confirm('Are you sure? This will clear all settings.')) {
       await window.api.resetConfig();
+      // Redirect to setup page after reset
+      window.location.href = '../shared/setup.html';
     }
   }
 
   function goToReporting() {
-    window.location.href = 'reporting.html';
+    window.location.href = '../milestone11/index.html';
   }
 
-  function goToInventoryWebhook() {
-    window.location.href = 'inventory-webhook.html';
+  function goToMainDashboard() {
+    window.location.href = '../main-dashboard.html';
   }
 
   async function runQuery() {

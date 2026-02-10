@@ -253,7 +253,7 @@
         const res = await window.api.saveConfig(config);
 
         if (res.success) {
-          window.location.replace('reporting.html');
+          window.location.replace('../main-dashboard.html');
         } else {
           statusMsg.style.background = '#7f1d1d';
           statusMsg.textContent = '❌ ' + res.message;

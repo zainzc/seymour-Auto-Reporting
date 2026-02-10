@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Seymour Auto - Main Dashboard</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+    }
+
+    .container {
+      text-align: center;
+      max-width: 900px;
+      padding: 40px;
+    }
+
+    .logo {
+      font-size: 48px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .subtitle {
+      font-size: 18px;
+      color: #94a3b8;
+      margin-bottom: 60px;
+    }
+
+    .dashboard-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      max-width: 500px;
+      margin: 0 auto;
+    }
+
+    .dashboard-btn {
+      background: #1e293b;
+      border: 2px solid #334155;
+      border-radius: 12px;
+      padding: 30px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      color: white;
+      text-decoration: none;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      font-size: 18px;
+      font-weight: 600;
+    }
+
+    .dashboard-btn:hover {
+      border-color: #3b82f6;
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(59, 130, 246, 0.2);
+      background: #334155;
+    }
+
+    .btn-icon {
+      font-size: 48px;
+      flex-shrink: 0;
+    }
+
+    .btn-content {
+      flex-grow: 1;
+    }
+
+    .btn-title {
+      font-size: 22px;
+      margin-bottom: 5px;
+    }
+
+    .btn-description {
+      font-size: 14px;
+      color: #94a3b8;
+      font-weight: normal;
+    }
+
+    .milestone-badge {
+      display: inline-block;
+      background: #3b82f6;
+      color: white;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+
+    .milestone-badge.milestone-1 {
+      background: #8b5cf6;
+    }
+
+    .footer {
+      margin-top: 60px;
+      padding-top: 30px;
+      border-top: 1px solid #334155;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 20px;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .footer-link {
+      color: #64748b;
+      text-decoration: none;
+      font-size: 14px;
+      transition: color 0.2s;
+    }
+
+    .footer-link:hover {
+      color: #3b82f6;
+    }
+
+    @media (max-width: 768px) {
+      .dashboard-grid {
+        grid-template-columns: 1fr;
+      }
+      
+      .logo {
+        font-size: 36px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="logo">Seymour Auto</div>
+  <div class="subtitle">Choose your workspace</div>
+
+  <div class="dashboard-grid">
+    
+    <button class="dashboard-btn" onclick="goToMilestone1()">
+      <div class="btn-icon">⚙️</div>
+      <div class="btn-content">
+        <div class="btn-title">Milestone 1</div>
+        <div class="btn-description">Listing Enrichment & Automation</div>
+      </div>
+    </button>
+
+    <button class="dashboard-btn" onclick="goToReporting()">
+      <div class="btn-icon">📊</div>
+      <div class="btn-content">
+        <div class="btn-title">Milestone 11</div>
+        <div class="btn-description">Auto Reporting Dashboard</div>
+      </div>
+    </button>
+
+  </div>
+
+  <div class="footer">
+    <div class="footer-links">
+      <a href="#" class="footer-link" onclick="openSettings(); return false;">⚙️ Settings</a>
+      <a href="#" class="footer-link" onclick="resetApp(); return false;">🔄 Reset Configuration</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  function goToMilestone1() {
+    window.location.href = 'milestone1/index.html';
+  }
+
+  function goToReporting() {
+    window.location.href = 'milestone11/index.html';
+  }
+
+  function openSettings() {
+    window.location.href = 'shared/setup.html';
+  }
+
+  async function resetApp() {
+    if (confirm('Are you sure you want to reset all configurations? This will clear database, webhook, and reporting settings.')) {
+      try {
+        await window.api.resetConfig();
+        alert('Configuration reset successfully. Redirecting to setup...');
+        window.location.href = 'shared/setup.html';
+      } catch (err) {
+        console.error('Reset failed:', err);
+        alert('Reset failed. Please try again.');
+      }
+    }
+  }
+</script>
+
+</body>
+</html>

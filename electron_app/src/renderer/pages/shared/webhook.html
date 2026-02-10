@@ -131,7 +131,7 @@
         const res = await window.api.saveWebhook(url);
 
         if (res.success) {
-          window.location.replace('dashboard.html');
+          window.location.replace('../seymour-autosync/index.html');
         } else {
           statusMsg.style.background = '#7f1d1d';
           statusMsg.textContent = '❌ ' + res.message;

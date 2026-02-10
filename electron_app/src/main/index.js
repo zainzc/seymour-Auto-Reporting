@@ -42,15 +42,15 @@ if (require('electron-squirrel-startup')) {
    PAGE LOADERS (ONLY PLACE!)
 ---------------------------- */
 function loadSetup() {
-  mainWindow.loadFile(path.join(__dirname, '../renderer/pages/setup.html'));
+  mainWindow.loadFile(path.join(__dirname, '../renderer/pages/shared/setup.html'));
 }
 
 function loadWebhook() {
-  mainWindow.loadFile(path.join(__dirname, '../renderer/pages/webhook.html'));
+  mainWindow.loadFile(path.join(__dirname, '../renderer/pages/shared/webhook.html'));
 }
 
 function loadDashboard() {
-  mainWindow.loadFile(path.join(__dirname, '../renderer/pages/reporting.html'));
+  mainWindow.loadFile(path.join(__dirname, '../renderer/pages/main-dashboard.html'));
 }
 
 /* ---------------------------
@@ -243,7 +243,7 @@ ipcMain.handle('save-webhook', async (_, url) => {
   if (!url) return { success: false, message: 'Webhook required' };
 
   saveWebhookConfig(url);
-  startAutoSync();
+  // startAutoSync(); // Removed: Only sync when user clicks button
   loadDashboard();
 
   return { success: true, message: 'Webhook saved successfully!' };
@@ -309,16 +309,25 @@ ipcMain.handle('sync-users', async () => {
 
 ipcMain.handle('sync-tables', async (_, tableNames) => {
   if (!dbReady) throw new Error('DB not ready');
-  if (!getWebhookConfig()) throw new Error('Webhook not configured');
+  
+  // Check if webhook is configured
+  if (!getWebhookConfig()) {
+    return { 
+      success: false, 
+      needsWebhook: true,
+      message: 'Webhook not configured. Would you like to configure it now?' 
+    };
+  }
+  
   if (!Array.isArray(tableNames) || tableNames.length === 0) {
     throw new Error('Select at least one table');
   }
 
-  // Save selected tables for auto-sync
+  // Save selected tables
   saveSelectedTables(tableNames);
   
-  // Start auto-sync with new selection
-  startAutoSync();
+  // Removed auto-sync - only manual sync on button click
+  // startAutoSync();
   
   await syncTables(tableNames);
 
@@ -635,10 +644,10 @@ ipcMain.handle('oauth2-disconnect', async () => {
 });
 
 /* ---------------------------
-   INVENTORY WEBHOOK HANDLERS
+   INVENTORY GOOGLE SHEETS HANDLERS - PHASE 1
 ---------------------------- */
 const { getAllInventory } = require('../services/inventoryService');
-const { sendToWebhook, testWebhook } = require('../services/webhookService');
+const { testSheetsConnection, validateAndExtractSpreadsheetId } = require('../services/googleSheetsInventoryService');
 const { 
   startInventorySchedule, 
   stopInventorySchedule, 
@@ -648,10 +657,10 @@ const {
   initializeSchedule: initInventorySchedule
 } = require('../services/inventoryScheduleService');
 
-// Test webhook connection
-ipcMain.handle('inventory-webhook-test', async (_, webhookUrl) => {
+// Test Google Sheets connection
+ipcMain.handle('inventory-sheets-test', async (_, spreadsheetId, worksheetName) => {
   try {
-    const result = await testWebhook(webhookUrl);
+    const result = await testSheetsConnection(spreadsheetId, worksheetName);
     return result;
   } catch (error) {
     return {
@@ -661,15 +670,29 @@ ipcMain.handle('inventory-webhook-test', async (_, webhookUrl) => {
   }
 });
 
-// Save webhook configuration
-ipcMain.handle('inventory-webhook-save-config', async (_, webhookUrl) => {
+// Validate and extract spreadsheet ID from URL
+ipcMain.handle('inventory-sheets-validate-url', async (_, sheetsUrl) => {
+  try {
+    const result = validateAndExtractSpreadsheetId(sheetsUrl);
+    return result;
+  } catch (error) {
+    return {
+      success: false,
+      message: `URL validation failed: ${error.message}`
+    };
+  }
+});
+
+// Save Google Sheets configuration
+ipcMain.handle('inventory-sheets-save-config', async (_, spreadsheetId, worksheetName) => {
   try {
     const { saveInventoryConfig } = require('../config/configStore');
-    saveInventoryConfig('webhookUrl', webhookUrl);
+    saveInventoryConfig('spreadsheetId', spreadsheetId);
+    saveInventoryConfig('worksheetName', worksheetName);
     
     return {
       success: true,
-      message: 'Webhook URL saved successfully'
+      message: 'Google Sheets configuration saved successfully'
     };
   } catch (error) {
     return {
@@ -679,15 +702,15 @@ ipcMain.handle('inventory-webhook-save-config', async (_, webhookUrl) => {
   }
 });
 
-// Start inventory webhook schedule
-ipcMain.handle('inventory-webhook-start', async (_, webhookUrl) => {
+// Start inventory Google Sheets schedule
+ipcMain.handle('inventory-sheets-start', async (_, spreadsheetId, worksheetName) => {
   try {
-    const started = startInventorySchedule(webhookUrl);
+    const started = startInventorySchedule(spreadsheetId, worksheetName);
     
     if (started) {
       return {
         success: true,
-        message: 'Schedule started successfully. Inventory data will be pushed daily at midnight.'
+        message: 'Schedule started successfully. Inventory data will be written to Google Sheets daily at midnight.'
       };
     } else {
       return {
@@ -703,8 +726,8 @@ ipcMain.handle('inventory-webhook-start', async (_, webhookUrl) => {
   }
 });
 
-// Stop inventory webhook schedule
-ipcMain.handle('inventory-webhook-stop', async () => {
+// Stop inventory Google Sheets schedule
+ipcMain.handle('inventory-sheets-stop', async () => {
   try {
     stopInventorySchedule();
     
@@ -720,10 +743,10 @@ ipcMain.handle('inventory-webhook-stop', async () => {
   }
 });
 
-// Push inventory now (manual test)
-ipcMain.handle('inventory-webhook-push-now', async (_, webhookUrl) => {
+// Push inventory to Google Sheets now (manual test)
+ipcMain.handle('inventory-sheets-push-now', async (_, spreadsheetId, worksheetName) => {
   try {
-    const result = await executeInventoryPush(webhookUrl);
+    const result = await executeInventoryPush(spreadsheetId, worksheetName);
     return result;
   } catch (error) {
     return {
@@ -734,20 +757,21 @@ ipcMain.handle('inventory-webhook-push-now', async (_, webhookUrl) => {
 });
 
 // Get schedule status
-ipcMain.handle('inventory-webhook-get-status', async () => {
+ipcMain.handle('inventory-sheets-get-status', async () => {
   try {
     const status = getScheduleStatus();
     return status;
   } catch (error) {
     return {
       active: false,
-      webhookUrl: null
+      spreadsheetId: null,
+      worksheetName: null
     };
   }
 });
 
 // Get execution logs
-ipcMain.handle('inventory-webhook-get-logs', async () => {
+ipcMain.handle('inventory-sheets-get-logs', async () => {
   try {
     const logs = getInventoryLogs();
     return logs;
@@ -797,8 +821,8 @@ function createWindow() {
         await initDb();
       }
       dbReady = true;
-      startAutoSync();
-      console.log('✅ DB ready and auto-sync started');
+      // startAutoSync(); // Removed: Only sync on manual button click
+      console.log('✅ DB ready');
       
       // Resume any active reporting schedules
       resumeSchedule();

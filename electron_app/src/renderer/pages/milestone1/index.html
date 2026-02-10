@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Milestone 1 - Seymour Auto</title>
+  <style>
+    body {
+      font-family: Arial;
+      background: #0f172a;
+      color: white;
+      padding: 30px;
+    }
+    button {
+      padding: 10px 15px;
+      background: #f59e0b;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-weight: bold;
+      margin-right: 10px;
+      margin-bottom: 10px;
+    }
+    .content-section {
+      background: #1e293b;
+      padding: 20px;
+      border-radius: 6px;
+      margin: 20px 0;
+    }
+    .phase-info {
+      background: #1e3a8a;
+      border: 1px solid #3b82f6;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 20px 0;
+    }
+    .phase-title {
+      font-weight: 600;
+      color: #dbeafe;
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+    .phase-desc {
+      color: #bfdbfe;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Milestone 1 - Listing Enrichment & Automation</h1>
+
+<div>
+  <button onclick="goBack()" style="background: #64748b;">← Back</button>
+  <button onclick="goToPowerlinkSheets()" style="background: #8b5cf6;">📊 Phase 1: Powerlink → Google Sheets</button>
+</div>
+
+<div class="content-section">
+  <h3>Phase 1: Powerlink → Google Sheets Integration</h3>
+  <div class="phase-info">
+    <div class="phase-title">🔄 Automated Inventory Pipeline</div>
+    <div class="phase-desc">
+      Establish a stable, repeatable pipeline for raw inventory data sourced from Powerlink (SQL Database), 
+      writing to predefined Google Sheets file on a fixed 24-hour schedule with full dataset refresh.
+    </div>
+  </div>
+  
+  <p style="color: #94a3b8; font-size: 14px;">
+    Click the "Phase 1: Powerlink → Google Sheets" button above to configure and manage the automated inventory data pipeline.
+  </p>
+</div>
+
+<script>
+  function goBack() {
+    window.location.href = '../main-dashboard.html';
+  }
+
+  function goToPowerlinkSheets() {
+    window.location.href = 'powerlink-sheets.html';
+  }
+</script>
+
+</body>
+</html>
