@@ -38,3 +38,14 @@ contextBridge.exposeInMainWorld('oauth2API', {
   onAuthorized: (callback) => ipcRenderer.on('oauth2-authorized', callback),
   openExternal: (url) => shell.openExternal(url)
 });
+
+// Inventory Webhook API
+contextBridge.exposeInMainWorld('inventoryWebhookAPI', {
+  testConnection: (url) => ipcRenderer.invoke('inventory-webhook-test', url),
+  saveConfig: (url) => ipcRenderer.invoke('inventory-webhook-save-config', url),
+  startSchedule: (url) => ipcRenderer.invoke('inventory-webhook-start', url),
+  stopSchedule: () => ipcRenderer.invoke('inventory-webhook-stop'),
+  pushNow: (url) => ipcRenderer.invoke('inventory-webhook-push-now', url),
+  getStatus: () => ipcRenderer.invoke('inventory-webhook-get-status'),
+  getLogs: () => ipcRenderer.invoke('inventory-webhook-get-logs')
+});

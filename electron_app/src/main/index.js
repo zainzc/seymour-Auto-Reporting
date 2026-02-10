@@ -635,6 +635,128 @@ ipcMain.handle('oauth2-disconnect', async () => {
 });
 
 /* ---------------------------
+   INVENTORY WEBHOOK HANDLERS
+---------------------------- */
+const { getAllInventory } = require('../services/inventoryService');
+const { sendToWebhook, testWebhook } = require('../services/webhookService');
+const { 
+  startInventorySchedule, 
+  stopInventorySchedule, 
+  executeInventoryPush,
+  getScheduleStatus,
+  getExecutionLogs: getInventoryLogs,
+  initializeSchedule: initInventorySchedule
+} = require('../services/inventoryScheduleService');
+
+// Test webhook connection
+ipcMain.handle('inventory-webhook-test', async (_, webhookUrl) => {
+  try {
+    const result = await testWebhook(webhookUrl);
+    return result;
+  } catch (error) {
+    return {
+      success: false,
+      message: `Test failed: ${error.message}`
+    };
+  }
+});
+
+// Save webhook configuration
+ipcMain.handle('inventory-webhook-save-config', async (_, webhookUrl) => {
+  try {
+    const { saveInventoryConfig } = require('../config/configStore');
+    saveInventoryConfig('webhookUrl', webhookUrl);
+    
+    return {
+      success: true,
+      message: 'Webhook URL saved successfully'
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to save: ${error.message}`
+    };
+  }
+});
+
+// Start inventory webhook schedule
+ipcMain.handle('inventory-webhook-start', async (_, webhookUrl) => {
+  try {
+    const started = startInventorySchedule(webhookUrl);
+    
+    if (started) {
+      return {
+        success: true,
+        message: 'Schedule started successfully. Inventory data will be pushed daily at midnight.'
+      };
+    } else {
+      return {
+        success: false,
+        message: 'Failed to start schedule'
+      };
+    }
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to start schedule: ${error.message}`
+    };
+  }
+});
+
+// Stop inventory webhook schedule
+ipcMain.handle('inventory-webhook-stop', async () => {
+  try {
+    stopInventorySchedule();
+    
+    return {
+      success: true,
+      message: 'Schedule stopped successfully'
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to stop schedule: ${error.message}`
+    };
+  }
+});
+
+// Push inventory now (manual test)
+ipcMain.handle('inventory-webhook-push-now', async (_, webhookUrl) => {
+  try {
+    const result = await executeInventoryPush(webhookUrl);
+    return result;
+  } catch (error) {
+    return {
+      success: false,
+      message: `Push failed: ${error.message}`
+    };
+  }
+});
+
+// Get schedule status
+ipcMain.handle('inventory-webhook-get-status', async () => {
+  try {
+    const status = getScheduleStatus();
+    return status;
+  } catch (error) {
+    return {
+      active: false,
+      webhookUrl: null
+    };
+  }
+});
+
+// Get execution logs
+ipcMain.handle('inventory-webhook-get-logs', async () => {
+  try {
+    const logs = getInventoryLogs();
+    return logs;
+  } catch (error) {
+    return [];
+  }
+});
+
+/* ---------------------------
    WINDOW CREATION (STRICT)
 ---------------------------- */
 function createWindow() {
@@ -680,6 +802,9 @@ function createWindow() {
       
       // Resume any active reporting schedules
       resumeSchedule();
+      
+      // Initialize inventory webhook schedule if it was previously active
+      initInventorySchedule();
     } catch (err) {
       console.error('❌ DB init failed:', err.message);
       dbReady = false;

@@ -14,39 +14,41 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
   let query = `
     SELECT
         i.DateCreated,
-        i.CreatedBy,
-        i.InvoiceID AS [Invoice#],
+        e.EmployeeName AS CreatedBy,
+        i.InvoiceNumber AS [Invoice#],
         i.CustomerNumber,
         i.OrderSource,
 
-        inv.ReferenceNumber AS RNumber,
+        'R0' + CAST(inv.InventoryID AS VARCHAR(50)) AS RNumber,
         inv.StockTicketNumber AS [Stock#],
         inv.InventoryNumber,
-        ISNULL(inv.RetailPrice, 0) AS Price,
+        li.UnitPrice AS Price,
         inv.WarrantyInfo AS Warranty,
 
         i.TotalDiscountAmount AS Discount,
 
-        /* Shipping: Freight + Freight Tax */
-        ISNULL(i.TotalFreightAmount, 0) 
-        + ISNULL(i.TotalFreightTaxAmount, 0) AS Shipping,
+        ISNULL(i.TotalFreightAmount, 0) AS Shipping,
 
-        /* Tax: Sum of all tax fields */
         ISNULL(i.TotalCityTaxAmount, 0) +
         ISNULL(i.TotalCountyTaxAmount, 0) +
         ISNULL(i.TotalStateProvTaxAmount, 0) +
         ISNULL(i.TotalOtherTax, 0) +
         ISNULL(i.TotalGSTTaxAmount, 0) AS Tax,
 
-        /* Total: (Retail Price + Shipping + Tax) - Discount */
-        (ISNULL(inv.RetailPrice, 0) + 
-        (ISNULL(i.TotalFreightAmount, 0) + ISNULL(i.TotalFreightTaxAmount, 0)) + 
-        (ISNULL(i.TotalCityTaxAmount, 0) + ISNULL(i.TotalCountyTaxAmount, 0) + ISNULL(i.TotalStateProvTaxAmount, 0) + ISNULL(i.TotalOtherTax, 0) + ISNULL(i.TotalGSTTaxAmount, 0)) - 
-        ISNULL(i.TotalDiscountAmount, 0)) AS Total,
+        /* Line-level total (invoice values repeated per line) */
+        li.UnitPrice +
+        ISNULL(i.TotalFreightAmount, 0) +
+        ISNULL(i.TotalFreightTaxAmount, 0) +
+        ISNULL(i.TotalCityTaxAmount, 0) +
+        ISNULL(i.TotalCountyTaxAmount, 0) +
+        ISNULL(i.TotalStateProvTaxAmount, 0) +
+        ISNULL(i.TotalOtherTax, 0) +
+        ISNULL(i.TotalGSTTaxAmount, 0) -
+        ISNULL(i.TotalDiscountAmount, 0) AS Total,
 
         inv.LocationCode,
 
-        c.CustomerName AS CustomerName,
+        c.CustomerName,
         c.BillToAddress1,
         c.BillToAddress2,
         c.BillToCity,
@@ -60,33 +62,33 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         i.CreditCardApprovalCode AS CreditCardAuthNumber,
         i.CreditCardType AS PaymentType,
 
-        /* PO DATA - Only populated if Stock# starts with 'P' */
-        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN po.VendorName ELSE NULL END AS VendorName,
-        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN po.PONumber ELSE NULL END AS PONumber,
-        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN poli.UnitPrice ELSE NULL END AS UnitPrice,
-        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN poli.ReceivedQty ELSE NULL END AS [Qty/Received],
-        
-        /* Mark-up: Calculated as ((Retail - Cost) / Cost) * 100, rounded to 2 decimals */
-        CASE 
-            WHEN inv.StockTicketNumber LIKE 'P%' AND ISNULL(poli.UnitPrice, 0) > 0 
-            THEN ROUND(((ISNULL(inv.RetailPrice, 0) - poli.UnitPrice) / poli.UnitPrice) * 100, 2)
-            ELSE 0 
+        po.VendorName,
+        po.PONumber,
+        poli.UnitPrice,
+        poli.ReceivedQty AS [Qty/Received],
+
+        /* Line-level markup */
+        CASE
+            WHEN poli.UnitPrice > 0
+            THEN ROUND(((inv.RetailPrice - poli.UnitPrice) / poli.UnitPrice) * 100, 2)
+            ELSE 0
         END AS MarkUp
 
     FROM dbo.INVOICE i
-    JOIN dbo.CUSTOMER c
-        ON c.CustomerNumber = i.CustomerNumber
-
     JOIN dbo.INVOICE_LINEITEM li
         ON li.InvoiceID = i.InvoiceID
 
     JOIN dbo.INVENTORY inv
-        ON CAST(li.InventoryNumber AS VARCHAR(50))
-         = CAST(inv.InventoryNumber AS VARCHAR(50))
+        ON inv.InventoryID = li.InventoryID
+
+    LEFT JOIN dbo.EMPLOYEE e
+        ON e.EmployeeID = i.CreatedBy
+
+    JOIN dbo.CUSTOMER c
+        ON c.CustomerNumber = i.CustomerNumber
 
     LEFT JOIN dbo.PURCHASE_ORDER_LINEITEM poli
-        ON CAST(poli.InventoryNumber AS VARCHAR(50))
-         = CAST(inv.InventoryNumber AS VARCHAR(50))
+        ON poli.InventoryNumber = inv.InventoryNumber
 
     LEFT JOIN dbo.PURCHASE_ORDER po
         ON po.PurchaseOrderID = poli.PurchaseOrderID
@@ -97,10 +99,10 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
 
   // Add salesperson filter if not ALL
   if (salesperson && salesperson !== 'ALL') {
-    query += ` AND i.CreatedBy = @salesperson`;
+    query += ` AND e.EmployeeName = @salesperson`;
   }
 
-  query += ` ORDER BY i.DateCreated DESC`;
+  query += ` ORDER BY i.InvoiceNumber`;
 
   const request = pool.request();
   request.input('dateFrom', dateFrom);
@@ -122,14 +124,16 @@ async function getSalespeople() {
   const pool = getDB();
   
   const query = `
-    SELECT DISTINCT CreatedBy
-    FROM dbo.INVOICE
-    WHERE CreatedBy IS NOT NULL
-    ORDER BY CreatedBy
+    SELECT DISTINCT e.EmployeeName
+    FROM dbo.INVOICE i
+    LEFT JOIN dbo.EMPLOYEE e
+        ON e.EmployeeID = i.CreatedBy
+    WHERE e.EmployeeName IS NOT NULL
+    ORDER BY e.EmployeeName
   `;
 
   const result = await pool.request().query(query);
-  return result.recordset.map(row => row.CreatedBy);
+  return result.recordset.map(row => row.EmployeeName);
 }
 
 /**

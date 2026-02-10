@@ -64,6 +64,21 @@ function clearReportingConfig() {
   store.delete('reporting');
 }
 
+/* ---------------------------
+   INVENTORY WEBHOOK CONFIG
+---------------------------- */
+function saveInventoryConfig(key, value) {
+  store.set(`inventoryWebhook.${key}`, value);
+}
+
+function getInventoryConfig(key) {
+  return store.get(`inventoryWebhook.${key}`);
+}
+
+function clearInventoryConfig() {
+  store.delete('inventoryWebhook');
+}
+
 module.exports = {
   saveDbConfig,
   getDbConfig,
@@ -76,5 +91,8 @@ module.exports = {
   clearSelectedTables,
   saveReportingConfig,
   getReportingConfig,
-  clearReportingConfig
+  clearReportingConfig,
+  saveInventoryConfig,
+  getInventoryConfig,
+  clearInventoryConfig
 };

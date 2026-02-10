@@ -152,6 +152,7 @@
   <button onclick="loadTables()">Load Tables</button>
   <button onclick="sync()">Sync Selected</button>
   <button onclick="goToReporting()" style="background: #22c55e;">📊 Auto Reporting</button>
+  <button onclick="goToInventoryWebhook()" style="background: #8b5cf6;">🔗 Inventory Webhook</button>
   <button onclick="reset()" style="background: #ef4444;">Reset Setup</button>
 </div>
 
@@ -244,6 +245,10 @@
 
   function goToReporting() {
     window.location.href = 'reporting.html';
+  }
+
+  function goToInventoryWebhook() {
+    window.location.href = 'inventory-webhook.html';
   }
 
   async function runQuery() {
