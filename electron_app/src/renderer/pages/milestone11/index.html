@@ -1,452 +1,573 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Seymour Auto Reporting</title>
   <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: #0f172a;
-      color: white;
-      padding: 30px;
-      margin: 0;
+    :root {
+      --bg: #eef3f9;
+      --surface: #ffffff;
+      --text: #152238;
+      --muted: #5d6f89;
+      --border: #d4deec;
+      --brand: #0b5cab;
+      --brand-strong: #084a8a;
+      --accent: #0f8a6a;
+      --warn: #b57900;
+      --danger: #b53d35;
+      --shadow-lg: 0 18px 32px rgba(10, 35, 64, 0.12);
+      --shadow-sm: 0 10px 18px rgba(12, 35, 58, 0.07);
     }
-    
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px 14px 32px;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 90% 6%, rgba(11, 92, 171, 0.13), transparent 34%),
+        radial-gradient(circle at 8% 8%, rgba(15, 138, 106, 0.11), transparent 30%),
+        var(--bg);
+    }
+
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+
     .header {
+      background: linear-gradient(124deg, #0b5cab 0%, #0f7f79 100%);
+      border-radius: 16px;
+      padding: 18px 20px;
+      color: #eef7ff;
+      box-shadow: var(--shadow-lg);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 30px;
-      padding-bottom: 20px;
-      border-bottom: 2px solid #1e293b;
+      gap: 12px;
+      flex-wrap: wrap;
     }
-    
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
     h1 {
       margin: 0;
       font-size: 28px;
+      letter-spacing: 0.2px;
+      color: #f2f9ff;
     }
-    
+
     .back-btn {
-      padding: 10px 20px;
-      background: #475569;
-      border: none;
-      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      background: rgba(255, 255, 255, 0.15);
+      color: #f2f8ff;
+      border-radius: 9px;
+      padding: 9px 13px;
+      font-size: 13px;
+      font-weight: 700;
       cursor: pointer;
-      font-weight: bold;
-      color: white;
+      transition: background 0.14s ease;
     }
-    
+
     .back-btn:hover {
-      background: #64748b;
+      background: rgba(255, 255, 255, 0.24);
     }
-    
+
+    #google-status {
+      padding: 9px 12px;
+      background: rgba(255, 255, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 9px;
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #eef7ff;
+    }
+
+    #google-indicator {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #ef4444;
+      flex: 0 0 auto;
+    }
+
+    #google-btn {
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      background: rgba(255, 255, 255, 0.17);
+      color: #f2f8ff;
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
     .card {
-      background: #1e293b;
-      padding: 25px;
-      border-radius: 10px;
-      margin-bottom: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: var(--shadow-sm);
     }
-    
+
+    .card h3 {
+      margin: 0 0 12px;
+      font-size: 20px;
+      color: #1e3a5f;
+    }
+
     .data-type-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 15px;
-      margin-top: 15px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 8px;
     }
-    
+
     .data-type-btn {
-      padding: 20px;
-      background: #334155;
-      border: 2px solid transparent;
-      border-radius: 8px;
+      padding: 12px 10px;
+      border: 1px solid #c9d8eb;
+      border-radius: 10px;
+      background: #f5f9ff;
       cursor: pointer;
       text-align: center;
-      font-size: 16px;
-      font-weight: 600;
-      transition: all 0.2s;
+      font-size: 14px;
+      font-weight: 700;
+      color: #294a71;
+      transition: transform 0.14s ease, background 0.14s ease, border-color 0.14s ease;
     }
-    
+
     .data-type-btn.active {
-      background: #f59e0b;
-      border-color: #d97706;
-      color: #0f172a;
+      background: #dcedff;
+      border-color: #90b6df;
+      color: #163f6d;
     }
-    
+
     .data-type-btn.disabled {
-      opacity: 0.4;
+      opacity: 0.45;
       cursor: not-allowed;
     }
-    
+
     .mode-selector {
-      display: flex;
-      gap: 15px;
-      margin: 20px 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 16px;
     }
-    
+
     .mode-btn {
-      flex: 1;
-      padding: 15px;
-      background: #334155;
-      border: 2px solid transparent;
-      border-radius: 8px;
+      padding: 11px 12px;
+      background: #edf4fd;
+      border: 1px solid #c7d8ed;
+      border-radius: 10px;
       cursor: pointer;
-      font-size: 16px;
-      font-weight: 600;
-      color: white;
-      transition: all 0.2s;
+      font-size: 14px;
+      font-weight: 700;
+      color: #2a4c74;
+      transition: background 0.14s ease, border-color 0.14s ease;
     }
-    
+
     .mode-btn.active {
-      background: #f59e0b;
-      border-color: #d97706;
-      color: #0f172a;
+      background: #dcedff;
+      border-color: #8fb4dd;
+      color: #163f6d;
     }
-    
+
     .mode-content {
       display: none;
     }
-    
+
     .mode-content.active {
       display: block;
     }
-    
+
     .form-group {
-      margin-bottom: 20px;
+      margin-bottom: 14px;
     }
-    
+
     label {
       display: block;
-      margin-bottom: 8px;
-      font-weight: 500;
-      color: #cbd5e1;
+      margin-bottom: 6px;
+      font-weight: 700;
+      color: #2b4a71;
+      font-size: 14px;
     }
-    
+
     input[type="date"],
+    input[type="text"],
     select {
       width: 100%;
-      padding: 12px;
-      background: #0f172a;
-      border: 1px solid #475569;
-      border-radius: 6px;
-      color: white;
+      padding: 10px 12px;
+      background: #fcfdff;
+      border: 1px solid #bfd0e5;
+      border-radius: 9px;
+      color: #1a324f;
       font-size: 14px;
       box-sizing: border-box;
+      transition: border-color 0.14s ease, box-shadow 0.14s ease;
     }
-    
-    input[type="date"]::-webkit-calendar-picker-indicator {
-      filter: invert(1) brightness(100);
-      cursor: pointer;
-    }
-    
+
     input[type="date"]:focus,
+    input[type="text"]:focus,
     select:focus {
       outline: none;
-      border-color: #f59e0b;
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(11, 92, 171, 0.14);
     }
-    
+
     .date-range {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 15px;
+      gap: 10px;
     }
-    
+
     .action-btn {
       width: 100%;
-      padding: 15px;
-      background: #f59e0b;
+      padding: 11px 12px;
       border: none;
-      border-radius: 8px;
+      border-radius: 10px;
       cursor: pointer;
-      font-size: 16px;
-      font-weight: bold;
-      color: #0f172a;
-      transition: all 0.2s;
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      background: var(--brand);
+      transition: background 0.14s ease;
     }
-    
+
     .action-btn:hover {
-      background: #d97706;
+      background: var(--brand-strong);
     }
-    
+
     .action-btn:disabled {
-      opacity: 0.5;
+      opacity: 0.6;
       cursor: not-allowed;
     }
-    
+
     .action-btn.success {
-      background: #22c55e;
+      background: var(--accent);
     }
-    
+
+    .action-btn.success:hover {
+      background: #0b755a;
+    }
+
     .action-btn.danger {
-      background: #ef4444;
+      background: var(--danger);
     }
-    
+
+    .action-btn.danger:hover {
+      background: #9d2c25;
+    }
+
     .schedule-controls {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 15px;
-      margin-top: 20px;
+      gap: 10px;
+      margin-top: 10px;
     }
-    
+
     .status-box {
-      margin-top: 20px;
-      padding: 15px;
-      background: #0f172a;
-      border-radius: 6px;
-      border-left: 4px solid #3b82f6;
+      margin-top: 12px;
+      padding: 11px 12px;
+      border-radius: 8px;
+      border: 1px solid #c3d7ee;
+      background: #eff5fd;
+      color: #294f78;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.45;
     }
-    
+
     .status-box.success {
-      border-left-color: #22c55e;
+      background: #ddf4ec;
+      border-color: #b9e7d6;
+      color: #0d7156;
     }
-    
+
     .status-box.error {
-      border-left-color: #ef4444;
+      background: #f8dfdd;
+      border-color: #edbdb8;
+      color: #8f261f;
     }
-    
+
     .status-box.hidden {
       display: none;
     }
-    
+
     .info-text {
-      color: #94a3b8;
-      font-size: 13px;
+      color: var(--muted);
+      font-size: 12px;
       margin-top: 5px;
+      line-height: 1.45;
     }
-    
+
     .schedule-info {
-      background: #0f172a;
-      padding: 15px;
-      border-radius: 6px;
-      margin-top: 15px;
+      background: #f6f9ff;
+      border: 1px solid #d4e1f1;
+      padding: 12px;
+      border-radius: 9px;
+      margin-top: 12px;
     }
-    
+
     .schedule-info h4 {
-      margin: 0 0 10px 0;
-      color: #38bdf8;
+      margin: 0 0 8px;
+      color: #23507f;
+      font-size: 15px;
     }
-    
+
     .schedule-info p {
-      margin: 5px 0;
-      font-size: 14px;
+      margin: 4px 0;
+      font-size: 13px;
+      color: #264b76;
+      line-height: 1.5;
     }
-    
+
     .loading {
       display: inline-block;
     }
-    
+
     .loading::after {
-      content: '';
+      content: "";
       animation: dots 1.5s steps(4, end) infinite;
     }
-    
+
     @keyframes dots {
-      0%, 20% { content: ''; }
-      40% { content: '.'; }
-      60% { content: '..'; }
-      80%, 100% { content: '...'; }
+      0%, 20% { content: ""; }
+      40% { content: "."; }
+      60% { content: ".."; }
+      80%, 100% { content: "..."; }
     }
+
     .help-icon {
       display: inline-block;
-      width: 18px;
-      height: 18px;
-      background: #475569;
-      color: white;
+      width: 17px;
+      height: 17px;
+      background: #dbE8f8;
+      color: #2a507a;
       border-radius: 50%;
       text-align: center;
-      line-height: 18px;
-      font-size: 12px;
-      font-weight: bold;
+      line-height: 17px;
+      font-size: 11px;
+      font-weight: 700;
       cursor: help;
-      margin-left: 8px;
+      margin-left: 6px;
       position: relative;
+      border: 1px solid #b9cee7;
     }
-    .help-icon:hover {
-      background: #64748b;
-    }
+
     .help-tooltip {
       display: none;
       position: absolute;
-      background: #1e293b;
-      border: 1px solid #475569;
+      background: #ffffff;
+      border: 1px solid #c7d8ed;
       border-radius: 8px;
-      padding: 15px;
-      width: 400px;
-      max-width: 90vw;
-      top: 25px;
+      padding: 12px;
+      width: 360px;
+      max-width: 88vw;
+      top: 24px;
       left: 0;
       z-index: 1000;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-      font-size: 13px;
-      line-height: 1.6;
+      box-shadow: var(--shadow-sm);
+      font-size: 12px;
+      line-height: 1.5;
+      color: #284a73;
+      font-weight: 600;
     }
+
     .help-icon:hover .help-tooltip {
       display: block;
     }
+
     .help-tooltip strong {
-      color: #38bdf8;
+      color: #1e4875;
     }
+
     .help-tooltip code {
-      background: #0f172a;
-      padding: 2px 6px;
+      background: #edf3fb;
+      padding: 2px 5px;
       border-radius: 3px;
-      font-family: monospace;
-      color: #22c55e;
+      font-family: Consolas, monospace;
+      color: #0b5cab;
       word-break: break-all;
+    }
+
+    @media (max-width: 920px) {
+      .data-type-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 700px) {
+      .mode-selector,
+      .date-range,
+      .schedule-controls {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
     }
   </style>
 </head>
 <body>
 
-<div class="header">
-  <div style="display: flex; align-items: center; gap: 15px;">
-    <button class="back-btn" onclick="goToMainDashboard()" style="font-size: 14px;">← Back</button>
-    <h1 id="app-title" style="cursor: default; user-select: none; margin: 0;">Seymour Auto Reporting</h1>
-  </div>
-  <div style="display: flex; gap: 15px;">
-    <div id="google-status" style="padding: 10px 15px; background: #334155; border-radius: 6px; font-size: 14px; display: flex; align-items: center; gap: 10px;">
-      <span id="google-indicator" style="width: 10px; height: 10px; border-radius: 50%; background: #ef4444;"></span>
+<div class="container">
+  <div class="header">
+    <div class="header-left">
+      <button class="back-btn" onclick="goToMainDashboard()">Back</button>
+      <h1 id="app-title" style="cursor: default; user-select: none;">Seymour Auto Reporting</h1>
+    </div>
+    <div id="google-status">
+      <span id="google-indicator"></span>
       <span id="google-text">Not Connected</span>
-      <button id="google-btn" class="back-btn" style="margin: 0;" onclick="toggleGoogleAuth()">Connect</button>
+      <button id="google-btn" onclick="toggleGoogleAuth()">Connect</button>
     </div>
   </div>
-</div>
 
-<!-- Data Type Selection -->
-<div class="card">
-  <h3>Select Data Type</h3>
-  <div class="data-type-grid">
-    <div class="data-type-btn active" id="btn-invoices" onclick="selectDataType('invoices')">
-      Invoices
-    </div>
-    <div class="data-type-btn disabled" id="btn-quotes">
-      Quotes
-    </div>
-    <div class="data-type-btn disabled" id="btn-workorders">
-      Work Orders
-    </div>
-    <div class="data-type-btn disabled" id="btn-inventory">
-      Inventory
-    </div>
-  </div>
-</div>
-
-<!-- Mode Selection -->
-<div class="card" id="mode-card">
-  <h3>Execution Mode</h3>
-  <div class="mode-selector">
-    <button class="mode-btn active" id="btn-manual" onclick="selectMode('manual')">
-      Manual Export (Excel)
-    </button>
-    <button class="mode-btn" id="btn-scheduled" onclick="selectMode('scheduled')">
-      Scheduled Download (Google Sheets)
-    </button>
-  </div>
-
-  <!-- Manual Export Mode -->
-  <div class="mode-content active" id="manual-mode">
-    <div class="form-group">
-      <label>Date Range</label>
-      <div class="date-range">
-        <div>
-          <input type="date" id="manual-date-from" />
-          <div class="info-text">From Date</div>
-        </div>
-        <div>
-          <input type="date" id="manual-date-to" />
-          <div class="info-text">To Date</div>
-        </div>
+  <div class="card">
+    <h3>Select Data Type</h3>
+    <div class="data-type-grid">
+      <div class="data-type-btn active" id="btn-invoices" onclick="selectDataType('invoices')">
+        Invoices
+      </div>
+      <div class="data-type-btn disabled" id="btn-quotes">
+        Quotes
+      </div>
+      <div class="data-type-btn disabled" id="btn-workorders">
+        Work Orders
+      </div>
+      <div class="data-type-btn disabled" id="btn-inventory">
+        Inventory
       </div>
     </div>
-
-    <div class="form-group">
-      <label>Salesperson</label>
-      <select id="manual-salesperson">
-        <option value="ALL">ALL</option>
-      </select>
-      <div class="info-text">Filter by salesperson (default: ALL)</div>
-    </div>
-
-    <button class="action-btn" id="btn-export" onclick="exportToExcel()">
-      Export Now to .xls
-    </button>
-
-    <div class="status-box hidden" id="manual-status"></div>
   </div>
 
-  <!-- Scheduled Mode -->
-  <div class="mode-content" id="scheduled-mode">
-    <div class="form-group">
-      <label>Schedule Frequency</label>
-      <select id="schedule-frequency" onchange="updateScheduleInfo()">
-        <option value="nightly">Nightly (Previous Day)</option>
-        <option value="weekly">Weekly (Last Completed Week)</option>
-      </select>
+  <div class="card" id="mode-card">
+    <h3>Execution Mode</h3>
+    <div class="mode-selector">
+      <button class="mode-btn active" id="btn-manual" onclick="selectMode('manual')">
+        Manual Export (Excel)
+      </button>
+      <button class="mode-btn" id="btn-scheduled" onclick="selectMode('scheduled')">
+        Scheduled Download (Google Sheets)
+      </button>
     </div>
 
-    <div class="form-group" id="week-start-group" style="display: none;">
-      <label>Week Start Day</label>
-      <select id="week-start-day">
-        <option value="1">Monday</option>
-        <option value="2">Tuesday</option>
-        <option value="3">Wednesday</option>
-        <option value="4">Thursday</option>
-        <option value="5">Friday</option>
-        <option value="6">Saturday</option>
-        <option value="0">Sunday</option>
-      </select>
+    <div class="mode-content active" id="manual-mode">
+      <div class="form-group">
+        <label>Date Range</label>
+        <div class="date-range">
+          <div>
+            <input type="date" id="manual-date-from" />
+            <div class="info-text">From Date</div>
+          </div>
+          <div>
+            <input type="date" id="manual-date-to" />
+            <div class="info-text">To Date</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Salesperson</label>
+        <select id="manual-salesperson">
+          <option value="ALL">ALL</option>
+        </select>
+        <div class="info-text">Filter by salesperson (default: ALL)</div>
+      </div>
+
+      <button class="action-btn" id="btn-export" onclick="exportToExcel()">
+        Export Now to .xls
+      </button>
+
+      <div class="status-box hidden" id="manual-status"></div>
     </div>
 
-    <div class="form-group">
-      <label>End Date (Optional)</label>
-      <input type="date" id="schedule-end-date" />
-      <div class="info-text">Schedule will auto-deactivate on this date</div>
-    </div>
+    <div class="mode-content" id="scheduled-mode">
+      <div class="form-group">
+        <label>Schedule Frequency</label>
+        <select id="schedule-frequency" onchange="updateScheduleInfo()">
+          <option value="nightly">Nightly (Previous Day)</option>
+          <option value="weekly">Weekly (Last Completed Week)</option>
+        </select>
+      </div>
 
-    <div class="form-group">
-      <label>
-        Google Sheet ID <span style="color: #ef4444;">*</span>
-        <span class="help-icon">?
-          <span class="help-tooltip">
-            <strong>How to find your Google Sheet ID:</strong><br><br>
-            1. Open your Google Sheet in a browser<br>
-            2. Look at the URL in the address bar<br>
-            3. The Sheet ID is the long string between <code>/d/</code> and <code>/edit</code><br><br>
-            <strong>Example URL:</strong><br>
-            https://docs.google.com/spreadsheets/d/<code>1ABC-xyz123_EXAMPLE-ID</code>/edit<br><br>
-            <strong>Copy only the ID part</strong> (the green text above)<br>
-            ⚠️ Don't paste the full URL, just the ID
+      <div class="form-group" id="week-start-group" style="display: none;">
+        <label>Week Start Day</label>
+        <select id="week-start-day">
+          <option value="1">Monday</option>
+          <option value="2">Tuesday</option>
+          <option value="3">Wednesday</option>
+          <option value="4">Thursday</option>
+          <option value="5">Friday</option>
+          <option value="6">Saturday</option>
+          <option value="0">Sunday</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label>End Date (Optional)</label>
+        <input type="date" id="schedule-end-date" />
+        <div class="info-text">Schedule will auto-deactivate on this date</div>
+      </div>
+
+      <div class="form-group">
+        <label>
+          Google Sheet ID <span style="color: var(--danger);">*</span>
+          <span class="help-icon">?
+            <span class="help-tooltip">
+              <strong>How to find your Google Sheet ID:</strong><br><br>
+              1. Open your Google Sheet in a browser<br>
+              2. Look at the URL in the address bar<br>
+              3. The Sheet ID is the long string between <code>/d/</code> and <code>/edit</code><br><br>
+              <strong>Example URL:</strong><br>
+              https://docs.google.com/spreadsheets/d/<code>1ABC-xyz123_EXAMPLE-ID</code>/edit<br><br>
+              <strong>Copy only the ID part</strong> (the green text above)<br>
+              Do not paste the full URL, just the ID
+            </span>
           </span>
-        </span>
-      </label>
-      <input type="text" id="spreadsheet-id" placeholder="e.g., 1ABC-xyz123_EXAMPLE-ID" style="background: #0f172a; border: 1px solid #475569; border-radius: 6px; padding: 12px; color: white; width: 100%; box-sizing: border-box; font-family: monospace;" />
-      <div class="info-text">Hover over the <strong>?</strong> icon above for detailed instructions</div>
-    </div>
+        </label>
+        <input type="text" id="spreadsheet-id" placeholder="e.g., 1ABC-xyz123_EXAMPLE-ID" style="font-family: Consolas, monospace;" />
+        <div class="info-text">Hover over the ? icon above for detailed instructions.</div>
+      </div>
 
-    <div class="form-group">
-      <label>Destination</label>
-      <select disabled>
-        <option>Google Sheets - RAW Tab (Fixed)</option>
-      </select>
-      <div class="info-text">Data will overwrite the RAW tab only</div>
-    </div>
+      <div class="form-group">
+        <label>Destination</label>
+        <select disabled>
+          <option>Google Sheets - RAW Tab (Fixed)</option>
+        </select>
+        <div class="info-text">Data will overwrite the RAW tab only.</div>
+      </div>
 
-    <div class="schedule-controls">
-      <button class="action-btn success" onclick="saveSchedule()">
-        Save Schedule
-      </button>
-      <button class="action-btn danger" onclick="cancelSchedule()">
-        Cancel Schedule
-      </button>
-    </div>
+      <div class="schedule-controls">
+        <button class="action-btn success" onclick="saveSchedule()">Save Schedule</button>
+        <button class="action-btn danger" onclick="cancelSchedule()">Cancel Schedule</button>
+      </div>
 
-    <div class="status-box hidden" id="scheduled-status"></div>
+      <div class="status-box hidden" id="scheduled-status"></div>
 
-    <div class="schedule-info" id="current-schedule" style="display: none;">
-      <h4>Current Schedule</h4>
-      <p id="schedule-details"></p>
-      <button class="action-btn" style="background: #f59e0b; margin-top: 15px;" onclick="testScheduleNow()">
-        Test Schedule Now
-      </button>
+      <div class="schedule-info" id="current-schedule" style="display: none;">
+        <h4>Current Schedule</h4>
+        <p id="schedule-details"></p>
+        <button class="action-btn" style="margin-top: 10px;" onclick="testScheduleNow()">
+          Test Schedule Now
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -749,7 +870,7 @@ let isDisconnecting = false;
         console.log('Disconnecting from Google...');
         await window.oauth2API.disconnect();
         updateGoogleStatusUI(false);
-        console.log('✅ Disconnected successfully');
+        console.log('Disconnected successfully');
         isDisconnecting = false;
         // After disconnect, re-check status
         setTimeout(() => {

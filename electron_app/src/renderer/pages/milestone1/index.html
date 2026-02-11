@@ -1,84 +1,197 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Milestone 1 - Seymour Auto</title>
   <style>
+    :root {
+      --bg: #f4f7fb;
+      --surface: #ffffff;
+      --text: #152238;
+      --muted: #5a6b85;
+      --border: #d7e1ee;
+      --brand: #0b5cab;
+      --brand-strong: #094a8a;
+      --accent: #178a6b;
+      --shadow: 0 18px 34px rgba(7, 33, 63, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: Arial;
-      background: #0f172a;
-      color: white;
-      padding: 30px;
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top right, rgba(11, 92, 171, 0.14), transparent 38%),
+        radial-gradient(circle at top left, rgba(23, 138, 107, 0.12), transparent 42%),
+        var(--bg);
+      padding: 28px 20px 40px;
     }
-    button {
-      padding: 10px 15px;
-      background: #f59e0b;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-      font-weight: bold;
-      margin-right: 10px;
-      margin-bottom: 10px;
+
+    .layout {
+      max-width: 980px;
+      margin: 0 auto;
+      display: grid;
+      gap: 18px;
     }
-    .content-section {
-      background: #1e293b;
-      padding: 20px;
-      border-radius: 6px;
-      margin: 20px 0;
+
+    .hero {
+      background: linear-gradient(120deg, #0b5cab 0%, #0f7f79 100%);
+      color: #ecf6ff;
+      border-radius: 18px;
+      padding: 26px 26px 24px;
+      box-shadow: var(--shadow);
     }
-    .phase-info {
-      background: #1e3a8a;
-      border: 1px solid #3b82f6;
-      border-radius: 8px;
-      padding: 16px;
-      margin: 20px 0;
+
+    .hero h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      letter-spacing: 0.3px;
     }
-    .phase-title {
-      font-weight: 600;
-      color: #dbeafe;
-      margin-bottom: 10px;
-      font-size: 16px;
-    }
-    .phase-desc {
-      color: #bfdbfe;
-      font-size: 14px;
+
+    .hero p {
+      margin: 0;
+      color: #d8ebff;
       line-height: 1.5;
+      max-width: 740px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .btn {
+      appearance: none;
+      border: none;
+      border-radius: 10px;
+      padding: 11px 18px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-back {
+      background: #d9e3f2;
+      color: #2f476b;
+    }
+
+    .btn-back:hover {
+      background: #c9d7eb;
+    }
+
+    .btn-primary {
+      background: var(--brand);
+      color: #ffffff;
+      box-shadow: 0 10px 22px rgba(11, 92, 171, 0.3);
+    }
+
+    .btn-primary:hover {
+      background: var(--brand-strong);
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 22px;
+      box-shadow: 0 8px 16px rgba(16, 38, 66, 0.05);
+    }
+
+    .panel h3 {
+      margin: 0 0 12px;
+      font-size: 20px;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      margin-bottom: 14px;
+    }
+
+    .pill {
+      border: 1px solid #b9cde6;
+      background: #eef4fb;
+      color: #24466f;
+      border-radius: 100px;
+      padding: 7px 12px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .description {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 14px;
+    }
+
+    @media (max-width: 760px) {
+      body {
+        padding: 18px 12px 26px;
+      }
+
+      .hero h1 {
+        font-size: 24px;
+      }
+
+      .panel {
+        padding: 16px;
+      }
+
+      .btn {
+        width: 100%;
+      }
     }
   </style>
 </head>
 <body>
+  <div class="layout">
+    <section class="hero">
+      <h1>Milestone 1: Listing Enrichment & Automation</h1>
+      <p>
+        Configure and operate the inventory sync foundation that feeds downstream listing workflows with clean, scheduled source data.
+      </p>
+    </section>
 
-<h1>Milestone 1 - Listing Enrichment & Automation</h1>
-
-<div>
-  <button onclick="goBack()" style="background: #64748b;">← Back</button>
-  <button onclick="goToPowerlinkSheets()" style="background: #8b5cf6;">📊 Phase 1: Powerlink → Google Sheets</button>
-</div>
-
-<div class="content-section">
-  <h3>Phase 1: Powerlink → Google Sheets Integration</h3>
-  <div class="phase-info">
-    <div class="phase-title">🔄 Automated Inventory Pipeline</div>
-    <div class="phase-desc">
-      Establish a stable, repeatable pipeline for raw inventory data sourced from Powerlink (SQL Database), 
-      writing to predefined Google Sheets file on a fixed 24-hour schedule with full dataset refresh.
+    <div class="actions">
+      <button class="btn btn-back" onclick="goBack()">Back</button>
+      <button class="btn btn-primary" onclick="goToPowerlinkSheets()">Open Inventory Sync Workspace</button>
     </div>
+
+    <section class="panel">
+      <h3>Inventory Sync Workspace</h3>
+      <div class="pill-row">
+        <span class="pill">SQL Source</span>
+        <span class="pill">Google Sheets Destination</span>
+        <span class="pill">24-Hour Automation</span>
+        <span class="pill">Full Refresh Writes</span>
+      </div>
+      <p class="description">
+        Use the workspace to connect Google Sheets, define the target worksheet, validate access, run manual syncs, and control the daily automation schedule from one screen.
+      </p>
+    </section>
   </div>
-  
-  <p style="color: #94a3b8; font-size: 14px;">
-    Click the "Phase 1: Powerlink → Google Sheets" button above to configure and manage the automated inventory data pipeline.
-  </p>
-</div>
 
-<script>
-  function goBack() {
-    window.location.href = '../main-dashboard.html';
-  }
+  <script>
+    function goBack() {
+      window.location.href = '../main-dashboard.html';
+    }
 
-  function goToPowerlinkSheets() {
-    window.location.href = 'powerlink-sheets.html';
-  }
-</script>
-
+    function goToPowerlinkSheets() {
+      window.location.href = 'powerlink-sheets.html';
+    }
+  </script>
 </body>
 </html>

@@ -1,152 +1,262 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Webhook Setup</title>
   <style>
+    :root {
+      --bg: #eef4fb;
+      --surface: #ffffff;
+      --text: #14263f;
+      --muted: #617490;
+      --border: #d2deec;
+      --brand: #0b5cab;
+      --brand-strong: #084a8a;
+      --success-bg: #ddf4ec;
+      --success-text: #0f6f56;
+      --error-bg: #f8dddb;
+      --error-text: #8f2620;
+      --info-bg: #dce9fb;
+      --info-text: #184f97;
+      --shadow: 0 20px 34px rgba(8, 33, 62, 0.13);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
     body {
-      font-family: Arial;
-      background: #0f172a;
-      color: white;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 20px 12px;
+      font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 92% 6%, rgba(11, 92, 171, 0.14), transparent 34%),
+        radial-gradient(circle at 8% 8%, rgba(15, 138, 106, 0.11), transparent 34%),
+        var(--bg);
     }
+
     .card {
-      background: #1e293b;
-      padding: 30px;
-      border-radius: 10px;
-      width: 360px;
-    }
-    input, button {
       width: 100%;
-      padding: 10px;
+      max-width: 500px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 24px 22px;
+    }
+
+    .title {
+      margin: 0 0 4px;
+      font-size: 28px;
+      color: #173254;
+      letter-spacing: 0.2px;
+    }
+
+    .subtitle {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    input {
+      width: 100%;
+      border: 1px solid #bfd0e5;
+      border-radius: 10px;
+      background: #fcfdff;
+      color: #173454;
+      font-size: 14px;
+      padding: 11px 12px;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(11, 92, 171, 0.14);
+    }
+
+    .note {
       margin-top: 10px;
-      border-radius: 6px;
-      border: none;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
     }
-    button {
-      background: #f59e0b;
-      font-weight: bold;
-      cursor: pointer;
-    }
+
     .error {
-      color: #ef4444;
-      font-size: 14px;
-      margin-top: 5px;
+      color: var(--error-text);
+      font-size: 13px;
+      margin-top: 10px;
+      min-height: 18px;
     }
-    .success {
-      color: #22c55e;
-      font-size: 14px;
-      margin-top: 5px;
-    }
+
     .status {
-      margin-top: 15px;
-      padding: 10px;
-      border-radius: 6px;
-      text-align: center;
+      margin-top: 6px;
+      padding: 10px 12px;
+      border-radius: 9px;
+      font-size: 13px;
+      font-weight: 700;
       display: none;
+      line-height: 1.4;
     }
+
+    .btn-primary {
+      width: 100%;
+      margin-top: 12px;
+      border: none;
+      border-radius: 10px;
+      padding: 11px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #ffffff;
+      background: var(--brand);
+      box-shadow: 0 10px 18px rgba(11, 92, 171, 0.26);
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.15s ease;
+    }
+
+    .btn-primary:hover {
+      background: var(--brand-strong);
+      transform: translateY(-1px);
+    }
+
+    .btn-primary:disabled {
+      cursor: not-allowed;
+      opacity: 0.75;
+      transform: none;
+    }
+
+    .btn-secondary {
+      width: 100%;
+      margin-top: 8px;
+      border: 1px solid #c2d2e8;
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #2f5076;
+      background: #f4f8ff;
+      cursor: pointer;
+      transition: background 0.15s ease, transform 0.15s ease;
+    }
+
+    .btn-secondary:hover {
+      background: #e6eefb;
+      transform: translateY(-1px);
+    }
+
     .loading {
       display: inline-block;
       animation: spin 1s linear infinite;
     }
+
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+
+    @media (max-width: 540px) {
+      .card {
+        padding: 18px 14px;
+      }
+
+      .title {
+        font-size: 24px;
+      }
+    }
   </style>
 </head>
 <body>
+  <div class="card">
+    <h1 class="title">Webhook Setup</h1>
+    <p class="subtitle">Provide a destination endpoint to receive sync payloads and validate connectivity.</p>
 
-<div class="card">
-  <h2>Webhook Setup</h2>
+    <input id="webhook" placeholder="https://example.com/webhook" />
+    <p class="note">Only valid `http://` or `https://` URLs are accepted.</p>
 
-  <input id="webhook" placeholder="https://example.com/webhook" />
-  
-  <div id="errorMsg" class="error"></div>
-  <div id="statusMsg" class="status"></div>
+    <div id="errorMsg" class="error"></div>
+    <div id="statusMsg" class="status"></div>
 
-  <button onclick="testAndSaveWebhook()">Test & Save Webhook</button>
-</div>
+    <button id="webhookSubmitBtn" class="btn-primary" onclick="testAndSaveWebhook()">Test & Save Webhook</button>
+    <button class="btn-secondary" onclick="goBackToAutoSync()">Back to AutoSync</button>
+  </div>
 
-<script>
-  async function testAndSaveWebhook() {
-    const url = webhook.value.trim();
-    const errorMsg = document.getElementById('errorMsg');
-    const statusMsg = document.getElementById('statusMsg');
-    const button = event.target;
-
-    // Validation
-    errorMsg.textContent = '';
-
-    if (!url) {
-      errorMsg.textContent = 'Webhook URL is required';
-      return;
+  <script>
+    function goBackToAutoSync() {
+      window.location.href = '../seymour-autosync/index.html';
     }
 
-    // Validate URL format
-    try {
-      new URL(url);
-    } catch {
-      errorMsg.textContent = 'Invalid URL format. Must start with http:// or https://';
-      return;
-    }
+    async function testAndSaveWebhook() {
+      const url = webhook.value.trim();
+      const errorMsg = document.getElementById('errorMsg');
+      const statusMsg = document.getElementById('statusMsg');
+      const button = document.getElementById('webhookSubmitBtn');
 
-    // Show loading
-    statusMsg.style.display = 'block';
-    statusMsg.style.background = '#1e40af';
-    statusMsg.innerHTML = '<span class="loading">⏳</span> Testing webhook with sample data...';
-    button.disabled = true;
+      errorMsg.textContent = '';
 
-    try {
-      // Test webhook with a POST request and sample data
-      const testData = {
-        test: true,
-        timestamp: new Date().toISOString(),
-        message: 'Webhook validation test'
-      };
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(testData)
-      });
-
-      // Check if response is successful (2xx status code)
-      if (!response.ok) {
-        throw new Error(`Server returned status ${response.status}`);
+      if (!url) {
+        errorMsg.textContent = 'Webhook URL is required';
+        return;
       }
 
-      // Don't require JSON - just check for successful response
-      // (webhook services might return HTML or other formats)
-      
-      // Show success
-      statusMsg.style.background = '#166534';
-      statusMsg.innerHTML = '<span>✅</span> Webhook accepted data successfully!';
+      try {
+        new URL(url);
+      } catch {
+        errorMsg.textContent = 'Invalid URL format. Must start with http:// or https://';
+        return;
+      }
 
-      setTimeout(async () => {
-        // Now save the webhook
-        const res = await window.api.saveWebhook(url);
-
-        if (res.success) {
-          window.location.replace('../seymour-autosync/index.html');
-        } else {
-          statusMsg.style.background = '#7f1d1d';
-          statusMsg.textContent = '❌ ' + res.message;
-          button.disabled = false;
-        }
-      }, 1000);
-
-    } catch (err) {
       statusMsg.style.display = 'block';
-      statusMsg.style.background = '#7f1d1d';
-      statusMsg.textContent = '❌ Webhook test failed: ' + err.message;
-      button.disabled = false;
-    }
-  }
-</script>
+      statusMsg.style.background = 'var(--info-bg)';
+      statusMsg.style.color = 'var(--info-text)';
+      statusMsg.innerHTML = '<span class="loading">o</span> Testing webhook with sample data...';
+      button.disabled = true;
 
+      try {
+        const testData = {
+          test: true,
+          timestamp: new Date().toISOString(),
+          message: 'Webhook validation test'
+        };
+
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(testData)
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server returned status ${response.status}`);
+        }
+
+        statusMsg.style.background = 'var(--success-bg)';
+        statusMsg.style.color = 'var(--success-text)';
+        statusMsg.textContent = 'Webhook accepted data successfully. Saving configuration...';
+
+        setTimeout(async () => {
+          const res = await window.api.saveWebhook(url);
+
+          if (res.success) {
+            window.location.replace('../seymour-autosync/index.html');
+          } else {
+            statusMsg.style.background = 'var(--error-bg)';
+            statusMsg.style.color = 'var(--error-text)';
+            statusMsg.textContent = 'Save failed: ' + res.message;
+            button.disabled = false;
+          }
+        }, 800);
+      } catch (err) {
+        statusMsg.style.display = 'block';
+        statusMsg.style.background = 'var(--error-bg)';
+        statusMsg.style.color = 'var(--error-text)';
+        statusMsg.textContent = 'Webhook test failed: ' + err.message;
+        button.disabled = false;
+      }
+    }
+  </script>
 </body>
 </html>

@@ -244,7 +244,6 @@ ipcMain.handle('save-webhook', async (_, url) => {
 
   saveWebhookConfig(url);
   // startAutoSync(); // Removed: Only sync when user clicks button
-  loadDashboard();
 
   return { success: true, message: 'Webhook saved successfully!' };
 });
@@ -342,7 +341,6 @@ ipcMain.handle('reset-config', async () => {
   clearWebhookConfig();
   clearSelectedTables();
 
-  loadSetup();
   return { success: true };
 });
 

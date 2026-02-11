@@ -5,6 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Seymour Auto - Main Dashboard</title>
   <style>
+    :root {
+      --bg: #eff4fb;
+      --surface: #ffffff;
+      --text: #14233a;
+      --muted: #5d6d86;
+      --border: #d5e0ee;
+      --brand: #0b5cab;
+      --brand-strong: #084a8a;
+      --accent: #0f8a6a;
+      --danger: #b44a42;
+      --shadow-lg: 0 20px 35px rgba(8, 33, 61, 0.12);
+      --shadow-sm: 0 10px 18px rgba(12, 35, 58, 0.07);
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -12,198 +26,267 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
       min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
+      font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 92% 4%, rgba(11, 92, 171, 0.14), transparent 34%),
+        radial-gradient(circle at 8% 10%, rgba(15, 138, 106, 0.12), transparent 34%),
+        var(--bg);
+      padding: 26px 16px 34px;
     }
 
     .container {
-      text-align: center;
-      max-width: 900px;
-      padding: 40px;
-    }
-
-    .logo {
-      font-size: 48px;
-      font-weight: 700;
-      margin-bottom: 10px;
-      background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .subtitle {
-      font-size: 18px;
-      color: #94a3b8;
-      margin-bottom: 60px;
-    }
-
-    .dashboard-grid {
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-      max-width: 500px;
+      max-width: 1020px;
       margin: 0 auto;
+      display: grid;
+      gap: 18px;
     }
 
-    .dashboard-btn {
-      background: #1e293b;
-      border: 2px solid #334155;
-      border-radius: 12px;
-      padding: 30px;
+    .hero {
+      background: linear-gradient(122deg, #0b5cab 0%, #0f7f79 100%);
+      border-radius: 18px;
+      color: #edf7ff;
+      padding: 26px 26px 22px;
+      box-shadow: var(--shadow-lg);
+    }
+
+    .hero-title {
+      font-size: 38px;
+      letter-spacing: 0.3px;
+      margin-bottom: 6px;
+    }
+
+    .hero-subtitle {
+      font-size: 15px;
+      color: #d9ecff;
+      line-height: 1.5;
+      max-width: 780px;
+    }
+
+    .workspace-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .workspace-card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+      padding: 18px;
       cursor: pointer;
-      transition: all 0.3s ease;
-      color: white;
-      text-decoration: none;
-      display: flex;
-      align-items: center;
-      gap: 20px;
-      font-size: 18px;
-      font-weight: 600;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+      text-align: left;
     }
 
-    .dashboard-btn:hover {
-      border-color: #3b82f6;
+    .workspace-card:hover {
       transform: translateY(-2px);
-      box-shadow: 0 10px 20px rgba(59, 130, 246, 0.2);
-      background: #334155;
+      box-shadow: 0 16px 25px rgba(8, 37, 67, 0.12);
+      border-color: #b9cde6;
     }
 
-    .btn-icon {
-      font-size: 48px;
-      flex-shrink: 0;
-    }
-
-    .btn-content {
-      flex-grow: 1;
-    }
-
-    .btn-title {
-      font-size: 22px;
-      margin-bottom: 5px;
-    }
-
-    .btn-description {
-      font-size: 14px;
-      color: #94a3b8;
-      font-weight: normal;
-    }
-
-    .milestone-badge {
-      display: inline-block;
-      background: #3b82f6;
-      color: white;
-      padding: 4px 12px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: 600;
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       margin-bottom: 12px;
     }
 
-    .milestone-badge.milestone-1 {
-      background: #8b5cf6;
+    .card-badge {
+      background: #eaf2fc;
+      color: #27507a;
+      border: 1px solid #bfd2ea;
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+
+    .card-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(15, 138, 106, 0.16);
+    }
+
+    .workspace-title {
+      font-size: 23px;
+      margin-bottom: 7px;
+      color: #183355;
+      letter-spacing: 0.2px;
+    }
+
+    .workspace-description {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.55;
+      min-height: 44px;
+    }
+
+    .workspace-cta {
+      margin-top: 13px;
+      color: var(--brand);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
     }
 
     .footer {
-      margin-top: 60px;
-      padding-top: 30px;
-      border-top: 1px solid #334155;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 13px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      box-shadow: var(--shadow-sm);
+      flex-wrap: wrap;
+    }
+
+    .footer-note {
+      color: #607491;
+      font-size: 13px;
+      font-weight: 600;
     }
 
     .footer-links {
       display: flex;
-      gap: 20px;
-      justify-content: center;
-      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
     }
 
-    .footer-link {
-      color: #64748b;
-      text-decoration: none;
-      font-size: 14px;
-      transition: color 0.2s;
+    .action-btn {
+      border: 1px solid #c3d3e8;
+      border-radius: 10px;
+      background: #f7fbff;
+      color: #2e5078;
+      padding: 8px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.14s ease, transform 0.14s ease;
     }
 
-    .footer-link:hover {
-      color: #3b82f6;
+    .action-btn:hover {
+      background: #eaf2fb;
+      transform: translateY(-1px);
     }
 
-    @media (max-width: 768px) {
-      .dashboard-grid {
+    .action-btn.danger {
+      color: #7e2f29;
+      border-color: #e2bdb8;
+      background: #f9ecea;
+    }
+
+    .action-btn.danger:hover {
+      background: #f4dfdc;
+    }
+
+    @media (max-width: 840px) {
+      .workspace-grid {
         grid-template-columns: 1fr;
       }
-      
-      .logo {
-        font-size: 36px;
+
+      .hero-title {
+        font-size: 30px;
+      }
+    }
+
+    @media (max-width: 580px) {
+      body {
+        padding: 16px 10px 24px;
+      }
+
+      .hero {
+        padding: 18px 14px 16px;
+      }
+
+      .hero-title {
+        font-size: 26px;
+      }
+
+      .workspace-card {
+        padding: 15px;
+      }
+
+      .workspace-title {
+        font-size: 20px;
+      }
+
+      .action-btn {
+        width: 100%;
       }
     }
   </style>
 </head>
 <body>
+  <div class="container">
+    <header class="hero">
+      <h1 class="hero-title">Seymour Auto Dashboard</h1>
+      <p class="hero-subtitle">Select a workspace to manage inventory sync operations or reporting workflows.</p>
+    </header>
 
-<div class="container">
-  <div class="logo">Seymour Auto</div>
-  <div class="subtitle">Choose your workspace</div>
+    <section class="workspace-grid">
+      <button class="workspace-card" onclick="goToMilestone1()">
+        <div class="card-top">
+          <span class="card-badge">Milestone 1</span>
+          <span class="card-dot"></span>
+        </div>
+        <h2 class="workspace-title">Listing Enrichment</h2>
+        <p class="workspace-description">Configure inventory sync, worksheet delivery, and automated scheduling for downstream listing workflows.</p>
+        <div class="workspace-cta">Open workspace</div>
+      </button>
 
-  <div class="dashboard-grid">
-    
-    <button class="dashboard-btn" onclick="goToMilestone1()">
-      <div class="btn-icon">⚙️</div>
-      <div class="btn-content">
-        <div class="btn-title">Milestone 1</div>
-        <div class="btn-description">Listing Enrichment & Automation</div>
+      <button class="workspace-card" onclick="goToReporting()">
+        <div class="card-top">
+          <span class="card-badge">Milestone 11</span>
+          <span class="card-dot"></span>
+        </div>
+        <h2 class="workspace-title">Auto Reporting</h2>
+        <p class="workspace-description">Manage reporting schedules, template output, and export pipelines for recurring business insights.</p>
+        <div class="workspace-cta">Open workspace</div>
+      </button>
+    </section>
+
+    <footer class="footer">
+      <div class="footer-note">System tools</div>
+      <div class="footer-links">
+        <button class="action-btn" onclick="openSettings()">Settings</button>
+        <button class="action-btn danger" onclick="resetApp()">Reset Configuration</button>
       </div>
-    </button>
-
-    <button class="dashboard-btn" onclick="goToReporting()">
-      <div class="btn-icon">📊</div>
-      <div class="btn-content">
-        <div class="btn-title">Milestone 11</div>
-        <div class="btn-description">Auto Reporting Dashboard</div>
-      </div>
-    </button>
-
+    </footer>
   </div>
 
-  <div class="footer">
-    <div class="footer-links">
-      <a href="#" class="footer-link" onclick="openSettings(); return false;">⚙️ Settings</a>
-      <a href="#" class="footer-link" onclick="resetApp(); return false;">🔄 Reset Configuration</a>
-    </div>
-  </div>
-</div>
+  <script>
+    function goToMilestone1() {
+      window.location.href = 'milestone1/index.html';
+    }
 
-<script>
-  function goToMilestone1() {
-    window.location.href = 'milestone1/index.html';
-  }
+    function goToReporting() {
+      window.location.href = 'milestone11/index.html';
+    }
 
-  function goToReporting() {
-    window.location.href = 'milestone11/index.html';
-  }
+    function openSettings() {
+      window.location.href = 'shared/setup.html';
+    }
 
-  function openSettings() {
-    window.location.href = 'shared/setup.html';
-  }
-
-  async function resetApp() {
-    if (confirm('Are you sure you want to reset all configurations? This will clear database, webhook, and reporting settings.')) {
-      try {
-        await window.api.resetConfig();
-        alert('Configuration reset successfully. Redirecting to setup...');
-        window.location.href = 'shared/setup.html';
-      } catch (err) {
-        console.error('Reset failed:', err);
-        alert('Reset failed. Please try again.');
+    async function resetApp() {
+      if (confirm('Are you sure you want to reset all configurations? This will clear database, webhook, and reporting settings.')) {
+        try {
+          await window.api.resetConfig();
+          alert('Configuration reset successfully. Redirecting to setup...');
+          window.location.href = 'shared/setup.html';
+        } catch (err) {
+          console.error('Reset failed:', err);
+          alert('Reset failed. Please try again.');
+        }
       }
     }
-  }
-</script>
-
+  </script>
 </body>
 </html>

@@ -62,7 +62,9 @@ async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryDat
       'UnitsOfDamage',
       'DateBPGGraded',
       'EComDescription',
-      'PrivacyIndicator'
+      'PrivacyIndicator',
+      'BlockOnlineSale',
+      'ReferenceNumber'
     ];
 
     // Convert inventory data to 2D array format expected by Sheets API

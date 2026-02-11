@@ -48,30 +48,35 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
 
         inv.LocationCode,
 
-        c.CustomerName,
-        c.BillToAddress1,
-        c.BillToAddress2,
-        c.BillToCity,
-        c.BillToStateOrProvince,
-        c.BillToPostalCode AS BillToZipCode,
+        i.BillToBusinessName AS CustomerName,
+        i.BillToAddress1,
+        i.BillToAddress2,
+        i.BillToCity,
+        i.BillToStateOrProvince,
+        i.BillToPostalCode AS BillToZipCode,
 
-        i.CustomerPO AS PONumber,
+        NULLIF(LTRIM(RTRIM(i.CustomerPO)), '') AS PONumber,
         i.EbayOrderNumber AS [EbayOrder#],
         i.InvoiceNotes,
-        i.InvoiceNotes AS PaymentNotes,
+        i.PaymentComment AS PaymentNotes,
         i.CreditCardApprovalCode AS CreditCardAuthNumber,
-        i.CreditCardType AS PaymentType,
+        /* UPDATED PAYMENT TYPE LOGIC */
+        CASE 
+           WHEN i.CreditCardType IS NOT NULL THEN cc.CreditCardDescription 
+           ELSE opt.OtherPaymentTypeDescription 
+        END AS PaymentType,
 
-        po.VendorName,
-        po.PONumber,
-        poli.UnitPrice,
-        poli.ReceivedQty AS [Qty/Received],
+        /* Condition: Only populate if Stock# starts with 'P' */
+        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN po.VendorName ELSE NULL END AS VendorName,
+        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN po.PONumber ELSE NULL END AS [PurchaseOrder#],
+        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN poli.UnitPrice ELSE NULL END AS VendorUnitPrice,
+        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN poli.ReceivedQty ELSE NULL END AS [Qty/Received],
 
-        /* Line-level markup */
+        /* Line-level markup logic applied only for 'P' stocks */
         CASE
-            WHEN poli.UnitPrice > 0
-            THEN ROUND(((inv.RetailPrice - poli.UnitPrice) / poli.UnitPrice) * 100, 2)
-            ELSE 0
+           WHEN inv.StockTicketNumber LIKE 'P%' AND poli.UnitPrice > 0
+           THEN ROUND(((inv.RetailPrice - poli.UnitPrice) / poli.UnitPrice) * 100, 2)
+           ELSE 0
         END AS MarkUp
 
     FROM dbo.INVOICE i
@@ -81,11 +86,14 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
     JOIN dbo.INVENTORY inv
         ON inv.InventoryID = li.InventoryID
 
+    LEFT JOIN dbo.OTHER_PAYMENT_TYPE opt
+        ON opt.OtherPaymentType = i.OtherPaymentType
+
+    LEFT JOIN dbo.CREDIT_CARD cc 
+        ON cc.CreditCardType = i.CreditCardType
+
     LEFT JOIN dbo.EMPLOYEE e
         ON e.EmployeeID = i.CreatedBy
-
-    JOIN dbo.CUSTOMER c
-        ON c.CustomerNumber = i.CustomerNumber
 
     LEFT JOIN dbo.PURCHASE_ORDER_LINEITEM poli
         ON poli.InventoryNumber = inv.InventoryNumber
