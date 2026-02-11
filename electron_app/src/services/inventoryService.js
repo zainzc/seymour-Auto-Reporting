@@ -51,6 +51,7 @@ async function getAllInventory() {
         BlockOnlineSale,
         ReferenceNumber
     FROM INVENTORY
+    WHERE LastDateModified >= DATEADD(DAY, -1, GETDATE());
   `;
 
   const result = await pool.request().query(query);
