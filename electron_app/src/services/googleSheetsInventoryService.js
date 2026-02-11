@@ -235,7 +235,7 @@ async function testSheetsConnection(spreadsheetId, worksheetName) {
  */
 async function getAuthenticatedSheetsClient() {
   try {
-    const auth = await oauth2Service.getAuthClient();
+    const auth = oauth2Service.getAuthenticatedClient();
     return google.sheets({ version: 'v4', auth });
   } catch (error) {
     throw new Error(`Failed to get authenticated Google Sheets client: ${error.message}`);
