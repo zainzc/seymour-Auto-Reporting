@@ -9,24 +9,6 @@ const { google } = require('googleapis');
 let sheetsAPI = null;
 
 /**
- * Convert a 1-based column number to A1 notation (A, B, ..., Z, AA, AB, ...)
- * @param {number} colNumber
- * @returns {string}
- */
-function toA1Column(colNumber) {
-  let n = colNumber;
-  let col = '';
-
-  while (n > 0) {
-    const rem = (n - 1) % 26;
-    col = String.fromCharCode(65 + rem) + col;
-    n = Math.floor((n - 1) / 26);
-  }
-
-  return col;
-}
-
-/**
  * Initialize Google Sheets API with OAuth2 client
  * @param {google.auth.OAuth2} auth - Authenticated OAuth2 client
  */
@@ -66,10 +48,14 @@ async function writeToRawTab(spreadsheetId, data) {
     const sheetName = 'RAW';
 
     // Prepare data for Google Sheets
-    const headers = Object.keys(data[0]);
+    const timestamp = new Date().toISOString();
+    const headers = ['Date Last Synced', ...Object.keys(data[0])];
     const values = [
       headers, // Header row
       ...data.map(row => headers.map(header => {
+        if (header === 'Date Last Synced') {
+          return timestamp;
+        }
         const value = row[header];
         // Convert null, undefined, or actual null values to empty string
         if (value === null || value === undefined) {
@@ -93,19 +79,6 @@ async function writeToRawTab(spreadsheetId, data) {
       valueInputOption: 'RAW',
       resource: {
         values
-      }
-    });
-
-    // Write timestamp in a separate column after the exported dataset.
-    const timestamp = new Date().toISOString();
-    const timestampCol = toA1Column(headers.length + 2);
-    
-    await sheetsAPI.spreadsheets.values.update({
-      spreadsheetId,
-      range: `${sheetName}!${timestampCol}1:${timestampCol}2`,
-      valueInputOption: 'RAW',
-      resource: {
-        values: [['Last Run:'], [timestamp]]
       }
     });
 
@@ -183,3 +156,4 @@ module.exports = {
   verifyAccess,
   rawTabExists
 };
+

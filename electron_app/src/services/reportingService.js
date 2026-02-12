@@ -11,9 +11,9 @@ const { getDB } = require('./db');
 async function getInvoices({ dateFrom, dateTo, salesperson }) {
   const pool = getDB();
   
-  let query = `
+  let query = `  
     SELECT
-        i.DateCreated,
+        CONVERT(varchar(23), i.DateCreated, 121) AS DateCreated,
         e.EmployeeName AS [Created By],
         i.InvoiceNumber AS [Invoice#],
         i.CustomerNumber,
@@ -60,10 +60,18 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         i.InvoiceNotes,
         i.PaymentComment AS PaymentNotes,
         i.CreditCardApprovalCode AS CreditCardAuthNumber,
-        /* UPDATED PAYMENT TYPE LOGIC */
+        /* Updated Payment Type Logic */
         CASE 
-           WHEN i.CreditCardType IS NOT NULL THEN cc.CreditCardDescription 
-           ELSE opt.OtherPaymentTypeDescription 
+        -- 1. Check specific payment amount columns first
+          WHEN ISNULL(i.TotalPaymentCheck, 0) <> 0 THEN 'Check'
+          WHEN ISNULL(i.TotalPaymentCash, 0) <> 0 THEN 'Cash'
+          WHEN ISNULL(i.TotalPaymentCharge, 0) <> 0 THEN 'Charge'
+        
+        -- 2. Fallback to Credit Card table if amounts are null/zero
+          WHEN i.CreditCardType IS NOT NULL THEN cc.CreditCardDescription 
+        
+        -- 3. Final fallback to Other Payment Type
+          ELSE opt.OtherPaymentTypeDescription 
         END AS PaymentType,
 
         /* Condition: Only populate if Stock# starts with 'P' */
@@ -100,6 +108,7 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
 
     LEFT JOIN dbo.PURCHASE_ORDER po
         ON po.PurchaseOrderID = poli.PurchaseOrderID
+
     
     WHERE i.DateCreated >= @dateFrom 
       AND i.DateCreated < DATEADD(day, 1, @dateTo)
