@@ -803,8 +803,9 @@ function createWindow() {
     return loadSetup();
   }
 
+  // Missing webhook should not block app startup; users can configure it from dashboard flows.
   if (!webhook) {
-    return loadWebhook();
+    console.log('Webhook not configured, continuing to dashboard.');
   }
 
   // Initialize DB asynchronously in background AFTER loading dashboard
