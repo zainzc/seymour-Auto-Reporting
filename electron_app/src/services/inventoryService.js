@@ -14,7 +14,7 @@ async function getAllInventory() {
   
   const query = `
     SELECT
-        InterchangeNumber AS RNumber,
+        InventoryID AS RNumber,
         InventoryNumber,
         ModelYear,
         ModelName,
