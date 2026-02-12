@@ -1,5 +1,6 @@
 const { OAuth2Client } = require('google-auth-library');
-const { saveReportingConfig, getReportingConfig } = require('../config/configStore');
+const ElectronStore = require('electron-store').default;
+const { saveReportingConfig, getReportingConfig, saveInventoryConfig, getInventoryConfig } = require('../config/configStore');
 require('dotenv').config();
 
 // OAuth2 credentials from environment variables
@@ -9,6 +10,7 @@ const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
 const REDIRECT_URI = 'http://localhost:9999/oauth2callback';
 
 let oauth2Client = null;
+const store = new ElectronStore({ encryptionKey: 'client-secret-key' });
 
 /**
  * Initialize OAuth2 client
@@ -32,7 +34,7 @@ function getOAuth2Client() {
  * Generate Google login URL
  * @returns {string} URL to send user to for login
  */
-function getAuthUrl() {
+function getAuthUrl(context = 'reporting') {
   const client = getOAuth2Client();
   
   return client.generateAuthUrl({
@@ -43,7 +45,8 @@ function getAuthUrl() {
       'https://www.googleapis.com/auth/userinfo.email',
       'https://www.googleapis.com/auth/userinfo.profile'
     ],
-    prompt: 'consent'  // Always show consent screen
+    prompt: 'consent',  // Always show consent screen
+    state: context
   });
 }
 
@@ -52,13 +55,17 @@ function getAuthUrl() {
  * @param {string} code - Authorization code from Google
  * @returns {Promise<Object>} Token data
  */
-async function getTokensFromCode(code) {
+async function getTokensFromCode(code, context = 'reporting') {
   try {
     const client = getOAuth2Client();
     const { tokens } = await client.getToken(code);
     
-    // Save tokens to electron-store (encrypted)
-    saveReportingConfig('googleTokens', tokens);
+    // Save tokens to scoped config (encrypted via Electron Store)
+    if (context === 'inventory') {
+      saveInventoryConfig('googleTokens', tokens);
+    } else {
+      saveReportingConfig('googleTokens', tokens);
+    }
     
     console.log('✅ Google OAuth2 tokens saved');
     return tokens;
@@ -72,16 +79,18 @@ async function getTokensFromCode(code) {
  * Get stored tokens from electron-store
  * @returns {Object|null} Stored tokens or null
  */
-function getStoredTokens() {
-  return getReportingConfig('googleTokens');
+function getStoredTokens(context = 'reporting') {
+  return context === 'inventory'
+    ? getInventoryConfig('googleTokens')
+    : getReportingConfig('googleTokens');
 }
 
 /**
  * Check if user is authenticated
  * @returns {boolean} True if tokens exist
  */
-function isAuthenticated() {
-  const tokens = getStoredTokens();
+function isAuthenticated(context = 'reporting') {
+  const tokens = getStoredTokens(context);
   if (!tokens || typeof tokens !== 'object') return false;
   if (Object.keys(tokens).length === 0) return false;
   if (!tokens.access_token || typeof tokens.access_token !== 'string' || tokens.access_token.length === 0) return false;
@@ -101,8 +110,8 @@ function setTokensOnClient(tokens) {
  * Get authenticated OAuth2 client with user's tokens
  * @returns {OAuth2Client} Authenticated client
  */
-function getAuthenticatedClient() {
-  const tokens = getStoredTokens();
+function getAuthenticatedClient(context = 'reporting') {
+  const tokens = getStoredTokens(context);
   
   if (!tokens || !tokens.access_token) {
     throw new Error('User not authenticated. Please connect to Google first.');
@@ -117,11 +126,11 @@ function getAuthenticatedClient() {
 /**
  * Disconnect user (remove tokens)
  */
-function disconnect() {
-  // Delete tokens from storage using configStore
-  const ElectronStore = require('electron-store').default;
-  const store = new ElectronStore({ encryptionKey: 'client-secret-key' });
-  store.delete('reporting.googleTokens');
+function disconnect(context = 'reporting') {
+  const key = context === 'inventory'
+    ? 'inventoryWebhook.googleTokens'
+    : 'reporting.googleTokens';
+  store.delete(key);
   console.log('✅ Google disconnected');
 }
 
@@ -129,9 +138,9 @@ function disconnect() {
  * Get user info from tokens
  * @returns {Promise<Object>} User info {email, name}
  */
-async function getUserInfo() {
+async function getUserInfo(context = 'reporting') {
   try {
-    const client = getAuthenticatedClient();
+    const client = getAuthenticatedClient(context);
     const { google } = require('googleapis');
     const oauth2 = google.oauth2({ version: 'v2', auth: client });
     const userInfo = await oauth2.userinfo.get();

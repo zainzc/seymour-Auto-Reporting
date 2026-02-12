@@ -476,6 +476,7 @@
   <script>
     let currentSpreadsheetId = null;
     let currentWorksheetName = null;
+    let isDisconnecting = false;
 
     window.addEventListener('load', async () => {
       await checkGoogleAuth();
@@ -486,36 +487,102 @@
 
     async function checkGoogleAuth() {
       try {
-        const isAuth = await window.oauth2API.isAuthenticated();
-        const indicator = document.getElementById('auth-indicator');
-        const text = document.getElementById('auth-text');
-        const btn = document.getElementById('auth-btn');
-
+        const isAuth = await window.oauth2InventoryAPI.isAuthenticated();
         if (isAuth) {
-          indicator.classList.add('connected');
-          text.textContent = 'Connected to Google. Ready for Google Sheets access.';
-          btn.style.display = 'none';
+          const userInfo = await window.oauth2InventoryAPI.getUserInfo();
+          updateGoogleAuthUI(true, userInfo?.email);
         } else {
-          indicator.classList.remove('connected');
-          text.textContent = 'Google account not connected. Authenticate to continue.';
-          btn.style.display = 'inline-block';
+          updateGoogleAuthUI(false);
         }
       } catch (error) {
         console.error('Failed to check Google authentication:', error);
+        updateGoogleAuthUI(false);
       }
     }
 
+    function updateGoogleAuthUI(isConnected, email = null) {
+      const indicator = document.getElementById('auth-indicator');
+      const text = document.getElementById('auth-text');
+      const btn = document.getElementById('auth-btn');
+
+      if (isConnected) {
+        indicator.classList.add('connected');
+        text.textContent = email ? `Connected: ${email}` : 'Connected to Google. Ready for Google Sheets access.';
+        btn.textContent = 'Disconnect Google';
+      } else {
+        indicator.classList.remove('connected');
+        text.textContent = 'Google account not connected. Authenticate to continue.';
+        btn.textContent = 'Connect to Google';
+      }
+
+      btn.style.display = 'inline-block';
+    }
+
     async function handleGoogleAuth() {
+      const statusDiv = document.getElementById('config-status');
+      const btn = document.getElementById('auth-btn');
+
+      if (btn.disabled) return;
+      btn.disabled = true;
+
       try {
-        const result = await window.oauth2API.authenticate();
-        if (result.success) {
-          await checkGoogleAuth();
-          showStatus(document.getElementById('config-status'), 'success', 'Google account connected successfully.');
+        const isAuth = await window.oauth2InventoryAPI.isAuthenticated();
+
+        if (isAuth) {
+          if (isDisconnecting) return;
+          isDisconnecting = true;
+          try {
+            const result = await window.oauth2InventoryAPI.disconnect();
+
+            if (result?.success === false) {
+              showStatus(statusDiv, 'error', result.message || 'Failed to disconnect from Google.');
+            } else {
+              updateGoogleAuthUI(false);
+              showStatus(statusDiv, 'success', 'Disconnected from Google.');
+            }
+          } finally {
+            isDisconnecting = false;
+          }
+
+          btn.disabled = false;
+          return;
         }
+
+        const authUrl = await window.oauth2InventoryAPI.getAuthUrl();
+
+        try {
+          if (window.oauth2InventoryAPI.openExternal) {
+            await window.oauth2InventoryAPI.openExternal(authUrl);
+          } else {
+            window.open(authUrl, '_blank');
+          }
+        } catch (openErr) {
+          console.error('openExternal failed, using window.open:', openErr);
+          window.open(authUrl, '_blank');
+        }
+
+        showStatus(statusDiv, 'info', 'Complete Google sign-in in your browser, then return here.');
+        setTimeout(() => {
+          btn.disabled = false;
+        }, 5000);
       } catch (error) {
-        showStatus(document.getElementById('config-status'), 'error', 'Failed to connect to Google.');
+        showStatus(statusDiv, 'error', `Google authentication failed: ${error.message}`);
+        btn.disabled = false;
       }
     }
+
+    window.oauth2InventoryAPI.onAuthorized(async () => {
+      const btn = document.getElementById('auth-btn');
+      try {
+        await new Promise(resolve => setTimeout(resolve, 500));
+        await checkGoogleAuth();
+        showStatus(document.getElementById('config-status'), 'success', 'Google account connected successfully.');
+      } catch (err) {
+        console.error('Failed to refresh auth status after callback:', err);
+      } finally {
+        btn.disabled = false;
+      }
+    });
 
     async function loadSheetsConfig() {
       try {

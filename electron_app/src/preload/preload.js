@@ -39,6 +39,16 @@ contextBridge.exposeInMainWorld('oauth2API', {
   openExternal: (url) => shell.openExternal(url)
 });
 
+// OAuth2 API (Inventory / Milestone 1)
+contextBridge.exposeInMainWorld('oauth2InventoryAPI', {
+  getAuthUrl: () => ipcRenderer.invoke('oauth2-inventory-get-auth-url'),
+  getUserInfo: () => ipcRenderer.invoke('oauth2-inventory-get-user-info'),
+  isAuthenticated: () => ipcRenderer.invoke('oauth2-inventory-is-authenticated'),
+  disconnect: () => ipcRenderer.invoke('oauth2-inventory-disconnect'),
+  onAuthorized: (callback) => ipcRenderer.on('oauth2-authorized-inventory', callback),
+  openExternal: (url) => shell.openExternal(url)
+});
+
 // Inventory Google Sheets API - Phase 1
 contextBridge.exposeInMainWorld('inventorySheetsAPI', {
   testConnection: (spreadsheetId, worksheetName) => ipcRenderer.invoke('inventory-sheets-test', spreadsheetId, worksheetName),

@@ -390,11 +390,11 @@ ipcMain.handle('reporting-export-excel', async (_, params) => {
 ipcMain.handle('reporting-save-schedule', async (_, scheduleConfig) => {
   try {
     // Check if user is authenticated with Google
-    const isAuthenticated = await oauth2Service.isAuthenticated();
+    const isAuthenticated = await oauth2Service.isAuthenticated('reporting');
     if (!isAuthenticated) {
       return {
         success: false,
-        message: 'Please connect to Google Sheets first. Click the "Connect" button in the reporting panel.'
+        message: 'Please connect to Google Sheets first using the Connect button.'
       };
     }
 
@@ -408,7 +408,7 @@ ipcMain.handle('reporting-save-schedule', async (_, scheduleConfig) => {
 
     // Initialize Google Sheets with OAuth2 client
     try {
-      const authClient = await oauth2Service.getAuthenticatedClient();
+      const authClient = await oauth2Service.getAuthenticatedClient('reporting');
       await initSheets(authClient);
     } catch (err) {
       return {
@@ -420,7 +420,7 @@ ipcMain.handle('reporting-save-schedule', async (_, scheduleConfig) => {
     // Test the spreadsheet ID - try to access it
     try {
       const { google } = require('googleapis');
-      const authClient = await oauth2Service.getAuthenticatedClient();
+      const authClient = await oauth2Service.getAuthenticatedClient('reporting');
       const sheets = google.sheets({ version: 'v4', auth: authClient });
       
       // Try to get spreadsheet metadata to verify access
@@ -527,18 +527,18 @@ ipcMain.handle('reporting-test-schedule', async () => {
     console.log('Testing schedule immediately...');
     
     // Check if user is authenticated with Google
-    const isAuthenticated = await oauth2Service.isAuthenticated();
+    const isAuthenticated = await oauth2Service.isAuthenticated('reporting');
     if (!isAuthenticated) {
       return {
         success: false,
-        message: 'Please connect to Google Sheets first. Click the "Connect" button in the reporting panel.'
+        message: 'Please connect to Google Sheets first using the Connect button.'
       };
     }
 
     // Initialize Google Sheets with OAuth2 client
     const spreadsheetId = schedule.spreadsheetId;
     try {
-      const authClient = await oauth2Service.getAuthenticatedClient();
+      const authClient = await oauth2Service.getAuthenticatedClient('reporting');
       await initSheets(authClient);
       console.log('Google Sheets initialized for test');
     } catch (initErr) {
@@ -582,11 +582,11 @@ ipcMain.handle('reporting-test-schedule', async () => {
   }
 });
 
-// OAuth2 handlers
+// OAuth2 handlers (Reporting / Milestone 11)
 ipcMain.handle('oauth2-get-auth-url', async () => {
   try {
     // Return the auth URL string directly
-    return oauth2Service.getAuthUrl();
+    return oauth2Service.getAuthUrl('reporting');
   } catch (error) {
     throw error;
   }
@@ -594,7 +594,7 @@ ipcMain.handle('oauth2-get-auth-url', async () => {
 
 ipcMain.handle('oauth2-exchange-code', async (_, code) => {
   try {
-    await oauth2Service.getTokensFromCode(code);
+    await oauth2Service.getTokensFromCode(code, 'reporting');
     return {
       success: true,
       message: 'Successfully connected to Google!'
@@ -609,12 +609,12 @@ ipcMain.handle('oauth2-exchange-code', async (_, code) => {
 
 ipcMain.handle('oauth2-get-user-info', async () => {
   try {
-    if (!oauth2Service.isAuthenticated()) {
+    if (!oauth2Service.isAuthenticated('reporting')) {
       return null;
     }
 
     // Return plain user info object
-    const userInfo = await oauth2Service.getUserInfo();
+    const userInfo = await oauth2Service.getUserInfo('reporting');
     return userInfo;
   } catch (error) {
     throw error;
@@ -623,12 +623,51 @@ ipcMain.handle('oauth2-get-user-info', async () => {
 
 ipcMain.handle('oauth2-is-authenticated', async () => {
   // Return a simple boolean so renderer can do `if (isAuthenticated)`
-  return oauth2Service.isAuthenticated();
+  return oauth2Service.isAuthenticated('reporting');
 });
 
 ipcMain.handle('oauth2-disconnect', async () => {
   try {
-    oauth2Service.disconnect();
+    oauth2Service.disconnect('reporting');
+    return {
+      success: true,
+      message: 'Disconnected from Google'
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error.message
+    };
+  }
+});
+
+// OAuth2 handlers (Inventory / Milestone 1)
+ipcMain.handle('oauth2-inventory-get-auth-url', async () => {
+  try {
+    return oauth2Service.getAuthUrl('inventory');
+  } catch (error) {
+    throw error;
+  }
+});
+
+ipcMain.handle('oauth2-inventory-get-user-info', async () => {
+  try {
+    if (!oauth2Service.isAuthenticated('inventory')) {
+      return null;
+    }
+    return await oauth2Service.getUserInfo('inventory');
+  } catch (error) {
+    throw error;
+  }
+});
+
+ipcMain.handle('oauth2-inventory-is-authenticated', async () => {
+  return oauth2Service.isAuthenticated('inventory');
+});
+
+ipcMain.handle('oauth2-inventory-disconnect', async () => {
+  try {
+    oauth2Service.disconnect('inventory');
     return {
       success: true,
       message: 'Disconnected from Google'
@@ -703,6 +742,14 @@ ipcMain.handle('inventory-sheets-save-config', async (_, spreadsheetId, workshee
 // Start inventory Google Sheets schedule
 ipcMain.handle('inventory-sheets-start', async (_, spreadsheetId, worksheetName) => {
   try {
+    const isAuthenticated = await oauth2Service.isAuthenticated('inventory');
+    if (!isAuthenticated) {
+      return {
+        success: false,
+        message: 'Please connect to Google Sheets first using the Connect button.'
+      };
+    }
+
     const started = startInventorySchedule(spreadsheetId, worksheetName);
     
     if (started) {
@@ -744,6 +791,14 @@ ipcMain.handle('inventory-sheets-stop', async () => {
 // Push inventory to Google Sheets now (manual test)
 ipcMain.handle('inventory-sheets-push-now', async (_, spreadsheetId, worksheetName) => {
   try {
+    const isAuthenticated = await oauth2Service.isAuthenticated('inventory');
+    if (!isAuthenticated) {
+      return {
+        success: false,
+        message: 'Please connect to Google Sheets first using the Connect button.'
+      };
+    }
+
     const result = await executeInventoryPush(spreadsheetId, worksheetName);
     return result;
   } catch (error) {
@@ -847,11 +902,13 @@ const { shell } = require('electron');
 http.createServer(async (req, res) => {
   const queryUrl = url.parse(req.url, true);
   const code = queryUrl.query.code;
+  const state = queryUrl.query.state;
+  const authContext = state === 'inventory' ? 'inventory' : 'reporting';
 
   if (code) {
     // Exchange code for tokens
     try {
-      await oauth2Service.getTokensFromCode(code);
+      await oauth2Service.getTokensFromCode(code, authContext);
       res.writeHead(200, { 'Content-Type': 'text/html' });
       res.end(`
         <html>
@@ -867,7 +924,11 @@ http.createServer(async (req, res) => {
       
       // Send message to renderer to update UI
       if (mainWindow) {
-        mainWindow.webContents.send('oauth2-authorized');
+        if (authContext === 'inventory') {
+          mainWindow.webContents.send('oauth2-authorized-inventory');
+        } else {
+          mainWindow.webContents.send('oauth2-authorized');
+        }
       }
     } catch (error) {
       res.writeHead(400, { 'Content-Type': 'text/html' });

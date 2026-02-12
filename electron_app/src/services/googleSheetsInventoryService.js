@@ -185,7 +185,7 @@ async function testSheetsConnection(spreadsheetId, worksheetName) {
     }
 
     // Check if user is authenticated with Google
-    if (!oauth2Service.isAuthenticated()) {
+    if (!oauth2Service.isAuthenticated('inventory')) {
       throw new Error('Not authenticated with Google. Please connect to Google Sheets first.');
     }
 
@@ -237,7 +237,7 @@ async function testSheetsConnection(spreadsheetId, worksheetName) {
  */
 async function getAuthenticatedSheetsClient() {
   try {
-    const auth = oauth2Service.getAuthenticatedClient();
+    const auth = oauth2Service.getAuthenticatedClient('inventory');
     return google.sheets({ version: 'v4', auth });
   } catch (error) {
     throw new Error(`Failed to get authenticated Google Sheets client: ${error.message}`);
