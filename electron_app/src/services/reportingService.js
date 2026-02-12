@@ -14,7 +14,7 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
   let query = `
     SELECT
         i.DateCreated,
-        e.EmployeeName AS CreatedBy,
+        e.EmployeeName AS [Created By],
         i.InvoiceNumber AS [Invoice#],
         i.CustomerNumber,
         i.OrderSource,

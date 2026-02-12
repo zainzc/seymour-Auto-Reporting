@@ -9,6 +9,24 @@ const { google } = require('googleapis');
 let sheetsAPI = null;
 
 /**
+ * Convert a 1-based column number to A1 notation (A, B, ..., Z, AA, AB, ...)
+ * @param {number} colNumber
+ * @returns {string}
+ */
+function toA1Column(colNumber) {
+  let n = colNumber;
+  let col = '';
+
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    col = String.fromCharCode(65 + rem) + col;
+    n = Math.floor((n - 1) / 26);
+  }
+
+  return col;
+}
+
+/**
  * Initialize Google Sheets API with OAuth2 client
  * @param {google.auth.OAuth2} auth - Authenticated OAuth2 client
  */
@@ -78,13 +96,13 @@ async function writeToRawTab(spreadsheetId, data) {
       }
     });
 
-    // Write timestamp in a separate cell (e.g., last column + 2)
+    // Write timestamp in a separate column after the exported dataset.
     const timestamp = new Date().toISOString();
-    const timestampCol = String.fromCharCode(65 + headers.length + 1); // A=65, B=66, etc.
+    const timestampCol = toA1Column(headers.length + 2);
     
     await sheetsAPI.spreadsheets.values.update({
       spreadsheetId,
-      range: `${sheetName}!${timestampCol}1`,
+      range: `${sheetName}!${timestampCol}1:${timestampCol}2`,
       valueInputOption: 'RAW',
       resource: {
         values: [['Last Run:'], [timestamp]]
