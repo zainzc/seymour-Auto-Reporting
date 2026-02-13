@@ -34,8 +34,8 @@ async function getAllInventory() {
         QuantityAvailable,
         QuantityQuoted,
         QuantityOnHold,
-        InventorierID,
-        DismantlerID,
+        inv_emp.EmployeeName AS Inventorier, 
+        dism_emp.EmployeeName AS Dismantler,
         Mileage,
         RetailPrice,
         WholesalePrice,
@@ -50,8 +50,13 @@ async function getAllInventory() {
         PrivacyIndicator,
         BlockOnlineSale,
         ReferenceNumber
-    FROM INVENTORY
-    WHERE LastDateModified >= DATEADD(DAY, -1, GETDATE())
+    FROM dbo.INVENTORY i -- Added alias 'i' for clarity
+    LEFT JOIN dbo.EMPLOYEE inv_emp
+      ON inv_emp.EmployeeID = i.InventorierID
+    LEFT JOIN dbo.EMPLOYEE dism_emp
+      ON dism_emp.EmployeeID = i.DismantlerID
+
+    WHERE i.LastDateModified >= DATEADD(DAY, -1, CAST(GETDATE() AS DATE))
       AND (
         InventoryNumber IS NULL
         OR (
