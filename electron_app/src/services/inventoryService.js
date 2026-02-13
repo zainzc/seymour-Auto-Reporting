@@ -51,7 +51,15 @@ async function getAllInventory() {
         BlockOnlineSale,
         ReferenceNumber
     FROM INVENTORY
-    WHERE LastDateModified >= DATEADD(DAY, -1, GETDATE());
+    WHERE LastDateModified >= DATEADD(DAY, -1, GETDATE())
+      AND (
+        InventoryNumber IS NULL
+        OR (
+          CAST(InventoryNumber AS VARCHAR(50)) NOT LIKE '900%'
+          AND CAST(InventoryNumber AS VARCHAR(50)) NOT LIKE '950%'
+          AND CAST(InventoryNumber AS VARCHAR(50)) NOT LIKE '999%'
+        )
+      );
   `;
 
   const result = await pool.request().query(query);
