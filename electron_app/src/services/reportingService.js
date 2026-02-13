@@ -12,7 +12,7 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
   const pool = getDB();
   
   let query = `  
-    SELECT
+   SELECT
         CONVERT(varchar(23), i.DateCreated, 121) AS DateCreated,
         e.EmployeeName AS [Created By],
         i.InvoiceNumber AS [Invoice#],
@@ -27,7 +27,9 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
 
         i.TotalDiscountAmount AS Discount,
 
-        ISNULL(i.TotalFreightAmount, 0) AS Shipping,
+        ISNULL(i.TotalFreightAmount, 0) + 
+        ISNULL(li.TotalFreightAmount, 0)
+        AS Shipping,
 
         ISNULL(i.TotalCityTaxAmount, 0) +
         ISNULL(i.TotalCountyTaxAmount, 0) +
@@ -38,6 +40,7 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         /* Line-level total (invoice values repeated per line) */
         li.UnitPrice +
         ISNULL(i.TotalFreightAmount, 0) +
+        ISNULL(li.TotalFreightAmount, 0) +
         ISNULL(i.TotalFreightTaxAmount, 0) +
         ISNULL(i.TotalCityTaxAmount, 0) +
         ISNULL(i.TotalCountyTaxAmount, 0) +
@@ -108,7 +111,6 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
 
     LEFT JOIN dbo.PURCHASE_ORDER po
         ON po.PurchaseOrderID = poli.PurchaseOrderID
-
     
     WHERE i.DateCreated >= @dateFrom 
       AND i.DateCreated < DATEADD(day, 1, @dateTo)
