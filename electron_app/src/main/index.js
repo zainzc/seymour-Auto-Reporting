@@ -16,7 +16,9 @@ const {
   getSelectedTables,
   clearSelectedTables,
   saveReportingConfig,
-  getReportingConfig
+  getReportingConfig,
+  saveInventoryConfig,
+  getInventoryConfig
 } = require('../config/configStore');
 
 const { initDb, initDbWindowsAuth } = require('../services/db');
@@ -26,6 +28,9 @@ const { generateExcelFile } = require('../services/excelService');
 const { initialize: initSheets, writeToRawTab } = require('../services/sheetsService');
 const { startSchedule, stopSchedule, resumeSchedule, logExecution, getExecutionLogs, executeScheduledJob } = require('../services/scheduleService');
 const oauth2Service = require('../services/oauth2Service');
+const { runPhase2, buildPhase2Config } = require('../services/phase2Service');
+const ClickUpService = require('../services/clickupService');
+const AirtableService = require('../services/airtableService');
 
 let mainWindow;
 let autoSyncInterval = null;
@@ -830,6 +835,118 @@ ipcMain.handle('inventory-sheets-get-logs', async () => {
     return logs;
   } catch (error) {
     return [];
+  }
+});
+
+/* ---------------------------
+   PHASE 2 HANDLERS (GOOGLE SHEETS -> AIRTABLE)
+---------------------------- */
+ipcMain.handle('phase2-get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  const merged = buildPhase2Config(stored);
+
+  return {
+    sheetId: merged.sheetId || '',
+    tabName: merged.tabName || '',
+    airtableBaseId: merged.airtableBaseId || '',
+    airtableMasterTable: merged.airtableMasterTable || 'Master Parts Table',
+    airtableCategoryTable: merged.airtableCategoryTable || 'Category Names',
+    clickupListId: merged.clickupListId || '',
+    ignoreTaskCache: Boolean(merged.ignoreTaskCache),
+    dryRun: Boolean(merged.dryRun),
+    airtableToken: stored.airtableToken || '',
+    clickupToken: stored.clickupToken || ''
+  };
+});
+
+ipcMain.handle('phase2-save-config', async (_, configPayload = {}) => {
+  const existing = getInventoryConfig('phase2Config') || {};
+  const merged = {
+    ...existing,
+    ...configPayload
+  };
+
+  saveInventoryConfig('phase2Config', merged);
+  return { success: true, message: 'Phase 2 configuration saved.' };
+});
+
+ipcMain.handle('phase2-fetch-clickup-lists', async (_, token = '') => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const resolvedToken = String(token || '').trim() || String(stored.clickupToken || '').trim();
+    if (!resolvedToken) {
+      return {
+        success: false,
+        message: 'ClickUp token is required to fetch lists.',
+        lists: []
+      };
+    }
+
+    const clickupService = new ClickUpService({ token: resolvedToken });
+    const lists = await clickupService.fetchAllLists();
+    return { success: true, lists };
+  } catch (error) {
+    const message =
+      error?.response?.data?.err ||
+      error?.response?.data?.error ||
+      error?.message ||
+      'Failed to fetch ClickUp lists.';
+    return { success: false, message, lists: [] };
+  }
+});
+
+ipcMain.handle('phase2-fetch-airtable-bases', async (_, token = '') => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const resolvedToken = String(token || '').trim() || String(stored.airtableToken || '').trim();
+    if (!resolvedToken) {
+      return {
+        success: false,
+        message: 'Airtable token is required to fetch bases.',
+        bases: []
+      };
+    }
+
+    const bases = await AirtableService.fetchAllBases(resolvedToken);
+    return { success: true, bases };
+  } catch (error) {
+    const message =
+      error?.response?.data?.error?.message ||
+      error?.response?.data?.error ||
+      error?.message ||
+      'Failed to fetch Airtable bases.';
+    return { success: false, message, bases: [] };
+  }
+});
+
+ipcMain.handle('phase2-run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options
+    };
+
+    const summary = await runPhase2(runOptions, progress => {
+      event.sender.send('phase2-progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    event.sender.send('phase2-progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message: error.message
+    });
+
+    return {
+      success: false,
+      message: error.message
+    };
   }
 });
 

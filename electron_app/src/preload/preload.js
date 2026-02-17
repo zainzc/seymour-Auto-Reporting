@@ -60,3 +60,13 @@ contextBridge.exposeInMainWorld('inventorySheetsAPI', {
   getStatus: () => ipcRenderer.invoke('inventory-sheets-get-status'),
   getLogs: () => ipcRenderer.invoke('inventory-sheets-get-logs')
 });
+
+// Phase 2 API - Google Sheets -> Airtable Master Parts
+contextBridge.exposeInMainWorld('phase2API', {
+  getConfig: () => ipcRenderer.invoke('phase2-get-config'),
+  saveConfig: (config) => ipcRenderer.invoke('phase2-save-config', config),
+  fetchClickUpLists: (token) => ipcRenderer.invoke('phase2-fetch-clickup-lists', token),
+  fetchAirtableBases: (token) => ipcRenderer.invoke('phase2-fetch-airtable-bases', token),
+  run: (options) => ipcRenderer.invoke('phase2-run', options),
+  onProgress: (callback) => ipcRenderer.on('phase2-progress', callback)
+});

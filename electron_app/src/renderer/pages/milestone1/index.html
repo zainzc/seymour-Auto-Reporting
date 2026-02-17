@@ -168,6 +168,7 @@
     <div class="actions">
       <button class="btn btn-back" onclick="goBack()">Back</button>
       <button class="btn btn-primary" onclick="goToPowerlinkSheets()">Open Inventory Sync Workspace</button>
+      <button class="btn btn-primary" onclick="goToPhase2()">Open Phase 2 Master Parts Workspace</button>
     </div>
 
     <section class="panel">
@@ -182,6 +183,19 @@
         Use the workspace to connect Google Sheets, define the target worksheet, validate access, run manual syncs, and control the daily automation schedule from one screen.
       </p>
     </section>
+
+    <section class="panel">
+      <h3>Phase 2: Master Parts Sync</h3>
+      <div class="pill-row">
+        <span class="pill">Google Sheets Source</span>
+        <span class="pill">Airtable Master Parts</span>
+        <span class="pill">Category Resolution</span>
+        <span class="pill">ClickUp Exceptions</span>
+      </div>
+      <p class="description">
+        Run and monitor Phase 2 processing from the same milestone flow. This workspace reads Phase 1 sheet data, upserts Airtable Master Parts, and creates ClickUp tasks for unresolved categories.
+      </p>
+    </section>
   </div>
 
   <script>
@@ -191,6 +205,10 @@
 
     function goToPowerlinkSheets() {
       window.location.href = 'powerlink-sheets.html';
+    }
+
+    function goToPhase2() {
+      window.location.href = 'phase2-master-parts.html';
     }
   </script>
 </body>

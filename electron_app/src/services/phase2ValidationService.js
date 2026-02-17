@@ -1,0 +1,195 @@
+const EXPECTED_PHASE1_HEADERS = [
+  'RNumber',
+  'InventoryNumber',
+  'ModelYear',
+  'ModelName',
+  'CategoryCode',
+  'StockTicketNumber',
+  'PartType',
+  'LocationCode',
+  'PrimaryARADamageCode',
+  'SecondaryARADamageCode',
+  'ConditionsAndOptions',
+  'PartNotes',
+  'IsAlternate',
+  'PartRating',
+  'InventoriedDate',
+  'DateAcquired',
+  'ConditionCode',
+  'QuantityAvailable',
+  'QuantityQuoted',
+  'QuantityOnHold',
+  'Inventorier',
+  'Dismantler',
+  'Mileage',
+  'RetailPrice',
+  'WholesalePrice',
+  'CostPrice',
+  'ValuePrice',
+  'EbayPrice',
+  'EcomPrice',
+  'DamageReported',
+  'UnitsOfDamage',
+  'DateBPGGraded',
+  'EComDescription',
+  'PrivacyIndicator',
+  'BlockOnlineSale',
+  'ReferenceNumber'
+];
+
+const LEGACY_PHASE1_HEADERS = [
+  'RNumber',
+  'InventoryNumber',
+  'ModelYear',
+  'ModelName',
+  'CategoryCode',
+  'StockTicketNumber',
+  'PartType',
+  'LocationCode',
+  'PrimaryARADamageCode',
+  'SecondaryARADamageCode',
+  'ConditionsAndOptions',
+  'PartNotes',
+  'IsAlternate',
+  'PartRating',
+  'InventoriedDate',
+  'DateAcquired',
+  'ConditionCode',
+  'QuantityAvailable',
+  'QuantityQuoted',
+  'QuantityOnHold',
+  'InventorierID',
+  'DismantlerID',
+  'Mileage',
+  'RetailPrice',
+  'WholesalePrice',
+  'CostPrice',
+  'ValuePrice',
+  'EbayPrice',
+  'EcomPrice',
+  'DamageReported',
+  'UnitsOfDamage',
+  'DateBPGGraded',
+  'EComDescription',
+  'PrivacyIndicator',
+  'BlockOnlineSale',
+  'ReferenceNumber'
+];
+
+function normalizeString(value) {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+function normalizeLower(value) {
+  return normalizeString(value).toLowerCase();
+}
+
+function parseNumeric(value) {
+  if (value === null || value === undefined) return null;
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const normalized = text.replace(/,/g, '');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function findHeaderVariant(headers) {
+  const variants = [EXPECTED_PHASE1_HEADERS, LEGACY_PHASE1_HEADERS];
+  const cleaned = headers.map(h => String(h || '').trim());
+
+  for (const variant of variants) {
+    if (cleaned.length !== variant.length) continue;
+    let allMatch = true;
+    for (let i = 0; i < variant.length; i += 1) {
+      if (cleaned[i] !== variant[i]) {
+        allMatch = false;
+        break;
+      }
+    }
+    if (allMatch) {
+      return variant;
+    }
+  }
+
+  return null;
+}
+
+function validateHeaders(headers) {
+  if (!Array.isArray(headers)) {
+    throw new Error('Invalid header row: header row is missing.');
+  }
+
+  const variant = findHeaderVariant(headers);
+  if (!variant) {
+    const cleaned = headers.map(h => String(h || '').trim());
+    throw new Error(
+      `Header mismatch for Phase 1 dataset. Received columns: ${cleaned.join(', ')}`
+    );
+  }
+
+  return variant;
+}
+
+function buildRowObject(headers, rowValues) {
+  const row = {};
+  headers.forEach((header, index) => {
+    row[header] = rowValues[index] !== undefined ? rowValues[index] : '';
+  });
+  return row;
+}
+
+function getIpnPrefix(ipn) {
+  const firstToken = String(ipn).split('-')[0].trim();
+  const parsed = parseInt(firstToken, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeRow(row, rowNumber) {
+  const ipn = normalizeString(row.InventoryNumber);
+  if (!ipn) {
+    return {
+      rowNumber,
+      skipReason: 'missing_ipn'
+    };
+  }
+
+  const upperIpn = ipn.toUpperCase();
+  if (upperIpn.startsWith('900') || upperIpn.startsWith('950') || upperIpn.startsWith('999')) {
+    return {
+      rowNumber,
+      skipReason: 'excluded_prefix'
+    };
+  }
+
+  const ipnPrefix = getIpnPrefix(ipn);
+
+  return {
+    rowNumber,
+    skipReason: null,
+    ipn,
+    ipnUpper: upperIpn,
+    ipnPrefix,
+    qoh: parseNumeric(row.QuantityAvailable) || 0,
+    categoryCode: normalizeString(row.CategoryCode),
+    conditionsAndOptions: normalizeString(row.ConditionsAndOptions),
+    conditionsAndOptionsLower: normalizeLower(row.ConditionsAndOptions),
+    partType: normalizeString(row.PartType),
+    modelYear: normalizeString(row.ModelYear),
+    modelName: normalizeString(row.ModelName),
+    locationCode: normalizeString(row.LocationCode),
+    stockTicketNumber: normalizeString(row.StockTicketNumber),
+    referenceNumber: normalizeString(row.ReferenceNumber),
+    sourceRow: row
+  };
+}
+
+module.exports = {
+  EXPECTED_PHASE1_HEADERS,
+  LEGACY_PHASE1_HEADERS,
+  validateHeaders,
+  buildRowObject,
+  normalizeRow,
+  normalizeString
+};

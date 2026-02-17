@@ -80,13 +80,13 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         /* Condition: Only populate if Stock# starts with 'P' */
         CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN po.VendorName ELSE NULL END AS VendorName,
         CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN po.PONumber ELSE NULL END AS [PurchaseOrder#],
-        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN poli.UnitPrice ELSE NULL END AS VendorUnitPrice,
-        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN poli.ReceivedQty ELSE NULL END AS [Qty/Received],
+        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN poli1.UnitPrice ELSE NULL END AS VendorUnitPrice,
+        CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN poli1.ReceivedQty ELSE NULL END AS [Qty/Received],
 
         /* Line-level markup logic applied only for 'P' stocks */
         CASE
-           WHEN inv.StockTicketNumber LIKE 'P%' AND poli.UnitPrice > 0
-           THEN ROUND(((inv.RetailPrice - poli.UnitPrice) / poli.UnitPrice) * 100, 2)
+           WHEN inv.StockTicketNumber LIKE 'P%' AND poli1.UnitPrice > 0
+           THEN ROUND(((inv.RetailPrice - poli1.UnitPrice) / poli1.UnitPrice) * 100, 2)
            ELSE 0
         END AS MarkUp
 
@@ -106,11 +106,25 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
     LEFT JOIN dbo.EMPLOYEE e
         ON e.EmployeeID = i.CreatedBy
 
-    LEFT JOIN dbo.PURCHASE_ORDER_LINEITEM poli
-        ON poli.InventoryNumber = inv.InventoryNumber
+    OUTER APPLY (
+     SELECT TOP 1
+        poli.PurchaseOrderID,
+        poli.UnitPrice,
+        poli.ReceivedQty,
+        poli.DateReceived,
+        poli.LastEditDate,
+        poli.LineItemID
+     FROM dbo.PURCHASE_ORDER_LINEITEM poli
+     WHERE poli.InventoryNumber = inv.InventoryNumber
+     ORDER BY
+        CASE WHEN poli.DateReceived IS NULL THEN 1 ELSE 0 END,  -- prefer received rows
+        poli.DateReceived DESC,
+        poli.LastEditDate DESC,
+        poli.LineItemID DESC
+    ) poli1
 
     LEFT JOIN dbo.PURCHASE_ORDER po
-        ON po.PurchaseOrderID = poli.PurchaseOrderID
+        ON po.PurchaseOrderID = poli1.PurchaseOrderID
     
     WHERE i.DateCreated >= @dateFrom 
       AND i.DateCreated < DATEADD(day, 1, @dateTo)

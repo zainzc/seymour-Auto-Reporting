@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Phase 2 Master Parts Sync - Seymour Auto</title>
+  <style>
+    :root {
+      --bg: #eef3f9;
+      --surface: #ffffff;
+      --text: #152238;
+      --muted: #5a6b85;
+      --border: #d4deec;
+      --brand: #0b5cab;
+      --brand-strong: #084888;
+      --success: #0f8a6a;
+      --danger: #b53d35;
+      --warning: #a86f00;
+      --shadow: 0 16px 30px rgba(8, 37, 68, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 24px 16px 34px;
+      color: var(--text);
+      font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 88% 8%, rgba(11, 92, 171, 0.11), transparent 36%),
+        radial-gradient(circle at 12% 2%, rgba(15, 138, 106, 0.12), transparent 34%),
+        var(--bg);
+    }
+
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .back-link {
+      color: #345579;
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .back-link:hover {
+      color: var(--brand);
+      text-decoration: underline;
+    }
+
+    .header-card {
+      background: linear-gradient(124deg, #0b5cab 0%, #0f7f79 100%);
+      color: #eef7ff;
+      border-radius: 16px;
+      padding: 22px 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .tag {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.32);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: 0.3px;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: #d9ecff;
+      line-height: 1.5;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--surface);
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      padding: 20px;
+      box-shadow: 0 8px 16px rgba(12, 37, 63, 0.06);
+    }
+
+    .card-title {
+      margin: 0 0 14px;
+      font-size: 19px;
+      color: #1b3557;
+      letter-spacing: 0.2px;
+    }
+
+    .auth-status {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 13px 14px;
+      border-radius: 10px;
+      border: 1px solid #d2dfef;
+      background: #f6f9ff;
+      margin-bottom: 14px;
+    }
+
+    .auth-indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #7b8da8;
+      flex: 0 0 auto;
+    }
+
+    .auth-indicator.connected {
+      background: var(--success);
+      box-shadow: 0 0 0 4px rgba(15, 138, 106, 0.15);
+    }
+
+    .status-title {
+      font-weight: 700;
+      color: #294a6f;
+      line-height: 1.3;
+    }
+
+    .form-group { margin-bottom: 13px; }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #2b486d;
+    }
+
+    .form-group input, .form-group select {
+      width: 100%;
+      padding: 11px 13px;
+      border: 1px solid #bfcfe4;
+      border-radius: 9px;
+      background: #fcfdff;
+      color: #1a304d;
+      font-size: 14px;
+    }
+
+    .picker-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 8px;
+    }
+
+    .picker-row .btn {
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+
+    .picker-row select {
+      flex: 1 1 280px;
+      min-width: 220px;
+    }
+
+    .hint {
+      margin-top: 5px;
+      color: #6d7f99;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      border: none;
+      border-radius: 10px;
+      padding: 10px 16px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      transition: transform 0.14s ease, box-shadow 0.14s ease, background 0.14s ease;
+    }
+
+    .btn:hover { transform: translateY(-1px); }
+
+    .btn-primary {
+      background: var(--brand);
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(11, 92, 171, 0.28);
+    }
+    .btn-primary:hover { background: var(--brand-strong); }
+
+    .btn-secondary { background: #d7e2f2; color: #2b4c71; }
+    .btn-secondary:hover { background: #c6d6eb; }
+
+    .btn-danger {
+      background: #f4d5d3;
+      color: #7b1f19;
+      border: 1px solid #e6b9b5;
+    }
+    .btn-danger:hover { background: #ecc1bd; }
+
+    .status-box {
+      margin-top: 12px;
+      padding: 11px 13px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      display: none;
+      line-height: 1.45;
+    }
+
+    .status-box.success { background: #ddf4ec; color: #0b6f54; border: 1px solid #b7e6d5; }
+    .status-box.error { background: #f8dddb; color: #8f241f; border: 1px solid #edb8b3; }
+    .status-box.info { background: #f8edd6; color: #8a5d00; border: 1px solid #eed9a8; }
+
+    .progress-wrap {
+      background: #edf3fc;
+      border: 1px solid #d0deef;
+      border-radius: 999px;
+      height: 14px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .progress-bar {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, #0b5cab, #0f8a6a);
+      transition: width 0.2s ease;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .summary-item {
+      background: #f4f8fe;
+      border: 1px solid #d8e5f5;
+      border-radius: 10px;
+      padding: 10px;
+    }
+
+    .summary-label {
+      color: #5a6c87;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.35px;
+      margin-bottom: 6px;
+    }
+
+    .summary-value {
+      color: #1f3f66;
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+
+    .logs {
+      max-height: 260px;
+      overflow-y: auto;
+      border-radius: 10px;
+      border: 1px solid #d6e2f0;
+      background: #f8fbff;
+      padding: 10px;
+    }
+
+    .log-entry {
+      background: #fff;
+      border: 1px solid #dae5f2;
+      border-left: 4px solid #8da4c0;
+      border-radius: 8px;
+      padding: 10px 11px;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: #183253;
+    }
+
+    .log-entry:last-child { margin-bottom: 0; }
+
+    @media (max-width: 900px) {
+      .grid-2 { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 680px) {
+      body { padding: 16px 10px 24px; }
+      .header-card { padding: 18px 14px; }
+      h1 { font-size: 23px; }
+      .card { padding: 15px; }
+      .btn { width: 100%; }
+      .summary-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="topbar">
+      <a href="index.html" class="back-link">Back to Milestone 1</a>
+    </div>
+
+    <header class="header-card">
+      <div class="tag">Milestone 1 - Phase 2</div>
+      <h1>Master Parts Sync Workspace</h1>
+      <p class="subtitle">Read Phase 1 sheet data, upsert Airtable Master Parts, and create ClickUp tasks for unresolved category cases.</p>
+    </header>
+
+    <div class="grid-2">
+      <section class="card">
+        <h2 class="card-title">Google Authentication</h2>
+        <div class="auth-status">
+          <div class="auth-indicator" id="auth-indicator"></div>
+          <div class="status-title" id="auth-text">Checking Google authentication...</div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="auth-btn" onclick="handleGoogleAuth()">Connect to Google</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2 class="card-title">Run Controls</h2>
+        <div class="form-group">
+          <label for="dry-run-select">Run Mode</label>
+          <select id="dry-run-select">
+            <option value="true">Dry Run (No Airtable Writes, ClickUp Tasks Enabled)</option>
+            <option value="false">Live Run (Write to Airtable/ClickUp)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="ignore-task-cache">
+            <input id="ignore-task-cache" type="checkbox">
+            Ignore Task Cache (recreate ClickUp tasks this run)
+          </label>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-secondary" onclick="saveConfig()">Save Settings</button>
+          <button class="btn btn-primary" onclick="runPhase2()">Run Phase 2</button>
+        </div>
+        <div id="run-status" class="status-box"></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2 class="card-title">Phase 2 Configuration</h2>
+
+      <div class="grid-2">
+        <div>
+          <div class="form-group">
+            <label for="sheet-id">Google Sheet ID</label>
+            <input id="sheet-id" type="text" placeholder="Spreadsheet ID">
+            <div class="hint">Use the same source sheet used by Phase 1 export.</div>
+          </div>
+          <div class="form-group">
+            <label for="tab-name">Google Tab Name</label>
+            <input id="tab-name" type="text" placeholder="Worksheet tab name">
+          </div>
+          <div class="form-group">
+            <label for="airtable-base-id">Airtable Base ID</label>
+            <input id="airtable-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
+            <div class="picker-row">
+              <button class="btn btn-secondary" type="button" onclick="fetchAirtableBases()">Find Bases from Token</button>
+              <select id="airtable-base-picker">
+                <option value="">Select Airtable base...</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="airtable-token">Airtable Token</label>
+            <input id="airtable-token" type="password" placeholder="pat...">
+          </div>
+        </div>
+
+        <div>
+          <div class="form-group">
+            <label for="airtable-master-table">Airtable Master Table</label>
+            <input id="airtable-master-table" type="text" placeholder="Master Parts Table">
+          </div>
+          <div class="form-group">
+            <label for="airtable-category-table">Airtable Category Table</label>
+            <input id="airtable-category-table" type="text" placeholder="Category Names">
+          </div>
+          <div class="form-group">
+            <label for="clickup-list-id">ClickUp List ID</label>
+            <input id="clickup-list-id" type="text" placeholder="ClickUp list ID">
+            <div class="picker-row">
+              <button class="btn btn-secondary" type="button" onclick="fetchClickUpLists()">Find Lists from Token</button>
+              <select id="clickup-list-picker">
+                <option value="">Select ClickUp list...</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="clickup-token">ClickUp Token</label>
+            <input id="clickup-token" type="password" placeholder="pk_...">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">Execution Progress</h2>
+      <div class="progress-wrap">
+        <div id="progress-bar" class="progress-bar"></div>
+      </div>
+      <div class="status-title" id="progress-text">Waiting to run Phase 2...</div>
+
+      <div class="summary-grid">
+        <div class="summary-item"><div class="summary-label">Total Rows</div><div class="summary-value" id="sum-total">0</div></div>
+        <div class="summary-item"><div class="summary-label">Valid Rows</div><div class="summary-value" id="sum-valid">0</div></div>
+        <div class="summary-item"><div class="summary-label">Created</div><div class="summary-value" id="sum-created">0</div></div>
+        <div class="summary-item"><div class="summary-label">Updated</div><div class="summary-value" id="sum-updated">0</div></div>
+        <div class="summary-item"><div class="summary-label">Category Resolved</div><div class="summary-value" id="sum-resolved">0</div></div>
+        <div class="summary-item"><div class="summary-label">Tasks Created</div><div class="summary-value" id="sum-tasks">0</div></div>
+        <div class="summary-item"><div class="summary-label">Skipped Missing IPN</div><div class="summary-value" id="sum-missing">0</div></div>
+        <div class="summary-item"><div class="summary-label">Skipped Excluded Prefix</div><div class="summary-value" id="sum-excluded">0</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">Activity Log</h2>
+      <div class="logs" id="log-list">
+        <div class="log-entry">No activity yet.</div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    let isDisconnecting = false;
+    let isRunning = false;
+
+    window.addEventListener('load', async () => {
+      await checkGoogleAuth();
+      await loadConfig();
+      attachProgressListener();
+      attachPickerListeners();
+    });
+
+    function logLine(text) {
+      const list = document.getElementById('log-list');
+      if (list.children.length === 1 && list.children[0].textContent === 'No activity yet.') {
+        list.innerHTML = '';
+      }
+      const row = document.createElement('div');
+      row.className = 'log-entry';
+      row.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+      list.prepend(row);
+    }
+
+    function updateAuthUI(isConnected, email = null) {
+      const indicator = document.getElementById('auth-indicator');
+      const text = document.getElementById('auth-text');
+      const btn = document.getElementById('auth-btn');
+
+      if (isConnected) {
+        indicator.classList.add('connected');
+        text.textContent = email ? `Connected: ${email}` : 'Connected to Google';
+        btn.textContent = 'Disconnect Google';
+      } else {
+        indicator.classList.remove('connected');
+        text.textContent = 'Google account not connected.';
+        btn.textContent = 'Connect to Google';
+      }
+    }
+
+    async function checkGoogleAuth() {
+      try {
+        const isAuth = await window.oauth2InventoryAPI.isAuthenticated();
+        if (isAuth) {
+          const userInfo = await window.oauth2InventoryAPI.getUserInfo();
+          updateAuthUI(true, userInfo?.email);
+        } else {
+          updateAuthUI(false);
+        }
+      } catch (err) {
+        updateAuthUI(false);
+        logLine(`Auth check failed: ${err.message}`);
+      }
+    }
+
+    async function handleGoogleAuth() {
+      const btn = document.getElementById('auth-btn');
+      if (btn.disabled) return;
+      btn.disabled = true;
+
+      try {
+        const isAuth = await window.oauth2InventoryAPI.isAuthenticated();
+        if (isAuth) {
+          if (isDisconnecting) return;
+          isDisconnecting = true;
+          try {
+            const result = await window.oauth2InventoryAPI.disconnect();
+            if (result?.success === false) {
+              showStatus('run-status', 'error', result.message || 'Failed to disconnect Google.');
+            } else {
+              updateAuthUI(false);
+              showStatus('run-status', 'success', 'Disconnected from Google.');
+            }
+          } finally {
+            isDisconnecting = false;
+            btn.disabled = false;
+          }
+          return;
+        }
+
+        const authUrl = await window.oauth2InventoryAPI.getAuthUrl();
+        await window.oauth2InventoryAPI.openExternal(authUrl);
+        showStatus('run-status', 'info', 'Complete Google sign-in in browser, then return here.');
+        setTimeout(() => { btn.disabled = false; }, 5000);
+      } catch (err) {
+        showStatus('run-status', 'error', `Google authentication failed: ${err.message}`);
+        btn.disabled = false;
+      }
+    }
+
+    window.oauth2InventoryAPI.onAuthorized(async () => {
+      await checkGoogleAuth();
+      document.getElementById('auth-btn').disabled = false;
+      showStatus('run-status', 'success', 'Google account connected for Milestone 1.');
+      logLine('Google OAuth authorization completed.');
+    });
+
+    async function loadConfig() {
+      try {
+        const config = await window.phase2API.getConfig();
+        document.getElementById('sheet-id').value = config.sheetId || '';
+        document.getElementById('tab-name').value = config.tabName || '';
+        document.getElementById('airtable-base-id').value = config.airtableBaseId || '';
+        document.getElementById('airtable-token').value = config.airtableToken || '';
+        document.getElementById('airtable-master-table').value = config.airtableMasterTable || 'Master Parts Table';
+        document.getElementById('airtable-category-table').value = config.airtableCategoryTable || 'Category Names';
+        document.getElementById('clickup-list-id').value = config.clickupListId || '';
+        document.getElementById('clickup-token').value = config.clickupToken || '';
+        document.getElementById('ignore-task-cache').checked = Boolean(config.ignoreTaskCache);
+        document.getElementById('dry-run-select').value = String(Boolean(config.dryRun));
+
+        if (config.airtableToken) {
+          await fetchAirtableBases(true);
+        }
+        if (config.clickupToken) {
+          await fetchClickUpLists(true);
+        }
+      } catch (err) {
+        logLine(`Failed to load Phase 2 config: ${err.message}`);
+      }
+    }
+
+    function attachPickerListeners() {
+      const airtablePicker = document.getElementById('airtable-base-picker');
+      const clickupPicker = document.getElementById('clickup-list-picker');
+
+      airtablePicker.addEventListener('change', () => {
+        const selectedId = airtablePicker.value || '';
+        if (selectedId) {
+          document.getElementById('airtable-base-id').value = selectedId;
+        }
+      });
+
+      clickupPicker.addEventListener('change', () => {
+        const selectedId = clickupPicker.value || '';
+        if (selectedId) {
+          document.getElementById('clickup-list-id').value = selectedId;
+        }
+      });
+    }
+
+    function setPickerOptions(selectEl, items, placeholder) {
+      const previousValue = selectEl.value;
+      selectEl.innerHTML = '';
+      const placeholderOption = document.createElement('option');
+      placeholderOption.value = '';
+      placeholderOption.textContent = placeholder;
+      selectEl.appendChild(placeholderOption);
+
+      items.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.value;
+        option.textContent = item.label;
+        selectEl.appendChild(option);
+      });
+
+      if (previousValue && items.some(item => item.value === previousValue)) {
+        selectEl.value = previousValue;
+      }
+    }
+
+    async function fetchAirtableBases(silent = false) {
+      const token = document.getElementById('airtable-token').value.trim();
+      if (!token) {
+        showStatus('run-status', 'error', 'Enter Airtable token first, then click Find Bases from Token.');
+        return;
+      }
+
+      try {
+        if (!silent) {
+          showStatus('run-status', 'info', 'Fetching Airtable bases...');
+        }
+
+        const result = await window.phase2API.fetchAirtableBases(token);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Failed to fetch Airtable bases.');
+        }
+
+        const options = (result.bases || []).map(base => ({
+          value: base.id,
+          label: `${base.name} (${base.id})`
+        }));
+        setPickerOptions(document.getElementById('airtable-base-picker'), options, 'Select Airtable base...');
+
+        const currentBaseId = document.getElementById('airtable-base-id').value.trim();
+        if (currentBaseId && options.some(option => option.value === currentBaseId)) {
+          document.getElementById('airtable-base-picker').value = currentBaseId;
+        }
+
+        if (!silent) {
+          showStatus('run-status', 'success', `Found ${options.length} Airtable base(s).`);
+          logLine(`Fetched ${options.length} Airtable base(s) from token.`);
+        }
+      } catch (err) {
+        if (!silent) {
+          showStatus('run-status', 'error', `Airtable base discovery failed: ${err.message}`);
+          logLine(`Airtable base discovery failed: ${err.message}`);
+        }
+      }
+    }
+
+    async function fetchClickUpLists(silent = false) {
+      const token = document.getElementById('clickup-token').value.trim();
+      if (!token) {
+        showStatus('run-status', 'error', 'Enter ClickUp token first, then click Find Lists from Token.');
+        return;
+      }
+
+      try {
+        if (!silent) {
+          showStatus('run-status', 'info', 'Fetching ClickUp lists...');
+        }
+
+        const result = await window.phase2API.fetchClickUpLists(token);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Failed to fetch ClickUp lists.');
+        }
+
+        const options = (result.lists || []).map(list => ({
+          value: list.id,
+          label: `${list.path || list.name || list.id} (${list.id})`
+        }));
+        setPickerOptions(document.getElementById('clickup-list-picker'), options, 'Select ClickUp list...');
+
+        const currentListId = document.getElementById('clickup-list-id').value.trim();
+        if (currentListId && options.some(option => option.value === currentListId)) {
+          document.getElementById('clickup-list-picker').value = currentListId;
+        }
+
+        if (!silent) {
+          showStatus('run-status', 'success', `Found ${options.length} ClickUp list(s).`);
+          logLine(`Fetched ${options.length} ClickUp list(s) from token.`);
+        }
+      } catch (err) {
+        if (!silent) {
+          showStatus('run-status', 'error', `ClickUp list discovery failed: ${err.message}`);
+          logLine(`ClickUp list discovery failed: ${err.message}`);
+        }
+      }
+    }
+
+    function collectConfigFromForm() {
+      return {
+        sheetId: document.getElementById('sheet-id').value.trim(),
+        tabName: document.getElementById('tab-name').value.trim(),
+        airtableBaseId: document.getElementById('airtable-base-id').value.trim(),
+        airtableToken: document.getElementById('airtable-token').value.trim(),
+        airtableMasterTable: document.getElementById('airtable-master-table').value.trim(),
+        airtableCategoryTable: document.getElementById('airtable-category-table').value.trim(),
+        clickupListId: document.getElementById('clickup-list-id').value.trim(),
+        clickupToken: document.getElementById('clickup-token').value.trim(),
+        ignoreTaskCache: document.getElementById('ignore-task-cache').checked,
+        dryRun: document.getElementById('dry-run-select').value === 'true'
+      };
+    }
+
+    async function saveConfig() {
+      try {
+        const config = collectConfigFromForm();
+        const result = await window.phase2API.saveConfig(config);
+        if (result.success) {
+          showStatus('run-status', 'success', 'Phase 2 settings saved.');
+          logLine('Saved Phase 2 configuration.');
+        } else {
+          showStatus('run-status', 'error', result.message || 'Failed to save settings.');
+        }
+      } catch (err) {
+        showStatus('run-status', 'error', `Failed to save settings: ${err.message}`);
+      }
+    }
+
+    function attachProgressListener() {
+      window.phase2API.onProgress((event, payload) => {
+        if (!payload) return;
+        const percent = Number(payload.percent || 0);
+        document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+        document.getElementById('progress-text').textContent =
+          payload.message || `Stage: ${payload.stage || 'running'} (${percent}%)`;
+
+        if (payload.counts) {
+          renderSummary(payload.counts);
+        }
+
+        if (payload.stage) {
+          logLine(`Progress: ${payload.stage} (${percent}%)`);
+        }
+      });
+    }
+
+    async function runPhase2() {
+      if (isRunning) return;
+      isRunning = true;
+      showStatus('run-status', 'info', 'Phase 2 run started...');
+      logLine('Starting Phase 2 pipeline.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+
+        const result = await window.phase2API.run(config);
+
+        if (result.success) {
+          renderSummary(result.summary || {});
+          showStatus('run-status', 'success', `Phase 2 completed (${config.dryRun ? 'Dry Run' : 'Live Run'}).`);
+          logLine(`Phase 2 completed. Created: ${result.summary?.created || 0}, Updated: ${result.summary?.updated || 0}, Tasks: ${result.summary?.clickupTasksCreated || 0}`);
+
+          if (Array.isArray(result.summary?.errors) && result.summary.errors.length > 0) {
+            result.summary.errors.forEach(err => logLine(`Error: ${err}`));
+          }
+        } else {
+          showStatus('run-status', 'error', result.message || 'Phase 2 failed.');
+          logLine(`Phase 2 failed: ${result.message || 'Unknown error'}`);
+        }
+      } catch (err) {
+        showStatus('run-status', 'error', `Phase 2 failed: ${err.message}`);
+        logLine(`Phase 2 failed: ${err.message}`);
+      } finally {
+        isRunning = false;
+      }
+    }
+
+    function renderSummary(summary) {
+      document.getElementById('sum-total').textContent = summary.totalRows || 0;
+      document.getElementById('sum-valid').textContent = summary.validRows || 0;
+      document.getElementById('sum-created').textContent = summary.created || 0;
+      document.getElementById('sum-updated').textContent = summary.updated || 0;
+      document.getElementById('sum-resolved').textContent = summary.categoryResolved || 0;
+      document.getElementById('sum-tasks').textContent = summary.clickupTasksCreated || 0;
+      document.getElementById('sum-missing').textContent = summary.skippedMissingIPN || 0;
+      document.getElementById('sum-excluded').textContent = summary.skippedExcludedPrefix || 0;
+    }
+
+    function showStatus(id, type, message) {
+      const el = document.getElementById(id);
+      el.className = `status-box ${type}`;
+      el.textContent = message;
+      el.style.display = 'block';
+    }
+  </script>
+</body>
+</html>
