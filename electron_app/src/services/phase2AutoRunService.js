@@ -179,8 +179,16 @@ class Phase2AutoRunService {
       sheetId: payload.spreadsheetId,
       tabName: payload.worksheetName
     };
+    const config = this.buildRuntimeConfig(overrides);
+    if (!parseBoolean(config.phase2AutoRunEnabled, true)) {
+      return { skipped: true, reason: 'autorun_disabled' };
+    }
+
+    const state = this.getState();
+    const hasBaseline = Boolean(state.lastFingerprint);
+
     return this.trigger('phase1_push_success', {
-      force: true,
+      force: !hasBaseline,
       configOverrides: overrides
     });
   }

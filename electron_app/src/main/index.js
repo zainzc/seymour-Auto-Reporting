@@ -1108,11 +1108,6 @@ function createWindow() {
       // Initialize inventory webhook schedule if it was previously active
       initInventorySchedule();
 
-      const autoRunConfig = buildPhase2Config(getInventoryConfig('phase2Config') || {});
-      if (parseBoolean(autoRunConfig.phase2AutoRunEnabled, true)) {
-        phase2AutoRunService.start();
-      }
-
       const writebackConfig = buildPhase2WritebackConfig();
       if (parseBoolean(writebackConfig.enabled, false)) {
         phase2WritebackPoller.start(writebackConfig);
