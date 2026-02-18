@@ -14,11 +14,14 @@ async function initDb() {
   // Use server name exactly as provided - no port parsing
   // Let SQL Server Browser handle the connection like SSMS does
   const serverName = config.server.trim();
+  const connectTimeoutSec = Number(process.env.DB_CONNECT_TIMEOUT_SEC || 30);
+  const requestTimeoutMs = Number(process.env.DB_REQUEST_TIMEOUT_MS || 120000);
+  const queryTimeoutSec = Math.ceil(requestTimeoutMs / 1000);
 
   const poolConfig = {
-    connectionString: `Driver={ODBC Driver 18 for SQL Server};Server=${serverName};Database=${config.database};Uid=${config.user};Pwd=${config.password};Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=30;`,
-    connectionTimeout: 30000,
-    requestTimeout: 30000,
+    connectionString: `Driver={ODBC Driver 18 for SQL Server};Server=${serverName};Database=${config.database};Uid=${config.user};Pwd=${config.password};Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=${connectTimeoutSec};Query Timeout=${queryTimeoutSec};`,
+    connectionTimeout: connectTimeoutSec * 1000,
+    requestTimeout: requestTimeoutMs,
     pool: {
       max: 10,
       min: 0,

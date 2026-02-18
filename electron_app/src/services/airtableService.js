@@ -82,6 +82,18 @@ class AirtableService {
     return `OR(${terms.join(',')})`;
   }
 
+  static buildAndFormula(clauses) {
+    const cleanClauses = (clauses || []).filter(Boolean);
+    if (cleanClauses.length === 0) return '';
+    if (cleanClauses.length === 1) return cleanClauses[0];
+    return `AND(${cleanClauses.join(',')})`;
+  }
+
+  static buildEqualsFormula(fieldName, value) {
+    const escaped = String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    return `{${fieldName}}="${escaped}"`;
+  }
+
   async fetchMasterPartsByIpns(ipns) {
     const uniqueIpns = [...new Set(ipns.filter(Boolean))];
     const results = [];
@@ -101,6 +113,68 @@ class AirtableService {
     }
 
     return results;
+  }
+
+  async fetchMasterPartByIpn(ipn) {
+    const normalized = String(ipn || '').trim();
+    if (!normalized) return null;
+
+    const formula = AirtableService.buildEqualsFormula('IPN', normalized);
+    const data = await this.request('GET', `/${encodeURIComponent(this.masterTable)}`, {
+      params: {
+        filterByFormula: formula,
+        maxRecords: 2
+      }
+    });
+
+    const records = data?.records || [];
+    if (records.length === 0) return null;
+    return records[0];
+  }
+
+  async fetchCategoryRecordsByPrefixAndName(ipnPrefix, categoryName) {
+    const prefixText = String(ipnPrefix || '').trim();
+    const targetName = String(categoryName || '').trim().toLowerCase();
+    if (!prefixText || !targetName) return [];
+
+    const data = await this.request('GET', `/${encodeURIComponent(this.categoryTable)}`, {
+      params: {
+        filterByFormula: `{IPN Prefix}=${prefixText}`
+      }
+    });
+
+    const records = data?.records || [];
+    return records.filter(record => {
+      const name = String(record?.fields?.['Category Name'] || '').trim().toLowerCase();
+      return name === targetName;
+    });
+  }
+
+  async setMasterPartCategory(masterRecordId, categoryRecordId) {
+    const recordId = String(masterRecordId || '').trim();
+    const categoryId = String(categoryRecordId || '').trim();
+    if (!recordId) {
+      throw new Error('Airtable master record ID is required.');
+    }
+    if (!categoryId) {
+      throw new Error('Airtable category record ID is required.');
+    }
+
+    const data = await this.request('PATCH', `/${encodeURIComponent(this.masterTable)}`, {
+      data: {
+        records: [
+          {
+            id: recordId,
+            fields: {
+              Categories: [categoryId]
+            }
+          }
+        ],
+        typecast: true
+      }
+    });
+
+    return (data?.records || [])[0] || null;
   }
 
   async createMasterParts(records, onProgress = null) {

@@ -10,6 +10,11 @@ const { saveInventoryConfig, getInventoryConfig } = require('../config/configSto
 
 let scheduledTask = null;
 let isScheduleActive = false;
+let postPushHook = null;
+
+function setPostPushHook(hook) {
+  postPushHook = typeof hook === 'function' ? hook : null;
+}
 
 /**
  * Start the 24-hour inventory Google Sheets schedule
@@ -88,6 +93,20 @@ async function executeInventoryPush(spreadsheetId, worksheetName) {
 
     // Log execution
     logExecution(result.success, result.message, inventoryData.length, duration);
+
+    if (result.success && postPushHook) {
+      try {
+        await postPushHook({
+          spreadsheetId,
+          worksheetName,
+          recordCount: inventoryData.length,
+          duration,
+          source: 'inventory_push'
+        });
+      } catch (hookError) {
+        console.error('⚠️ Post push hook failed:', hookError.message);
+      }
+    }
     
     return result;
     
@@ -172,6 +191,7 @@ module.exports = {
   startInventorySchedule,
   stopInventorySchedule,
   executeInventoryPush,
+  setPostPushHook,
   getScheduleStatus,
   getExecutionLogs,
   initializeSchedule

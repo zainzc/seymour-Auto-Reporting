@@ -316,8 +316,123 @@ If you intentionally want re-creation, clear `phase2TaskCache` in store before r
 
 ## 13. Current Known Limitations
 1. Dry run still allows ClickUp task creation in current code path.
-2. No automatic task closure/reconciliation based on later Airtable state.
+2. Write-back depends on manual ClickUp dropdown setup (`Resolved Category`) and consistent status names in the target list.
 3. Error list is capped to avoid log explosion; additional errors are summarized.
 
 References:
 - Error cap behavior: `electron_app/src/services/airtableService.js:142`
+
+## 14. Phase 2 Write-Back (ClickUp -> Airtable)
+Phase 2 now supports polling ClickUp tasks in `Category Determined` status and writing the selected category back to Airtable Master Parts.
+
+### 14.1 Manual ClickUp Setup (required)
+In the ClickUp category-resolution list, create a custom dropdown field:
+1. Field name: `Resolved Category`
+2. Type: `Dropdown`
+3. Values: category names that exist in Airtable Category table (`Category Name` field)
+
+If the field is missing, write-back run fails with a clear error.
+
+### 14.2 Poller Behavior
+Poller service:
+- `electron_app/src/services/phase2WritebackPollerService.js`
+- Core logic: `electron_app/src/services/phase2WritebackService.js`
+
+Each run:
+1. Fetch tasks in status `Category Determined`.
+2. Parse IPN from task title `Resolve Category - {IPN}` or description.
+3. Read selected `Resolved Category`.
+4. Skip excluded IPNs (`900/950/999`) without Airtable write.
+5. If Master Parts already has `Categories`, do not overwrite; complete task.
+6. Map selected category by `(IPN Prefix + Category Name)` in Airtable Category table.
+7. Update Master Parts `Categories` link.
+8. Move task to `Completed` only after successful write-back.
+
+### 14.3 Write-Back Summary Object
+Each run records:
+- `tasksProcessed`
+- `tasksCompleted`
+- `tasksErrored`
+- `airtableUpdates`
+- `skippedExcluded`
+- `skippedAlreadyResolved`
+
+The poller logs:
+- `Phase2 write-back poll summary { ... }`
+
+### 14.4 Start/Stop/Run-Once Controls
+IPC endpoints:
+- `phase2-writeback-start`
+- `phase2-writeback-stop`
+- `phase2-writeback-status`
+- `phase2-writeback-run-once`
+
+Preload bridge:
+- `phase2API.startWriteback(options)`
+- `phase2API.stopWriteback()`
+- `phase2API.getWritebackStatus()`
+- `phase2API.runWritebackOnce(options)`
+
+### 14.5 Config / Env for Write-Back
+Add these env vars as needed:
+
+```env
+PHASE2_WRITEBACK_ENABLED=true
+WRITEBACK_POLL_INTERVAL_MINUTES=5
+CLICKUP_RESOLVED_CATEGORY_FIELD_NAME=Resolved Category
+CLICKUP_STATUS_DETERMINED=Category Determined
+CLICKUP_STATUS_COMPLETED=Completed
+```
+
+### 14.8 Phase 2 Auto-Run on Sheet Changes
+Phase 2 can now run automatically when source sheet data changes.
+
+Triggers:
+1. Immediate trigger after successful Phase 1 inventory push.
+2. Background poller that fingerprints source sheet content and runs Phase 2 only on change.
+
+Safety controls:
+- No concurrent Phase 2 runs.
+- Cooldown window to avoid thrashing.
+- Baseline initialization on first poll (no forced replay).
+
+Env keys:
+```env
+PHASE2_AUTORUN_ENABLED=true
+PHASE2_AUTORUN_POLL_MINUTES=3
+PHASE2_AUTORUN_COOLDOWN_MINUTES=5
+```
+
+IPC controls:
+- `phase2-autorun-status`
+- `phase2-autorun-start`
+- `phase2-autorun-stop`
+- `phase2-autorun-run-now`
+
+Also ensure these existing values are set:
+- `CLICKUP_TOKEN`
+- `CLICKUP_LIST_ID`
+- `AIRTABLE_TOKEN`
+- `AIRTABLE_BASE_ID`
+- `AIRTABLE_MASTER_TABLE`
+- `AIRTABLE_CATEGORY_TABLE`
+
+### 14.6 Verification Steps
+1. Set a task to `Category Determined` and choose `Resolved Category`.
+2. Run once via IPC (`phase2-writeback-run-once`) or wait for poll interval.
+3. Confirm Airtable Master Parts record for that IPN now has `Categories` set.
+4. Confirm task moved to `Completed`.
+
+### 14.7 Edge Cases Handled
+1. Missing IPN in task: comment + task stays open.
+2. Missing Resolved Category selection: comment + task stays open.
+3. Master Parts record missing: comment + task stays open.
+4. Duplicate or missing category mapping for prefix+name: comment + task stays open.
+5. Excluded IPNs: no write-back; task auto-completed with comment.
+
+## 15. Remote Task Dedupe During Phase 2 Task Creation
+Before creating new ClickUp tasks, Phase 2 now preloads open tasks in the target list and skips creation when an open task for the same IPN already exists.
+
+References:
+- Dedupe preload: `electron_app/src/services/phase2Service.js`
+- Open task IPN scan: `electron_app/src/services/clickupService.js`

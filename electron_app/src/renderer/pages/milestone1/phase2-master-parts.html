@@ -113,30 +113,6 @@
       letter-spacing: 0.2px;
     }
 
-    .auth-status {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 13px 14px;
-      border-radius: 10px;
-      border: 1px solid #d2dfef;
-      background: #f6f9ff;
-      margin-bottom: 14px;
-    }
-
-    .auth-indicator {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #7b8da8;
-      flex: 0 0 auto;
-    }
-
-    .auth-indicator.connected {
-      background: var(--success);
-      box-shadow: 0 0 0 4px rgba(15, 138, 106, 0.15);
-    }
-
     .status-title {
       font-weight: 700;
       color: #294a6f;
@@ -333,18 +309,7 @@
     </header>
 
     <div class="grid-2">
-      <section class="card">
-        <h2 class="card-title">Google Authentication</h2>
-        <div class="auth-status">
-          <div class="auth-indicator" id="auth-indicator"></div>
-          <div class="status-title" id="auth-text">Checking Google authentication...</div>
-        </div>
-        <div class="btn-group">
-          <button class="btn btn-primary" id="auth-btn" onclick="handleGoogleAuth()">Connect to Google</button>
-        </div>
-      </section>
-
-      <section class="card">
+      <section class="card" style="grid-column: 1 / -1;">
         <h2 class="card-title">Run Controls</h2>
         <div class="form-group">
           <label for="dry-run-select">Run Mode</label>
@@ -359,10 +324,23 @@
             Ignore Task Cache (recreate ClickUp tasks this run)
           </label>
         </div>
+        <div class="form-group">
+          <label>
+            Write-back settings are auto-managed:
+          </label>
+          <div class="hint">Resolved field: <code>Resolved Category</code> | Source status: <code>Category Determined</code> | Complete status: <code>Completed</code> | Poll: <code>5 min</code></div>
+        </div>
         <div class="btn-group">
           <button class="btn btn-secondary" onclick="saveConfig()">Save Settings</button>
           <button class="btn btn-primary" onclick="runPhase2()">Run Phase 2</button>
         </div>
+        <div class="btn-group" style="margin-top: 10px;">
+          <button class="btn btn-secondary" onclick="startWritebackPoller()">Start Write-back</button>
+          <button class="btn btn-danger" onclick="stopWritebackPoller()">Stop Write-back</button>
+          <button class="btn btn-secondary" onclick="runWritebackOnce()">Run Write-back Once</button>
+          <button class="btn btn-secondary" onclick="refreshWritebackStatus()">Refresh Status</button>
+        </div>
+        <div class="hint" id="writeback-status-text">Write-back status: unknown</div>
         <div id="run-status" class="status-box"></div>
       </section>
     </div>
@@ -378,6 +356,17 @@
             <div class="hint">Use the same source sheet used by Phase 1 export.</div>
           </div>
           <div class="form-group">
+            <label for="airtable-token">Airtable Token</label>
+            <input id="airtable-token" type="password" placeholder="pat...">
+          </div>
+          <div class="form-group">
+            <label for="clickup-token">ClickUp Token</label>
+            <input id="clickup-token" type="password" placeholder="pk_...">
+          </div>
+        </div>
+
+        <div>
+          <div class="form-group">
             <label for="tab-name">Google Tab Name</label>
             <input id="tab-name" type="text" placeholder="Worksheet tab name">
           </div>
@@ -392,21 +381,6 @@
             </div>
           </div>
           <div class="form-group">
-            <label for="airtable-token">Airtable Token</label>
-            <input id="airtable-token" type="password" placeholder="pat...">
-          </div>
-        </div>
-
-        <div>
-          <div class="form-group">
-            <label for="airtable-master-table">Airtable Master Table</label>
-            <input id="airtable-master-table" type="text" placeholder="Master Parts Table">
-          </div>
-          <div class="form-group">
-            <label for="airtable-category-table">Airtable Category Table</label>
-            <input id="airtable-category-table" type="text" placeholder="Category Names">
-          </div>
-          <div class="form-group">
             <label for="clickup-list-id">ClickUp List ID</label>
             <input id="clickup-list-id" type="text" placeholder="ClickUp list ID">
             <div class="picker-row">
@@ -415,10 +389,6 @@
                 <option value="">Select ClickUp list...</option>
               </select>
             </div>
-          </div>
-          <div class="form-group">
-            <label for="clickup-token">ClickUp Token</label>
-            <input id="clickup-token" type="password" placeholder="pk_...">
           </div>
         </div>
       </div>
@@ -452,11 +422,16 @@
   </div>
 
   <script>
-    let isDisconnecting = false;
     let isRunning = false;
+    const DEFAULT_MASTER_TABLE = 'Master Parts Table';
+    const DEFAULT_CATEGORY_TABLE = 'Category Names';
+    const DEFAULT_RESOLVED_FIELD = 'Resolved Category';
+    const DEFAULT_STATUS_DETERMINED = 'Category Determined';
+    const DEFAULT_STATUS_COMPLETED = 'Completed';
+    const DEFAULT_WRITEBACK_INTERVAL_MINUTES = 5;
+    const DEFAULT_WRITEBACK_ENABLED = true;
 
     window.addEventListener('load', async () => {
-      await checkGoogleAuth();
       await loadConfig();
       attachProgressListener();
       attachPickerListeners();
@@ -473,79 +448,6 @@
       list.prepend(row);
     }
 
-    function updateAuthUI(isConnected, email = null) {
-      const indicator = document.getElementById('auth-indicator');
-      const text = document.getElementById('auth-text');
-      const btn = document.getElementById('auth-btn');
-
-      if (isConnected) {
-        indicator.classList.add('connected');
-        text.textContent = email ? `Connected: ${email}` : 'Connected to Google';
-        btn.textContent = 'Disconnect Google';
-      } else {
-        indicator.classList.remove('connected');
-        text.textContent = 'Google account not connected.';
-        btn.textContent = 'Connect to Google';
-      }
-    }
-
-    async function checkGoogleAuth() {
-      try {
-        const isAuth = await window.oauth2InventoryAPI.isAuthenticated();
-        if (isAuth) {
-          const userInfo = await window.oauth2InventoryAPI.getUserInfo();
-          updateAuthUI(true, userInfo?.email);
-        } else {
-          updateAuthUI(false);
-        }
-      } catch (err) {
-        updateAuthUI(false);
-        logLine(`Auth check failed: ${err.message}`);
-      }
-    }
-
-    async function handleGoogleAuth() {
-      const btn = document.getElementById('auth-btn');
-      if (btn.disabled) return;
-      btn.disabled = true;
-
-      try {
-        const isAuth = await window.oauth2InventoryAPI.isAuthenticated();
-        if (isAuth) {
-          if (isDisconnecting) return;
-          isDisconnecting = true;
-          try {
-            const result = await window.oauth2InventoryAPI.disconnect();
-            if (result?.success === false) {
-              showStatus('run-status', 'error', result.message || 'Failed to disconnect Google.');
-            } else {
-              updateAuthUI(false);
-              showStatus('run-status', 'success', 'Disconnected from Google.');
-            }
-          } finally {
-            isDisconnecting = false;
-            btn.disabled = false;
-          }
-          return;
-        }
-
-        const authUrl = await window.oauth2InventoryAPI.getAuthUrl();
-        await window.oauth2InventoryAPI.openExternal(authUrl);
-        showStatus('run-status', 'info', 'Complete Google sign-in in browser, then return here.');
-        setTimeout(() => { btn.disabled = false; }, 5000);
-      } catch (err) {
-        showStatus('run-status', 'error', `Google authentication failed: ${err.message}`);
-        btn.disabled = false;
-      }
-    }
-
-    window.oauth2InventoryAPI.onAuthorized(async () => {
-      await checkGoogleAuth();
-      document.getElementById('auth-btn').disabled = false;
-      showStatus('run-status', 'success', 'Google account connected for Milestone 1.');
-      logLine('Google OAuth authorization completed.');
-    });
-
     async function loadConfig() {
       try {
         const config = await window.phase2API.getConfig();
@@ -553,8 +455,6 @@
         document.getElementById('tab-name').value = config.tabName || '';
         document.getElementById('airtable-base-id').value = config.airtableBaseId || '';
         document.getElementById('airtable-token').value = config.airtableToken || '';
-        document.getElementById('airtable-master-table').value = config.airtableMasterTable || 'Master Parts Table';
-        document.getElementById('airtable-category-table').value = config.airtableCategoryTable || 'Category Names';
         document.getElementById('clickup-list-id').value = config.clickupListId || '';
         document.getElementById('clickup-token').value = config.clickupToken || '';
         document.getElementById('ignore-task-cache').checked = Boolean(config.ignoreTaskCache);
@@ -566,6 +466,7 @@
         if (config.clickupToken) {
           await fetchClickUpLists(true);
         }
+        await refreshWritebackStatus(true);
       } catch (err) {
         logLine(`Failed to load Phase 2 config: ${err.message}`);
       }
@@ -696,13 +597,98 @@
         tabName: document.getElementById('tab-name').value.trim(),
         airtableBaseId: document.getElementById('airtable-base-id').value.trim(),
         airtableToken: document.getElementById('airtable-token').value.trim(),
-        airtableMasterTable: document.getElementById('airtable-master-table').value.trim(),
-        airtableCategoryTable: document.getElementById('airtable-category-table').value.trim(),
+        airtableMasterTable: DEFAULT_MASTER_TABLE,
+        airtableCategoryTable: DEFAULT_CATEGORY_TABLE,
         clickupListId: document.getElementById('clickup-list-id').value.trim(),
         clickupToken: document.getElementById('clickup-token').value.trim(),
         ignoreTaskCache: document.getElementById('ignore-task-cache').checked,
+        phase2WritebackEnabled: DEFAULT_WRITEBACK_ENABLED,
+        writebackPollIntervalMinutes: DEFAULT_WRITEBACK_INTERVAL_MINUTES,
+        clickupResolvedCategoryFieldName: DEFAULT_RESOLVED_FIELD,
+        clickupStatusDetermined: DEFAULT_STATUS_DETERMINED,
+        clickupStatusCompleted: DEFAULT_STATUS_COMPLETED,
         dryRun: document.getElementById('dry-run-select').value === 'true'
       };
+    }
+
+    function renderWritebackStatus(status) {
+      const text = document.getElementById('writeback-status-text');
+      if (!status || typeof status !== 'object') {
+        text.textContent = 'Write-back status: unavailable';
+        return;
+      }
+      const active = status.active ? 'active' : 'stopped';
+      const inFlight = status.inFlight ? ', running now' : '';
+      const lastRun = status.lastRunAt ? `, last run: ${new Date(status.lastRunAt).toLocaleString()}` : '';
+      text.textContent = `Write-back status: ${active}${inFlight}, interval=${status.intervalMinutes || 5}m${lastRun}`;
+    }
+
+    async function refreshWritebackStatus(silent = false) {
+      try {
+        const status = await window.phase2API.getWritebackStatus();
+        renderWritebackStatus(status);
+        if (!silent) {
+          logLine('Refreshed write-back status.');
+        }
+      } catch (err) {
+        if (!silent) {
+          showStatus('run-status', 'error', `Failed to refresh write-back status: ${err.message}`);
+        }
+      }
+    }
+
+    async function startWritebackPoller() {
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase2API.startWriteback(config);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Failed to start write-back poller.');
+        }
+        renderWritebackStatus(result.status);
+        showStatus('run-status', 'success', 'Write-back poller started.');
+        logLine('Write-back poller started.');
+      } catch (err) {
+        showStatus('run-status', 'error', `Start write-back failed: ${err.message}`);
+        logLine(`Start write-back failed: ${err.message}`);
+      }
+    }
+
+    async function stopWritebackPoller() {
+      try {
+        const result = await window.phase2API.stopWriteback();
+        if (!result?.success) {
+          throw new Error(result?.message || 'Failed to stop write-back poller.');
+        }
+        renderWritebackStatus(result.status);
+        showStatus('run-status', 'success', 'Write-back poller stopped.');
+        logLine('Write-back poller stopped.');
+      } catch (err) {
+        showStatus('run-status', 'error', `Stop write-back failed: ${err.message}`);
+        logLine(`Stop write-back failed: ${err.message}`);
+      }
+    }
+
+    async function runWritebackOnce() {
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase2API.runWritebackOnce(config);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Write-back run failed.');
+        }
+        const summary = result?.result?.summary || {};
+        showStatus(
+          'run-status',
+          'success',
+          `Write-back done. Processed=${summary.tasksProcessed || 0}, Completed=${summary.tasksCompleted || 0}, Errors=${summary.tasksErrored || 0}`
+        );
+        logLine(`Write-back summary: ${JSON.stringify(summary)}`);
+        await refreshWritebackStatus(true);
+      } catch (err) {
+        showStatus('run-status', 'error', `Write-back run failed: ${err.message}`);
+        logLine(`Write-back run failed: ${err.message}`);
+      }
     }
 
     async function saveConfig() {

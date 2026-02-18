@@ -108,6 +108,91 @@ class ClickUpService {
     }
   }
 
+  static normalizeIpn(value) {
+    return String(value || '').trim().toUpperCase();
+  }
+
+  static extractIpnFromTask(task = {}) {
+    const title = String(task.name || '').trim();
+    const titleMatch = title.match(/^Resolve\s+Category\s*-\s*(.+)$/i);
+    if (titleMatch && titleMatch[1]) {
+      return ClickUpService.normalizeIpn(titleMatch[1]);
+    }
+
+    const description = String(task.description || '');
+    const descMatch = description.match(/(?:^|\n)\s*IPN:\s*([^\n\r]+)/i);
+    if (descMatch && descMatch[1]) {
+      return ClickUpService.normalizeIpn(descMatch[1]);
+    }
+
+    return '';
+  }
+
+  static extractCustomFieldText(task = {}, fieldName = '') {
+    const normalizedName = String(fieldName || '').trim().toLowerCase();
+    if (!normalizedName) return '';
+    const fields = Array.isArray(task.custom_fields) ? task.custom_fields : [];
+    const target = fields.find(field => String(field?.name || '').trim().toLowerCase() === normalizedName);
+    if (!target) return '';
+
+    const rawValue = target?.value;
+    if (rawValue === null || rawValue === undefined) return '';
+
+    if (target?.type === 'drop_down') {
+      const options = target?.type_config?.options || [];
+      const option =
+        options.find(item => String(item?.id || '') === String(rawValue)) ||
+        options.find(item => String(item?.orderindex || '') === String(rawValue));
+      return String(option?.name || '').trim();
+    }
+
+    return String(rawValue).trim();
+  }
+
+  static getTaskCustomFieldDisplayValue(task = {}, fieldMeta = null) {
+    if (!fieldMeta) return '';
+    const fields = Array.isArray(task.custom_fields) ? task.custom_fields : [];
+    const target = fields.find(field => String(field?.id || '') === String(fieldMeta?.id || ''));
+    if (!target) return '';
+
+    let rawValue = target?.value;
+    if (rawValue === null || rawValue === undefined) return '';
+    if (Array.isArray(rawValue)) {
+      rawValue = rawValue.length > 0 ? rawValue[0] : null;
+      if (rawValue === null || rawValue === undefined) return '';
+    }
+
+    if (target?.type === 'drop_down') {
+      const options = target?.type_config?.options || fieldMeta?.type_config?.options || [];
+      const valueId =
+        typeof rawValue === 'object'
+          ? String(rawValue?.id || rawValue?.value || rawValue?.orderindex || '')
+          : String(rawValue);
+      const valueName =
+        typeof rawValue === 'object' ? String(rawValue?.name || '').trim() : '';
+
+      if (valueName) {
+        return valueName;
+      }
+
+      const option =
+        options.find(item => String(item?.id || '') === valueId) ||
+        options.find(item => String(item?.orderindex || '') === valueId);
+      return String(option?.name || '').trim();
+    }
+
+    if (typeof rawValue === 'object') {
+      if (typeof rawValue?.name === 'string' && rawValue.name.trim()) {
+        return rawValue.name.trim();
+      }
+      if (typeof rawValue?.value === 'string' && rawValue.value.trim()) {
+        return rawValue.value.trim();
+      }
+    }
+
+    return String(rawValue).trim();
+  }
+
   async getList() {
     if (!this.listId) {
       throw new Error('ClickUp list ID is missing.');
@@ -121,6 +206,112 @@ class ClickUpService {
       success: true,
       listName: data?.name || 'Unknown List'
     };
+  }
+
+  async getTask(taskId) {
+    if (!taskId) {
+      throw new Error('ClickUp task ID is required.');
+    }
+    return this.request('GET', `/task/${taskId}`);
+  }
+
+  async updateTaskStatus(taskId, status) {
+    if (!taskId) throw new Error('ClickUp task ID is required.');
+    if (!status) throw new Error('ClickUp status is required.');
+    return this.request('PUT', `/task/${taskId}`, { data: { status } });
+  }
+
+  async addTaskComment(taskId, commentText, notifyAll = false) {
+    if (!taskId) throw new Error('ClickUp task ID is required.');
+    const text = String(commentText || '').trim();
+    if (!text) throw new Error('ClickUp comment text is required.');
+
+    return this.request('POST', `/task/${taskId}/comment`, {
+      data: {
+        comment_text: text,
+        notify_all: Boolean(notifyAll)
+      }
+    });
+  }
+
+  async getCustomFieldByName(fieldName) {
+    const normalizedName = String(fieldName || '').trim().toLowerCase();
+    if (!normalizedName) {
+      throw new Error('Custom field name is required.');
+    }
+
+    const list = await this.getList();
+    const fields = Array.isArray(list?.fields) ? list.fields : [];
+    return (
+      fields.find(field => String(field?.name || '').trim().toLowerCase() === normalizedName) || null
+    );
+  }
+
+  async fetchTasks(options = {}) {
+    if (!this.listId) {
+      throw new Error('ClickUp list ID is missing.');
+    }
+
+    const params = {
+      include_closed: options.includeClosed ? 'true' : 'false',
+      subtasks: options.subtasks ? 'true' : 'false',
+      page: Number.isFinite(options.page) ? options.page : 0
+    };
+
+    const statuses = Array.isArray(options.statuses)
+      ? options.statuses.filter(Boolean).map(value => String(value).trim())
+      : [];
+    if (statuses.length > 0) {
+      params['statuses[]'] = statuses;
+    }
+
+    if (Number.isFinite(options.limit) && options.limit > 0) {
+      params.limit = Math.floor(options.limit);
+    }
+
+    const data = await this.request('GET', `/list/${this.listId}/task`, { params });
+    return {
+      tasks: Array.isArray(data?.tasks) ? data.tasks : [],
+      lastPage: Boolean(data?.last_page)
+    };
+  }
+
+  async fetchTasksByStatuses(statuses = [], options = {}) {
+    const results = [];
+    const maxPages = Number.isFinite(options.maxPages) ? Math.max(1, options.maxPages) : 100;
+
+    for (let page = 0; page < maxPages; page += 1) {
+      const { tasks, lastPage } = await this.fetchTasks({
+        ...options,
+        statuses,
+        page
+      });
+
+      results.push(...tasks);
+      if (lastPage || tasks.length === 0) {
+        break;
+      }
+    }
+
+    return results;
+  }
+
+  async fetchOpenTaskIpnSet() {
+    const tasks = await this.fetchTasksByStatuses([], {
+      includeClosed: false,
+      subtasks: false
+    });
+
+    const set = new Set();
+    for (const task of tasks) {
+      const ipn =
+        ClickUpService.extractIpnFromTask(task) ||
+        ClickUpService.extractCustomFieldText(task, 'IPN');
+      if (ipn) {
+        set.add(ipn);
+      }
+    }
+    return set;
   }
 
   async fetchAllLists() {

@@ -44,6 +44,50 @@ function buildPhase2Config(options = {}) {
       'Category Names',
     clickupToken: options.clickupToken || savedConfig.clickupToken || process.env.CLICKUP_TOKEN,
     clickupListId: options.clickupListId || savedConfig.clickupListId || process.env.CLICKUP_LIST_ID,
+    phase2WritebackEnabled:
+      typeof options.phase2WritebackEnabled !== 'undefined'
+        ? parseBoolean(options.phase2WritebackEnabled)
+        : parseBoolean(
+            savedConfig.phase2WritebackEnabled,
+            parseBoolean(process.env.PHASE2_WRITEBACK_ENABLED, false)
+          ),
+    writebackPollIntervalMinutes:
+      Number(options.writebackPollIntervalMinutes) ||
+      Number(savedConfig.writebackPollIntervalMinutes) ||
+      Number(process.env.WRITEBACK_POLL_INTERVAL_MINUTES) ||
+      5,
+    clickupResolvedCategoryFieldName:
+      options.clickupResolvedCategoryFieldName ||
+      savedConfig.clickupResolvedCategoryFieldName ||
+      process.env.CLICKUP_RESOLVED_CATEGORY_FIELD_NAME ||
+      'Resolved Category',
+    clickupStatusDetermined:
+      options.clickupStatusDetermined ||
+      savedConfig.clickupStatusDetermined ||
+      process.env.CLICKUP_STATUS_DETERMINED ||
+      'Category Determined',
+    clickupStatusCompleted:
+      options.clickupStatusCompleted ||
+      savedConfig.clickupStatusCompleted ||
+      process.env.CLICKUP_STATUS_COMPLETED ||
+      'Completed',
+    phase2AutoRunEnabled:
+      typeof options.phase2AutoRunEnabled !== 'undefined'
+        ? parseBoolean(options.phase2AutoRunEnabled)
+        : parseBoolean(
+            savedConfig.phase2AutoRunEnabled,
+            parseBoolean(process.env.PHASE2_AUTORUN_ENABLED, true)
+          ),
+    phase2AutoRunPollMinutes:
+      Number(options.phase2AutoRunPollMinutes) ||
+      Number(savedConfig.phase2AutoRunPollMinutes) ||
+      Number(process.env.PHASE2_AUTORUN_POLL_MINUTES) ||
+      3,
+    phase2AutoRunCooldownMinutes:
+      Number(options.phase2AutoRunCooldownMinutes) ||
+      Number(savedConfig.phase2AutoRunCooldownMinutes) ||
+      Number(process.env.PHASE2_AUTORUN_COOLDOWN_MINUTES) ||
+      5,
     ignoreTaskCache:
       typeof options.ignoreTaskCache !== 'undefined'
         ? parseBoolean(options.ignoreTaskCache)
@@ -75,6 +119,7 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     updated: 0,
     categoryResolved: 0,
     clickupTasksCreated: 0,
+    clickupTasksSkippedExisting: 0,
     errors: [],
     dryRun: false
   };
@@ -238,8 +283,22 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
       token: config.clickupToken,
       listId: config.clickupListId
     });
+    let existingOpenTaskIpns = new Set();
+    try {
+      existingOpenTaskIpns = await clickupService.fetchOpenTaskIpnSet();
+    } catch (error) {
+      summary.errors.push(
+        `ClickUp dedupe pre-check failed; continuing with local cache only: ${error.message}`
+      );
+    }
 
     for (const task of plan.clickupTasks) {
+      const normalizedTaskIpn = ClickUpService.normalizeIpn(task.ipn);
+      if (existingOpenTaskIpns.has(normalizedTaskIpn)) {
+        summary.clickupTasksSkippedExisting += 1;
+        continue;
+      }
+
       try {
         await clickupService.createTask(task);
         taskCache[task.taskKey] = {
@@ -248,6 +307,7 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
           reason: task.reason
         };
         summary.clickupTasksCreated += 1;
+        existingOpenTaskIpns.add(normalizedTaskIpn);
       } catch (error) {
         const errorMsg = `ClickUp task failed for ${task.ipn}: ${error.message}`;
         summary.errors.push(errorMsg);

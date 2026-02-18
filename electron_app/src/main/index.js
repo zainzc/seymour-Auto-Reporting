@@ -31,10 +31,18 @@ const oauth2Service = require('../services/oauth2Service');
 const { runPhase2, buildPhase2Config } = require('../services/phase2Service');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
+const phase2WritebackPoller = require('../services/phase2WritebackPollerService');
+const phase2AutoRunService = require('../services/phase2AutoRunService');
 
 let mainWindow;
 let autoSyncInterval = null;
 let dbReady = false;
+
+function parseBoolean(value, defaultValue = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'string') return value.toLowerCase() === 'true';
+  return defaultValue;
+}
 
 /* ---------------------------
    WINDOWS INSTALLER SAFETY
@@ -694,10 +702,15 @@ const {
   startInventorySchedule, 
   stopInventorySchedule, 
   executeInventoryPush,
+  setPostPushHook,
   getScheduleStatus,
   getExecutionLogs: getInventoryLogs,
   initializeSchedule: initInventorySchedule
 } = require('../services/inventoryScheduleService');
+
+setPostPushHook(async payload => {
+  await phase2AutoRunService.onPhase1PushSuccess(payload);
+});
 
 // Test Google Sheets connection
 ipcMain.handle('inventory-sheets-test', async (_, spreadsheetId, worksheetName) => {
@@ -841,6 +854,28 @@ ipcMain.handle('inventory-sheets-get-logs', async () => {
 /* ---------------------------
    PHASE 2 HANDLERS (GOOGLE SHEETS -> AIRTABLE)
 ---------------------------- */
+function buildPhase2WritebackConfig(overrides = {}) {
+  const stored = getInventoryConfig('phase2Config') || {};
+  const merged = buildPhase2Config({
+    ...stored,
+    ...overrides
+  });
+
+  return {
+    clickupToken: merged.clickupToken,
+    clickupListId: merged.clickupListId,
+    airtableToken: merged.airtableToken,
+    airtableBaseId: merged.airtableBaseId,
+    airtableMasterTable: merged.airtableMasterTable,
+    airtableCategoryTable: merged.airtableCategoryTable,
+    clickupResolvedCategoryFieldName: merged.clickupResolvedCategoryFieldName,
+    clickupStatusDetermined: merged.clickupStatusDetermined,
+    clickupStatusCompleted: merged.clickupStatusCompleted,
+    pollIntervalMinutes: merged.writebackPollIntervalMinutes,
+    enabled: merged.phase2WritebackEnabled
+  };
+}
+
 ipcMain.handle('phase2-get-config', async () => {
   const stored = getInventoryConfig('phase2Config') || {};
   const merged = buildPhase2Config(stored);
@@ -852,6 +887,14 @@ ipcMain.handle('phase2-get-config', async () => {
     airtableMasterTable: merged.airtableMasterTable || 'Master Parts Table',
     airtableCategoryTable: merged.airtableCategoryTable || 'Category Names',
     clickupListId: merged.clickupListId || '',
+    phase2AutoRunEnabled: Boolean(merged.phase2AutoRunEnabled),
+    phase2AutoRunPollMinutes: Number(merged.phase2AutoRunPollMinutes || 3),
+    phase2AutoRunCooldownMinutes: Number(merged.phase2AutoRunCooldownMinutes || 5),
+    phase2WritebackEnabled: Boolean(merged.phase2WritebackEnabled),
+    writebackPollIntervalMinutes: Number(merged.writebackPollIntervalMinutes || 5),
+    clickupResolvedCategoryFieldName: merged.clickupResolvedCategoryFieldName || 'Resolved Category',
+    clickupStatusDetermined: merged.clickupStatusDetermined || 'Category Determined',
+    clickupStatusCompleted: merged.clickupStatusCompleted || 'Completed',
     ignoreTaskCache: Boolean(merged.ignoreTaskCache),
     dryRun: Boolean(merged.dryRun),
     airtableToken: stored.airtableToken || '',
@@ -868,6 +911,70 @@ ipcMain.handle('phase2-save-config', async (_, configPayload = {}) => {
 
   saveInventoryConfig('phase2Config', merged);
   return { success: true, message: 'Phase 2 configuration saved.' };
+});
+
+ipcMain.handle('phase2-writeback-start', async (_, options = {}) => {
+  try {
+    const config = buildPhase2WritebackConfig(options);
+    const status = phase2WritebackPoller.start(config);
+    return { success: true, status };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+});
+
+ipcMain.handle('phase2-writeback-stop', async () => {
+  try {
+    const status = phase2WritebackPoller.stop();
+    return { success: true, status };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+});
+
+ipcMain.handle('phase2-writeback-status', async () => {
+  return phase2WritebackPoller.getStatus();
+});
+
+ipcMain.handle('phase2-writeback-run-once', async (_, options = {}) => {
+  try {
+    const config = buildPhase2WritebackConfig(options);
+    const result = await phase2WritebackPoller.executeOnce(config);
+    return { success: true, result };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+});
+
+ipcMain.handle('phase2-autorun-status', async () => {
+  return phase2AutoRunService.getStatus();
+});
+
+ipcMain.handle('phase2-autorun-start', async (_, options = {}) => {
+  try {
+    const status = phase2AutoRunService.start(options);
+    return { success: true, status };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+});
+
+ipcMain.handle('phase2-autorun-stop', async () => {
+  try {
+    const status = phase2AutoRunService.stop();
+    return { success: true, status };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
+});
+
+ipcMain.handle('phase2-autorun-run-now', async () => {
+  try {
+    const result = await phase2AutoRunService.trigger('manual_run_now', { force: true });
+    return { success: true, result };
+  } catch (error) {
+    return { success: false, message: error.message };
+  }
 });
 
 ipcMain.handle('phase2-fetch-clickup-lists', async (_, token = '') => {
@@ -1000,6 +1107,19 @@ function createWindow() {
       
       // Initialize inventory webhook schedule if it was previously active
       initInventorySchedule();
+
+      const autoRunConfig = buildPhase2Config(getInventoryConfig('phase2Config') || {});
+      if (parseBoolean(autoRunConfig.phase2AutoRunEnabled, true)) {
+        phase2AutoRunService.start();
+      }
+
+      const writebackConfig = buildPhase2WritebackConfig();
+      if (parseBoolean(writebackConfig.enabled, false)) {
+        phase2WritebackPoller.start(writebackConfig);
+        console.log(
+          `Phase2 write-back poller started (${Number(writebackConfig.pollIntervalMinutes) || 5} min interval)`
+        );
+      }
     } catch (err) {
       console.error('❌ DB init failed:', err.message);
       dbReady = false;
@@ -1071,6 +1191,13 @@ http.createServer(async (req, res) => {
 
 app.whenReady().then(createWindow);
 
+app.on('before-quit', () => {
+  phase2AutoRunService.stop();
+  phase2WritebackPoller.stop();
+});
+
 app.on('window-all-closed', () => {
+  phase2AutoRunService.stop();
+  phase2WritebackPoller.stop();
   if (process.platform !== 'darwin') app.quit();
 });

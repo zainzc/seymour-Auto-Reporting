@@ -68,5 +68,13 @@ contextBridge.exposeInMainWorld('phase2API', {
   fetchClickUpLists: (token) => ipcRenderer.invoke('phase2-fetch-clickup-lists', token),
   fetchAirtableBases: (token) => ipcRenderer.invoke('phase2-fetch-airtable-bases', token),
   run: (options) => ipcRenderer.invoke('phase2-run', options),
+  startWriteback: (options) => ipcRenderer.invoke('phase2-writeback-start', options),
+  stopWriteback: () => ipcRenderer.invoke('phase2-writeback-stop'),
+  getWritebackStatus: () => ipcRenderer.invoke('phase2-writeback-status'),
+  runWritebackOnce: (options) => ipcRenderer.invoke('phase2-writeback-run-once', options),
+  getAutoRunStatus: () => ipcRenderer.invoke('phase2-autorun-status'),
+  startAutoRun: (options) => ipcRenderer.invoke('phase2-autorun-start', options),
+  stopAutoRun: () => ipcRenderer.invoke('phase2-autorun-stop'),
+  runAutoRunNow: () => ipcRenderer.invoke('phase2-autorun-run-now'),
   onProgress: (callback) => ipcRenderer.on('phase2-progress', callback)
 });
