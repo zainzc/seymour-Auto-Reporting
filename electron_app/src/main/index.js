@@ -895,8 +895,6 @@ ipcMain.handle('phase2-get-config', async () => {
     clickupResolvedCategoryFieldName: merged.clickupResolvedCategoryFieldName || 'Resolved Category',
     clickupStatusDetermined: merged.clickupStatusDetermined || 'Category Determined',
     clickupStatusCompleted: merged.clickupStatusCompleted || 'Completed',
-    ignoreTaskCache: Boolean(merged.ignoreTaskCache),
-    dryRun: Boolean(merged.dryRun),
     airtableToken: stored.airtableToken || '',
     clickupToken: stored.clickupToken || ''
   };

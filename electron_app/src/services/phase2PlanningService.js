@@ -19,8 +19,7 @@ function buildPhase2Plan({
   normalizedRows,
   existingMap,
   categoryIndex,
-  taskCache,
-  ignoreTaskCache = false
+  taskCache
 }) {
   const creates = [];
   const updates = [];
@@ -82,7 +81,7 @@ function buildPhase2Plan({
       }
       seenTaskKeys.add(taskKey);
 
-      if (ignoreTaskCache || !taskCache[taskKey]) {
+      if (!taskCache[taskKey]) {
         clickupTasks.push({
           taskKey,
           ipn: row.ipn,

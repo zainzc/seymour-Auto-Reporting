@@ -88,17 +88,6 @@ function buildPhase2Config(options = {}) {
       Number(savedConfig.phase2AutoRunCooldownMinutes) ||
       Number(process.env.PHASE2_AUTORUN_COOLDOWN_MINUTES) ||
       5,
-    ignoreTaskCache:
-      typeof options.ignoreTaskCache !== 'undefined'
-        ? parseBoolean(options.ignoreTaskCache)
-        : parseBoolean(
-            savedConfig.ignoreTaskCache,
-            parseBoolean(process.env.PHASE2_IGNORE_TASK_CACHE, false)
-          ),
-    dryRun:
-      typeof options.dryRun !== 'undefined'
-        ? parseBoolean(options.dryRun)
-        : parseBoolean(savedConfig.dryRun, parseBoolean(process.env.PHASE2_DRY_RUN, false)),
     authContext: 'inventory'
   };
 }
@@ -120,12 +109,10 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     categoryResolved: 0,
     clickupTasksCreated: 0,
     clickupTasksSkippedExisting: 0,
-    errors: [],
-    dryRun: false
+    errors: []
   };
 
   const config = buildPhase2Config(options);
-  summary.dryRun = config.dryRun;
 
   if (!config.sheetId || !config.tabName) {
     throw new Error('Phase 2 source sheet config is missing. Set spreadsheet ID and tab name first.');
@@ -146,8 +133,6 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   await clickupValidation.validateAccess();
 
   console.log('Phase2 started', {
-    dryRun: config.dryRun,
-    ignoreTaskCache: config.ignoreTaskCache,
     sheetId: config.sheetId,
     tabName: config.tabName
   });
@@ -202,80 +187,69 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     normalizedRows,
     existingMap,
     categoryIndex,
-    taskCache,
-    ignoreTaskCache: config.ignoreTaskCache
+    taskCache
   });
   summary.categoryResolved = plan.categoryResolved;
 
   emitProgress(progressCallback, { stage: 'execute_airtable_writes', percent: 82, counts: summary });
-  if (config.dryRun) {
-    summary.created = plan.creates.length;
-    summary.updated = plan.updates.length;
-    console.log('Phase2 dry run plan', {
-      creates: plan.creates.length,
-      updates: plan.updates.length,
-      clickupTasks: plan.clickupTasks.length
-    });
-  } else {
-    const totalToWrite = plan.creates.length + plan.updates.length;
-    let createProcessed = 0;
-    let updateProcessed = 0;
-    let lastWriteProgressEmitAt = 0;
-    let lastWriteProgressProcessed = -1;
+  const totalToWrite = plan.creates.length + plan.updates.length;
+  let createProcessed = 0;
+  let updateProcessed = 0;
+  let lastWriteProgressEmitAt = 0;
+  let lastWriteProgressProcessed = -1;
 
-    const emitWriteProgress = (message = null) => {
-      const processed = createProcessed + updateProcessed;
-      const now = Date.now();
-      const shouldEmit =
+  const emitWriteProgress = (message = null) => {
+    const processed = createProcessed + updateProcessed;
+    const now = Date.now();
+    const shouldEmit =
+      message ||
+      processed === totalToWrite ||
+      processed - lastWriteProgressProcessed >= 200 ||
+      now - lastWriteProgressEmitAt >= 3000;
+    if (!shouldEmit) return;
+
+    lastWriteProgressEmitAt = now;
+    lastWriteProgressProcessed = processed;
+    const ratio = totalToWrite > 0 ? processed / totalToWrite : 1;
+    const percent = Math.min(91, 82 + Math.floor(ratio * 9));
+    emitProgress(progressCallback, {
+      stage: 'execute_airtable_writes',
+      percent,
+      counts: summary,
+      message:
         message ||
-        processed === totalToWrite ||
-        processed - lastWriteProgressProcessed >= 200 ||
-        now - lastWriteProgressEmitAt >= 3000;
-      if (!shouldEmit) return;
+        `Writing to Airtable: ${processed}/${totalToWrite} records processed`
+    });
+  };
 
-      lastWriteProgressEmitAt = now;
-      lastWriteProgressProcessed = processed;
-      const ratio = totalToWrite > 0 ? processed / totalToWrite : 1;
-      const percent = Math.min(91, 82 + Math.floor(ratio * 9));
-      emitProgress(progressCallback, {
-        stage: 'execute_airtable_writes',
-        percent,
-        counts: summary,
-        message:
-          message ||
-          `Writing to Airtable: ${processed}/${totalToWrite} records processed`
-      });
-    };
+  emitWriteProgress('Writing to Airtable...');
 
-    emitWriteProgress('Writing to Airtable...');
-
-    if (plan.creates.length > 0) {
-      const createResult = await airtableService.createMasterParts(plan.creates, progress => {
-        createProcessed = progress.processedRecords;
-        emitWriteProgress();
-      });
-      summary.created = createResult.count || 0;
-      if (Array.isArray(createResult.errors) && createResult.errors.length > 0) {
-        summary.errors.push(
-          ...createResult.errors.map(message => `Airtable create failed: ${message}`)
-        );
-      }
+  if (plan.creates.length > 0) {
+    const createResult = await airtableService.createMasterParts(plan.creates, progress => {
+      createProcessed = progress.processedRecords;
+      emitWriteProgress();
+    });
+    summary.created = createResult.count || 0;
+    if (Array.isArray(createResult.errors) && createResult.errors.length > 0) {
+      summary.errors.push(
+        ...createResult.errors.map(message => `Airtable create failed: ${message}`)
+      );
     }
-    if (plan.updates.length > 0) {
-      const updateResult = await airtableService.updateMasterParts(plan.updates, progress => {
-        updateProcessed = progress.processedRecords;
-        emitWriteProgress();
-      });
-      summary.updated = updateResult.count || 0;
-      if (Array.isArray(updateResult.errors) && updateResult.errors.length > 0) {
-        summary.errors.push(
-          ...updateResult.errors.map(message => `Airtable update failed: ${message}`)
-        );
-      }
-    }
-
-    emitWriteProgress('Airtable write stage completed.');
   }
+  if (plan.updates.length > 0) {
+    const updateResult = await airtableService.updateMasterParts(plan.updates, progress => {
+      updateProcessed = progress.processedRecords;
+      emitWriteProgress();
+    });
+    summary.updated = updateResult.count || 0;
+    if (Array.isArray(updateResult.errors) && updateResult.errors.length > 0) {
+      summary.errors.push(
+        ...updateResult.errors.map(message => `Airtable update failed: ${message}`)
+      );
+    }
+  }
+
+  emitWriteProgress('Airtable write stage completed.');
 
   emitProgress(progressCallback, { stage: 'create_clickup_tasks', percent: 92, counts: summary });
   if (plan.clickupTasks.length > 0) {

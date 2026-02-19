@@ -32,7 +32,6 @@ Open Milestone 1 Phase 2 workspace and configure:
 - Google Sheet ID and tab name.
 - Airtable token/base/table names.
 - ClickUp token/list.
-- Run mode (dry/live).
 
 References:
 - UI form fields and run button: `electron_app/src/renderer/pages/milestone1/phase2-master-parts.html:350`
@@ -40,7 +39,7 @@ References:
 - ClickUp list picker action: `electron_app/src/renderer/pages/milestone1/phase2-master-parts.html:407`
 
 ### 3.2 Save and Run Behavior
-On run, frontend passes full config object (not just `dryRun`) to backend, so selected base/list/token values are used directly.
+On run, frontend passes full config object to backend, so selected base/list/token values are used directly.
 
 Reference:
 - `electron_app/src/renderer/pages/milestone1/phase2-master-parts.html:743`
@@ -54,18 +53,6 @@ Reference:
 References:
 - Write heartbeat message: `electron_app/src/services/phase2Service.js:192`
 - Stage completion message: `electron_app/src/services/phase2Service.js:223`
-
-### 3.4 Dry Run vs Live Run
-- Dry run:
-  - Airtable writes are skipped.
-  - Planned create/update counts are still shown.
-  - ClickUp task creation still runs in current implementation.
-- Live run:
-  - Airtable writes + ClickUp task creation both run.
-
-References:
-- Dry-run branch: `electron_app/src/services/phase2Service.js:157`
-- ClickUp stage runs after dry/live branch: `electron_app/src/services/phase2Service.js:226`
 
 ## 4. Configuration and Precedence
 ### 4.1 Config Sources (highest to lowest)
@@ -87,7 +74,6 @@ AIRTABLE_MASTER_TABLE=Master Parts Table
 AIRTABLE_CATEGORY_TABLE=Category Names
 CLICKUP_TOKEN=
 CLICKUP_LIST_ID=
-PHASE2_DRY_RUN=true
 ```
 
 ### 4.3 IPC Surface
@@ -245,7 +231,7 @@ References:
 
 ### 9.2 Summary Counters
 `summary` tracks:
-- totals, skips, created, updated, categoryResolved, clickupTasksCreated, errors, dryRun.
+- totals, skips, created, updated, categoryResolved, clickupTasksCreated, errors.
 
 Reference:
 - `electron_app/src/services/phase2Service.js:59`
@@ -283,13 +269,11 @@ References:
 2. Verify sheet tab exists and has supported headers.
 3. Use `Find Bases from Token` and select target base.
 4. Use `Find Lists from Token` and select target list.
-5. Start with dry run to validate counts and task volume expectations.
 
 ### 11.2 Safe Live Run Checklist
-1. Confirm `Run Mode = Live`.
-2. Confirm selected Airtable Base ID is your intended environment (copy/prod).
-3. Monitor progress heartbeat in write stage.
-4. Inspect summary errors after run and fix schema mismatches.
+1. Confirm selected Airtable Base ID is your intended environment (copy/prod).
+2. Monitor progress heartbeat in write stage.
+3. Inspect summary errors after run and fix schema mismatches.
 
 ### 11.3 Cache Management
 Task dedupe cache can suppress expected re-creation.
@@ -315,9 +299,8 @@ If you intentionally want re-creation, clear `phase2TaskCache` in store before r
 4. If changing header schema, update both validation variants and migration notes.
 
 ## 13. Current Known Limitations
-1. Dry run still allows ClickUp task creation in current code path.
-2. Write-back depends on manual ClickUp dropdown setup (`Resolved Category`) and consistent status names in the target list.
-3. Error list is capped to avoid log explosion; additional errors are summarized.
+1. Write-back depends on manual ClickUp dropdown setup (`Resolved Category`) and consistent status names in the target list.
+2. Error list is capped to avoid log explosion; additional errors are summarized.
 
 References:
 - Error cap behavior: `electron_app/src/services/airtableService.js:142`

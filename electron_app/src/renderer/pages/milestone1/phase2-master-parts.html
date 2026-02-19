@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Phase 2 Master Parts Sync - Seymour Auto</title>
+  <title>Master Parts Sync - Seymour Auto</title>
   <style>
     :root {
       --bg: #eef3f9;
@@ -98,6 +98,12 @@
       gap: 16px;
     }
 
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+
     .card {
       background: var(--surface);
       border-radius: 14px;
@@ -162,6 +168,95 @@
       color: #6d7f99;
       font-size: 12px;
       line-height: 1.45;
+    }
+
+    .section-title {
+      margin: 0 0 8px;
+      font-size: 14px;
+      color: #25466d;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+    }
+
+    .field-error {
+      margin-top: 5px;
+      color: #8f241f;
+      font-size: 12px;
+      min-height: 16px;
+    }
+
+    .input-error {
+      border-color: #da8b86 !important;
+      background: #fff7f7 !important;
+    }
+
+    .health-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 6px 0 10px;
+    }
+
+    .health-pill {
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid #c7d6ea;
+      color: #2f4d73;
+      background: #eef4fb;
+    }
+
+    .health-pill.ok {
+      border-color: #b7e6d5;
+      color: #0b6f54;
+      background: #ddf4ec;
+    }
+
+    .health-pill.warn {
+      border-color: #eed9a8;
+      color: #8a5d00;
+      background: #f8edd6;
+    }
+
+    .status-banner {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 12px;
+      border: 1px solid #d6e2f0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      background: #f8fbff;
+    }
+
+    .status-pill {
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid #c7d6ea;
+      color: #2f4d73;
+      background: #eef4fb;
+      white-space: nowrap;
+    }
+
+    .status-pill.running {
+      border-color: #b8d4f1;
+      color: #0b5cab;
+      background: #e8f2fd;
+    }
+
+    .status-pill.success {
+      border-color: #b7e6d5;
+      color: #0b6f54;
+      background: #ddf4ec;
+    }
+
+    .status-pill.error {
+      border-color: #edb8b3;
+      color: #8f241f;
+      background: #f8dddb;
     }
 
     .btn-group {
@@ -279,10 +374,47 @@
       color: #183253;
     }
 
+    .log-entry.error {
+      border-left-color: #c85c54;
+      background: #fff9f9;
+    }
+
+    .logs-toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .logs-toolbar select {
+      border: 1px solid #bfcfe4;
+      border-radius: 8px;
+      padding: 7px 10px;
+      color: #1a304d;
+      background: #fcfdff;
+      font-size: 13px;
+    }
+
+    .btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+
+    .btn:focus-visible,
+    input:focus-visible,
+    select:focus-visible {
+      outline: 2px solid #0b5cab;
+      outline-offset: 2px;
+    }
+
     .log-entry:last-child { margin-bottom: 0; }
 
     @media (max-width: 900px) {
       .grid-2 { grid-template-columns: 1fr; }
+      .grid-3 { grid-template-columns: 1fr; }
       .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
 
@@ -303,72 +435,41 @@
     </div>
 
     <header class="header-card">
-      <div class="tag">Milestone 1 - Phase 2</div>
+      <div class="tag">Milestone 1</div>
       <h1>Master Parts Sync Workspace</h1>
-      <p class="subtitle">Read Phase 1 sheet data, upsert Airtable Master Parts, and create ClickUp tasks for unresolved category cases.</p>
+      <p class="subtitle">Read inventory sheet data, upsert Airtable Master Parts, and create ClickUp tasks for unresolved category cases.</p>
     </header>
 
-    <div class="grid-2">
-      <section class="card" style="grid-column: 1 / -1;">
-        <h2 class="card-title">Run Controls</h2>
-        <div class="form-group">
-          <label for="dry-run-select">Run Mode</label>
-          <select id="dry-run-select">
-            <option value="true">Dry Run (No Airtable Writes, ClickUp Tasks Enabled)</option>
-            <option value="false">Live Run (Write to Airtable/ClickUp)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label for="ignore-task-cache">
-            <input id="ignore-task-cache" type="checkbox">
-            Ignore Task Cache (recreate ClickUp tasks this run)
-          </label>
-        </div>
-        <div class="form-group">
-          <label>
-            Write-back settings are auto-managed:
-          </label>
-          <div class="hint">Resolved field: <code>Resolved Category</code> | Source status: <code>Category Determined</code> | Complete status: <code>Completed</code> | Poll: <code>5 min</code></div>
-        </div>
-        <div class="btn-group">
-          <button class="btn btn-secondary" onclick="saveConfig()">Save Settings</button>
-          <button class="btn btn-primary" onclick="runPhase2()">Run Phase 2</button>
-        </div>
-        <div class="btn-group" style="margin-top: 10px;">
-          <button class="btn btn-secondary" onclick="startWritebackPoller()">Start Write-back</button>
-          <button class="btn btn-danger" onclick="stopWritebackPoller()">Stop Write-back</button>
-          <button class="btn btn-secondary" onclick="runWritebackOnce()">Run Write-back Once</button>
-          <button class="btn btn-secondary" onclick="refreshWritebackStatus()">Refresh Status</button>
-        </div>
-        <div class="hint" id="writeback-status-text">Write-back status: unknown</div>
-        <div id="run-status" class="status-box"></div>
-      </section>
-    </div>
-
     <section class="card">
-      <h2 class="card-title">Phase 2 Configuration</h2>
-
-      <div class="grid-2">
+      <h2 class="card-title">1. Connect and Configure</h2>
+      <div class="grid-3">
         <div>
+          <h3 class="section-title">Source (Google Sheets)</h3>
+          <div class="health-row">
+            <span id="health-source" class="health-pill warn">Source: Missing fields</span>
+          </div>
           <div class="form-group">
             <label for="sheet-id">Google Sheet ID</label>
             <input id="sheet-id" type="text" placeholder="Spreadsheet ID">
-            <div class="hint">Use the same source sheet used by Phase 1 export.</div>
+            <div class="hint">Use the same source sheet used by inventory export.</div>
+            <div id="err-sheet-id" class="field-error"></div>
+          </div>
+          <div class="form-group">
+            <label for="tab-name">Google Tab Name</label>
+            <input id="tab-name" type="text" placeholder="Worksheet tab name">
+            <div id="err-tab-name" class="field-error"></div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="section-title">Destination (Airtable)</h3>
+          <div class="health-row">
+            <span id="health-airtable" class="health-pill warn">Airtable: Missing fields</span>
           </div>
           <div class="form-group">
             <label for="airtable-token">Airtable Token</label>
             <input id="airtable-token" type="password" placeholder="pat...">
-          </div>
-          <div class="form-group">
-            <label for="clickup-token">ClickUp Token</label>
-            <input id="clickup-token" type="password" placeholder="pk_...">
-          </div>
-        </div>
-
-        <div>
-          <div class="form-group">
-            <label for="tab-name">Google Tab Name</label>
-            <input id="tab-name" type="text" placeholder="Worksheet tab name">
+            <div id="err-airtable-token" class="field-error"></div>
           </div>
           <div class="form-group">
             <label for="airtable-base-id">Airtable Base ID</label>
@@ -379,6 +480,19 @@
                 <option value="">Select Airtable base...</option>
               </select>
             </div>
+            <div id="err-airtable-base-id" class="field-error"></div>
+          </div>
+        </div>
+
+        <div>
+          <h3 class="section-title">Tasks (ClickUp)</h3>
+          <div class="health-row">
+            <span id="health-clickup" class="health-pill warn">ClickUp: Missing fields</span>
+          </div>
+          <div class="form-group">
+            <label for="clickup-token">ClickUp Token</label>
+            <input id="clickup-token" type="password" placeholder="pk_...">
+            <div id="err-clickup-token" class="field-error"></div>
           </div>
           <div class="form-group">
             <label for="clickup-list-id">ClickUp List ID</label>
@@ -389,17 +503,47 @@
                 <option value="">Select ClickUp list...</option>
               </select>
             </div>
+            <div id="err-clickup-list-id" class="field-error"></div>
           </div>
         </div>
+      </div>
+      <div class="btn-group" style="margin-top: 12px;">
+        <button class="btn btn-secondary" onclick="validateSetup()">Validate Setup</button>
+        <button class="btn btn-secondary" onclick="saveConfig()">Save Settings</button>
       </div>
     </section>
 
     <section class="card">
-      <h2 class="card-title">Execution Progress</h2>
+      <h2 class="card-title">2. Run and Automation</h2>
+      <div class="form-group">
+        <label>
+          Write-back settings are auto-managed:
+        </label>
+        <div class="hint">Resolved field: <code>Resolved Category</code> | Source status: <code>Category Determined</code> | Complete status: <code>Completed</code> | Poll: <code>5 min</code></div>
+      </div>
+      <div class="btn-group">
+        <button id="run-sync-btn" class="btn btn-primary" onclick="runPhase2()">Run Sync</button>
+      </div>
+      <div class="btn-group" style="margin-top: 10px;">
+        <button class="btn btn-secondary" onclick="startWritebackPoller()">Start Write-back</button>
+        <button class="btn btn-danger" onclick="stopWritebackPoller()">Stop Write-back</button>
+        <button class="btn btn-secondary" onclick="runWritebackOnce()">Run Write-back Once</button>
+        <button class="btn btn-secondary" onclick="refreshWritebackStatus()">Refresh Status</button>
+      </div>
+      <div class="hint" id="writeback-status-text">Write-back status: unknown</div>
+      <div class="status-banner" aria-live="polite">
+        <span id="run-state-pill" class="status-pill">Idle</span>
+        <div id="run-state-detail" class="hint" style="margin:0;">Waiting for validation and run action.</div>
+      </div>
+      <div id="run-status" class="status-box" aria-live="polite"></div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">3. Status and Progress</h2>
       <div class="progress-wrap">
         <div id="progress-bar" class="progress-bar"></div>
       </div>
-      <div class="status-title" id="progress-text">Waiting to run Phase 2...</div>
+      <div class="status-title" id="progress-text" aria-live="polite">Waiting to run sync...</div>
 
       <div class="summary-grid">
         <div class="summary-item"><div class="summary-label">Total Rows</div><div class="summary-value" id="sum-total">0</div></div>
@@ -414,8 +558,17 @@
     </section>
 
     <section class="card">
-      <h2 class="card-title">Activity Log</h2>
-      <div class="logs" id="log-list">
+      <h2 class="card-title">4. Activity Log</h2>
+      <div class="logs-toolbar">
+        <button id="toggle-logs-btn" class="btn btn-secondary" type="button" onclick="toggleLogs()">Collapse Logs</button>
+        <select id="log-filter" onchange="renderLogs()">
+          <option value="all">All</option>
+          <option value="error">Errors only</option>
+          <option value="latest">Latest 20</option>
+        </select>
+        <button class="btn btn-secondary" type="button" onclick="clearLogs()">Clear Logs</button>
+      </div>
+      <div class="logs" id="log-list" aria-live="polite">
         <div class="log-entry">No activity yet.</div>
       </div>
     </section>
@@ -423,6 +576,9 @@
 
   <script>
     let isRunning = false;
+    let lastRunFailed = false;
+    let logsCollapsed = false;
+    const logEntries = [];
     const DEFAULT_MASTER_TABLE = 'Master Parts Table';
     const DEFAULT_CATEGORY_TABLE = 'Category Names';
     const DEFAULT_RESOLVED_FIELD = 'Resolved Category';
@@ -430,22 +586,197 @@
     const DEFAULT_STATUS_COMPLETED = 'Completed';
     const DEFAULT_WRITEBACK_INTERVAL_MINUTES = 5;
     const DEFAULT_WRITEBACK_ENABLED = true;
+    const REQUIRED_FIELDS = [
+      ['sheet-id', 'Google Sheet ID'],
+      ['tab-name', 'Google Tab Name'],
+      ['airtable-token', 'Airtable Token'],
+      ['airtable-base-id', 'Airtable Base ID'],
+      ['clickup-token', 'ClickUp Token'],
+      ['clickup-list-id', 'ClickUp List ID']
+    ];
+    const STAGE_LABELS = {
+      read_sheet: 'Reading source sheet',
+      normalize_filter: 'Normalizing and filtering rows',
+      load_category_reference: 'Loading category reference',
+      load_existing_master_parts: 'Loading existing master parts',
+      plan_upserts: 'Planning upserts',
+      execute_airtable_writes: 'Writing to Airtable',
+      create_clickup_tasks: 'Creating ClickUp tasks',
+      completed: 'Completed'
+    };
 
     window.addEventListener('load', async () => {
       await loadConfig();
       attachProgressListener();
       attachPickerListeners();
+      attachFieldListeners();
+      updateHealthBadges();
+      updateRunButtonState();
     });
 
-    function logLine(text) {
+    function setRunState(state, detail = '') {
+      const pill = document.getElementById('run-state-pill');
+      const detailEl = document.getElementById('run-state-detail');
+      pill.className = 'status-pill';
+      if (state === 'Running') pill.classList.add('running');
+      if (state === 'Success') pill.classList.add('success');
+      if (state === 'Error') pill.classList.add('error');
+      pill.textContent = state;
+      detailEl.textContent = detail || detailEl.textContent;
+    }
+
+    function renderLogs() {
       const list = document.getElementById('log-list');
-      if (list.children.length === 1 && list.children[0].textContent === 'No activity yet.') {
-        list.innerHTML = '';
+      const filter = document.getElementById('log-filter').value;
+      list.style.display = logsCollapsed ? 'none' : 'block';
+
+      let rows = [...logEntries];
+      if (filter === 'error') {
+        rows = rows.filter(entry => entry.level === 'error');
+      } else if (filter === 'latest') {
+        rows = rows.slice(0, 20);
       }
-      const row = document.createElement('div');
-      row.className = 'log-entry';
-      row.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
-      list.prepend(row);
+
+      if (rows.length === 0) {
+        list.innerHTML = '<div class="log-entry">No activity yet.</div>';
+        return;
+      }
+
+      list.innerHTML = '';
+      rows.forEach(entry => {
+        const row = document.createElement('div');
+        row.className = `log-entry ${entry.level === 'error' ? 'error' : ''}`.trim();
+        row.textContent = `[${entry.time}] ${entry.text}`;
+        list.appendChild(row);
+      });
+    }
+
+    function logLine(text, level = 'info') {
+      logEntries.unshift({
+        time: new Date().toLocaleTimeString(),
+        text,
+        level
+      });
+      renderLogs();
+    }
+
+    function toggleLogs() {
+      logsCollapsed = !logsCollapsed;
+      document.getElementById('toggle-logs-btn').textContent = logsCollapsed ? 'Expand Logs' : 'Collapse Logs';
+      renderLogs();
+    }
+
+    function clearLogs() {
+      logEntries.length = 0;
+      renderLogs();
+    }
+
+    function setFieldError(fieldId, message) {
+      const input = document.getElementById(fieldId);
+      const error = document.getElementById(`err-${fieldId}`);
+      if (input) input.classList.add('input-error');
+      if (error) error.textContent = message;
+    }
+
+    function clearFieldError(fieldId) {
+      const input = document.getElementById(fieldId);
+      const error = document.getElementById(`err-${fieldId}`);
+      if (input) input.classList.remove('input-error');
+      if (error) error.textContent = '';
+    }
+
+    function validateForm(showErrors = true) {
+      let valid = true;
+      REQUIRED_FIELDS.forEach(([id, label]) => {
+        const value = document.getElementById(id).value.trim();
+        if (!value) {
+          valid = false;
+          if (showErrors) {
+            setFieldError(id, `${label} is required.`);
+          }
+        } else {
+          clearFieldError(id);
+        }
+      });
+      return valid;
+    }
+
+    function setHealthPill(id, okText, warnText, isOk) {
+      const el = document.getElementById(id);
+      el.className = `health-pill ${isOk ? 'ok' : 'warn'}`;
+      el.textContent = isOk ? okText : warnText;
+    }
+
+    function updateHealthBadges() {
+      setHealthPill(
+        'health-source',
+        'Source: Configured',
+        'Source: Missing fields',
+        Boolean(document.getElementById('sheet-id').value.trim() && document.getElementById('tab-name').value.trim())
+      );
+      setHealthPill(
+        'health-airtable',
+        'Airtable: Configured',
+        'Airtable: Missing fields',
+        Boolean(document.getElementById('airtable-token').value.trim() && document.getElementById('airtable-base-id').value.trim())
+      );
+      setHealthPill(
+        'health-clickup',
+        'ClickUp: Configured',
+        'ClickUp: Missing fields',
+        Boolean(document.getElementById('clickup-token').value.trim() && document.getElementById('clickup-list-id').value.trim())
+      );
+    }
+
+    function updateRunButtonState() {
+      const runBtn = document.getElementById('run-sync-btn');
+      runBtn.disabled = isRunning || !validateForm(false);
+    }
+
+    function attachFieldListeners() {
+      REQUIRED_FIELDS.forEach(([id]) => {
+        const el = document.getElementById(id);
+        el.addEventListener('input', () => {
+          clearFieldError(id);
+          updateHealthBadges();
+          updateRunButtonState();
+        });
+      });
+    }
+
+    function formatProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = STAGE_LABELS[stage] || 'Running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    async function validateSetup() {
+      await ensureSourceFieldsFromInventoryExport();
+      const valid = validateForm(true);
+      updateRunButtonState();
+      updateHealthBadges();
+      if (!valid) {
+        setRunState('Error', 'Configuration has missing required fields.');
+        showStatus('run-status', 'error', 'Please complete all required fields.');
+        return;
+      }
+
+      setRunState('Running', 'Validating Airtable and ClickUp access...');
+      showStatus('run-status', 'info', 'Validating setup...');
+      try {
+        await fetchAirtableBases(true, true);
+        await fetchClickUpLists(true, true);
+        setRunState('Success', 'Setup validation completed. You can run sync.');
+        showStatus('run-status', 'success', 'Setup validation completed.');
+        logLine('Setup validation completed.');
+      } catch (err) {
+        setRunState('Error', `Setup validation failed: ${err.message}`);
+        showStatus('run-status', 'error', `Setup validation failed: ${err.message}`);
+        logLine(`Setup validation failed: ${err.message}`, 'error');
+      }
     }
 
     async function loadConfig() {
@@ -457,8 +788,6 @@
         document.getElementById('airtable-token').value = config.airtableToken || '';
         document.getElementById('clickup-list-id').value = config.clickupListId || '';
         document.getElementById('clickup-token').value = config.clickupToken || '';
-        document.getElementById('ignore-task-cache').checked = Boolean(config.ignoreTaskCache);
-        document.getElementById('dry-run-select').value = String(Boolean(config.dryRun));
 
         if (config.airtableToken) {
           await fetchAirtableBases(true);
@@ -466,10 +795,59 @@
         if (config.clickupToken) {
           await fetchClickUpLists(true);
         }
+        if (!document.getElementById('sheet-id').value.trim() || !document.getElementById('tab-name').value.trim()) {
+          await pullSourceFromInventoryExport(true);
+        }
         await refreshWritebackStatus(true);
+        setRunState('Idle', 'Configuration loaded. Validate setup, then run sync.');
+        updateHealthBadges();
+        updateRunButtonState();
       } catch (err) {
-        logLine(`Failed to load Phase 2 config: ${err.message}`);
+        setRunState('Error', `Failed to load config: ${err.message}`);
+        logLine(`Failed to load sync config: ${err.message}`, 'error');
       }
+    }
+
+    async function pullSourceFromInventoryExport(silent = false) {
+      try {
+        if (!window.inventorySheetsAPI || typeof window.inventorySheetsAPI.getStatus !== 'function') {
+          throw new Error('Inventory export API is unavailable in this window.');
+        }
+
+        const status = await window.inventorySheetsAPI.getStatus();
+        const spreadsheetId = String(status?.spreadsheetId || '').trim();
+        const worksheetName = String(status?.worksheetName || '').trim();
+
+        if (!spreadsheetId || !worksheetName) {
+          throw new Error('Inventory export source is not configured yet.');
+        }
+
+        document.getElementById('sheet-id').value = spreadsheetId;
+        document.getElementById('tab-name').value = worksheetName;
+        clearFieldError('sheet-id');
+        clearFieldError('tab-name');
+        updateHealthBadges();
+        updateRunButtonState();
+
+        if (!silent) {
+          showStatus('run-status', 'success', 'Imported Google Sheet ID and Tab Name from inventory export.');
+          logLine('Imported source sheet config from inventory export.');
+        }
+        return true;
+      } catch (err) {
+        if (!silent) {
+          showStatus('run-status', 'error', `Failed to import inventory export source: ${err.message}`);
+          logLine(`Failed to import inventory export source: ${err.message}`, 'error');
+        }
+        return false;
+      }
+    }
+
+    async function ensureSourceFieldsFromInventoryExport() {
+      const missingSheet = !document.getElementById('sheet-id').value.trim();
+      const missingTab = !document.getElementById('tab-name').value.trim();
+      if (!missingSheet && !missingTab) return true;
+      return pullSourceFromInventoryExport(true);
     }
 
     function attachPickerListeners() {
@@ -480,6 +858,9 @@
         const selectedId = airtablePicker.value || '';
         if (selectedId) {
           document.getElementById('airtable-base-id').value = selectedId;
+          clearFieldError('airtable-base-id');
+          updateHealthBadges();
+          updateRunButtonState();
         }
       });
 
@@ -487,6 +868,9 @@
         const selectedId = clickupPicker.value || '';
         if (selectedId) {
           document.getElementById('clickup-list-id').value = selectedId;
+          clearFieldError('clickup-list-id');
+          updateHealthBadges();
+          updateRunButtonState();
         }
       });
     }
@@ -511,10 +895,14 @@
       }
     }
 
-    async function fetchAirtableBases(silent = false) {
+    async function fetchAirtableBases(silent = false, strict = false) {
       const token = document.getElementById('airtable-token').value.trim();
       if (!token) {
+        setFieldError('airtable-token', 'Airtable Token is required.');
         showStatus('run-status', 'error', 'Enter Airtable token first, then click Find Bases from Token.');
+        if (strict) {
+          throw new Error('Airtable token is missing.');
+        }
         return;
       }
 
@@ -544,17 +932,24 @@
           logLine(`Fetched ${options.length} Airtable base(s) from token.`);
         }
       } catch (err) {
+        if (strict) {
+          throw err;
+        }
         if (!silent) {
           showStatus('run-status', 'error', `Airtable base discovery failed: ${err.message}`);
-          logLine(`Airtable base discovery failed: ${err.message}`);
+          logLine(`Airtable base discovery failed: ${err.message}`, 'error');
         }
       }
     }
 
-    async function fetchClickUpLists(silent = false) {
+    async function fetchClickUpLists(silent = false, strict = false) {
       const token = document.getElementById('clickup-token').value.trim();
       if (!token) {
+        setFieldError('clickup-token', 'ClickUp Token is required.');
         showStatus('run-status', 'error', 'Enter ClickUp token first, then click Find Lists from Token.');
+        if (strict) {
+          throw new Error('ClickUp token is missing.');
+        }
         return;
       }
 
@@ -584,9 +979,12 @@
           logLine(`Fetched ${options.length} ClickUp list(s) from token.`);
         }
       } catch (err) {
+        if (strict) {
+          throw err;
+        }
         if (!silent) {
           showStatus('run-status', 'error', `ClickUp list discovery failed: ${err.message}`);
-          logLine(`ClickUp list discovery failed: ${err.message}`);
+          logLine(`ClickUp list discovery failed: ${err.message}`, 'error');
         }
       }
     }
@@ -601,13 +999,11 @@
         airtableCategoryTable: DEFAULT_CATEGORY_TABLE,
         clickupListId: document.getElementById('clickup-list-id').value.trim(),
         clickupToken: document.getElementById('clickup-token').value.trim(),
-        ignoreTaskCache: document.getElementById('ignore-task-cache').checked,
         phase2WritebackEnabled: DEFAULT_WRITEBACK_ENABLED,
         writebackPollIntervalMinutes: DEFAULT_WRITEBACK_INTERVAL_MINUTES,
         clickupResolvedCategoryFieldName: DEFAULT_RESOLVED_FIELD,
         clickupStatusDetermined: DEFAULT_STATUS_DETERMINED,
-        clickupStatusCompleted: DEFAULT_STATUS_COMPLETED,
-        dryRun: document.getElementById('dry-run-select').value === 'true'
+        clickupStatusCompleted: DEFAULT_STATUS_COMPLETED
       };
     }
 
@@ -633,12 +1029,20 @@
       } catch (err) {
         if (!silent) {
           showStatus('run-status', 'error', `Failed to refresh write-back status: ${err.message}`);
+          logLine(`Failed to refresh write-back status: ${err.message}`, 'error');
         }
       }
     }
 
     async function startWritebackPoller() {
+      if (!window.confirm('Start automatic write-back polling now?')) return;
       try {
+        await ensureSourceFieldsFromInventoryExport();
+        if (!validateForm(true)) {
+          setRunState('Error', 'Fix setup errors before starting write-back.');
+          showStatus('run-status', 'error', 'Complete required fields before starting write-back.');
+          return;
+        }
         const config = collectConfigFromForm();
         await window.phase2API.saveConfig(config);
         const result = await window.phase2API.startWriteback(config);
@@ -646,31 +1050,42 @@
           throw new Error(result?.message || 'Failed to start write-back poller.');
         }
         renderWritebackStatus(result.status);
+        setRunState('Success', 'Write-back poller started.');
         showStatus('run-status', 'success', 'Write-back poller started.');
         logLine('Write-back poller started.');
       } catch (err) {
+        setRunState('Error', `Start write-back failed: ${err.message}`);
         showStatus('run-status', 'error', `Start write-back failed: ${err.message}`);
-        logLine(`Start write-back failed: ${err.message}`);
+        logLine(`Start write-back failed: ${err.message}`, 'error');
       }
     }
 
     async function stopWritebackPoller() {
+      if (!window.confirm('Stop automatic write-back polling?')) return;
       try {
         const result = await window.phase2API.stopWriteback();
         if (!result?.success) {
           throw new Error(result?.message || 'Failed to stop write-back poller.');
         }
         renderWritebackStatus(result.status);
+        setRunState('Idle', 'Write-back poller stopped.');
         showStatus('run-status', 'success', 'Write-back poller stopped.');
         logLine('Write-back poller stopped.');
       } catch (err) {
+        setRunState('Error', `Stop write-back failed: ${err.message}`);
         showStatus('run-status', 'error', `Stop write-back failed: ${err.message}`);
-        logLine(`Stop write-back failed: ${err.message}`);
+        logLine(`Stop write-back failed: ${err.message}`, 'error');
       }
     }
 
     async function runWritebackOnce() {
       try {
+        await ensureSourceFieldsFromInventoryExport();
+        if (!validateForm(true)) {
+          setRunState('Error', 'Fix setup errors before write-back run.');
+          showStatus('run-status', 'error', 'Complete required fields before write-back run.');
+          return;
+        }
         const config = collectConfigFromForm();
         await window.phase2API.saveConfig(config);
         const result = await window.phase2API.runWritebackOnce(config);
@@ -683,26 +1098,38 @@
           'success',
           `Write-back done. Processed=${summary.tasksProcessed || 0}, Completed=${summary.tasksCompleted || 0}, Errors=${summary.tasksErrored || 0}`
         );
+        setRunState('Success', `Write-back complete. Processed ${summary.tasksProcessed || 0} tasks.`);
         logLine(`Write-back summary: ${JSON.stringify(summary)}`);
         await refreshWritebackStatus(true);
       } catch (err) {
+        setRunState('Error', `Write-back run failed: ${err.message}`);
         showStatus('run-status', 'error', `Write-back run failed: ${err.message}`);
-        logLine(`Write-back run failed: ${err.message}`);
+        logLine(`Write-back run failed: ${err.message}`, 'error');
       }
     }
 
     async function saveConfig() {
       try {
+        await ensureSourceFieldsFromInventoryExport();
+        if (!validateForm(true)) {
+          setRunState('Error', 'Fix setup errors before saving settings.');
+          showStatus('run-status', 'error', 'Please complete required fields before saving.');
+          return;
+        }
         const config = collectConfigFromForm();
         const result = await window.phase2API.saveConfig(config);
         if (result.success) {
-          showStatus('run-status', 'success', 'Phase 2 settings saved.');
-          logLine('Saved Phase 2 configuration.');
+          setRunState('Success', 'Settings saved.');
+          showStatus('run-status', 'success', 'Sync settings saved.');
+          logLine('Saved sync configuration.');
         } else {
+          setRunState('Error', result.message || 'Failed to save settings.');
           showStatus('run-status', 'error', result.message || 'Failed to save settings.');
         }
       } catch (err) {
+        setRunState('Error', `Failed to save settings: ${err.message}`);
         showStatus('run-status', 'error', `Failed to save settings: ${err.message}`);
+        logLine(`Failed to save settings: ${err.message}`, 'error');
       }
     }
 
@@ -711,24 +1138,34 @@
         if (!payload) return;
         const percent = Number(payload.percent || 0);
         document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
-        document.getElementById('progress-text').textContent =
-          payload.message || `Stage: ${payload.stage || 'running'} (${percent}%)`;
+        document.getElementById('progress-text').textContent = formatProgressText(payload);
 
         if (payload.counts) {
           renderSummary(payload.counts);
         }
 
         if (payload.stage) {
-          logLine(`Progress: ${payload.stage} (${percent}%)`);
+          logLine(`Progress: ${formatProgressText(payload)}`);
         }
       });
     }
 
     async function runPhase2() {
       if (isRunning) return;
+      if (lastRunFailed && !window.confirm('Previous run failed. Do you want to run sync again now?')) return;
+      await ensureSourceFieldsFromInventoryExport();
+      if (!validateForm(true)) {
+        setRunState('Error', 'Fix setup errors before running sync.');
+        showStatus('run-status', 'error', 'Please complete required fields before running sync.');
+        updateRunButtonState();
+        return;
+      }
       isRunning = true;
-      showStatus('run-status', 'info', 'Phase 2 run started...');
-      logLine('Starting Phase 2 pipeline.');
+      updateRunButtonState();
+      lastRunFailed = false;
+      setRunState('Running', 'Sync is in progress...');
+      showStatus('run-status', 'info', 'Sync run started...');
+      logLine('Starting sync pipeline.');
 
       try {
         const config = collectConfigFromForm();
@@ -738,21 +1175,27 @@
 
         if (result.success) {
           renderSummary(result.summary || {});
-          showStatus('run-status', 'success', `Phase 2 completed (${config.dryRun ? 'Dry Run' : 'Live Run'}).`);
-          logLine(`Phase 2 completed. Created: ${result.summary?.created || 0}, Updated: ${result.summary?.updated || 0}, Tasks: ${result.summary?.clickupTasksCreated || 0}`);
+          setRunState('Success', 'Sync completed successfully.');
+          showStatus('run-status', 'success', 'Sync completed.');
+          logLine(`Sync completed. Created: ${result.summary?.created || 0}, Updated: ${result.summary?.updated || 0}, Tasks: ${result.summary?.clickupTasksCreated || 0}`);
 
           if (Array.isArray(result.summary?.errors) && result.summary.errors.length > 0) {
-            result.summary.errors.forEach(err => logLine(`Error: ${err}`));
+            result.summary.errors.forEach(err => logLine(`Error: ${err}`, 'error'));
           }
         } else {
-          showStatus('run-status', 'error', result.message || 'Phase 2 failed.');
-          logLine(`Phase 2 failed: ${result.message || 'Unknown error'}`);
+          lastRunFailed = true;
+          setRunState('Error', result.message || 'Sync failed.');
+          showStatus('run-status', 'error', result.message || 'Sync failed.');
+          logLine(`Sync failed: ${result.message || 'Unknown error'}`, 'error');
         }
       } catch (err) {
-        showStatus('run-status', 'error', `Phase 2 failed: ${err.message}`);
-        logLine(`Phase 2 failed: ${err.message}`);
+        lastRunFailed = true;
+        setRunState('Error', `Sync failed: ${err.message}`);
+        showStatus('run-status', 'error', `Sync failed: ${err.message}`);
+        logLine(`Sync failed: ${err.message}`, 'error');
       } finally {
         isRunning = false;
+        updateRunButtonState();
       }
     }
 
