@@ -38,16 +38,7 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         ISNULL(i.TotalGSTTaxAmount, 0) AS Tax,
 
         /* Line-level total (invoice values repeated per line) */
-        li.UnitPrice +
-        ISNULL(i.TotalFreightAmount, 0) +
-        ISNULL(li.TotalFreightAmount, 0) +
-        ISNULL(i.TotalFreightTaxAmount, 0) +
-        ISNULL(i.TotalCityTaxAmount, 0) +
-        ISNULL(i.TotalCountyTaxAmount, 0) +
-        ISNULL(i.TotalStateProvTaxAmount, 0) +
-        ISNULL(i.TotalOtherTax, 0) +
-        ISNULL(i.TotalGSTTaxAmount, 0) -
-        ISNULL(i.TotalDiscountAmount, 0) AS Total,
+        i.InvoiceAmount AS Total,
 
         inv.LocationCode,
 
