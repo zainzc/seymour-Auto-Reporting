@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
-require('dotenv').config({ debug: process.env.DEBUG_DOTENV === 'true' });
+const { loadEnv } = require('../config/loadEnv');
+loadEnv();
 
 const config = require('../config/env');
 

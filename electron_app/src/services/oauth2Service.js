@@ -1,7 +1,8 @@
 const { OAuth2Client } = require('google-auth-library');
 const ElectronStore = require('electron-store').default;
 const { saveReportingConfig, getReportingConfig, saveInventoryConfig, getInventoryConfig } = require('../config/configStore');
-require('dotenv').config();
+const { loadEnv } = require('../config/loadEnv');
+loadEnv();
 
 // OAuth2 credentials from environment variables
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -16,6 +17,11 @@ const store = new ElectronStore({ encryptionKey: 'client-secret-key' });
  * Initialize OAuth2 client
  */
 function initOAuth2Client() {
+  if (!CLIENT_ID || !CLIENT_SECRET) {
+    throw new Error(
+      'Google OAuth is not configured. Missing GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET in environment.'
+    );
+  }
   oauth2Client = new OAuth2Client(CLIENT_ID, CLIENT_SECRET, REDIRECT_URI);
   return oauth2Client;
 }
@@ -39,6 +45,7 @@ function getAuthUrl(context = 'reporting') {
   
   return client.generateAuthUrl({
     access_type: 'offline',  // Get refresh token
+    redirect_uri: REDIRECT_URI,
     scope: [
       'https://www.googleapis.com/auth/spreadsheets',
       'https://www.googleapis.com/auth/drive',
