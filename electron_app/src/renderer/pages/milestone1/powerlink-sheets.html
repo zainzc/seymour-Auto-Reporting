@@ -411,7 +411,9 @@
       </div>
       <div class="btn-group">
         <button class="btn btn-primary" id="auth-btn" onclick="handleGoogleAuth()" style="display: none;">Connect to Google</button>
+        <button class="btn btn-secondary" id="auth-update-btn" onclick="handleGoogleReauth()" style="display: none;">Connect / Update Google Account</button>
       </div>
+      <div id="auth-action-status" class="status-box"></div>
     </section>
 
     <section class="card">
@@ -442,7 +444,8 @@
         <button class="btn btn-primary" onclick="saveConfiguration()">Save Configuration</button>
       </div>
 
-      <div id="config-status" class="status-box"></div>
+      <div id="config-test-status" class="status-box"></div>
+      <div id="config-save-status" class="status-box"></div>
     </section>
 
     <section class="card">
@@ -459,10 +462,11 @@
       <div class="btn-group">
         <button class="btn btn-primary" id="btn-start" onclick="startSchedule()">Start Daily Schedule</button>
         <button class="btn btn-danger" id="btn-stop" onclick="stopSchedule()" style="display: none;">Stop Schedule</button>
-        <button class="btn btn-secondary" onclick="testPushNow()">Run Sync Now</button>
+        <button class="btn btn-secondary" id="btn-run-now" onclick="testPushNow()">Run Sync Now</button>
       </div>
 
       <div id="schedule-status" class="status-box"></div>
+      <div id="manual-sync-status" class="status-box"></div>
     </section>
 
     <section class="card">
@@ -477,6 +481,7 @@
     let currentSpreadsheetId = null;
     let currentWorksheetName = null;
     let isDisconnecting = false;
+    let inventoryAuthSource = 'none';
 
     window.addEventListener('load', async () => {
       await checkGoogleAuth();
@@ -488,38 +493,77 @@
     async function checkGoogleAuth() {
       try {
         const isAuth = await window.oauth2InventoryAPI.isAuthenticated();
+        inventoryAuthSource = typeof window.oauth2InventoryAPI.getAuthSource === 'function'
+          ? await window.oauth2InventoryAPI.getAuthSource()
+          : (isAuth ? 'inventory' : 'none');
         if (isAuth) {
           const userInfo = await window.oauth2InventoryAPI.getUserInfo();
-          updateGoogleAuthUI(true, userInfo?.email);
+          updateGoogleAuthUI(true, userInfo?.email, inventoryAuthSource);
         } else {
-          updateGoogleAuthUI(false);
+          updateGoogleAuthUI(false, null, 'none');
         }
       } catch (error) {
         console.error('Failed to check Google authentication:', error);
-        updateGoogleAuthUI(false);
+        updateGoogleAuthUI(false, null, 'none');
       }
     }
 
-    function updateGoogleAuthUI(isConnected, email = null) {
+    function updateGoogleAuthUI(isConnected, email = null, authSource = 'none') {
       const indicator = document.getElementById('auth-indicator');
       const text = document.getElementById('auth-text');
       const btn = document.getElementById('auth-btn');
+      const updateBtn = document.getElementById('auth-update-btn');
 
       if (isConnected) {
         indicator.classList.add('connected');
-        text.textContent = email ? `Connected: ${email}` : 'Connected to Google. Ready for Google Sheets access.';
-        btn.textContent = 'Disconnect Google';
+        if (authSource === 'reporting') {
+          text.textContent = email
+            ? `Connected via Milestone 11: ${email}`
+            : 'Connected via Milestone 11 Google account.';
+          btn.textContent = 'Using Shared Google Account';
+          btn.disabled = true;
+          updateBtn.textContent = 'Connect / Update Google Account';
+          updateBtn.style.display = 'inline-block';
+        } else {
+          text.textContent = email ? `Connected: ${email}` : 'Connected to Google. Ready for Google Sheets access.';
+          btn.textContent = 'Disconnect Google';
+          btn.disabled = false;
+          updateBtn.textContent = 'Connect / Update Google Account';
+          updateBtn.style.display = 'inline-block';
+        }
       } else {
         indicator.classList.remove('connected');
         text.textContent = 'Google account not connected. Authenticate to continue.';
         btn.textContent = 'Connect to Google';
+        btn.disabled = false;
+        updateBtn.style.display = 'none';
       }
 
       btn.style.display = 'inline-block';
     }
 
+    async function openGoogleAuthFlow(statusDiv, btnToReenable = null) {
+      const authUrl = await window.oauth2InventoryAPI.getAuthUrl();
+
+      try {
+        if (window.oauth2InventoryAPI.openExternal) {
+          await window.oauth2InventoryAPI.openExternal(authUrl);
+        } else {
+          window.open(authUrl, '_blank');
+        }
+      } catch (openErr) {
+        console.error('openExternal failed, using window.open:', openErr);
+        window.open(authUrl, '_blank');
+      }
+
+      showStatus(statusDiv, 'info', 'Complete Google sign-in in your browser, then return here.');
+      setTimeout(() => {
+        if (btnToReenable) btnToReenable.disabled = false;
+      }, 5000);
+    }
+
     async function handleGoogleAuth() {
-      const statusDiv = document.getElementById('config-status');
+      const statusDiv = document.getElementById('auth-action-status');
       const btn = document.getElementById('auth-btn');
 
       if (btn.disabled) return;
@@ -527,8 +571,15 @@
 
       try {
         const isAuth = await window.oauth2InventoryAPI.isAuthenticated();
+        const authSource = typeof window.oauth2InventoryAPI.getAuthSource === 'function'
+          ? await window.oauth2InventoryAPI.getAuthSource()
+          : (isAuth ? 'inventory' : 'none');
 
         if (isAuth) {
+          if (authSource === 'reporting') {
+            btn.disabled = false;
+            return;
+          }
           if (isDisconnecting) return;
           isDisconnecting = true;
           try {
@@ -548,23 +599,20 @@
           return;
         }
 
-        const authUrl = await window.oauth2InventoryAPI.getAuthUrl();
+        await openGoogleAuthFlow(statusDiv, btn);
+      } catch (error) {
+        showStatus(statusDiv, 'error', `Google authentication failed: ${error.message}`);
+        btn.disabled = false;
+      }
+    }
 
-        try {
-          if (window.oauth2InventoryAPI.openExternal) {
-            await window.oauth2InventoryAPI.openExternal(authUrl);
-          } else {
-            window.open(authUrl, '_blank');
-          }
-        } catch (openErr) {
-          console.error('openExternal failed, using window.open:', openErr);
-          window.open(authUrl, '_blank');
-        }
-
-        showStatus(statusDiv, 'info', 'Complete Google sign-in in your browser, then return here.');
-        setTimeout(() => {
-          btn.disabled = false;
-        }, 5000);
+    async function handleGoogleReauth() {
+      const statusDiv = document.getElementById('auth-action-status');
+      const btn = document.getElementById('auth-update-btn');
+      if (!btn || btn.disabled) return;
+      btn.disabled = true;
+      try {
+        await openGoogleAuthFlow(statusDiv, btn);
       } catch (error) {
         showStatus(statusDiv, 'error', `Google authentication failed: ${error.message}`);
         btn.disabled = false;
@@ -573,14 +621,16 @@
 
     window.oauth2InventoryAPI.onAuthorized(async () => {
       const btn = document.getElementById('auth-btn');
+      const updateBtn = document.getElementById('auth-update-btn');
       try {
         await new Promise(resolve => setTimeout(resolve, 500));
         await checkGoogleAuth();
-        showStatus(document.getElementById('config-status'), 'success', 'Google account connected successfully.');
+        showStatus(document.getElementById('auth-action-status'), 'success', 'Google account connected successfully.');
       } catch (err) {
         console.error('Failed to refresh auth status after callback:', err);
       } finally {
         btn.disabled = false;
+        if (updateBtn) updateBtn.disabled = false;
       }
     });
 
@@ -666,7 +716,7 @@
     async function testConnection() {
       const sheetsUrl = document.getElementById('sheets-url').value.trim();
       const worksheetName = document.getElementById('worksheet-name').value.trim();
-      const statusDiv = document.getElementById('config-status');
+      const statusDiv = document.getElementById('config-test-status');
 
       if (!sheetsUrl) {
         showStatus(statusDiv, 'error', 'Please enter a Google Sheets URL.');
@@ -705,7 +755,7 @@
     async function saveConfiguration() {
       const sheetsUrl = document.getElementById('sheets-url').value.trim();
       const worksheetName = document.getElementById('worksheet-name').value.trim();
-      const statusDiv = document.getElementById('config-status');
+      const statusDiv = document.getElementById('config-save-status');
 
       if (!sheetsUrl || !worksheetName) {
         showStatus(statusDiv, 'error', 'Please enter both Google Sheets URL and worksheet name.');
@@ -780,7 +830,8 @@
     }
 
     async function testPushNow() {
-      const statusDiv = document.getElementById('schedule-status');
+      const statusDiv = document.getElementById('manual-sync-status');
+      const runBtn = document.getElementById('btn-run-now');
 
       if (!currentSpreadsheetId || !currentWorksheetName) {
         showStatus(statusDiv, 'error', 'Please configure Google Sheets settings first.');
@@ -791,6 +842,7 @@
         return;
       }
 
+      if (runBtn) runBtn.disabled = true;
       showStatus(statusDiv, 'info', 'Running manual sync from Powerlink to Google Sheets...');
 
       try {
@@ -798,12 +850,19 @@
 
         if (result.success) {
           showStatus(statusDiv, 'success', `${result.message} Full refresh completed.`);
-          await loadExecutionLogs();
         } else {
           showStatus(statusDiv, 'error', result.message);
         }
       } catch (err) {
         showStatus(statusDiv, 'error', `Sync failed: ${err.message}`);
+      } finally {
+        try {
+          await loadExecutionLogs();
+          await loadScheduleStatus();
+        } catch (refreshErr) {
+          console.error('Failed to refresh manual sync UI state:', refreshErr);
+        }
+        if (runBtn) runBtn.disabled = false;
       }
     }
 

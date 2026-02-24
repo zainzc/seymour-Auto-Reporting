@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('oauth2InventoryAPI', {
   getAuthUrl: () => ipcRenderer.invoke('oauth2-inventory-get-auth-url'),
   getUserInfo: () => ipcRenderer.invoke('oauth2-inventory-get-user-info'),
   isAuthenticated: () => ipcRenderer.invoke('oauth2-inventory-is-authenticated'),
+  getAuthSource: () => ipcRenderer.invoke('oauth2-inventory-get-auth-source'),
   disconnect: () => ipcRenderer.invoke('oauth2-inventory-disconnect'),
   onAuthorized: (callback) => ipcRenderer.on('oauth2-authorized-inventory', callback),
   openExternal: (url) => shell.openExternal(url)
@@ -65,8 +66,13 @@ contextBridge.exposeInMainWorld('inventorySheetsAPI', {
 contextBridge.exposeInMainWorld('phase2API', {
   getConfig: () => ipcRenderer.invoke('phase2-get-config'),
   saveConfig: (config) => ipcRenderer.invoke('phase2-save-config', config),
+  getActivityLogs: () => ipcRenderer.invoke('phase2-get-activity-logs'),
+  appendActivityLog: (entry) => ipcRenderer.invoke('phase2-append-activity-log', entry),
+  clearActivityLogs: () => ipcRenderer.invoke('phase2-clear-activity-logs'),
   fetchClickUpLists: (token) => ipcRenderer.invoke('phase2-fetch-clickup-lists', token),
   fetchAirtableBases: (token) => ipcRenderer.invoke('phase2-fetch-airtable-bases', token),
+  validateClickUpConfig: (payload) => ipcRenderer.invoke('phase2-validate-clickup-config', payload),
+  validateAirtableConfig: (payload) => ipcRenderer.invoke('phase2-validate-airtable-config', payload),
   run: (options) => ipcRenderer.invoke('phase2-run', options),
   startWriteback: (options) => ipcRenderer.invoke('phase2-writeback-start', options),
   stopWriteback: () => ipcRenderer.invoke('phase2-writeback-stop'),

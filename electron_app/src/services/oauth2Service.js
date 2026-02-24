@@ -86,10 +86,34 @@ async function getTokensFromCode(code, context = 'reporting') {
  * Get stored tokens from electron-store
  * @returns {Object|null} Stored tokens or null
  */
-function getStoredTokens(context = 'reporting') {
-  return context === 'inventory'
-    ? getInventoryConfig('googleTokens')
-    : getReportingConfig('googleTokens');
+function getStoredTokens(context = 'reporting', options = {}) {
+  const allowFallback = options.allowFallback !== false;
+
+  if (context === 'inventory') {
+    const inventoryTokens = getInventoryConfig('googleTokens');
+    if (inventoryTokens && typeof inventoryTokens === 'object' && Object.keys(inventoryTokens).length > 0) {
+      return inventoryTokens;
+    }
+    if (allowFallback) {
+      return getReportingConfig('googleTokens');
+    }
+    return inventoryTokens;
+  }
+
+  return getReportingConfig('googleTokens');
+}
+
+function getAuthSource(context = 'reporting') {
+  if (context === 'inventory') {
+    const inventoryTokens = getStoredTokens('inventory', { allowFallback: false });
+    if (inventoryTokens && inventoryTokens.access_token) return 'inventory';
+    const reportingTokens = getStoredTokens('reporting', { allowFallback: false });
+    if (reportingTokens && reportingTokens.access_token) return 'reporting';
+    return 'none';
+  }
+
+  const reportingTokens = getStoredTokens('reporting', { allowFallback: false });
+  return reportingTokens && reportingTokens.access_token ? 'reporting' : 'none';
 }
 
 /**
@@ -168,6 +192,7 @@ module.exports = {
   getAuthUrl,
   getTokensFromCode,
   getStoredTokens,
+  getAuthSource,
   isAuthenticated,
   setTokensOnClient,
   getAuthenticatedClient,

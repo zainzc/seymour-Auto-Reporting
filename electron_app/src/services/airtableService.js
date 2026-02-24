@@ -74,6 +74,27 @@ class AirtableService {
     return records;
   }
 
+  async validateConfig() {
+    const checks = [];
+    if (this.masterTable) {
+      await this.request('GET', `/${encodeURIComponent(this.masterTable)}`, {
+        params: { maxRecords: 1 }
+      });
+      checks.push({ table: this.masterTable, ok: true });
+    }
+    if (this.categoryTable && this.categoryTable !== this.masterTable) {
+      await this.request('GET', `/${encodeURIComponent(this.categoryTable)}`, {
+        params: { maxRecords: 1 }
+      });
+      checks.push({ table: this.categoryTable, ok: true });
+    }
+    return {
+      success: true,
+      baseId: this.baseId,
+      checks
+    };
+  }
+
   static buildOrFormula(fieldName, values) {
     const terms = values.map(value => {
       const escaped = String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');

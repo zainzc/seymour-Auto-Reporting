@@ -606,12 +606,15 @@
     };
 
     window.addEventListener('load', async () => {
+      await loadPersistedActivityLogs();
+      setHealthLoadingState();
       await loadConfig();
       attachProgressListener();
       attachPickerListeners();
       attachFieldListeners();
       updateHealthBadges();
       updateRunButtonState();
+      renderLogs();
     });
 
     function setRunState(state, detail = '') {
@@ -651,13 +654,17 @@
       });
     }
 
-    function logLine(text, level = 'info') {
-      logEntries.unshift({
+    function logLine(text, level = 'info', persist = true) {
+      const entry = {
         time: new Date().toLocaleTimeString(),
         text,
         level
-      });
+      };
+      logEntries.unshift(entry);
       renderLogs();
+      if (persist && window.phase2API?.appendActivityLog) {
+        window.phase2API.appendActivityLog(entry).catch(() => {});
+      }
     }
 
     function toggleLogs() {
@@ -669,6 +676,29 @@
     function clearLogs() {
       logEntries.length = 0;
       renderLogs();
+      if (window.phase2API?.clearActivityLogs) {
+        window.phase2API.clearActivityLogs().catch(() => {});
+      }
+    }
+
+    async function loadPersistedActivityLogs() {
+      try {
+        if (!window.phase2API || typeof window.phase2API.getActivityLogs !== 'function') return;
+        const stored = await window.phase2API.getActivityLogs();
+        if (!Array.isArray(stored)) return;
+        logEntries.length = 0;
+        stored.forEach(item => {
+          const text = String(item?.text || '').trim();
+          if (!text) return;
+          logEntries.push({
+            time: String(item?.time || ''),
+            text,
+            level: String(item?.level || 'info')
+          });
+        });
+      } catch (error) {
+        console.error('Failed to load persisted Phase 2 activity logs:', error);
+      }
     }
 
     function setFieldError(fieldId, message) {
@@ -705,6 +735,19 @@
       const el = document.getElementById(id);
       el.className = `health-pill ${isOk ? 'ok' : 'warn'}`;
       el.textContent = isOk ? okText : warnText;
+    }
+
+    function setHealthLoadingState() {
+      ['health-source', 'health-airtable', 'health-clickup'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.className = 'health-pill';
+        el.textContent = el.id === 'health-source'
+          ? 'Source: Checking...'
+          : el.id === 'health-airtable'
+            ? 'Airtable: Checking...'
+            : 'ClickUp: Checking...';
+      });
     }
 
     function updateHealthBadges() {
@@ -753,8 +796,25 @@
       return `${label} (${percent}%)`;
     }
 
+    function formatSetupValidationError(serviceName, error) {
+      const message = String(error?.message || error || 'Unknown error');
+      const lower = message.toLowerCase();
+      if (lower.includes('timeout') && lower.includes('30000')) {
+        return `${serviceName} validation timed out after 30 seconds. This usually means a slow network/API response, not necessarily invalid credentials. Try again or use Find ${serviceName === 'Airtable' ? 'Bases' : 'Lists'} from Token separately.`;
+      }
+      return message;
+    }
+
     async function validateSetup() {
-      await ensureSourceFieldsFromInventoryExport();
+      const sourceFilled = await ensureSourceFieldsFromInventoryExport();
+      if (!sourceFilled && (!document.getElementById('sheet-id').value.trim() || !document.getElementById('tab-name').value.trim())) {
+        setRunState('Error', 'Could not auto-fill source sheet from inventory export.');
+        showStatus('run-status', 'error', 'Source sheet is missing. Configure inventory export or enter Google Sheet ID and Tab Name manually.');
+        logLine('Setup validation failed: source sheet fields are missing and auto-fill did not succeed.', 'error');
+        updateRunButtonState();
+        updateHealthBadges();
+        return;
+      }
       const valid = validateForm(true);
       updateRunButtonState();
       updateHealthBadges();
@@ -764,18 +824,70 @@
         return;
       }
 
-      setRunState('Running', 'Validating Airtable and ClickUp access...');
       showStatus('run-status', 'info', 'Validating setup...');
       try {
-        await fetchAirtableBases(true, true);
-        await fetchClickUpLists(true, true);
+        setRunState('Running', 'Validating Google Sheets source access...');
+        logLine('Validate Setup: checking Google Sheet ID and Tab Name access...');
+        if (!window.inventorySheetsAPI || typeof window.inventorySheetsAPI.testConnection !== 'function') {
+          throw new Error('Google Sheets validation API is unavailable.');
+        }
+        const sheetId = document.getElementById('sheet-id').value.trim();
+        const tabName = document.getElementById('tab-name').value.trim();
+        const result = await window.inventorySheetsAPI.testConnection(sheetId, tabName);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Google Sheets validation failed.');
+        }
+        logLine('Validate Setup: Google Sheets source access OK.');
+      } catch (err) {
+        const detail = String(err?.message || err || 'Unknown error');
+        setRunState('Error', `Google Sheets validation failed: ${detail}`);
+        showStatus('run-status', 'error', `Google Sheets validation failed: ${detail}`);
+        logLine(`Setup validation failed (Google Sheets): ${detail}`, 'error');
+        return;
+      }
+
+      setRunState('Running', 'Validating Airtable access...');
+      try {
+        logLine('Validate Setup: checking Airtable token/base access...');
+        const airtablePayload = {
+          airtableToken: document.getElementById('airtable-token').value.trim(),
+          airtableBaseId: document.getElementById('airtable-base-id').value.trim(),
+          airtableMasterTable: DEFAULT_MASTER_TABLE,
+          airtableCategoryTable: DEFAULT_CATEGORY_TABLE
+        };
+        const airtableResult = await window.phase2API.validateAirtableConfig(airtablePayload);
+        if (!airtableResult?.success) {
+          throw new Error(airtableResult?.message || 'Airtable validation failed.');
+        }
+        logLine('Validate Setup: Airtable access OK.');
+      } catch (err) {
+        const detail = formatSetupValidationError('Airtable', err);
+        setRunState('Error', `Airtable validation failed: ${detail}`);
+        showStatus('run-status', 'error', `Airtable validation failed: ${detail}`);
+        logLine(`Setup validation failed (Airtable): ${detail}`, 'error');
+        return;
+      }
+
+      try {
+        setRunState('Running', 'Validating ClickUp access...');
+        logLine('Validate Setup: checking ClickUp token/list access...');
+        const clickupPayload = {
+          clickupToken: document.getElementById('clickup-token').value.trim(),
+          clickupListId: document.getElementById('clickup-list-id').value.trim()
+        };
+        const clickupResult = await window.phase2API.validateClickUpConfig(clickupPayload);
+        if (!clickupResult?.success) {
+          throw new Error(clickupResult?.message || 'ClickUp validation failed.');
+        }
+        logLine('Validate Setup: ClickUp access OK.');
         setRunState('Success', 'Setup validation completed. You can run sync.');
         showStatus('run-status', 'success', 'Setup validation completed.');
         logLine('Setup validation completed.');
       } catch (err) {
-        setRunState('Error', `Setup validation failed: ${err.message}`);
-        showStatus('run-status', 'error', `Setup validation failed: ${err.message}`);
-        logLine(`Setup validation failed: ${err.message}`, 'error');
+        const detail = formatSetupValidationError('ClickUp', err);
+        setRunState('Error', `ClickUp validation failed: ${detail}`);
+        showStatus('run-status', 'error', `ClickUp validation failed: ${detail}`);
+        logLine(`Setup validation failed (ClickUp): ${detail}`, 'error');
       }
     }
 

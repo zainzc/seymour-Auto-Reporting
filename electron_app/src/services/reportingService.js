@@ -24,6 +24,11 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         inv.InventoryNumber,
         li.UnitPrice AS Price,
         inv.WarrantyInfo AS Warranty,
+        CASE 
+           WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 
+           THEN ISNULL(i.TotalServicesAmount, 0) 
+           ELSE 0  
+        END AS [Delivery Fee],
 
         i.TotalDiscountAmount AS Discount,
 
@@ -38,7 +43,27 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         ISNULL(i.TotalGSTTaxAmount, 0) AS Tax,
 
         /* Line-level total (invoice values repeated per line) */
-        i.InvoiceAmount AS Total,
+        li.UnitPrice +
+        ISNULL(i.TotalFreightAmount, 0) +
+        ISNULL(li.TotalFreightAmount, 0) +
+        ISNULL(i.TotalFreightTaxAmount, 0) +
+        ISNULL(i.TotalCityTaxAmount, 0) +
+        ISNULL(i.TotalCountyTaxAmount, 0) +
+        ISNULL(i.TotalStateProvTaxAmount, 0) +
+        ISNULL(i.TotalOtherTax, 0) +
+        ISNULL(i.TotalGSTTaxAmount, 0) +
+        -- Conditional check: if InvoiceAmount equals the calculated non-taxable amount, use 0
+        CASE 
+          WHEN i.InvoiceAmount = (i.InvoiceAmount - i.TotalTaxableAmount) THEN 0 
+          ELSE ISNULL(i.InvoiceAmount - i.TotalTaxableAmount, 0) 
+        END + 
+        /* Logic for Delivery Fee (Service Amount) - Added only to line 1 */
+        CASE 
+          WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 
+          THEN ISNULL(i.TotalServicesAmount, 0) 
+          ELSE 0 
+        END -
+        ISNULL(i.TotalDiscountAmount, 0) AS Total,
 
         inv.LocationCode,
 

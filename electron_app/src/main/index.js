@@ -679,6 +679,10 @@ ipcMain.handle('oauth2-inventory-is-authenticated', async () => {
   return oauth2Service.isAuthenticated('inventory');
 });
 
+ipcMain.handle('oauth2-inventory-get-auth-source', async () => {
+  return oauth2Service.getAuthSource('inventory');
+});
+
 ipcMain.handle('oauth2-inventory-disconnect', async () => {
   try {
     oauth2Service.disconnect('inventory');
@@ -912,6 +916,31 @@ ipcMain.handle('phase2-save-config', async (_, configPayload = {}) => {
   return { success: true, message: 'Phase 2 configuration saved.' };
 });
 
+ipcMain.handle('phase2-get-activity-logs', async () => {
+  return getInventoryConfig('phase2ActivityLogs') || [];
+});
+
+ipcMain.handle('phase2-append-activity-log', async (_, entry = {}) => {
+  const logs = getInventoryConfig('phase2ActivityLogs') || [];
+  const normalized = {
+    time: String(entry.time || new Date().toLocaleTimeString()),
+    text: String(entry.text || '').trim(),
+    level: String(entry.level || 'info')
+  };
+  if (!normalized.text) {
+    return { success: false, message: 'Log text is required.' };
+  }
+  logs.unshift(normalized);
+  if (logs.length > 300) logs.length = 300;
+  saveInventoryConfig('phase2ActivityLogs', logs);
+  return { success: true };
+});
+
+ipcMain.handle('phase2-clear-activity-logs', async () => {
+  saveInventoryConfig('phase2ActivityLogs', []);
+  return { success: true };
+});
+
 ipcMain.handle('phase2-writeback-start', async (_, options = {}) => {
   try {
     const config = buildPhase2WritebackConfig(options);
@@ -1022,6 +1051,63 @@ ipcMain.handle('phase2-fetch-airtable-bases', async (_, token = '') => {
       error?.message ||
       'Failed to fetch Airtable bases.';
     return { success: false, message, bases: [] };
+  }
+});
+
+ipcMain.handle('phase2-validate-clickup-config', async (_, payload = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const token = String(payload.clickupToken || stored.clickupToken || '').trim();
+    const listId = String(payload.clickupListId || stored.clickupListId || '').trim();
+    if (!token || !listId) {
+      return { success: false, message: 'ClickUp token and list ID are required.' };
+    }
+
+    const clickupService = new ClickUpService({ token, listId });
+    const list = await clickupService.getList();
+    return {
+      success: true,
+      list: {
+        id: String(list?.id || listId),
+        name: String(list?.name || 'Unknown List')
+      }
+    };
+  } catch (error) {
+    const message =
+      error?.response?.data?.err ||
+      error?.response?.data?.error ||
+      error?.message ||
+      'Failed to validate ClickUp list access.';
+    return { success: false, message };
+  }
+});
+
+ipcMain.handle('phase2-validate-airtable-config', async (_, payload = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const token = String(payload.airtableToken || stored.airtableToken || '').trim();
+    const baseId = String(payload.airtableBaseId || stored.airtableBaseId || '').trim();
+    const masterTable = String(payload.airtableMasterTable || stored.airtableMasterTable || 'Master Parts Table').trim();
+    const categoryTable = String(payload.airtableCategoryTable || stored.airtableCategoryTable || 'Category Names').trim();
+    if (!token || !baseId) {
+      return { success: false, message: 'Airtable token and base ID are required.' };
+    }
+
+    const airtableService = new AirtableService({
+      token,
+      baseId,
+      masterTable,
+      categoryTable
+    });
+    const result = await airtableService.validateConfig();
+    return { success: true, result };
+  } catch (error) {
+    const message =
+      error?.response?.data?.error?.message ||
+      error?.response?.data?.error ||
+      error?.message ||
+      'Failed to validate Airtable base access.';
+    return { success: false, message };
   }
 });
 
