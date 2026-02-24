@@ -11,30 +11,30 @@ const { getDB } = require('./db');
 async function getInvoices({ dateFrom, dateTo, salesperson }) {
   const pool = getDB();
   
-  let query = `  
-   SELECT
+  let query = `
+    SELECT
         CONVERT(varchar(23), i.DateCreated, 121) AS DateCreated,
         e.EmployeeName AS [Created By],
         i.InvoiceNumber AS [Invoice#],
         i.CustomerNumber,
         i.OrderSource,
 
-        'R0' + CAST(inv.InventoryID AS VARCHAR(50)) AS RNumber,
-        inv.StockTicketNumber AS [Stock#],
-        inv.InventoryNumber,
+        /* Ghost Logic: If no line item exists, these return NULL/Blank */
+        CASE WHEN li.LineItemID IS NULL THEN NULL ELSE 'R0' + CAST(inv.InventoryID AS VARCHAR(50)) END AS RNumber,
+        CASE WHEN li.LineItemID IS NULL THEN NULL ELSE inv.StockTicketNumber END AS [Stock#],
+        CASE WHEN li.LineItemID IS NULL THEN NULL ELSE inv.InventoryNumber END AS InventoryNumber,
         li.UnitPrice AS Price,
         inv.WarrantyInfo AS Warranty,
+
+        /* Delivery Fee: Show on first valid row only */
         CASE 
-           WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 
-           THEN ISNULL(i.TotalServicesAmount, 0) 
-           ELSE 0  
+            WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 
+            THEN ISNULL(i.TotalServicesAmount, 0) 
+            ELSE 0 
         END AS [Delivery Fee],
 
         i.TotalDiscountAmount AS Discount,
-
-        ISNULL(i.TotalFreightAmount, 0) + 
-        ISNULL(li.TotalFreightAmount, 0)
-        AS Shipping,
+        ISNULL(i.TotalFreightAmount, 0) + ISNULL(li.TotalFreightAmount, 0) AS Shipping,
 
         ISNULL(i.TotalCityTaxAmount, 0) +
         ISNULL(i.TotalCountyTaxAmount, 0) +
@@ -42,31 +42,36 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         ISNULL(i.TotalOtherTax, 0) +
         ISNULL(i.TotalGSTTaxAmount, 0) AS Tax,
 
-        /* Line-level total (invoice values repeated per line) */
-        li.UnitPrice +
-        ISNULL(i.TotalFreightAmount, 0) +
-        ISNULL(li.TotalFreightAmount, 0) +
-        ISNULL(i.TotalFreightTaxAmount, 0) +
-        ISNULL(i.TotalCityTaxAmount, 0) +
-        ISNULL(i.TotalCountyTaxAmount, 0) +
-        ISNULL(i.TotalStateProvTaxAmount, 0) +
-        ISNULL(i.TotalOtherTax, 0) +
-        ISNULL(i.TotalGSTTaxAmount, 0) +
-        -- Conditional check: if InvoiceAmount equals the calculated non-taxable amount, use 0
+        /* TOTAL CALCULATION: Adjusted for Ghost Invoices */
         CASE 
-          WHEN i.InvoiceAmount = (i.InvoiceAmount - i.TotalTaxableAmount) THEN 0 
-          ELSE ISNULL(i.InvoiceAmount - i.TotalTaxableAmount, 0) 
-        END + 
-        /* Logic for Delivery Fee (Service Amount) - Added only to line 1 */
-        CASE 
-          WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 
-          THEN ISNULL(i.TotalServicesAmount, 0) 
-          ELSE 0 
-        END -
-        ISNULL(i.TotalDiscountAmount, 0) AS Total,
+            /* If it's a Ghost (No Line Items), use the Header Amount directly from the INVOICE table */
+            WHEN li.LineItemID IS NULL THEN i.InvoiceAmount 
+            ELSE (
+                ISNULL(li.UnitPrice, 0) +
+                ISNULL(i.TotalFreightAmount, 0) +
+                ISNULL(li.TotalFreightAmount, 0) +
+                ISNULL(i.TotalFreightTaxAmount, 0) +
+                ISNULL(i.TotalCityTaxAmount, 0) +
+                ISNULL(i.TotalCountyTaxAmount, 0) +
+                ISNULL(i.TotalStateProvTaxAmount, 0) +
+                ISNULL(i.TotalOtherTax, 0) +
+                ISNULL(i.TotalGSTTaxAmount, 0) +
+                /* Non-Taxable adjustment */
+                CASE 
+                    WHEN i.InvoiceAmount = (i.InvoiceAmount - i.TotalTaxableAmount) THEN 0 
+                    ELSE ISNULL(i.InvoiceAmount - i.TotalTaxableAmount, 0) 
+                END +
+                /* Delivery Fee adjustment */
+                CASE 
+                    WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 
+                    THEN ISNULL(i.TotalServicesAmount, 0) 
+                    ELSE 0 
+                END -
+                ISNULL(i.TotalDiscountAmount, 0)
+            )
+        END AS Total,
 
         inv.LocationCode,
-
         i.BillToBusinessName AS CustomerName,
         i.BillToAddress1,
         i.BillToAddress2,
@@ -79,27 +84,23 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         i.InvoiceNotes,
         i.PaymentComment AS PaymentNotes,
         i.CreditCardApprovalCode AS CreditCardAuthNumber,
-        /* Updated Payment Type Logic */
+
+        /* Payment Type Logic */
         CASE 
-        -- 1. Check specific payment amount columns first
           WHEN ISNULL(i.TotalPaymentCheck, 0) <> 0 THEN 'Check'
           WHEN ISNULL(i.TotalPaymentCash, 0) <> 0 THEN 'Cash'
           WHEN ISNULL(i.TotalPaymentCharge, 0) <> 0 THEN 'Charge'
-        
-        -- 2. Fallback to Credit Card table if amounts are null/zero
           WHEN i.CreditCardType IS NOT NULL THEN cc.CreditCardDescription 
-        
-        -- 3. Final fallback to Other Payment Type
           ELSE opt.OtherPaymentTypeDescription 
         END AS PaymentType,
 
-        /* Condition: Only populate if Stock# starts with 'P' */
+        /* Vendor/PO Logic (Only populated if Stock# starts with 'P') */
         CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN po.VendorName ELSE NULL END AS VendorName,
         CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN po.PONumber ELSE NULL END AS [PurchaseOrder#],
         CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN poli1.UnitPrice ELSE NULL END AS VendorUnitPrice,
         CASE WHEN inv.StockTicketNumber LIKE 'P%' THEN poli1.ReceivedQty ELSE NULL END AS [Qty/Received],
 
-        /* Line-level markup logic applied only for 'P' stocks */
+        /* Markup Logic for 'P' stocks */
         CASE
            WHEN inv.StockTicketNumber LIKE 'P%' AND poli1.UnitPrice > 0
            THEN ROUND(((inv.RetailPrice - poli1.UnitPrice) / poli1.UnitPrice) * 100, 2)
@@ -107,41 +108,27 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         END AS MarkUp
 
     FROM dbo.INVOICE i
-    JOIN dbo.INVOICE_LINEITEM li
-        ON li.InvoiceID = i.InvoiceID
+    /* LEFT JOIN is critical: It keeps the Invoice Header even if the line item drifted elsewhere */
+    LEFT JOIN dbo.INVOICE_LINEITEM li
+        ON li.InvoiceID = i.InvoiceID 
+        AND li.LineItemType = 'PART'
 
-    JOIN dbo.INVENTORY inv
+    LEFT JOIN dbo.INVENTORY inv
         ON inv.InventoryID = li.InventoryID
 
-    LEFT JOIN dbo.OTHER_PAYMENT_TYPE opt
-        ON opt.OtherPaymentType = i.OtherPaymentType
-
-    LEFT JOIN dbo.CREDIT_CARD cc 
-        ON cc.CreditCardType = i.CreditCardType
-
-    LEFT JOIN dbo.EMPLOYEE e
-        ON e.EmployeeID = i.CreatedBy
+    LEFT JOIN dbo.OTHER_PAYMENT_TYPE opt ON opt.OtherPaymentType = i.OtherPaymentType
+    LEFT JOIN dbo.CREDIT_CARD cc ON cc.CreditCardType = i.CreditCardType
+    LEFT JOIN dbo.EMPLOYEE e ON e.EmployeeID = i.CreatedBy
 
     OUTER APPLY (
-     SELECT TOP 1
-        poli.PurchaseOrderID,
-        poli.UnitPrice,
-        poli.ReceivedQty,
-        poli.DateReceived,
-        poli.LastEditDate,
-        poli.LineItemID
-     FROM dbo.PURCHASE_ORDER_LINEITEM poli
-     WHERE poli.InventoryNumber = inv.InventoryNumber
-     ORDER BY
-        CASE WHEN poli.DateReceived IS NULL THEN 1 ELSE 0 END,  -- prefer received rows
-        poli.DateReceived DESC,
-        poli.LastEditDate DESC,
-        poli.LineItemID DESC
+        SELECT TOP 1 poli.PurchaseOrderID, poli.UnitPrice, poli.ReceivedQty
+        FROM dbo.PURCHASE_ORDER_LINEITEM poli
+        WHERE poli.InventoryNumber = inv.InventoryNumber
+        ORDER BY CASE WHEN poli.DateReceived IS NULL THEN 1 ELSE 0 END, poli.DateReceived DESC
     ) poli1
 
-    LEFT JOIN dbo.PURCHASE_ORDER po
-        ON po.PurchaseOrderID = poli1.PurchaseOrderID
-    
+    LEFT JOIN dbo.PURCHASE_ORDER po ON po.PurchaseOrderID = poli1.PurchaseOrderID
+
     WHERE i.DateCreated >= @dateFrom 
       AND i.DateCreated < DATEADD(day, 1, @dateTo)
   `;
