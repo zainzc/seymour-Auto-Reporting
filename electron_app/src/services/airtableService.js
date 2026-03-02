@@ -153,6 +153,10 @@ class AirtableService {
     return records[0];
   }
 
+  async findMasterPartByIPN(ipn) {
+    return this.fetchMasterPartByIpn(ipn);
+  }
+
   async fetchCategoryRecordsByPrefixAndName(ipnPrefix, categoryName) {
     const prefixText = String(ipnPrefix || '').trim();
     const targetName = String(categoryName || '').trim().toLowerCase();
@@ -189,6 +193,39 @@ class AirtableService {
             fields: {
               Categories: [categoryId]
             }
+          }
+        ],
+        typecast: true
+      }
+    });
+
+    return (data?.records || [])[0] || null;
+  }
+
+  async updateMasterShipstationFields(masterRecordId, fieldsToSet = {}) {
+    const recordId = String(masterRecordId || '').trim();
+    if (!recordId) {
+      throw new Error('Airtable master record ID is required.');
+    }
+
+    const sanitizedFields = {};
+    Object.entries(fieldsToSet || {}).forEach(([key, value]) => {
+      if (!key) return;
+      if (value === null || value === undefined) return;
+      if (typeof value === 'string' && !value.trim()) return;
+      sanitizedFields[key] = value;
+    });
+
+    if (Object.keys(sanitizedFields).length === 0) {
+      return null;
+    }
+
+    const data = await this.request('PATCH', `/${encodeURIComponent(this.masterTable)}`, {
+      data: {
+        records: [
+          {
+            id: recordId,
+            fields: sanitizedFields
           }
         ],
         typecast: true

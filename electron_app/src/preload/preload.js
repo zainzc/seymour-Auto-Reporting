@@ -84,3 +84,10 @@ contextBridge.exposeInMainWorld('phase2API', {
   runAutoRunNow: () => ipcRenderer.invoke('phase2-autorun-run-now'),
   onProgress: (callback) => ipcRenderer.on('phase2-progress', callback)
 });
+
+// Phase 3 API - ShipStation -> Airtable Master Parts dims/weight
+contextBridge.exposeInMainWorld('phase3API', {
+  getConfig: () => ipcRenderer.invoke('phase3:get-config'),
+  run: (options) => ipcRenderer.invoke('phase3:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase3:progress', callback)
+});

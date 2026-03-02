@@ -30,6 +30,7 @@ const { initialize: initSheets, writeToRawTab } = require('../services/sheetsSer
 const { startSchedule, stopSchedule, resumeSchedule, logExecution, getExecutionLogs, executeScheduledJob } = require('../services/scheduleService');
 const oauth2Service = require('../services/oauth2Service');
 const { runPhase2, buildPhase2Config } = require('../services/phase2Service');
+const { runPhase3, buildPhase3Config, PARTSHUNTER_STORE_ID } = require('../services/phase3Service');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
 const phase2WritebackPoller = require('../services/phase2WritebackPollerService');
@@ -884,6 +885,7 @@ function buildPhase2WritebackConfig(overrides = {}) {
 ipcMain.handle('phase2-get-config', async () => {
   const stored = getInventoryConfig('phase2Config') || {};
   const merged = buildPhase2Config(stored);
+  const phase3Config = buildPhase3Config(stored);
 
   return {
     sheetId: merged.sheetId || '',
@@ -896,10 +898,15 @@ ipcMain.handle('phase2-get-config', async () => {
     phase2AutoRunPollMinutes: Number(merged.phase2AutoRunPollMinutes || 3),
     phase2AutoRunCooldownMinutes: Number(merged.phase2AutoRunCooldownMinutes || 5),
     phase2WritebackEnabled: Boolean(merged.phase2WritebackEnabled),
-    writebackPollIntervalMinutes: Number(merged.writebackPollIntervalMinutes || 5),
+    writebackPollIntervalMinutes: Number(merged.writebackPollIntervalMinutes || 120),
     clickupResolvedCategoryFieldName: merged.clickupResolvedCategoryFieldName || 'Resolved Category',
     clickupStatusDetermined: merged.clickupStatusDetermined || 'Category Determined',
     clickupStatusCompleted: merged.clickupStatusCompleted || 'Completed',
+    shipstationApiKey: stored.shipstationApiKey || phase3Config.shipstationApiKey || '',
+    shipstationApiSecret: stored.shipstationApiSecret || phase3Config.shipstationApiSecret || '',
+    shipstationStoreId: Number(phase3Config.shipstationStoreId || PARTSHUNTER_STORE_ID),
+    phase3LookbackDays: Number(phase3Config.phase3LookbackDays || 90),
+    phase3DryRun: Boolean(phase3Config.phase3DryRun),
     airtableToken: stored.airtableToken || '',
     clickupToken: stored.clickupToken || ''
   };
@@ -1142,6 +1149,55 @@ ipcMain.handle('phase2-run', async (event, options = {}) => {
   }
 });
 
+ipcMain.handle('phase3:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  const merged = buildPhase3Config(stored);
+
+  return {
+    sheetId: merged.sheetId || '',
+    tabName: merged.tabName || '',
+    airtableBaseId: merged.airtableBaseId || '',
+    airtableMasterTable: merged.airtableMasterTable || 'Master Parts Table',
+    airtableToken: stored.airtableToken || merged.airtableToken || '',
+    shipstationApiKey: stored.shipstationApiKey || merged.shipstationApiKey || '',
+    shipstationApiSecret: stored.shipstationApiSecret || merged.shipstationApiSecret || '',
+    shipstationStoreId: Number(merged.shipstationStoreId || PARTSHUNTER_STORE_ID),
+    phase3LookbackDays: Number(merged.phase3LookbackDays || 90),
+    phase3DryRun: Boolean(merged.phase3DryRun)
+  };
+});
+
+ipcMain.handle('phase3:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options
+    };
+
+    const summary = await runPhase3(runOptions, progress => {
+      event.sender.send('phase3:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    event.sender.send('phase3:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message: error.message
+    });
+
+    return {
+      success: false,
+      message: error.message
+    };
+  }
+});
+
 /* ---------------------------
    WINDOW CREATION (STRICT)
 ---------------------------- */
@@ -1197,7 +1253,7 @@ function createWindow() {
       if (parseBoolean(writebackConfig.enabled, false)) {
         phase2WritebackPoller.start(writebackConfig);
         console.log(
-          `Phase2 write-back poller started (${Number(writebackConfig.pollIntervalMinutes) || 5} min interval)`
+          `Phase2 write-back poller started (${Number(writebackConfig.pollIntervalMinutes) || 120} min interval)`
         );
       }
     } catch (err) {

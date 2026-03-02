@@ -55,7 +55,7 @@ function buildPhase2Config(options = {}) {
       Number(options.writebackPollIntervalMinutes) ||
       Number(savedConfig.writebackPollIntervalMinutes) ||
       Number(process.env.WRITEBACK_POLL_INTERVAL_MINUTES) ||
-      5,
+      120,
     clickupResolvedCategoryFieldName:
       options.clickupResolvedCategoryFieldName ||
       savedConfig.clickupResolvedCategoryFieldName ||

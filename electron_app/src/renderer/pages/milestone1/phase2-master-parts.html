@@ -514,12 +514,58 @@
     </section>
 
     <section class="card">
-      <h2 class="card-title">2. Run and Automation</h2>
+      <h2 class="card-title">2. Phase 3 (ShipStation)</h2>
+      <div class="grid-2">
+        <div>
+          <h3 class="section-title">Credentials</h3>
+          <div class="health-row">
+            <span id="health-phase3" class="health-pill warn">Phase 3: Missing fields</span>
+          </div>
+          <div class="form-group">
+            <label for="shipstation-api-key">ShipStation V1 API Key</label>
+            <input id="shipstation-api-key" type="password" placeholder="ShipStation API Key">
+            <div id="err-shipstation-api-key" class="field-error"></div>
+          </div>
+          <div class="form-group">
+            <label for="shipstation-api-secret">ShipStation V1 API Secret</label>
+            <input id="shipstation-api-secret" type="password" placeholder="ShipStation API Secret">
+            <div id="err-shipstation-api-secret" class="field-error"></div>
+          </div>
+        </div>
+        <div>
+          <h3 class="section-title">Run Options</h3>
+          <div class="form-group">
+            <label for="shipstation-store-id">ShipStation Store ID</label>
+            <input id="shipstation-store-id" type="text" value="333796" readonly>
+            <div class="hint">Locked to Partshunter203 store (333796).</div>
+          </div>
+          <div class="form-group">
+            <label for="phase3-lookback-days">Phase 3 Lookback Days</label>
+            <input id="phase3-lookback-days" type="number" min="1" step="1" value="90">
+            <div id="err-phase3-lookback-days" class="field-error"></div>
+          </div>
+          <div class="form-group">
+            <label for="phase3-dry-run">Phase 3 Dry Run</label>
+            <select id="phase3-dry-run">
+              <option value="false" selected>False (Write Airtable)</option>
+              <option value="true">True (No Airtable Writes)</option>
+            </select>
+          </div>
+          <div class="btn-group">
+            <button id="run-phase3-btn" class="btn btn-secondary" onclick="runPhase3()">Run Phase 3</button>
+          </div>
+          <div class="hint" id="phase3-status-text">Phase 3 status: idle</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">3. Run and Automation</h2>
       <div class="form-group">
         <label>
           Write-back settings are auto-managed:
         </label>
-        <div class="hint">Resolved field: <code>Resolved Category</code> | Source status: <code>Category Determined</code> | Complete status: <code>Completed</code> | Poll: <code>5 min</code></div>
+        <div class="hint">Resolved field: <code>Resolved Category</code> | Source status: <code>Category Determined</code> | Complete status: <code>Completed</code> | Poll: <code>120 min</code></div>
       </div>
       <div class="btn-group">
         <button id="run-sync-btn" class="btn btn-primary" onclick="runPhase2()">Run Sync</button>
@@ -539,7 +585,7 @@
     </section>
 
     <section class="card">
-      <h2 class="card-title">3. Status and Progress</h2>
+      <h2 class="card-title">4. Status and Progress</h2>
       <div class="progress-wrap">
         <div id="progress-bar" class="progress-bar"></div>
       </div>
@@ -555,10 +601,16 @@
         <div class="summary-item"><div class="summary-label">Skipped Missing IPN</div><div class="summary-value" id="sum-missing">0</div></div>
         <div class="summary-item"><div class="summary-label">Skipped Excluded Prefix</div><div class="summary-value" id="sum-excluded">0</div></div>
       </div>
+      <div class="summary-grid" style="margin-top: 10px;">
+        <div class="summary-item"><div class="summary-label">Phase3 Shipments</div><div class="summary-value" id="sum3-shipments">0</div></div>
+        <div class="summary-item"><div class="summary-label">Phase3 SKUs Mapped</div><div class="summary-value" id="sum3-mapped">0</div></div>
+        <div class="summary-item"><div class="summary-label">Phase3 Airtable Updated</div><div class="summary-value" id="sum3-updated">0</div></div>
+        <div class="summary-item"><div class="summary-label">Phase3 Skipped Filled</div><div class="summary-value" id="sum3-skipped-filled">0</div></div>
+      </div>
     </section>
 
     <section class="card">
-      <h2 class="card-title">4. Activity Log</h2>
+      <h2 class="card-title">5. Activity Log</h2>
       <div class="logs-toolbar">
         <button id="toggle-logs-btn" class="btn btn-secondary" type="button" onclick="toggleLogs()">Collapse Logs</button>
         <select id="log-filter" onchange="renderLogs()">
@@ -576,6 +628,7 @@
 
   <script>
     let isRunning = false;
+    let isPhase3Running = false;
     let lastRunFailed = false;
     let logsCollapsed = false;
     const logEntries = [];
@@ -584,8 +637,10 @@
     const DEFAULT_RESOLVED_FIELD = 'Resolved Category';
     const DEFAULT_STATUS_DETERMINED = 'Category Determined';
     const DEFAULT_STATUS_COMPLETED = 'Completed';
-    const DEFAULT_WRITEBACK_INTERVAL_MINUTES = 5;
+    const DEFAULT_WRITEBACK_INTERVAL_MINUTES = 120;
     const DEFAULT_WRITEBACK_ENABLED = true;
+    const DEFAULT_PHASE3_STORE_ID = 333796;
+    const DEFAULT_PHASE3_LOOKBACK_DAYS = 90;
     const REQUIRED_FIELDS = [
       ['sheet-id', 'Google Sheet ID'],
       ['tab-name', 'Google Tab Name'],
@@ -593,6 +648,14 @@
       ['airtable-base-id', 'Airtable Base ID'],
       ['clickup-token', 'ClickUp Token'],
       ['clickup-list-id', 'ClickUp List ID']
+    ];
+    const REQUIRED_PHASE3_FIELDS = [
+      ['sheet-id', 'Google Sheet ID'],
+      ['tab-name', 'Google Tab Name'],
+      ['airtable-token', 'Airtable Token'],
+      ['airtable-base-id', 'Airtable Base ID'],
+      ['shipstation-api-key', 'ShipStation V1 API Key'],
+      ['shipstation-api-secret', 'ShipStation V1 API Secret']
     ];
     const STAGE_LABELS = {
       read_sheet: 'Reading source sheet',
@@ -603,6 +666,14 @@
       execute_airtable_writes: 'Writing to Airtable',
       create_clickup_tasks: 'Creating ClickUp tasks',
       completed: 'Completed'
+    };
+    const PHASE3_STAGE_LABELS = {
+      stage1_powerlink_mapping: 'Phase 3: Building Powerlink map',
+      stage2_fetch_shipstation: 'Phase 3: Fetching ShipStation shipments',
+      stage3_translate_sku_to_ipn: 'Phase 3: Translating SKU to IPN',
+      stage4_update_airtable: 'Phase 3: Updating Airtable',
+      completed: 'Phase 3 completed',
+      error: 'Phase 3 failed'
     };
 
     window.addEventListener('load', async () => {
@@ -731,6 +802,34 @@
       return valid;
     }
 
+    function validatePhase3Form(showErrors = true) {
+      let valid = true;
+      REQUIRED_PHASE3_FIELDS.forEach(([id, label]) => {
+        const value = document.getElementById(id).value.trim();
+        if (!value) {
+          valid = false;
+          if (showErrors) {
+            setFieldError(id, `${label} is required.`);
+          }
+        } else {
+          clearFieldError(id);
+        }
+      });
+
+      const lookbackRaw = document.getElementById('phase3-lookback-days').value.trim();
+      const lookback = Number(lookbackRaw);
+      if (!Number.isFinite(lookback) || lookback <= 0) {
+        valid = false;
+        if (showErrors) {
+          setFieldError('phase3-lookback-days', 'Phase 3 Lookback Days must be greater than 0.');
+        }
+      } else {
+        clearFieldError('phase3-lookback-days');
+      }
+
+      return valid;
+    }
+
     function setHealthPill(id, okText, warnText, isOk) {
       const el = document.getElementById(id);
       el.className = `health-pill ${isOk ? 'ok' : 'warn'}`;
@@ -738,7 +837,7 @@
     }
 
     function setHealthLoadingState() {
-      ['health-source', 'health-airtable', 'health-clickup'].forEach(id => {
+      ['health-source', 'health-airtable', 'health-clickup', 'health-phase3'].forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
         el.className = 'health-pill';
@@ -746,7 +845,9 @@
           ? 'Source: Checking...'
           : el.id === 'health-airtable'
             ? 'Airtable: Checking...'
-            : 'ClickUp: Checking...';
+            : el.id === 'health-clickup'
+              ? 'ClickUp: Checking...'
+              : 'Phase 3: Checking...';
       });
     }
 
@@ -769,16 +870,29 @@
         'ClickUp: Missing fields',
         Boolean(document.getElementById('clickup-token').value.trim() && document.getElementById('clickup-list-id').value.trim())
       );
+      setHealthPill(
+        'health-phase3',
+        'Phase 3: Configured',
+        'Phase 3: Missing fields',
+        Boolean(
+          document.getElementById('shipstation-api-key').value.trim() &&
+          document.getElementById('shipstation-api-secret').value.trim()
+        )
+      );
     }
 
     function updateRunButtonState() {
       const runBtn = document.getElementById('run-sync-btn');
-      runBtn.disabled = isRunning || !validateForm(false);
+      const runPhase3Btn = document.getElementById('run-phase3-btn');
+      runBtn.disabled = isRunning || isPhase3Running || !validateForm(false);
+      runPhase3Btn.disabled = isRunning || isPhase3Running || !validatePhase3Form(false);
     }
 
     function attachFieldListeners() {
-      REQUIRED_FIELDS.forEach(([id]) => {
+      const allFieldIds = new Set([...REQUIRED_FIELDS.map(item => item[0]), ...REQUIRED_PHASE3_FIELDS.map(item => item[0]), 'phase3-lookback-days', 'phase3-dry-run']);
+      allFieldIds.forEach(id => {
         const el = document.getElementById(id);
+        if (!el) return;
         el.addEventListener('input', () => {
           clearFieldError(id);
           updateHealthBadges();
@@ -791,6 +905,15 @@
       const stage = String(payload.stage || '').trim();
       const percent = Number(payload.percent || 0);
       const label = STAGE_LABELS[stage] || 'Running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase3ProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE3_STAGE_LABELS[stage] || 'Phase 3 running';
       const message = String(payload.message || '').trim();
       if (message) return `${label} (${percent}%): ${message}`;
       return `${label} (${percent}%)`;
@@ -900,6 +1023,11 @@
         document.getElementById('airtable-token').value = config.airtableToken || '';
         document.getElementById('clickup-list-id').value = config.clickupListId || '';
         document.getElementById('clickup-token').value = config.clickupToken || '';
+        document.getElementById('shipstation-api-key').value = config.shipstationApiKey || '';
+        document.getElementById('shipstation-api-secret').value = config.shipstationApiSecret || '';
+        document.getElementById('shipstation-store-id').value = String(config.shipstationStoreId || DEFAULT_PHASE3_STORE_ID);
+        document.getElementById('phase3-lookback-days').value = String(config.phase3LookbackDays || DEFAULT_PHASE3_LOOKBACK_DAYS);
+        document.getElementById('phase3-dry-run').value = config.phase3DryRun ? 'true' : 'false';
 
         if (config.airtableToken) {
           await fetchAirtableBases(true);
@@ -1115,7 +1243,12 @@
         writebackPollIntervalMinutes: DEFAULT_WRITEBACK_INTERVAL_MINUTES,
         clickupResolvedCategoryFieldName: DEFAULT_RESOLVED_FIELD,
         clickupStatusDetermined: DEFAULT_STATUS_DETERMINED,
-        clickupStatusCompleted: DEFAULT_STATUS_COMPLETED
+        clickupStatusCompleted: DEFAULT_STATUS_COMPLETED,
+        shipstationApiKey: document.getElementById('shipstation-api-key').value.trim(),
+        shipstationApiSecret: document.getElementById('shipstation-api-secret').value.trim(),
+        shipstationStoreId: DEFAULT_PHASE3_STORE_ID,
+        phase3LookbackDays: Number(document.getElementById('phase3-lookback-days').value.trim()) || DEFAULT_PHASE3_LOOKBACK_DAYS,
+        phase3DryRun: document.getElementById('phase3-dry-run').value === 'true'
       };
     }
 
@@ -1128,7 +1261,7 @@
       const active = status.active ? 'active' : 'stopped';
       const inFlight = status.inFlight ? ', running now' : '';
       const lastRun = status.lastRunAt ? `, last run: ${new Date(status.lastRunAt).toLocaleString()}` : '';
-      text.textContent = `Write-back status: ${active}${inFlight}, interval=${status.intervalMinutes || 5}m${lastRun}`;
+      text.textContent = `Write-back status: ${active}${inFlight}, interval=${status.intervalMinutes || 120}m${lastRun}`;
     }
 
     async function refreshWritebackStatus(silent = false) {
@@ -1260,6 +1393,25 @@
           logLine(`Progress: ${formatProgressText(payload)}`);
         }
       });
+
+      if (window.phase3API && typeof window.phase3API.onProgress === 'function') {
+        window.phase3API.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase3ProgressText(payload);
+          const statusText = document.getElementById('phase3-status-text');
+          statusText.textContent = `Phase 3 status: ${formatPhase3ProgressText(payload)}`;
+
+          if (payload.counts) {
+            renderPhase3Summary(payload.counts);
+          }
+
+          if (payload.stage) {
+            logLine(`Phase3 progress: ${formatPhase3ProgressText(payload)}`);
+          }
+        });
+      }
     }
 
     async function runPhase2() {
@@ -1311,6 +1463,54 @@
       }
     }
 
+    async function runPhase3() {
+      if (isPhase3Running || isRunning) return;
+      await ensureSourceFieldsFromInventoryExport();
+      if (!validatePhase3Form(true)) {
+        setRunState('Error', 'Fix setup errors before running Phase 3.');
+        showStatus('run-status', 'error', 'Please complete required Phase 3 fields before running.');
+        updateRunButtonState();
+        return;
+      }
+
+      isPhase3Running = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 3 is in progress...');
+      showStatus('run-status', 'info', 'Phase 3 run started...');
+      document.getElementById('phase3-status-text').textContent = 'Phase 3 status: running...';
+      logLine('Starting Phase 3 pipeline.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase3API.run(config);
+
+        if (result?.success) {
+          renderPhase3Summary(result.summary || {});
+          setRunState('Success', 'Phase 3 completed successfully.');
+          showStatus('run-status', 'success', 'Phase 3 completed.');
+          document.getElementById('phase3-status-text').textContent =
+            `Phase 3 status: completed. Updated ${result.summary?.ipnsUpdated || 0} IPNs.`;
+          logLine(
+            `Phase 3 completed. Updated=${result.summary?.ipnsUpdated || 0}, AlreadyFilled=${result.summary?.ipnsSkippedAlreadyFilled || 0}, UnmappedSKU=${result.summary?.skusUnmappedInPowerlink || 0}`
+          );
+          if (Array.isArray(result.summary?.errors) && result.summary.errors.length > 0) {
+            result.summary.errors.forEach(err => logLine(`Phase3: ${err}`, 'error'));
+          }
+        } else {
+          throw new Error(result?.message || 'Phase 3 failed.');
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 3 failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 3 failed: ${err.message}`);
+        document.getElementById('phase3-status-text').textContent = `Phase 3 status: failed (${err.message})`;
+        logLine(`Phase 3 failed: ${err.message}`, 'error');
+      } finally {
+        isPhase3Running = false;
+        updateRunButtonState();
+      }
+    }
+
     function renderSummary(summary) {
       document.getElementById('sum-total').textContent = summary.totalRows || 0;
       document.getElementById('sum-valid').textContent = summary.validRows || 0;
@@ -1320,6 +1520,13 @@
       document.getElementById('sum-tasks').textContent = summary.clickupTasksCreated || 0;
       document.getElementById('sum-missing').textContent = summary.skippedMissingIPN || 0;
       document.getElementById('sum-excluded').textContent = summary.skippedExcludedPrefix || 0;
+    }
+
+    function renderPhase3Summary(summary) {
+      document.getElementById('sum3-shipments').textContent = summary.shipmentsFetched || 0;
+      document.getElementById('sum3-mapped').textContent = summary.skusMappedToIpn || 0;
+      document.getElementById('sum3-updated').textContent = summary.ipnsUpdated || 0;
+      document.getElementById('sum3-skipped-filled').textContent = summary.ipnsSkippedAlreadyFilled || 0;
     }
 
     function showStatus(id, type, message) {
