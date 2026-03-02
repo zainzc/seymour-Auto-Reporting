@@ -31,6 +31,15 @@ function roundToTwo(value) {
   return Math.round(value * 100) / 100;
 }
 
+function formatTextNumber(value, decimals = 0) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return '';
+  if (decimals <= 0) {
+    return String(Math.round(parsed));
+  }
+  return parsed.toFixed(decimals);
+}
+
 function extractCompleteShipmentMeasurements(shipment) {
   const weightOz = parseNumber(shipment?.weight?.value);
   const lengthIn = parseNumber(shipment?.dimensions?.length);
@@ -129,15 +138,21 @@ function buildIpnToDims(skuToDims, rnumToIpn, summary, handlers = {}) {
 }
 
 function buildShipstationFieldsForBlankTargets(existingFields, dims) {
+  const lengthText = formatTextNumber(dims.lengthIn, 0);
+  const widthText = formatTextNumber(dims.widthIn, 0);
+  const heightText = formatTextNumber(dims.heightIn, 0);
+  const weightText = formatTextNumber(roundToTwo(dims.weightOz / 16), 2);
+
   const targets = [
-    ['Length (ShipStation)', dims.lengthIn],
-    ['Width (ShipStation)', dims.widthIn],
-    ['Height (ShipStation)', dims.heightIn],
-    ['Weight (ShipStation)', roundToTwo(dims.weightOz / 16)]
+    ['Length (ShipStation)', lengthText],
+    ['Width (ShipStation)', widthText],
+    ['Height (ShipStation)', heightText],
+    ['Weight (ShipStation)', weightText]
   ];
 
   const fields = {};
   for (const [fieldName, value] of targets) {
+    if (!value) continue;
     const current = existingFields ? existingFields[fieldName] : undefined;
     const isBlank =
       current === null ||

@@ -239,7 +239,11 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
         }
       }
     } catch (error) {
-      summary.errors.push(`Phase3 update failed for IPN ${ipn}: ${error.message}`);
+      const detail =
+        typeof AirtableService.getAirtableErrorMessage === 'function'
+          ? AirtableService.getAirtableErrorMessage(error)
+          : error.message;
+      summary.errors.push(`Phase3 update failed for IPN ${ipn}: ${detail}`);
     } finally {
       emitProgress(progressCallback, {
         stage: 'stage4_update_airtable',
