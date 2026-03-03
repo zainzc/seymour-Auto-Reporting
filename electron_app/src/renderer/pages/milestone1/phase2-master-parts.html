@@ -1600,7 +1600,9 @@
         await window.phase2API.saveConfig(config);
         const result = await window.itemSpecificSyncAPI.run({
           baseId: itemSpecificBaseId,
-          token: document.getElementById('airtable-token').value.trim() || undefined
+          token: document.getElementById('airtable-token').value.trim() || undefined,
+          templateIndexTableName: 'eBay Item Specific Templates',
+          referenceTableName: '104-Grille'
         });
         if (!result?.success) {
           throw new Error(result?.message || 'Item Specific sync failed.');

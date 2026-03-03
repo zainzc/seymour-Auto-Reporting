@@ -8,7 +8,12 @@ const { retryWithBackoff } = require('../utils/retry');
 
 loadEnv();
 
-const DEFAULT_TEMPLATE_INDEX_TABLE = 'eBay Item Specific Template';
+const DEFAULT_TEMPLATE_INDEX_TABLE = 'eBay Item Specific Templates';
+const TEMPLATE_INDEX_NAME_CANDIDATES = [
+  'eBay Item Specifics Templates',
+  'eBay Item Specific Templates',
+  'eBay Item Specific Template'
+];
 const DEFAULT_REFERENCE_TABLE = '104-Grille';
 const DEFAULT_AUTH_CONTEXT = 'inventory';
 const MAX_TABLE_NAME_LENGTH = 100;
@@ -275,6 +280,16 @@ function findFieldByName(fields = [], name) {
   return (fields || []).find(field => normalizeName(field?.name) === target) || null;
 }
 
+function resolveTableByNameCandidates(tableMap, names = []) {
+  for (const name of names) {
+    const key = normalizeName(name);
+    if (!key) continue;
+    const match = tableMap.get(key);
+    if (match) return match;
+  }
+  return null;
+}
+
 function emitProgress(progressCallback, payload = {}) {
   if (typeof progressCallback === 'function') {
     progressCallback({
@@ -317,19 +332,50 @@ async function runItemSpecificTableSync(options = {}, progressCallback = () => {
   });
   const sheets = await getSheetsClient(config.authContext);
 
-  const templateRows = await airtableRecordsService.fetchAllRecords(config.templateIndexTableName);
+  emitProgress(progressCallback, {
+    stage: 'preflight',
+    message: `Preflight: baseId=${config.baseId}, templateTable='${config.templateIndexTableName}', referenceTable='${config.referenceTableName}'.`
+  });
+
+  let tables = [];
+  try {
+    tables = await airtableSchemaService.listTables();
+  } catch (error) {
+    throw new Error(
+      `Failed reading Airtable schema tables for base '${config.baseId}' via meta API: ${getErrorMessage(error)}`
+    );
+  }
+  let tableMap = mapTablesByName(tables);
+
+  const resolvedTemplateTable = resolveTableByNameCandidates(tableMap, [
+    config.templateIndexTableName,
+    ...TEMPLATE_INDEX_NAME_CANDIDATES
+  ]);
+  if (!resolvedTemplateTable) {
+    const available = tables.map(table => String(table?.name || '')).filter(Boolean).slice(0, 20);
+    throw new Error(
+      `Template index table not found. Tried '${config.templateIndexTableName}' and known variants. Sample tables in base: ${available.join(', ')}`
+    );
+  }
+
+  let templateRows = [];
+  try {
+    // Use table ID to avoid name-matching issues.
+    templateRows = await airtableRecordsService.fetchAllRecords(resolvedTemplateTable.id);
+  } catch (error) {
+    throw new Error(
+      `Failed reading template index table '${resolvedTemplateTable.name}' (${resolvedTemplateTable.id}) in base '${config.baseId}': ${getErrorMessage(error)}`
+    );
+  }
   if (templateRows.length === 0) {
-    console.log(`No rows found in '${config.templateIndexTableName}'. Nothing to process.`);
+    console.log(`No rows found in '${resolvedTemplateTable.name}'. Nothing to process.`);
     emitProgress(progressCallback, {
       stage: 'completed',
-      message: `No rows found in '${config.templateIndexTableName}'.`,
+      message: `No rows found in '${resolvedTemplateTable.name}'.`,
       summary
     });
     return summary;
   }
-
-  let tables = await airtableSchemaService.listTables();
-  let tableMap = mapTablesByName(tables);
 
   const referenceTable = tableMap.get(normalizeName(config.referenceTableName));
   if (!referenceTable) {
