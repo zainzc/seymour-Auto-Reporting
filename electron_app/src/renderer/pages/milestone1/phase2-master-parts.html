@@ -551,6 +551,12 @@
               <option value="true">True (No Airtable Writes)</option>
             </select>
           </div>
+          <div class="form-group">
+            <label for="item-specific-base-id">Item Specifics Base ID</label>
+            <input id="item-specific-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
+            <div class="hint">Base B: Item Specifics by Part Type.</div>
+            <div id="err-item-specific-base-id" class="field-error"></div>
+          </div>
           <div class="btn-group">
             <button id="run-phase3-btn" class="btn btn-secondary" onclick="runPhase3()">Run Phase 3</button>
           </div>
@@ -569,6 +575,7 @@
       </div>
       <div class="btn-group">
         <button id="run-sync-btn" class="btn btn-primary" onclick="runPhase2()">Run Sync</button>
+        <button id="run-item-specific-sync-btn" class="btn btn-secondary" onclick="runItemSpecificSync()">Run Item Specific Table Sync</button>
       </div>
       <div class="btn-group" style="margin-top: 10px;">
         <button class="btn btn-secondary" onclick="startWritebackPoller()">Start Write-back</button>
@@ -578,6 +585,7 @@
         <button class="btn btn-secondary" onclick="clearPhase2TaskCache()">Clear Task Cache</button>
       </div>
       <div class="hint" id="writeback-status-text">Write-back status: unknown</div>
+      <div class="hint" id="item-specific-sync-status-text">Item Specific sync status: idle</div>
       <div class="status-banner" aria-live="polite">
         <span id="run-state-pill" class="status-pill">Idle</span>
         <div id="run-state-detail" class="hint" style="margin:0;">Waiting for validation and run action.</div>
@@ -630,6 +638,7 @@
   <script>
     let isRunning = false;
     let isPhase3Running = false;
+    let isItemSpecificSyncRunning = false;
     let lastRunFailed = false;
     let logsCollapsed = false;
     const logEntries = [];
@@ -885,12 +894,16 @@
     function updateRunButtonState() {
       const runBtn = document.getElementById('run-sync-btn');
       const runPhase3Btn = document.getElementById('run-phase3-btn');
-      runBtn.disabled = isRunning || isPhase3Running || !validateForm(false);
-      runPhase3Btn.disabled = isRunning || isPhase3Running || !validatePhase3Form(false);
+      const runItemSpecificSyncBtn = document.getElementById('run-item-specific-sync-btn');
+      const busy = isRunning || isPhase3Running || isItemSpecificSyncRunning;
+      const hasItemSpecificBaseId = Boolean(document.getElementById('item-specific-base-id').value.trim());
+      runBtn.disabled = busy || !validateForm(false);
+      runPhase3Btn.disabled = busy || !validatePhase3Form(false);
+      runItemSpecificSyncBtn.disabled = busy || !hasItemSpecificBaseId;
     }
 
     function attachFieldListeners() {
-      const allFieldIds = new Set([...REQUIRED_FIELDS.map(item => item[0]), ...REQUIRED_PHASE3_FIELDS.map(item => item[0]), 'phase3-lookback-days', 'phase3-dry-run']);
+      const allFieldIds = new Set([...REQUIRED_FIELDS.map(item => item[0]), ...REQUIRED_PHASE3_FIELDS.map(item => item[0]), 'phase3-lookback-days', 'phase3-dry-run', 'item-specific-base-id']);
       allFieldIds.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -1029,6 +1042,7 @@
         document.getElementById('shipstation-store-id').value = String(config.shipstationStoreId || DEFAULT_PHASE3_STORE_ID);
         document.getElementById('phase3-lookback-days').value = String(config.phase3LookbackDays || DEFAULT_PHASE3_LOOKBACK_DAYS);
         document.getElementById('phase3-dry-run').value = config.phase3DryRun ? 'true' : 'false';
+        document.getElementById('item-specific-base-id').value = config.itemSpecificsBaseId || '';
 
         if (config.airtableToken) {
           await fetchAirtableBases(true);
@@ -1249,7 +1263,8 @@
         shipstationApiSecret: document.getElementById('shipstation-api-secret').value.trim(),
         shipstationStoreId: DEFAULT_PHASE3_STORE_ID,
         phase3LookbackDays: Number(document.getElementById('phase3-lookback-days').value.trim()) || DEFAULT_PHASE3_LOOKBACK_DAYS,
-        phase3DryRun: document.getElementById('phase3-dry-run').value === 'true'
+        phase3DryRun: document.getElementById('phase3-dry-run').value === 'true',
+        itemSpecificsBaseId: document.getElementById('item-specific-base-id').value.trim()
       };
     }
 
@@ -1430,6 +1445,23 @@
           }
         });
       }
+
+      if (window.itemSpecificSyncAPI && typeof window.itemSpecificSyncAPI.onProgress === 'function') {
+        window.itemSpecificSyncAPI.onProgress((event, payload) => {
+          if (!payload) return;
+          const stage = String(payload.stage || 'running').trim();
+          const message = String(payload.message || '').trim();
+          const statusText = document.getElementById('item-specific-sync-status-text');
+          statusText.textContent = message
+            ? `Item Specific sync status: ${stage} - ${message}`
+            : `Item Specific sync status: ${stage}`;
+
+          if (message) {
+            const level = stage === 'failure' || stage === 'error' ? 'error' : 'info';
+            logLine(`ItemSpecific: ${message}`, level);
+          }
+        });
+      }
     }
 
     async function runPhase2() {
@@ -1538,6 +1570,61 @@
         logLine(`Phase 3 failed: ${err.message}`, 'error');
       } finally {
         isPhase3Running = false;
+        updateRunButtonState();
+      }
+    }
+
+    async function runItemSpecificSync() {
+      if (isRunning || isPhase3Running || isItemSpecificSyncRunning) return;
+      if (!window.itemSpecificSyncAPI || typeof window.itemSpecificSyncAPI.run !== 'function') {
+        showStatus('run-status', 'error', 'Item Specific sync API is unavailable.');
+        return;
+      }
+      const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
+      if (!itemSpecificBaseId) {
+        setFieldError('item-specific-base-id', 'Item Specifics Base ID is required.');
+        showStatus('run-status', 'error', 'Enter Item Specifics Base ID before running Item Specific sync.');
+        return;
+      }
+
+      isItemSpecificSyncRunning = true;
+      updateRunButtonState();
+      const statusText = document.getElementById('item-specific-sync-status-text');
+      statusText.textContent = 'Item Specific sync status: running...';
+      setRunState('Running', 'Item Specific table sync is running...');
+      showStatus('run-status', 'info', 'Item Specific table sync started...');
+      logLine('Starting Item Specific table sync.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.itemSpecificSyncAPI.run({
+          baseId: itemSpecificBaseId,
+          token: document.getElementById('airtable-token').value.trim() || undefined
+        });
+        if (!result?.success) {
+          throw new Error(result?.message || 'Item Specific sync failed.');
+        }
+
+        const summary = result.summary || {};
+        const failures = Array.isArray(summary.failures) ? summary.failures.length : 0;
+        statusText.textContent = `Item Specific sync status: completed. Created=${summary.tablesCreated || 0}, Patched=${summary.tablesSkippedExisting || 0}, Failures=${failures}`;
+        setRunState('Success', 'Item Specific table sync completed.');
+        showStatus(
+          'run-status',
+          failures > 0 ? 'info' : 'success',
+          `Item Specific sync completed. Templates=${summary.totalTemplatesProcessed || 0}, Created=${summary.tablesCreated || 0}, Existing=${summary.tablesSkippedExisting || 0}, Failures=${failures}`
+        );
+        logLine(
+          `ItemSpecific summary: Templates=${summary.totalTemplatesProcessed || 0}, Created=${summary.tablesCreated || 0}, Existing=${summary.tablesSkippedExisting || 0}, Failures=${failures}`
+        );
+      } catch (err) {
+        statusText.textContent = `Item Specific sync status: failed (${err.message})`;
+        setRunState('Error', `Item Specific sync failed: ${err.message}`);
+        showStatus('run-status', 'error', `Item Specific sync failed: ${err.message}`);
+        logLine(`Item Specific sync failed: ${err.message}`, 'error');
+      } finally {
+        isItemSpecificSyncRunning = false;
         updateRunButtonState();
       }
     }

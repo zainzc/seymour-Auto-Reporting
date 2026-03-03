@@ -92,3 +92,9 @@ contextBridge.exposeInMainWorld('phase3API', {
   run: (options) => ipcRenderer.invoke('phase3:run', options),
   onProgress: (callback) => ipcRenderer.on('phase3:progress', callback)
 });
+
+// Item Specific table automation API
+contextBridge.exposeInMainWorld('itemSpecificSyncAPI', {
+  run: (options) => ipcRenderer.invoke('item-specific-sync:run', options),
+  onProgress: (callback) => ipcRenderer.on('item-specific-sync:progress', callback)
+});

@@ -31,6 +31,7 @@ const { startSchedule, stopSchedule, resumeSchedule, logExecution, getExecutionL
 const oauth2Service = require('../services/oauth2Service');
 const { runPhase2, buildPhase2Config } = require('../services/phase2Service');
 const { runPhase3, buildPhase3Config, PARTSHUNTER_STORE_ID } = require('../services/phase3Service');
+const { runItemSpecificTableSync } = require('../scripts/syncItemSpecificTables');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
 const phase2WritebackPoller = require('../services/phase2WritebackPollerService');
@@ -44,6 +45,18 @@ function parseBoolean(value, defaultValue = false) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') return value.toLowerCase() === 'true';
   return defaultValue;
+}
+
+function formatDetailedErrorMessage(error) {
+  const status = error?.response?.status;
+  const payload = error?.response?.data;
+  const detail =
+    payload?.error?.message ||
+    payload?.error?.type ||
+    payload?.error ||
+    error?.message ||
+    'Unknown error';
+  return status ? `HTTP ${status}: ${detail}` : String(detail);
 }
 
 /* ---------------------------
@@ -907,6 +920,7 @@ ipcMain.handle('phase2-get-config', async () => {
     shipstationStoreId: Number(phase3Config.shipstationStoreId || PARTSHUNTER_STORE_ID),
     phase3LookbackDays: Number(phase3Config.phase3LookbackDays || 90),
     phase3DryRun: Boolean(phase3Config.phase3DryRun),
+    itemSpecificsBaseId: stored.itemSpecificsBaseId || '',
     airtableToken: stored.airtableToken || '',
     clickupToken: stored.clickupToken || ''
   };
@@ -1199,6 +1213,29 @@ ipcMain.handle('phase3:run', async (event, options = {}) => {
     return {
       success: false,
       message: error.message
+    };
+  }
+});
+
+ipcMain.handle('item-specific-sync:run', async (event, options = {}) => {
+  try {
+    const summary = await runItemSpecificTableSync(options, progress => {
+      event.sender.send('item-specific-sync:progress', progress);
+    });
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('item-specific-sync:progress', {
+      stage: 'error',
+      at: new Date().toISOString(),
+      message
+    });
+    return {
+      success: false,
+      message
     };
   }
 });
