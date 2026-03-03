@@ -948,6 +948,11 @@ ipcMain.handle('phase2-clear-activity-logs', async () => {
   return { success: true };
 });
 
+ipcMain.handle('phase2-clear-task-cache', async () => {
+  saveInventoryConfig('phase2TaskCache', {});
+  return { success: true, message: 'Phase 2 task cache cleared.' };
+});
+
 ipcMain.handle('phase2-writeback-start', async (_, options = {}) => {
   try {
     const config = buildPhase2WritebackConfig(options);

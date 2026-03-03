@@ -82,6 +82,7 @@ function buildSummary() {
     ipnsSkippedAlreadyFilled: 0,
     ipnsSkippedExcludedPrefix: 0,
     skusUnmappedInPowerlink: 0,
+    updatedIpnLogs: [],
     errors: []
   };
 }
@@ -219,6 +220,7 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
 
   const totalIpns = ipnToDims.size;
   let processed = 0;
+  const maxUpdatedLogs = 300;
 
   for (const [ipn, dims] of ipnToDims.entries()) {
     processed += 1;
@@ -234,8 +236,22 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
         } else if (!config.phase3DryRun) {
           await airtableService.updateMasterShipstationFields(record.id, fieldsToSet);
           summary.ipnsUpdated += 1;
+          if (summary.updatedIpnLogs.length < maxUpdatedLogs) {
+            summary.updatedIpnLogs.push({
+              ipn,
+              mode: 'updated',
+              fields: fieldsToSet
+            });
+          }
         } else {
           summary.ipnsUpdated += 1;
+          if (summary.updatedIpnLogs.length < maxUpdatedLogs) {
+            summary.updatedIpnLogs.push({
+              ipn,
+              mode: 'dry_run_would_update',
+              fields: fieldsToSet
+            });
+          }
         }
       }
     } catch (error) {

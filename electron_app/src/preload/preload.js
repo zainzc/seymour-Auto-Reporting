@@ -69,6 +69,7 @@ contextBridge.exposeInMainWorld('phase2API', {
   getActivityLogs: () => ipcRenderer.invoke('phase2-get-activity-logs'),
   appendActivityLog: (entry) => ipcRenderer.invoke('phase2-append-activity-log', entry),
   clearActivityLogs: () => ipcRenderer.invoke('phase2-clear-activity-logs'),
+  clearTaskCache: () => ipcRenderer.invoke('phase2-clear-task-cache'),
   fetchClickUpLists: (token) => ipcRenderer.invoke('phase2-fetch-clickup-lists', token),
   fetchAirtableBases: (token) => ipcRenderer.invoke('phase2-fetch-airtable-bases', token),
   validateClickUpConfig: (payload) => ipcRenderer.invoke('phase2-validate-clickup-config', payload),

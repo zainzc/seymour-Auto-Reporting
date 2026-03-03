@@ -575,6 +575,7 @@
         <button class="btn btn-danger" onclick="stopWritebackPoller()">Stop Write-back</button>
         <button class="btn btn-secondary" onclick="runWritebackOnce()">Run Write-back Once</button>
         <button class="btn btn-secondary" onclick="refreshWritebackStatus()">Refresh Status</button>
+        <button class="btn btn-secondary" onclick="clearPhase2TaskCache()">Clear Task Cache</button>
       </div>
       <div class="hint" id="writeback-status-text">Write-back status: unknown</div>
       <div class="status-banner" aria-live="polite">
@@ -1353,6 +1354,23 @@
       }
     }
 
+    async function clearPhase2TaskCache() {
+      if (!window.confirm('Clear Phase 2 task cache now? This allows task recreation for previous IPN::reason keys.')) {
+        return;
+      }
+      try {
+        const result = await window.phase2API.clearTaskCache();
+        if (!result?.success) {
+          throw new Error(result?.message || 'Failed to clear task cache.');
+        }
+        showStatus('run-status', 'success', result.message || 'Task cache cleared.');
+        logLine('Phase 2 task cache cleared.');
+      } catch (err) {
+        showStatus('run-status', 'error', `Failed to clear task cache: ${err.message}`);
+        logLine(`Failed to clear task cache: ${err.message}`, 'error');
+      }
+    }
+
     async function saveConfig() {
       try {
         await ensureSourceFieldsFromInventoryExport();
@@ -1494,6 +1512,19 @@
           logLine(
             `Phase 3 completed. Updated=${result.summary?.ipnsUpdated || 0}, AlreadyFilled=${result.summary?.ipnsSkippedAlreadyFilled || 0}, UnmappedSKU=${result.summary?.skusUnmappedInPowerlink || 0}`
           );
+          if (Array.isArray(result.summary?.updatedIpnLogs) && result.summary.updatedIpnLogs.length > 0) {
+            result.summary.updatedIpnLogs.forEach(entry => {
+              const ipn = String(entry?.ipn || '').trim();
+              if (!ipn) return;
+              const mode = entry?.mode === 'dry_run_would_update' ? 'Would update' : 'Updated';
+              const fields = entry?.fields && typeof entry.fields === 'object'
+                ? Object.keys(entry.fields)
+                    .map(name => `${name}=${entry.fields[name]}`)
+                    .join(', ')
+                : '';
+              logLine(`Phase3 ${mode} IPN ${ipn}${fields ? ` -> ${fields}` : ''}`);
+            });
+          }
           if (Array.isArray(result.summary?.errors) && result.summary.errors.length > 0) {
             result.summary.errors.forEach(err => logLine(`Phase3: ${err}`, 'error'));
           }
