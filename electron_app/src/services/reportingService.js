@@ -21,8 +21,8 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
     WHERE LineItemType = 'CRED' 
       AND (LineItemDescription LIKE '%Freight%' OR LineItemDescription LIKE 'CR:%')
     GROUP BY InvoiceID
-    )
-    SELECT
+)
+SELECT
     CONVERT(varchar(23), i.DateCreated, 121) AS DateCreated,
     e.EmployeeName AS [Created By],
     i.InvoiceNumber AS [Invoice#],
@@ -62,49 +62,41 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
         ELSE 0 
     END AS Tax,
 
-
     /* TOTAL CALCULATION: Conditional Logic based on Line Item Count */
-     CASE 
-            /* SCENARIO 1: Single Line Item or Ghost (Count <= 1)
-               Trust the Header InvoiceAmount to avoid double-counting shipping on eBay orders. */
-            WHEN (SELECT COUNT(*) FROM dbo.INVOICE_LINEITEM WHERE InvoiceID = i.InvoiceID AND LineItemType <> 'CRED') <= 1
-            THEN 
-                CASE 
-                    WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 THEN i.InvoiceAmount 
-                    ELSE 0 
-                END
+    CASE 
+        /* SCENARIO 1: Single Line Item or Ghost (Count <= 1)
+           Trust the Header InvoiceAmount to avoid double-counting shipping on eBay orders. */
+        WHEN (SELECT COUNT(*) FROM dbo.INVOICE_LINEITEM WHERE InvoiceID = i.InvoiceID AND LineItemType <> 'CRED') <= 1
+        THEN 
+            CASE 
+                WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 THEN i.InvoiceAmount 
+                ELSE 0 
+            END
 
-            /* SCENARIO 2: Multiple Line Items
+        /* SCENARIO 2: Multiple Line Items
            Logic: Each row uses its own UnitPrice. 
            Row 1 also gets the 'Non-Taxable gap' and all associated fees.
         */
-            ELSE (
-                  ISNULL(li.UnitPrice, 0) +
-                  CASE 
-                    WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 
-                    THEN (
-                       ISNULL(i.TotalFreightAmount, 0) +
-                       ISNULL(li.TotalFreightAmount, 0) +
-                       ISNULL(fc.TotalFreightCredit, 0) +
-                       ISNULL(i.TotalFreightTaxAmount, 0) +
-                       ISNULL(i.TotalCityTaxAmount, 0) +
-                       ISNULL(i.TotalCountyTaxAmount, 0) +
-                       ISNULL(i.TotalStateProvTaxAmount, 0) +
-                       ISNULL(i.TotalOtherTax, 0) +
-                       ISNULL(i.TotalGSTTaxAmount, 0) +
-                    
-                       /* Client's Non-Taxable adjustment logic (First row only) */
-                       CASE 
-                          WHEN i.InvoiceAmount = (i.InvoiceAmount - i.TotalTaxableAmount) THEN 0 
-                          ELSE ISNULL(i.InvoiceAmount - i.TotalTaxableAmount, 0) 
-                       END +
-                    
-                       ISNULL(i.TotalServicesAmount, 0) -
-                       ISNULL(i.TotalDiscountAmount, 0)
-                   )
-                   ELSE 0 
-                END
-            )
+        ELSE (
+            ISNULL(li.UnitPrice, 0) +
+            CASE 
+                WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 
+                THEN (
+                    ISNULL(i.TotalFreightAmount, 0) +
+                    ISNULL(li.TotalFreightAmount, 0) +
+                    ISNULL(fc.TotalFreightCredit, 0) +
+                    ISNULL(i.TotalFreightTaxAmount, 0) +
+                    ISNULL(i.TotalCityTaxAmount, 0) +
+                    ISNULL(i.TotalCountyTaxAmount, 0) +
+                    ISNULL(i.TotalStateProvTaxAmount, 0) +
+                    ISNULL(i.TotalOtherTax, 0) +
+                    ISNULL(i.TotalGSTTaxAmount, 0) +
+                    ISNULL(i.TotalServicesAmount, 0) -
+                    ISNULL(i.TotalDiscountAmount, 0)
+                )
+                ELSE 0 
+            END
+        )
     END AS Total,
 
     inv.LocationCode,
@@ -123,11 +115,11 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
 
     /* Payment Type Logic */
     CASE 
-      WHEN ISNULL(i.TotalPaymentCheck, 0) <> 0 THEN 'Check'
-      WHEN ISNULL(i.TotalPaymentCash, 0) <> 0 THEN 'Cash'
-      WHEN ISNULL(i.TotalPaymentCharge, 0) <> 0 THEN 'Charge'
-      WHEN i.CreditCardType IS NOT NULL THEN cc.CreditCardDescription 
-      ELSE opt.OtherPaymentTypeDescription 
+        WHEN ISNULL(i.TotalPaymentCheck, 0) <> 0 THEN 'Check'
+        WHEN ISNULL(i.TotalPaymentCash, 0) <> 0 THEN 'Cash'
+        WHEN ISNULL(i.TotalPaymentCharge, 0) <> 0 THEN 'Charge'
+        WHEN i.CreditCardType IS NOT NULL THEN cc.CreditCardDescription 
+        ELSE opt.OtherPaymentTypeDescription 
     END AS PaymentType,
 
     /* Vendor/PO Logic (Only populated if Stock# starts with 'P') */
@@ -138,30 +130,16 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
 
     /* Markup Logic for 'P' stocks */
     CASE
-       WHEN inv.StockTicketNumber LIKE 'P%' AND poli1.UnitPrice > 0
-       THEN ROUND(((inv.RetailPrice - poli1.UnitPrice) / poli1.UnitPrice) * 100, 2)
-       ELSE 0
+        WHEN inv.StockTicketNumber LIKE 'P%' AND poli1.UnitPrice > 0
+        THEN ROUND(((inv.RetailPrice - poli1.UnitPrice) / poli1.UnitPrice) * 100, 2)
+        ELSE 0
     END AS MarkUp
+
 FROM dbo.INVOICE i
-/* Use LEFT JOIN to ensure Invoice 406481 shows up even without line items */
 LEFT JOIN dbo.INVOICE_LINEITEM li
     ON li.InvoiceID = i.InvoiceID 
-    AND li.LineItemType <> 'CRED'
-    AND (
-        /* CLUE 1: The sum of all parts matches the header (Real Multi-part) */
-        i.TotalPartsAmount = (
-            SELECT SUM(UnitPrice) 
-            FROM dbo.INVOICE_LINEITEM 
-            WHERE InvoiceID = i.InvoiceID AND LineItemType <> 'CRED'
-        )
-        OR 
-        /* CLUE 2: The sum is wrong, so ONLY show the item that matches the header total (Ghost Fix) */
-        li.UnitPrice = i.TotalPartsAmount
-        OR
-        /* CLUE 3: Safety net if header is 0 */
-        i.TotalPartsAmount = 0
-    )
-
+    AND li.LineItemType NOT IN ('CRED', 'SERV')
+   
 LEFT JOIN dbo.INVENTORY inv
     ON inv.InventoryID = li.InventoryID
 
