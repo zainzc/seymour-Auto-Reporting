@@ -50,19 +50,18 @@ async function getAllInventory() {
         PrivacyIndicator,
         BlockOnlineSale,
         ReferenceNumber
-    FROM dbo.INVENTORY i -- Added alias 'i' for clarity
-    LEFT JOIN dbo.EMPLOYEE inv_emp
-      ON inv_emp.EmployeeID = i.InventorierID
-    LEFT JOIN dbo.EMPLOYEE dism_emp
-      ON dism_emp.EmployeeID = i.DismantlerID
-
-    WHERE i.LastDateModified >= DATEADD(DAY, -1, CAST(GETDATE() AS DATE))
-      AND (
-        InventoryNumber IS NULL
+FROM dbo.INVENTORY i -- Added alias 'i' for clarity
+LEFT JOIN dbo.EMPLOYEE inv_emp
+   ON inv_emp.EmployeeID = i.InventorierID
+LEFT JOIN dbo.EMPLOYEE dism_emp
+  ON dism_emp.EmployeeID = i.DismantlerID
+WHERE ISNULL(i.QuantityAvailable, 0) > 0
+   AND (
+        i.InventoryNumber IS NULL
         OR (
-          CAST(InventoryNumber AS VARCHAR(50)) NOT LIKE '900%'
-          AND CAST(InventoryNumber AS VARCHAR(50)) NOT LIKE '950%'
-          AND CAST(InventoryNumber AS VARCHAR(50)) NOT LIKE '999%'
+          CAST(i.InventoryNumber AS VARCHAR(50)) NOT LIKE '900%'
+          AND CAST(i.InventoryNumber AS VARCHAR(50)) NOT LIKE '950%'
+          AND CAST(i.InventoryNumber AS VARCHAR(50)) NOT LIKE '999%'
         )
       );
   `;
