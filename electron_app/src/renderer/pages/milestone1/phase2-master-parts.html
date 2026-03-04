@@ -185,9 +185,6 @@
       min-height: 16px;
     }
 
-    .phase4-hidden {
-      display: none !important;
-    }
 
     .input-error {
       border-color: #da8b86 !important;
@@ -555,7 +552,7 @@
               <option value="true">True (No Airtable Writes)</option>
             </select>
           </div>
-          <div class="form-group phase4-hidden">
+          <div class="form-group">
             <label for="item-specific-base-id">Item Specifics Base ID</label>
             <input id="item-specific-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
             <div class="hint">Base B: Item Specifics by Part Type.</div>
@@ -579,7 +576,7 @@
       </div>
       <div class="btn-group">
         <button id="run-sync-btn" class="btn btn-primary" onclick="runPhase2()">Run Sync</button>
-        <button id="run-item-specific-sync-btn" class="btn btn-secondary phase4-hidden" onclick="runItemSpecificSync()">Run Item Specific Table Sync</button>
+        <button id="run-item-specific-sync-btn" class="btn btn-secondary" onclick="runItemSpecificSync()">Run Item Specific Table Sync</button>
       </div>
       <div class="btn-group" style="margin-top: 10px;">
         <button class="btn btn-secondary" onclick="startWritebackPoller()">Start Write-back</button>
@@ -589,7 +586,7 @@
         <button class="btn btn-secondary" onclick="clearPhase2TaskCache()">Clear Task Cache</button>
       </div>
       <div class="hint" id="writeback-status-text">Write-back status: unknown</div>
-      <div class="hint phase4-hidden" id="item-specific-sync-status-text">Item Specific sync status: idle</div>
+      <div class="hint" id="item-specific-sync-status-text">Item Specific sync status: idle</div>
       <div class="status-banner" aria-live="polite">
         <span id="run-state-pill" class="status-pill">Idle</span>
         <div id="run-state-detail" class="hint" style="margin:0;">Waiting for validation and run action.</div>
