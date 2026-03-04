@@ -4,7 +4,10 @@ const AirtableService = require('../services/airtableService');
 const AirtableSchemaService = require('../services/airtableSchemaService');
 const oauth2Service = require('../services/oauth2Service');
 const { google } = require('googleapis');
+const ExcelJS = require('exceljs');
 const { retryWithBackoff } = require('../utils/retry');
+const fs = require('fs');
+const path = require('path');
 
 loadEnv();
 
@@ -146,13 +149,25 @@ function buildConfig(overrides = {}) {
     overrides.authContext ||
     process.env.ITEM_SPECIFICS_GOOGLE_AUTH_CONTEXT || DEFAULT_AUTH_CONTEXT
   ).trim();
+  const extractOnly =
+    typeof overrides.extractOnly === 'boolean'
+      ? overrides.extractOnly
+      : String(process.env.ITEM_SPECIFICS_EXTRACT_ONLY || '').toLowerCase() === 'true';
+
+  const outputJsonPath = String(
+    overrides.outputJsonPath ||
+      process.env.ITEM_SPECIFICS_OUTPUT_JSON ||
+      path.resolve(process.cwd(), 'output', 'itemSpecificExtracted.json')
+  ).trim();
 
   return {
     token,
     baseId,
     templateIndexTableName,
     referenceTableName,
-    authContext
+    authContext,
+    extractOnly,
+    outputJsonPath
   };
 }
 
@@ -177,6 +192,13 @@ function buildIpnFieldCreatePayload(referenceIpnField) {
   return payload;
 }
 
+function buildIpnFieldFallbackPayload() {
+  return {
+    name: 'IPN',
+    type: 'singleLineText'
+  };
+}
+
 function buildSingleLineTextFieldPayload(name) {
   return {
     name: sanitizeFieldName(name),
@@ -198,41 +220,88 @@ function ensureUniqueNames(names = []) {
   return result.sort((a, b) => a.localeCompare(b));
 }
 
-async function getSheetsClient(authContext) {
+function normalizeForMatch(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/\.(xlsx|gsheet)$/gi, '')
+    .replace(/^cat[-_\s]*/i, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function pickCatSheetName(sheetNames = [], templateName = '') {
+  const catSheets = (sheetNames || []).filter(name => /^cat[-_\s]/i.test(String(name || '')));
+  if (catSheets.length === 0) {
+    throw new Error('No Cat-* tab found in template.');
+  }
+  if (catSheets.length === 1) {
+    return catSheets[0];
+  }
+
+  const target = normalizeForMatch(templateName);
+  if (!target) {
+    return catSheets[0];
+  }
+
+  const ranked = catSheets
+    .map(name => {
+      const normalized = normalizeForMatch(name);
+      let score = 0;
+      if (normalized === target) score += 3;
+      if (normalized && target.includes(normalized)) score += 2;
+      if (normalized && normalized.includes(target)) score += 1;
+      return { name, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  return ranked[0]?.name || catSheets[0];
+}
+
+function findHeaderRowIndexForCat(values = []) {
+  const scanLimit = Math.min(values.length, 10);
+  for (let rowIndex = 0; rowIndex < scanLimit; rowIndex += 1) {
+    const row = Array.isArray(values[rowIndex]) ? values[rowIndex] : [];
+    const headers = row.map(value => sanitizeFieldName(value));
+    const cHeaderCount = headers.filter(header => header.startsWith('C:')).length;
+    if (cHeaderCount > 0) {
+      return rowIndex;
+    }
+  }
+  return -1;
+}
+
+function extractCHeadersFromCatValues(values = []) {
+  if (!Array.isArray(values) || values.length === 0) {
+    throw new Error('Cat tab is empty or missing.');
+  }
+
+  const headerRowIndex = findHeaderRowIndexForCat(values);
+  if (headerRowIndex < 0) {
+    throw new Error('Could not detect Cat header row with C:* fields in first 10 rows.');
+  }
+
+  const headerRow = Array.isArray(values[headerRowIndex]) ? values[headerRowIndex] : [];
+  const cHeaders = headerRow
+    .map(value => sanitizeFieldName(value))
+    .filter(header => header.startsWith('C:'));
+
+  return ensureUniqueNames(cHeaders);
+}
+
+async function getGoogleClients(authContext) {
   if (!oauth2Service.isAuthenticated(authContext)) {
     throw new Error(
       `Google auth context '${authContext}' is not connected. Connect Google first in the app.`
     );
   }
   const auth = oauth2Service.getAuthenticatedClient(authContext);
-  return google.sheets({ version: 'v4', auth });
+  return {
+    sheets: google.sheets({ version: 'v4', auth }),
+    drive: google.drive({ version: 'v3', auth })
+  };
 }
 
-async function extractAspectFieldsFromTemplate(sheets, spreadsheetId) {
-  const response = await retryWithBackoff(
-    async () =>
-      sheets.spreadsheets.values.get({
-        spreadsheetId,
-        range: 'Aspects!A:ZZ'
-      }),
-    {
-      maxAttempts: 5,
-      baseDelayMs: 500,
-      shouldRetry: error => {
-        const status = error?.response?.status;
-        return status === 429 || (status >= 500 && status <= 599);
-      },
-      onRetry: ({ attempt, delayMs, error }) => {
-        const status = error?.response?.status;
-        console.warn(
-          `Google Sheets retry attempt ${attempt} after ${delayMs}ms (status: ${status || 'n/a'})`
-        );
-      }
-    }
-  );
-
-  const values = Array.isArray(response?.data?.values) ? response.data.values : [];
-  if (values.length === 0) {
+function extractAspectNamesFromValues(values = []) {
+  if (!Array.isArray(values) || values.length === 0) {
     throw new Error('Aspects tab is empty or missing.');
   }
 
@@ -263,6 +332,137 @@ async function extractAspectFieldsFromTemplate(sheets, spreadsheetId) {
   }
 
   return ensureUniqueNames(aspectNames);
+}
+
+function isUnsupportedDocumentError(error) {
+  const status = error?.response?.status;
+  const message = String(
+    error?.response?.data?.error?.message ||
+      error?.response?.data?.error ||
+      error?.message ||
+      ''
+  ).toLowerCase();
+  return status === 400 && message.includes('operation is not supported for this document');
+}
+
+async function extractAspectFieldsFromXlsxInDrive(drive, fileId, templateName) {
+  const fileResponse = await retryWithBackoff(
+    async () =>
+      drive.files.get(
+        {
+          fileId,
+          alt: 'media'
+        },
+        {
+          responseType: 'arraybuffer'
+        }
+      ),
+    {
+      maxAttempts: 5,
+      baseDelayMs: 500,
+      shouldRetry: error => {
+        const status = error?.response?.status;
+        return status === 429 || (status >= 500 && status <= 599);
+      },
+      onRetry: ({ attempt, delayMs, error }) => {
+        const status = error?.response?.status;
+        console.warn(
+          `Google Drive retry attempt ${attempt} after ${delayMs}ms (status: ${status || 'n/a'})`
+        );
+      }
+    }
+  );
+
+  const workbook = new ExcelJS.Workbook();
+  const binary = fileResponse?.data;
+  const buffer = Buffer.isBuffer(binary) ? binary : Buffer.from(binary || []);
+  await workbook.xlsx.load(buffer);
+
+  const sheetNames = workbook.worksheets.map(ws => String(ws?.name || ''));
+  const selectedSheet = pickCatSheetName(sheetNames, templateName);
+  const worksheet = workbook.getWorksheet(selectedSheet);
+  if (!worksheet) {
+    throw new Error(`Selected Cat sheet '${selectedSheet}' is missing in XLSX template.`);
+  }
+
+  const values = [];
+  const rowCount = worksheet.rowCount || worksheet.actualRowCount || 0;
+  for (let rowIndex = 1; rowIndex <= rowCount; rowIndex += 1) {
+    const row = worksheet.getRow(rowIndex);
+    const rowValues = [];
+    const maxCol = row.cellCount || worksheet.columnCount || 0;
+    for (let colIndex = 1; colIndex <= maxCol; colIndex += 1) {
+      const cellValue = row.getCell(colIndex).value;
+      if (cellValue === null || cellValue === undefined) {
+        rowValues.push('');
+      } else if (typeof cellValue === 'object' && cellValue.text) {
+        rowValues.push(String(cellValue.text));
+      } else if (typeof cellValue === 'object' && Array.isArray(cellValue.richText)) {
+        rowValues.push(cellValue.richText.map(part => String(part?.text || '')).join(''));
+      } else {
+        rowValues.push(String(cellValue));
+      }
+    }
+    values.push(rowValues);
+  }
+
+  return extractCHeadersFromCatValues(values);
+}
+
+async function extractAspectFieldsFromTemplate(sheets, drive, spreadsheetId, templateName) {
+  let selectedSheetName = '';
+  try {
+    const meta = await retryWithBackoff(
+      async () =>
+        sheets.spreadsheets.get({
+          spreadsheetId,
+          includeGridData: false
+        }),
+      {
+        maxAttempts: 5,
+        baseDelayMs: 500,
+        shouldRetry: error => {
+          const status = error?.response?.status;
+          return status === 429 || (status >= 500 && status <= 599);
+        }
+      }
+    );
+
+    const sheetNames = Array.isArray(meta?.data?.sheets)
+      ? meta.data.sheets.map(item => String(item?.properties?.title || ''))
+      : [];
+    selectedSheetName = pickCatSheetName(sheetNames, templateName);
+
+    const response = await retryWithBackoff(
+      async () =>
+        sheets.spreadsheets.values.get({
+          spreadsheetId,
+          range: `'${selectedSheetName}'!A:ZZ`
+        }),
+      {
+        maxAttempts: 5,
+        baseDelayMs: 500,
+        shouldRetry: error => {
+          const status = error?.response?.status;
+          return status === 429 || (status >= 500 && status <= 599);
+        },
+        onRetry: ({ attempt, delayMs, error }) => {
+          const status = error?.response?.status;
+          console.warn(
+            `Google Sheets retry attempt ${attempt} after ${delayMs}ms (status: ${status || 'n/a'})`
+          );
+        }
+      }
+    );
+
+    const values = Array.isArray(response?.data?.values) ? response.data.values : [];
+    return extractCHeadersFromCatValues(values);
+  } catch (error) {
+    if (!isUnsupportedDocumentError(error)) {
+      throw error;
+    }
+    return extractAspectFieldsFromXlsxInDrive(drive, spreadsheetId, templateName);
+  }
 }
 
 function mapTablesByName(tables = []) {
@@ -315,6 +515,9 @@ async function runItemSpecificTableSync(options = {}, progressCallback = () => {
     tablesCreated: 0,
     tablesSkippedExisting: 0,
     fieldsAddedByTable: {},
+    extractOnly: Boolean(config.extractOnly),
+    outputJsonPath: config.outputJsonPath,
+    extractedTemplates: [],
     failures: []
   };
   emitProgress(progressCallback, {
@@ -330,7 +533,7 @@ async function runItemSpecificTableSync(options = {}, progressCallback = () => {
     token: config.token,
     baseId: config.baseId
   });
-  const sheets = await getSheetsClient(config.authContext);
+  const { sheets, drive } = await getGoogleClients(config.authContext);
 
   emitProgress(progressCallback, {
     stage: 'preflight',
@@ -405,11 +608,31 @@ async function runItemSpecificTableSync(options = {}, progressCallback = () => {
         throw new Error('Target table name resolved to empty value.');
       }
 
-      const aspectFields = await extractAspectFieldsFromTemplate(sheets, spreadsheetId);
+      const aspectFields = await extractAspectFieldsFromTemplate(
+        sheets,
+        drive,
+        spreadsheetId,
+        inferredName
+      );
+      summary.extractedTemplates.push({
+        templateName: inferTemplateName(fields, spreadsheetId),
+        targetTableName: tableName,
+        spreadsheetId,
+        aspectCount: aspectFields.length,
+        aspects: aspectFields
+      });
+
+      if (config.extractOnly) {
+        emitProgress(progressCallback, {
+          stage: 'template_extracted',
+          message: `Extracted ${aspectFields.length} aspects from '${tableName}' (extract-only mode).`
+        });
+        continue;
+      }
 
       let targetTable = tableMap.get(normalizeName(tableName));
       if (!targetTable) {
-        const createPayload = {
+        const createPayloadPrimary = {
           name: tableName,
           fields: [
             ipnFieldPayload,
@@ -417,15 +640,40 @@ async function runItemSpecificTableSync(options = {}, progressCallback = () => {
           ]
         };
 
-        const createdTable = await airtableSchemaService.createTable(createPayload);
+        let createdTable = null;
+        let usedFallbackIpnType = false;
+        try {
+          createdTable = await airtableSchemaService.createTable(createPayloadPrimary);
+        } catch (createError) {
+          const createMsg = getErrorMessage(createError);
+          const createPayloadFallback = {
+            name: tableName,
+            fields: [
+              buildIpnFieldFallbackPayload(),
+              ...aspectFields.map(name => buildSingleLineTextFieldPayload(name))
+            ]
+          };
+          try {
+            createdTable = await airtableSchemaService.createTable(createPayloadFallback);
+            usedFallbackIpnType = true;
+            const warn = `${tableName}: create table fallback used (IPN as singleLineText) because primary IPN schema failed: ${createMsg}`;
+            summary.failures.push(warn);
+            console.warn(`[WARN] ${warn}`);
+          } catch (fallbackError) {
+            throw new Error(
+              `create_table failed for '${tableName}' (primary: ${createMsg}; fallback: ${getErrorMessage(fallbackError)})`
+            );
+          }
+        }
+
         summary.tablesCreated += 1;
-        summary.fieldsAddedByTable[tableName] = createPayload.fields.length;
+        summary.fieldsAddedByTable[tableName] = 1 + aspectFields.length;
         console.log(
-          `[CREATE] ${tableName}: table created with ${createPayload.fields.length} fields (${aspectFields.length} aspect fields).`
+          `[CREATE] ${tableName}: table created with ${1 + aspectFields.length} fields (${aspectFields.length} aspect fields).${usedFallbackIpnType ? ' [fallback IPN type]' : ''}`
         );
         emitProgress(progressCallback, {
           stage: 'table_created',
-          message: `Created table '${tableName}' with ${createPayload.fields.length} fields.`
+          message: `Created table '${tableName}' with ${1 + aspectFields.length} fields.${usedFallbackIpnType ? ' (fallback IPN type)' : ''}`
         });
 
         tables = await airtableSchemaService.listTables();
@@ -441,7 +689,24 @@ async function runItemSpecificTableSync(options = {}, progressCallback = () => {
 
       let fieldsAdded = 0;
       if (!existingFieldNames.has(normalizeName('IPN'))) {
-        await airtableSchemaService.createField(targetTable.id, ipnFieldPayload);
+        try {
+          await airtableSchemaService.createField(targetTable.id, ipnFieldPayload);
+        } catch (ipnFieldError) {
+          const primaryErr = getErrorMessage(ipnFieldError);
+          try {
+            await airtableSchemaService.createField(
+              targetTable.id,
+              buildIpnFieldFallbackPayload()
+            );
+            const warn = `${tableName}: add IPN field fallback used (singleLineText) because primary schema failed: ${primaryErr}`;
+            summary.failures.push(warn);
+            console.warn(`[WARN] ${warn}`);
+          } catch (fallbackErr) {
+            throw new Error(
+              `add_ipn_field failed for '${tableName}' (primary: ${primaryErr}; fallback: ${getErrorMessage(fallbackErr)})`
+            );
+          }
+        }
         fieldsAdded += 1;
         existingFieldNames.add(normalizeName('IPN'));
       }
@@ -449,10 +714,16 @@ async function runItemSpecificTableSync(options = {}, progressCallback = () => {
       for (const aspectName of aspectFields) {
         const key = normalizeName(aspectName);
         if (existingFieldNames.has(key)) continue;
-        await airtableSchemaService.createField(
-          targetTable.id,
-          buildSingleLineTextFieldPayload(aspectName)
-        );
+        try {
+          await airtableSchemaService.createField(
+            targetTable.id,
+            buildSingleLineTextFieldPayload(aspectName)
+          );
+        } catch (fieldError) {
+          throw new Error(
+            `add_aspect_field failed for '${tableName}' field '${aspectName}': ${getErrorMessage(fieldError)}`
+          );
+        }
         fieldsAdded += 1;
         existingFieldNames.add(key);
       }
@@ -504,6 +775,36 @@ async function runItemSpecificTableSync(options = {}, progressCallback = () => {
     summary.failures.forEach(message => console.log(`  - ${message}`));
   } else {
     console.log('Failures: none');
+  }
+
+  try {
+    const outputDir = path.dirname(config.outputJsonPath);
+    fs.mkdirSync(outputDir, { recursive: true });
+    fs.writeFileSync(
+      config.outputJsonPath,
+      JSON.stringify(
+        {
+          generatedAt: new Date().toISOString(),
+          mode: config.extractOnly ? 'extract_only' : 'sync',
+          summary: {
+            totalTemplatesProcessed: summary.totalTemplatesProcessed,
+            tablesCreated: summary.tablesCreated,
+            tablesSkippedExisting: summary.tablesSkippedExisting,
+            failureCount: summary.failures.length
+          },
+          extractedTemplates: summary.extractedTemplates,
+          failures: summary.failures
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+    console.log(`Extraction JSON written: ${config.outputJsonPath}`);
+  } catch (writeError) {
+    const msg = `Failed writing extraction JSON '${config.outputJsonPath}': ${writeError.message}`;
+    summary.failures.push(msg);
+    console.error(msg);
   }
 
   emitProgress(progressCallback, {

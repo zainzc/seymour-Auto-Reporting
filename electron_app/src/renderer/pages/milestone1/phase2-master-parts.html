@@ -1602,7 +1602,8 @@
           baseId: itemSpecificBaseId,
           token: document.getElementById('airtable-token').value.trim() || undefined,
           templateIndexTableName: 'eBay Item Specific Templates',
-          referenceTableName: '104-Grille'
+          referenceTableName: '104-Grille',
+          extractOnly: true
         });
         if (!result?.success) {
           throw new Error(result?.message || 'Item Specific sync failed.');
@@ -1610,15 +1611,15 @@
 
         const summary = result.summary || {};
         const failures = Array.isArray(summary.failures) ? summary.failures.length : 0;
-        statusText.textContent = `Item Specific sync status: completed. Created=${summary.tablesCreated || 0}, Patched=${summary.tablesSkippedExisting || 0}, Failures=${failures}`;
+        statusText.textContent = `Item Specific sync status: completed. Extracted=${summary.totalTemplatesProcessed || 0}, Failures=${failures}`;
         setRunState('Success', 'Item Specific table sync completed.');
         showStatus(
           'run-status',
           failures > 0 ? 'info' : 'success',
-          `Item Specific sync completed. Templates=${summary.totalTemplatesProcessed || 0}, Created=${summary.tablesCreated || 0}, Existing=${summary.tablesSkippedExisting || 0}, Failures=${failures}`
+          `Item Specific extract completed. Templates=${summary.totalTemplatesProcessed || 0}, Failures=${failures}, JSON=${summary.outputJsonPath || 'output/itemSpecificExtracted.json'}`
         );
         logLine(
-          `ItemSpecific summary: Templates=${summary.totalTemplatesProcessed || 0}, Created=${summary.tablesCreated || 0}, Existing=${summary.tablesSkippedExisting || 0}, Failures=${failures}`
+          `ItemSpecific summary: Templates=${summary.totalTemplatesProcessed || 0}, Failures=${failures}, JSON=${summary.outputJsonPath || 'output/itemSpecificExtracted.json'}`
         );
       } catch (err) {
         statusText.textContent = `Item Specific sync status: failed (${err.message})`;
