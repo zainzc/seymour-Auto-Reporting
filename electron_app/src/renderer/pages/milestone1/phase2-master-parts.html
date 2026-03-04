@@ -1602,9 +1602,9 @@
         const result = await window.itemSpecificSyncAPI.run({
           baseId: itemSpecificBaseId,
           token: document.getElementById('airtable-token').value.trim() || undefined,
-          templateIndexTableName: 'eBay Item Specific Templates',
+          templateIndexTableName: 'eBay Item Specifics Templates',
           referenceTableName: '104-Grille',
-          extractOnly: true
+          extractOnly: false
         });
         if (!result?.success) {
           throw new Error(result?.message || 'Item Specific sync failed.');
@@ -1612,15 +1612,15 @@
 
         const summary = result.summary || {};
         const failures = Array.isArray(summary.failures) ? summary.failures.length : 0;
-        statusText.textContent = `Item Specific sync status: completed. Extracted=${summary.totalTemplatesProcessed || 0}, Failures=${failures}`;
+        statusText.textContent = `Item Specific sync status: completed. Templates=${summary.totalTemplatesProcessed || 0}, Created=${summary.tablesCreated || 0}, Failures=${failures}`;
         setRunState('Success', 'Item Specific table sync completed.');
         showStatus(
           'run-status',
           failures > 0 ? 'info' : 'success',
-          `Item Specific extract completed. Templates=${summary.totalTemplatesProcessed || 0}, Failures=${failures}, JSON=${summary.outputJsonPath || 'output/itemSpecificExtracted.json'}`
+          `Item Specific sync completed. Templates=${summary.totalTemplatesProcessed || 0}, Tables created=${summary.tablesCreated || 0}, Tables skipped=${summary.tablesSkippedExisting || 0}, Failures=${failures}`
         );
         logLine(
-          `ItemSpecific summary: Templates=${summary.totalTemplatesProcessed || 0}, Failures=${failures}, JSON=${summary.outputJsonPath || 'output/itemSpecificExtracted.json'}`
+          `ItemSpecific summary: Templates=${summary.totalTemplatesProcessed || 0}, Tables created=${summary.tablesCreated || 0}, Tables skipped=${summary.tablesSkippedExisting || 0}, Failures=${failures}`
         );
       } catch (err) {
         statusText.textContent = `Item Specific sync status: failed (${err.message})`;
