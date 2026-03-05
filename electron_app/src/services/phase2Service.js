@@ -1,6 +1,7 @@
 const AirtableService = require('./airtableService');
 const ClickUpService = require('./clickupService');
 const { readSheetRows } = require('./phase2SheetsService');
+const { chunkArray } = require('../utils/chunk');
 const {
   validateHeaders,
   buildRowObject,
@@ -273,7 +274,36 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   const ipns = normalizedRows.map(row => row.ipn);
   let existingRows = [];
   try {
-    existingRows = ipns.length > 0 ? await airtableService.fetchMasterPartsByIpns(ipns) : [];
+    if (ipns.length > 0) {
+      const uniqueIpns = [...new Set(ipns.filter(Boolean))];
+      const groups = chunkArray(uniqueIpns, 120);
+      let processedGroups = 0;
+      for (const group of groups) {
+        processedGroups += 1;
+        const formula = AirtableService.buildOrFormula('IPN', group);
+        let offset = null;
+        do {
+          const params = { filterByFormula: formula };
+          if (offset) params.offset = offset;
+          const data = await airtableService.request(
+            'GET',
+            `/${encodeURIComponent(config.airtableMasterTable)}`,
+            { params }
+          );
+          existingRows.push(...(data.records || []));
+          offset = data.offset || null;
+        } while (offset);
+
+        if (processedGroups === 1 || processedGroups % 20 === 0 || processedGroups === groups.length) {
+          emitProgress(progressCallback, {
+            stage: 'load_existing_master_parts',
+            percent: 55,
+            counts: summary,
+            message: `Loading existing master parts: batch ${processedGroups}/${groups.length}, records loaded=${existingRows.length}`
+          });
+        }
+      }
+    }
   } catch (error) {
     throw new Error(formatDetailedServiceError(error, 'load_existing_master_parts'));
   }
