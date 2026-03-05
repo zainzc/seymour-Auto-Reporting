@@ -161,6 +161,20 @@ function chooseTrackingField(masterFieldNames, name) {
   return masterFieldNames.has(name) ? name : '';
 }
 
+function formatDetailedServiceError(error, stage = '') {
+  const status = error?.response?.status;
+  const payload = error?.response?.data;
+  const detail =
+    payload?.error?.message ||
+    payload?.error?.type ||
+    payload?.error ||
+    payload?.message ||
+    error?.message ||
+    'Unknown error';
+  const base = status ? `HTTP ${status}: ${detail}` : String(detail);
+  return stage ? `${stage} failed: ${base}` : base;
+}
+
 async function runPhase2(options = {}, progressCallback = () => {}) {
   const summary = {
     totalRows: 0,
@@ -206,7 +220,12 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   });
 
   emitProgress(progressCallback, { stage: 'read_sheet', percent: 10, counts: summary });
-  const values = await readSheetRows(config.sheetId, config.tabName, config.authContext);
+  let values;
+  try {
+    values = await readSheetRows(config.sheetId, config.tabName, config.authContext);
+  } catch (error) {
+    throw new Error(formatDetailedServiceError(error, 'read_sheet'));
+  }
   const headers = (values[0] || []).map(value => String(value || '').trim());
   const matchedHeaders = validateHeaders(headers);
 
@@ -238,12 +257,12 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   });
 
   emitProgress(progressCallback, { stage: 'load_category_reference', percent: 40, counts: summary });
-  const categoryRows = await airtableService.fetchAllRecords(config.airtableCategoryTable, [
-    'Category Name',
-    'IPN Prefix',
-    'Category Identifier / Conditions & Options',
-    'Conditions & Options'
-  ]);
+  let categoryRows;
+  try {
+    categoryRows = await airtableService.fetchAllRecords(config.airtableCategoryTable);
+  } catch (error) {
+    throw new Error(formatDetailedServiceError(error, 'load_category_reference'));
+  }
   const categoryIndex = buildCategoryDefinitionsIndex(categoryRows);
   const categoryLinkFieldName = await airtableService.resolveMasterCategoryLinkFieldName(
     config.categoryLinkFieldName || 'Category Definitions'
@@ -252,7 +271,12 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
 
   emitProgress(progressCallback, { stage: 'load_existing_master_parts', percent: 55, counts: summary });
   const ipns = normalizedRows.map(row => row.ipn);
-  const existingRows = ipns.length > 0 ? await airtableService.fetchMasterPartsByIpns(ipns) : [];
+  let existingRows = [];
+  try {
+    existingRows = ipns.length > 0 ? await airtableService.fetchMasterPartsByIpns(ipns) : [];
+  } catch (error) {
+    throw new Error(formatDetailedServiceError(error, 'load_existing_master_parts'));
+  }
   const existingMap = new Map(existingRows.map(record => [record.fields?.IPN, record]));
 
   emitProgress(progressCallback, { stage: 'plan_upserts', percent: 70, counts: summary });
@@ -274,19 +298,12 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   // Self-healing pass: re-check unresolved Master Parts even if not present in current sheet rows.
   const statusFieldName = chooseTrackingField(masterFieldNames, 'Category Resolution Status');
   const identifierFieldName = chooseTrackingField(masterFieldNames, 'Resolved Category Identifier');
-  const minimalMasterFields = [
-    'IPN',
-    'IPN Prefix',
-    categoryLinkFieldName,
-    'Category Definitions',
-    'Categories'
-  ];
-  if (statusFieldName) minimalMasterFields.push(statusFieldName);
-  if (identifierFieldName) minimalMasterFields.push(identifierFieldName);
-
-  const allMasterRecords = await airtableService.fetchAllRecords(config.airtableMasterTable, [
-    ...new Set(minimalMasterFields)
-  ]);
+  let allMasterRecords = [];
+  try {
+    allMasterRecords = await airtableService.fetchAllRecords(config.airtableMasterTable);
+  } catch (error) {
+    throw new Error(formatDetailedServiceError(error, 'self_healing_scan_master_parts'));
+  }
   const knownIpns = new Set(normalizedRows.map(row => String(row.ipn || '').trim().toUpperCase()));
 
   for (const record of allMasterRecords) {
@@ -406,10 +423,15 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   emitWriteProgress('Writing to Airtable...');
 
   if (plan.creates.length > 0) {
-    const createResult = await airtableService.createMasterParts(plan.creates, progress => {
-      createProcessed = progress.processedRecords;
-      emitWriteProgress();
-    });
+    let createResult;
+    try {
+      createResult = await airtableService.createMasterParts(plan.creates, progress => {
+        createProcessed = progress.processedRecords;
+        emitWriteProgress();
+      });
+    } catch (error) {
+      throw new Error(formatDetailedServiceError(error, 'execute_airtable_writes_create'));
+    }
     summary.created = createResult.count || 0;
     if (Array.isArray(createResult.errors) && createResult.errors.length > 0) {
       summary.errors.push(
@@ -418,10 +440,15 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     }
   }
   if (plan.updates.length > 0) {
-    const updateResult = await airtableService.updateMasterParts(plan.updates, progress => {
-      updateProcessed = progress.processedRecords;
-      emitWriteProgress();
-    });
+    let updateResult;
+    try {
+      updateResult = await airtableService.updateMasterParts(plan.updates, progress => {
+        updateProcessed = progress.processedRecords;
+        emitWriteProgress();
+      });
+    } catch (error) {
+      throw new Error(formatDetailedServiceError(error, 'execute_airtable_writes_update'));
+    }
     summary.updated = updateResult.count || 0;
     if (Array.isArray(updateResult.errors) && updateResult.errors.length > 0) {
       summary.errors.push(

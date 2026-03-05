@@ -1158,16 +1158,17 @@ ipcMain.handle('phase2-run', async (event, options = {}) => {
       summary
     };
   } catch (error) {
+    const message = formatDetailedErrorMessage(error);
     event.sender.send('phase2-progress', {
       stage: 'error',
       percent: 100,
       counts: null,
-      message: error.message
+      message
     });
 
     return {
       success: false,
-      message: error.message
+      message
     };
   }
 });
