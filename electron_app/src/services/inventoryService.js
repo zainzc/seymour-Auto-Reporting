@@ -49,7 +49,8 @@ async function getAllInventory() {
         EComDescription,
         PrivacyIndicator,
         BlockOnlineSale,
-        ReferenceNumber
+        ReferenceNumber,
+        InterchangeNumber
 FROM dbo.INVENTORY i -- Added alias 'i' for clarity
 LEFT JOIN dbo.EMPLOYEE inv_emp
    ON inv_emp.EmployeeID = i.InventorierID

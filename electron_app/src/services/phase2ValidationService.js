@@ -76,6 +76,28 @@ const LEGACY_PHASE1_HEADERS = [
   'ReferenceNumber'
 ];
 
+const EXPECTED_PHASE1_HEADERS_WITH_INTERCHANGE = [
+  ...EXPECTED_PHASE1_HEADERS,
+  'InterChangeNumber'
+];
+
+const LEGACY_PHASE1_HEADERS_WITH_INTERCHANGE = [
+  ...LEGACY_PHASE1_HEADERS,
+  'InterChangeNumber'
+];
+
+const EXPECTED_PHASE1_HEADERS_WITH_INTERCHANGE_BEFORE_REFERENCE = [
+  ...EXPECTED_PHASE1_HEADERS.slice(0, -1),
+  'InterChangeNumber',
+  'ReferenceNumber'
+];
+
+const LEGACY_PHASE1_HEADERS_WITH_INTERCHANGE_BEFORE_REFERENCE = [
+  ...LEGACY_PHASE1_HEADERS.slice(0, -1),
+  'InterChangeNumber',
+  'ReferenceNumber'
+];
+
 function normalizeString(value) {
   if (value === null || value === undefined) return '';
   return String(value).trim();
@@ -96,7 +118,14 @@ function parseNumeric(value) {
 }
 
 function findHeaderVariant(headers) {
-  const variants = [EXPECTED_PHASE1_HEADERS, LEGACY_PHASE1_HEADERS];
+  const variants = [
+    EXPECTED_PHASE1_HEADERS,
+    LEGACY_PHASE1_HEADERS,
+    EXPECTED_PHASE1_HEADERS_WITH_INTERCHANGE,
+    LEGACY_PHASE1_HEADERS_WITH_INTERCHANGE,
+    EXPECTED_PHASE1_HEADERS_WITH_INTERCHANGE_BEFORE_REFERENCE,
+    LEGACY_PHASE1_HEADERS_WITH_INTERCHANGE_BEFORE_REFERENCE
+  ];
   const cleaned = headers.map(h => String(h || '').trim());
 
   for (const variant of variants) {
@@ -180,6 +209,7 @@ function normalizeRow(row, rowNumber) {
     modelName: normalizeString(row.ModelName),
     locationCode: normalizeString(row.LocationCode),
     stockTicketNumber: normalizeString(row.StockTicketNumber),
+    interchangeNumber: normalizeString(row.InterChangeNumber),
     referenceNumber: normalizeString(row.ReferenceNumber),
     sourceRow: row
   };

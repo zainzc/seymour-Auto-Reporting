@@ -98,6 +98,30 @@ function emitProgress(progressCallback, payload) {
   }
 }
 
+function buildInterchangeKey(row) {
+  const interchange = String(row?.interchangeNumber || '').trim();
+  if (interchange) return `INTERCHANGE::${interchange.toUpperCase()}`;
+
+  // Fallback keeps behavior stable for rows where interchange is missing.
+  const ipn = String(row?.ipn || '').trim();
+  return `IPN::${ipn.toUpperCase()}`;
+}
+
+function applyGroupedQoh(normalizedRows = []) {
+  const qohByInterchange = new Map();
+
+  for (const row of normalizedRows) {
+    const key = buildInterchangeKey(row);
+    const current = qohByInterchange.get(key) || 0;
+    qohByInterchange.set(key, current + (Number(row?.qoh) || 0));
+  }
+
+  normalizedRows.forEach(row => {
+    const key = buildInterchangeKey(row);
+    row.qoh = qohByInterchange.get(key) || 0;
+  });
+}
+
 async function runPhase2(options = {}, progressCallback = () => {}) {
   const summary = {
     totalRows: 0,
@@ -159,6 +183,7 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     }
     normalizedRows.push(normalized);
   }
+  applyGroupedQoh(normalizedRows);
   summary.validRows = normalizedRows.length;
 
   const airtableService = new AirtableService({
