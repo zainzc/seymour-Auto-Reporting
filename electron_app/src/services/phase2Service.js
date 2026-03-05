@@ -234,6 +234,7 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
 
   emitProgress(progressCallback, { stage: 'normalize_filter', percent: 25, counts: summary });
   const normalizedRows = [];
+  const totalSourceRows = Math.max(0, values.length - 1);
   for (let i = 1; i < values.length; i += 1) {
     const rowObject = buildRowObject(matchedHeaders, values[i] || []);
     const normalized = normalizeRow(rowObject, i + 1);
@@ -246,6 +247,15 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
       continue;
     }
     normalizedRows.push(normalized);
+
+    if (i === 1 || i % 5000 === 0 || i === values.length - 1) {
+      emitProgress(progressCallback, {
+        stage: 'normalize_filter',
+        percent: 25,
+        counts: summary,
+        message: `Normalizing rows: ${i}/${totalSourceRows} scanned, valid=${normalizedRows.length}, skippedMissing=${summary.skippedMissingIPN}, skippedExcluded=${summary.skippedExcludedPrefix}`
+      });
+    }
   }
   applyGroupedQoh(normalizedRows);
   summary.validRows = normalizedRows.length;
@@ -264,6 +274,12 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   } catch (error) {
     throw new Error(formatDetailedServiceError(error, 'load_category_reference'));
   }
+  emitProgress(progressCallback, {
+    stage: 'load_category_reference',
+    percent: 40,
+    counts: summary,
+    message: `Loaded category definitions: ${categoryRows.length}`
+  });
   const categoryIndex = buildCategoryDefinitionsIndex(categoryRows);
   const categoryLinkFieldName = await airtableService.resolveMasterCategoryLinkFieldName(
     config.categoryLinkFieldName || 'Category Definitions'
@@ -336,7 +352,17 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   }
   const knownIpns = new Set(normalizedRows.map(row => String(row.ipn || '').trim().toUpperCase()));
 
-  for (const record of allMasterRecords) {
+  for (let i = 0; i < allMasterRecords.length; i += 1) {
+    const record = allMasterRecords[i];
+    const idx = i + 1;
+    if (idx === 1 || idx % 5000 === 0 || idx === allMasterRecords.length) {
+      emitProgress(progressCallback, {
+        stage: 'plan_upserts',
+        percent: 70,
+        counts: summary,
+        message: `Planning upserts: self-healing scan ${idx}/${allMasterRecords.length}, plannedCreates=${plan.creates.length}, plannedUpdates=${plan.updates.length}, plannedTasks=${plan.clickupTasks.length}`
+      });
+    }
     const fields = record?.fields || {};
     const ipn = String(fields.IPN || '').trim();
     if (!ipn) continue;
@@ -417,6 +443,7 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
         }
       });
     }
+
   }
 
   emitProgress(progressCallback, { stage: 'execute_airtable_writes', percent: 82, counts: summary });
@@ -505,6 +532,8 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
       );
     }
 
+    const totalTasksToProcess = plan.clickupTasks.length;
+    let processedTasks = 0;
     for (const task of plan.clickupTasks) {
       const taskKey = buildTaskKey(task.ipn, task.type);
 
@@ -572,6 +601,20 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
       } catch (error) {
         const errorMsg = `ClickUp task failed for ${task.ipn}: ${error.message}`;
         summary.errors.push(errorMsg);
+      } finally {
+        processedTasks += 1;
+        if (
+          processedTasks === 1 ||
+          processedTasks % 100 === 0 ||
+          processedTasks === totalTasksToProcess
+        ) {
+          emitProgress(progressCallback, {
+            stage: 'create_clickup_tasks',
+            percent: 92,
+            counts: summary,
+            message: `Processing ClickUp tasks: ${processedTasks}/${totalTasksToProcess}, created=${summary.clickupTasksCreated}, updated=${summary.clickupTasksUpdated}, errors=${summary.errors.length}`
+          });
+        }
       }
     }
 
