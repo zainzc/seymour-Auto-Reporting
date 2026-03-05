@@ -22,7 +22,9 @@ function buildSummary() {
     tasksErrored: 0,
     airtableUpdates: 0,
     skippedExcluded: 0,
-    skippedAlreadyResolved: 0
+    skippedAlreadyResolved: 0,
+    writebacksCompleted: 0,
+    writebacksFailed: 0
   };
 }
 
@@ -30,9 +32,11 @@ class Phase2WritebackService {
   constructor(config = {}) {
     this.config = {
       clickupResolvedCategoryFieldName:
-        config.clickupResolvedCategoryFieldName || 'Resolved Category',
+        config.clickupResolvedCategoryFieldName || 'Category Identifier Selection',
       clickupStatusDetermined: config.clickupStatusDetermined || 'Category Determined',
       clickupStatusCompleted: config.clickupStatusCompleted || 'Completed',
+      clickupStatusNeedsReview: config.clickupStatusNeedsReview || 'Needs Review',
+      categoryLinkFieldName: config.categoryLinkFieldName || 'Category Definitions',
       ...config
     };
 
@@ -48,8 +52,10 @@ class Phase2WritebackService {
       token: this.config.airtableToken,
       baseId: this.config.airtableBaseId,
       masterTable: this.config.airtableMasterTable || 'Master Parts Table',
-      categoryTable: this.config.airtableCategoryTable || 'Category Names'
+      categoryTable: this.config.airtableCategoryTable || 'Category Definitions'
     });
+    this.masterFieldNames = new Set();
+    this.categoryLinkFieldName = this.config.categoryLinkFieldName;
   }
 
   ensureRequiredConfig() {
@@ -87,8 +93,19 @@ class Phase2WritebackService {
   }
 
   hasCategories(fields = {}) {
-    const categories = fields.Categories;
-    return Array.isArray(categories) && categories.length > 0;
+    const candidates = [
+      this.categoryLinkFieldName,
+      this.config.categoryLinkFieldName,
+      'Category Definitions',
+      'Categories'
+    ]
+      .map(value => String(value || '').trim())
+      .filter(Boolean);
+    for (const fieldName of candidates) {
+      const value = fields[fieldName];
+      if (Array.isArray(value) && value.length > 0) return true;
+    }
+    return false;
   }
 
   static normalizeText(value) {
@@ -177,6 +194,40 @@ class Phase2WritebackService {
     await this.clickupService.updateTaskStatus(taskId, closedStatuses[0].name);
   }
 
+  async moveTaskToNeedsReview(taskId) {
+    const list = await this.clickupService.getList();
+    const statuses = Array.isArray(list?.statuses) ? list.statuses : [];
+    const candidates = statuses
+      .map(status => String(status?.status || '').trim())
+      .filter(Boolean)
+      .filter(name => {
+        const lower = name.toLowerCase();
+        return lower.includes('review') || lower.includes('blocked');
+      });
+
+    const preferred = String(this.config.clickupStatusNeedsReview || '').trim();
+    const byName = statuses
+      .map(status => String(status?.status || '').trim())
+      .find(name => name.toLowerCase() === preferred.toLowerCase());
+    const target = byName || candidates[0] || '';
+    if (!target) return;
+    await this.clickupService.updateTaskStatus(taskId, target);
+  }
+
+  buildTrackingFields({ selectedIdentifier, status, taskId }) {
+    const fields = {};
+    if (this.masterFieldNames.has('Category Resolution Status') && status) {
+      fields['Category Resolution Status'] = status;
+    }
+    if (this.masterFieldNames.has('Resolved Category Identifier') && selectedIdentifier) {
+      fields['Resolved Category Identifier'] = selectedIdentifier;
+    }
+    if (this.masterFieldNames.has('ClickUp Task ID') && taskId) {
+      fields['ClickUp Task ID'] = taskId;
+    }
+    return fields;
+  }
+
   async processTask(task, resolvedField, summary) {
     summary.tasksProcessed += 1;
     const taskId = String(task?.id || '').trim();
@@ -205,13 +256,13 @@ class Phase2WritebackService {
       return;
     }
 
-    let resolvedCategory =
+    let selectedIdentifier =
       ClickUpService.getTaskCustomFieldDisplayValue(task, resolvedField) ||
       ClickUpService.extractCustomFieldText(task, this.config.clickupResolvedCategoryFieldName);
-    if (!resolvedCategory) {
+    if (!selectedIdentifier) {
       try {
         const detailedTask = await this.clickupService.getTask(taskId);
-        resolvedCategory =
+        selectedIdentifier =
           ClickUpService.getTaskCustomFieldDisplayValue(detailedTask, resolvedField) ||
           ClickUpService.extractCustomFieldText(
             detailedTask,
@@ -221,8 +272,9 @@ class Phase2WritebackService {
         // keep original path; missing detail fetch should not crash whole run
       }
     }
-    if (!resolvedCategory) {
+    if (!selectedIdentifier) {
       summary.tasksErrored += 1;
+      summary.writebacksFailed += 1;
       await this.addCommentOnce(
         taskId,
         'missing_resolved_category',
@@ -265,41 +317,54 @@ class Phase2WritebackService {
       return;
     }
 
-    const parsedSelection = this.parseResolvedSelection(resolvedCategory, ipnPrefix);
-    const effectivePrefix = Number.isFinite(parsedSelection.prefix)
-      ? parsedSelection.prefix
-      : ipnPrefix;
-    const effectiveCategoryName = String(parsedSelection.categoryName || '').trim();
-    let matches = await this.airtableService.fetchCategoryRecordsByPrefixAndName(
-      effectivePrefix,
-      effectiveCategoryName
+    const selected = String(selectedIdentifier || '').trim();
+    const matches = await this.airtableService.fetchCategoryRecordsByPrefixAndIdentifier(
+      ipnPrefix,
+      selected
     );
-    if (matches.length > 1) {
-      matches = this.filterMatchesByCondition(matches, parsedSelection.conditionText);
-    }
 
     if (matches.length !== 1) {
       summary.tasksErrored += 1;
+      summary.writebacksFailed += 1;
       const reason =
         matches.length === 0
-          ? `no category row for prefix ${effectivePrefix} and name '${effectiveCategoryName || parsedSelection.raw}'`
-          : `multiple category rows for prefix ${effectivePrefix} and name '${effectiveCategoryName || parsedSelection.raw}'`;
+          ? `no category definition row for prefix ${ipnPrefix} and identifier '${selected}'`
+          : `multiple category definition rows for prefix ${ipnPrefix} and identifier '${selected}'`;
       await this.addCommentOnce(
         taskId,
-        `category_mapping_${ipn}_${resolvedCategory.toLowerCase()}`,
+        `category_mapping_${ipn}_${selected.toLowerCase()}`,
         `Write-back blocked: ${reason}.`
       );
+      await this.moveTaskToNeedsReview(taskId);
       return;
     }
 
     const categoryRecord = matches[0];
-    await this.airtableService.setMasterPartCategory(masterRecord.id, categoryRecord.id);
+    const resolvedEbayCategoryId = String(
+      categoryRecord?.fields?.['eBay Category ID'] || ''
+    ).trim();
+    await this.airtableService.setMasterPartCategory(masterRecord.id, categoryRecord.id, {
+      linkFieldName: this.categoryLinkFieldName
+    });
+    const trackingFields = this.buildTrackingFields({
+      selectedIdentifier: selected,
+      status: 'Resolved',
+      taskId
+    });
+    if (Object.keys(trackingFields).length > 0) {
+      try {
+        await this.airtableService.updateMasterPartFields(masterRecord.id, trackingFields);
+      } catch (trackingError) {
+        // Tracking fields are optional. Do not fail write-back if unavailable/mismatched.
+      }
+    }
     summary.airtableUpdates += 1;
+    summary.writebacksCompleted += 1;
 
     await this.addCommentOnce(
       taskId,
       `writeback_success_${ipn}_${categoryRecord.id}`,
-      `Category write-back succeeded. MasterRecord=${masterRecord.id}, CategoryRecord=${categoryRecord.id}, Category='${resolvedCategory}'.`
+      `Category write-back succeeded. MasterRecord=${masterRecord.id}, CategoryRecord=${categoryRecord.id}, Identifier='${selected}', eBayCategoryID='${resolvedEbayCategoryId || 'n/a'}'.`
     );
     await this.moveTaskToCompleted(taskId);
     summary.tasksCompleted += 1;
@@ -308,6 +373,10 @@ class Phase2WritebackService {
   async runOnce() {
     this.ensureRequiredConfig();
     const summary = buildSummary();
+    this.masterFieldNames = await this.airtableService.getMasterFieldNames();
+    this.categoryLinkFieldName = await this.airtableService.resolveMasterCategoryLinkFieldName(
+      this.config.categoryLinkFieldName
+    );
 
     const tasks = await this.clickupService.fetchTasksByStatuses(
       [this.config.clickupStatusDetermined],

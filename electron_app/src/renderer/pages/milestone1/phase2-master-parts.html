@@ -572,7 +572,7 @@
         <label>
           Write-back settings are auto-managed:
         </label>
-        <div class="hint">Resolved field: <code>Resolved Category</code> | Source status: <code>Category Determined</code> | Complete status: <code>Completed</code> | Poll: <code>120 min</code></div>
+        <div class="hint">Resolved field: <code>Category Identifier Selection</code> | Source status: <code>Category Determined</code> | Complete status: <code>Completed</code> | Poll: <code>120 min</code></div>
       </div>
       <div class="btn-group">
         <button id="run-sync-btn" class="btn btn-primary" onclick="runPhase2()">Run Sync</button>
@@ -644,8 +644,8 @@
     let logsCollapsed = false;
     const logEntries = [];
     const DEFAULT_MASTER_TABLE = 'Master Parts Table';
-    const DEFAULT_CATEGORY_TABLE = 'Category Names';
-    const DEFAULT_RESOLVED_FIELD = 'Resolved Category';
+    const DEFAULT_CATEGORY_TABLE = 'Category Definitions';
+    const DEFAULT_RESOLVED_FIELD = 'Category Identifier Selection';
     const DEFAULT_STATUS_DETERMINED = 'Category Determined';
     const DEFAULT_STATUS_COMPLETED = 'Completed';
     const DEFAULT_WRITEBACK_INTERVAL_MINUTES = 120;

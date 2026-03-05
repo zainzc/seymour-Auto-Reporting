@@ -890,6 +890,8 @@ function buildPhase2WritebackConfig(overrides = {}) {
     clickupResolvedCategoryFieldName: merged.clickupResolvedCategoryFieldName,
     clickupStatusDetermined: merged.clickupStatusDetermined,
     clickupStatusCompleted: merged.clickupStatusCompleted,
+    clickupStatusNeedsReview: merged.clickupStatusNeedsReview,
+    categoryLinkFieldName: merged.categoryLinkFieldName,
     pollIntervalMinutes: merged.writebackPollIntervalMinutes,
     enabled: merged.phase2WritebackEnabled
   };
@@ -905,16 +907,18 @@ ipcMain.handle('phase2-get-config', async () => {
     tabName: merged.tabName || '',
     airtableBaseId: merged.airtableBaseId || '',
     airtableMasterTable: merged.airtableMasterTable || 'Master Parts Table',
-    airtableCategoryTable: merged.airtableCategoryTable || 'Category Names',
+    airtableCategoryTable: merged.airtableCategoryTable || 'Category Definitions',
     clickupListId: merged.clickupListId || '',
     phase2AutoRunEnabled: Boolean(merged.phase2AutoRunEnabled),
     phase2AutoRunPollMinutes: Number(merged.phase2AutoRunPollMinutes || 3),
     phase2AutoRunCooldownMinutes: Number(merged.phase2AutoRunCooldownMinutes || 5),
     phase2WritebackEnabled: Boolean(merged.phase2WritebackEnabled),
     writebackPollIntervalMinutes: Number(merged.writebackPollIntervalMinutes || 120),
-    clickupResolvedCategoryFieldName: merged.clickupResolvedCategoryFieldName || 'Resolved Category',
+    clickupResolvedCategoryFieldName: merged.clickupResolvedCategoryFieldName || 'Category Identifier Selection',
     clickupStatusDetermined: merged.clickupStatusDetermined || 'Category Determined',
     clickupStatusCompleted: merged.clickupStatusCompleted || 'Completed',
+    clickupStatusNeedsReview: merged.clickupStatusNeedsReview || 'Needs Review',
+    categoryLinkFieldName: merged.categoryLinkFieldName || 'Category Definitions',
     shipstationApiKey: stored.shipstationApiKey || phase3Config.shipstationApiKey || '',
     shipstationApiSecret: stored.shipstationApiSecret || phase3Config.shipstationApiSecret || '',
     shipstationStoreId: Number(phase3Config.shipstationStoreId || PARTSHUNTER_STORE_ID),
@@ -1114,7 +1118,7 @@ ipcMain.handle('phase2-validate-airtable-config', async (_, payload = {}) => {
     const token = String(payload.airtableToken || stored.airtableToken || '').trim();
     const baseId = String(payload.airtableBaseId || stored.airtableBaseId || '').trim();
     const masterTable = String(payload.airtableMasterTable || stored.airtableMasterTable || 'Master Parts Table').trim();
-    const categoryTable = String(payload.airtableCategoryTable || stored.airtableCategoryTable || 'Category Names').trim();
+    const categoryTable = String(payload.airtableCategoryTable || stored.airtableCategoryTable || 'Category Definitions').trim();
     if (!token || !baseId) {
       return { success: false, message: 'Airtable token and base ID are required.' };
     }

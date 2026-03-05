@@ -1,6 +1,7 @@
 const axios = require('axios');
 const { chunkArray } = require('../utils/chunk');
 const { retryWithBackoff, sleep } = require('../utils/retry');
+const AirtableSchemaService = require('./airtableSchemaService');
 
 class AirtableService {
   constructor(config) {
@@ -23,6 +24,8 @@ class AirtableService {
         'Content-Type': 'application/json'
       }
     });
+    this._schemaTablesCache = null;
+    this._masterFieldNamesCache = null;
   }
 
   async throttle() {
@@ -175,7 +178,96 @@ class AirtableService {
     });
   }
 
-  async setMasterPartCategory(masterRecordId, categoryRecordId) {
+  async fetchCategoryRecordsByPrefix(ipnPrefix) {
+    const prefixText = String(ipnPrefix || '').trim();
+    if (!prefixText) return [];
+    const data = await this.request('GET', `/${encodeURIComponent(this.categoryTable)}`, {
+      params: {
+        filterByFormula: `{IPN Prefix}=${prefixText}`
+      }
+    });
+    return data?.records || [];
+  }
+
+  async fetchCategoryRecordsByPrefixAndIdentifier(ipnPrefix, identifier) {
+    const prefixText = String(ipnPrefix || '').trim();
+    const target = String(identifier || '').trim().toLowerCase();
+    if (!prefixText || !target) return [];
+    const rows = await this.fetchCategoryRecordsByPrefix(prefixText);
+    return rows.filter(record => {
+      const fields = record?.fields || {};
+      const a = String(fields['Category Identifier / Conditions & Options'] || '')
+        .trim()
+        .toLowerCase();
+      const b = String(fields['Conditions & Options'] || '').trim().toLowerCase();
+      return a === target || b === target;
+    });
+  }
+
+  async getSchemaTables() {
+    if (Array.isArray(this._schemaTablesCache)) {
+      return this._schemaTablesCache;
+    }
+    const service = new AirtableSchemaService({
+      token: this.token,
+      baseId: this.baseId
+    });
+    this._schemaTablesCache = await service.listTables();
+    return this._schemaTablesCache;
+  }
+
+  async getMasterFieldNames() {
+    if (this._masterFieldNamesCache) {
+      return this._masterFieldNamesCache;
+    }
+    const tables = await this.getSchemaTables();
+    const masterTable = tables.find(
+      table => String(table?.name || '').trim().toLowerCase() === String(this.masterTable || '').trim().toLowerCase()
+    );
+    const names = new Set(
+      (masterTable?.fields || []).map(field => String(field?.name || '').trim()).filter(Boolean)
+    );
+    this._masterFieldNamesCache = names;
+    return names;
+  }
+
+  async resolveMasterCategoryLinkFieldName(preferredName = '') {
+    const preferred = String(preferredName || '').trim();
+    const tables = await this.getSchemaTables();
+    const masterTable = tables.find(
+      table => String(table?.name || '').trim().toLowerCase() === String(this.masterTable || '').trim().toLowerCase()
+    );
+    const categoryTable = tables.find(
+      table => String(table?.name || '').trim().toLowerCase() === String(this.categoryTable || '').trim().toLowerCase()
+    );
+    const fields = masterTable?.fields || [];
+
+    const byName = name =>
+      fields.find(field => String(field?.name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase());
+
+    if (preferred && byName(preferred)) return preferred;
+    if (byName('Category Definitions')) return 'Category Definitions';
+    if (byName('Categories')) return 'Categories';
+
+    const categoryTableId = String(categoryTable?.id || '').trim();
+    if (categoryTableId) {
+      const linked = fields.find(field => {
+        if (String(field?.type || '').trim() !== 'multipleRecordLinks') return false;
+        const linkedTableId = String(field?.options?.linkedTableId || '').trim();
+        return linkedTableId && linkedTableId === categoryTableId;
+      });
+      if (linked?.name) return String(linked.name);
+    }
+
+    const anyRecordLink = fields.find(
+      field => String(field?.type || '').trim() === 'multipleRecordLinks' && field?.name
+    );
+    if (anyRecordLink?.name) return String(anyRecordLink.name);
+
+    return preferred || 'Category Definitions';
+  }
+
+  async setMasterPartCategory(masterRecordId, categoryRecordId, options = {}) {
     const recordId = String(masterRecordId || '').trim();
     const categoryId = String(categoryRecordId || '').trim();
     if (!recordId) {
@@ -185,24 +277,47 @@ class AirtableService {
       throw new Error('Airtable category record ID is required.');
     }
 
-    const data = await this.request('PATCH', `/${encodeURIComponent(this.masterTable)}`, {
-      data: {
-        records: [
-          {
-            id: recordId,
-            fields: {
-              Categories: [categoryId]
-            }
-          }
-        ],
-        typecast: true
-      }
-    });
+    const preferredLinkField = String(options.linkFieldName || '').trim();
+    const resolvedLinkField = await this.resolveMasterCategoryLinkFieldName(preferredLinkField);
+    const candidates = [...new Set([preferredLinkField, resolvedLinkField, 'Category Definitions', 'Categories'].filter(Boolean))];
+    let lastError = null;
 
-    return (data?.records || [])[0] || null;
+    for (const fieldName of candidates) {
+      try {
+        const data = await this.request('PATCH', `/${encodeURIComponent(this.masterTable)}`, {
+          data: {
+            records: [
+              {
+                id: recordId,
+                fields: {
+                  [fieldName]: [categoryId]
+                }
+              }
+            ],
+            typecast: true
+          }
+        });
+        return (data?.records || [])[0] || null;
+      } catch (error) {
+        const detail = String(
+          error?.response?.data?.error?.message ||
+            error?.response?.data?.error ||
+            error?.message ||
+            ''
+        ).toLowerCase();
+        if (error?.response?.status === 422 && detail.includes('unknown field')) {
+          lastError = error;
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (lastError) throw lastError;
+    throw new Error('Failed to update category link on Master Parts.');
   }
 
-  async updateMasterShipstationFields(masterRecordId, fieldsToSet = {}) {
+  async updateMasterPartFields(masterRecordId, fieldsToSet = {}) {
     const recordId = String(masterRecordId || '').trim();
     if (!recordId) {
       throw new Error('Airtable master record ID is required.');
@@ -233,6 +348,27 @@ class AirtableService {
     });
 
     return (data?.records || [])[0] || null;
+  }
+
+  async updateMasterShipstationFields(masterRecordId, fieldsToSet = {}) {
+    const recordId = String(masterRecordId || '').trim();
+    if (!recordId) {
+      throw new Error('Airtable master record ID is required.');
+    }
+
+    const sanitizedFields = {};
+    Object.entries(fieldsToSet || {}).forEach(([key, value]) => {
+      if (!key) return;
+      if (value === null || value === undefined) return;
+      if (typeof value === 'string' && !value.trim()) return;
+      sanitizedFields[key] = value;
+    });
+
+    if (Object.keys(sanitizedFields).length === 0) {
+      return null;
+    }
+
+    return this.updateMasterPartFields(recordId, sanitizedFields);
   }
 
   async createMasterParts(records, onProgress = null) {

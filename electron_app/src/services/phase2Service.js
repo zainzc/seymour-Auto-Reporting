@@ -6,8 +6,11 @@ const {
   buildRowObject,
   normalizeRow
 } = require('./phase2ValidationService');
-const { buildCategoryIndex } = require('./phase2CategoryService');
-const { buildPhase2Plan } = require('./phase2PlanningService');
+const {
+  buildCategoryDefinitionsIndex,
+  buildPhase2PlanV2,
+  buildTaskKey
+} = require('./phase2CategoryResolutionV2Service');
 const { getInventoryConfig, saveInventoryConfig } = require('../config/configStore');
 
 function parseBoolean(value, defaultValue = false) {
@@ -41,7 +44,7 @@ function buildPhase2Config(options = {}) {
       options.airtableCategoryTable ||
       savedConfig.airtableCategoryTable ||
       process.env.AIRTABLE_CATEGORY_TABLE ||
-      'Category Names',
+      'Category Definitions',
     clickupToken: options.clickupToken || savedConfig.clickupToken || process.env.CLICKUP_TOKEN,
     clickupListId: options.clickupListId || savedConfig.clickupListId || process.env.CLICKUP_LIST_ID,
     phase2WritebackEnabled:
@@ -60,7 +63,7 @@ function buildPhase2Config(options = {}) {
       options.clickupResolvedCategoryFieldName ||
       savedConfig.clickupResolvedCategoryFieldName ||
       process.env.CLICKUP_RESOLVED_CATEGORY_FIELD_NAME ||
-      'Resolved Category',
+      'Category Identifier Selection',
     clickupStatusDetermined:
       options.clickupStatusDetermined ||
       savedConfig.clickupStatusDetermined ||
@@ -71,6 +74,16 @@ function buildPhase2Config(options = {}) {
       savedConfig.clickupStatusCompleted ||
       process.env.CLICKUP_STATUS_COMPLETED ||
       'Completed',
+    clickupStatusNeedsReview:
+      options.clickupStatusNeedsReview ||
+      savedConfig.clickupStatusNeedsReview ||
+      process.env.CLICKUP_STATUS_NEEDS_REVIEW ||
+      'Needs Review',
+    categoryLinkFieldName:
+      options.categoryLinkFieldName ||
+      savedConfig.categoryLinkFieldName ||
+      process.env.AIRTABLE_CATEGORY_LINK_FIELD ||
+      'Category Definitions',
     phase2AutoRunEnabled:
       typeof options.phase2AutoRunEnabled !== 'undefined'
         ? parseBoolean(options.phase2AutoRunEnabled)
@@ -122,6 +135,32 @@ function applyGroupedQoh(normalizedRows = []) {
   });
 }
 
+function parseIpnPrefixFromIpn(ipn) {
+  const firstToken = String(ipn || '').trim().split('-')[0];
+  const parsed = parseInt(firstToken, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isExcludedIpn(ipn) {
+  const normalized = String(ipn || '').trim().toUpperCase();
+  return normalized.startsWith('900') || normalized.startsWith('950') || normalized.startsWith('999');
+}
+
+function hasLinkedCategoryValue(fields = {}, linkFieldName = '') {
+  const candidates = [linkFieldName, 'Category Definitions', 'Categories']
+    .map(item => String(item || '').trim())
+    .filter(Boolean);
+  for (const fieldName of candidates) {
+    const value = fields?.[fieldName];
+    if (Array.isArray(value) && value.length > 0) return true;
+  }
+  return false;
+}
+
+function chooseTrackingField(masterFieldNames, name) {
+  return masterFieldNames.has(name) ? name : '';
+}
+
 async function runPhase2(options = {}, progressCallback = () => {}) {
   const summary = {
     totalRows: 0,
@@ -132,7 +171,12 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     updated: 0,
     categoryResolved: 0,
     clickupTasksCreated: 0,
+    clickupTasksUpdated: 0,
     clickupTasksSkippedExisting: 0,
+    deterministicResolved: 0,
+    multiCategoryTasksPlanned: 0,
+    exceptionTasksPlanned: 0,
+    unmappedPrefixes: [],
     errors: []
   };
 
@@ -197,9 +241,14 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   const categoryRows = await airtableService.fetchAllRecords(config.airtableCategoryTable, [
     'Category Name',
     'IPN Prefix',
+    'Category Identifier / Conditions & Options',
     'Conditions & Options'
   ]);
-  const categoryIndex = buildCategoryIndex(categoryRows);
+  const categoryIndex = buildCategoryDefinitionsIndex(categoryRows);
+  const categoryLinkFieldName = await airtableService.resolveMasterCategoryLinkFieldName(
+    config.categoryLinkFieldName || 'Category Definitions'
+  );
+  const masterFieldNames = await airtableService.getMasterFieldNames();
 
   emitProgress(progressCallback, { stage: 'load_existing_master_parts', percent: 55, counts: summary });
   const ipns = normalizedRows.map(row => row.ipn);
@@ -208,13 +257,120 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
 
   emitProgress(progressCallback, { stage: 'plan_upserts', percent: 70, counts: summary });
   const taskCache = getInventoryConfig('phase2TaskCache') || {};
-  const plan = buildPhase2Plan({
+  const plan = buildPhase2PlanV2({
     normalizedRows,
     existingMap,
     categoryIndex,
-    taskCache
+    taskCache,
+    categoryLinkFieldName,
+    masterFieldNames
   });
   summary.categoryResolved = plan.categoryResolved;
+  summary.deterministicResolved = plan.deterministicResolved || 0;
+  summary.multiCategoryTasksPlanned = plan.multiCategoryTasksPlanned || 0;
+  summary.exceptionTasksPlanned = plan.exceptionTasksPlanned || 0;
+  summary.unmappedPrefixes = Array.isArray(plan.unmappedPrefixes) ? plan.unmappedPrefixes : [];
+
+  // Self-healing pass: re-check unresolved Master Parts even if not present in current sheet rows.
+  const statusFieldName = chooseTrackingField(masterFieldNames, 'Category Resolution Status');
+  const identifierFieldName = chooseTrackingField(masterFieldNames, 'Resolved Category Identifier');
+  const minimalMasterFields = [
+    'IPN',
+    'IPN Prefix',
+    categoryLinkFieldName,
+    'Category Definitions',
+    'Categories'
+  ];
+  if (statusFieldName) minimalMasterFields.push(statusFieldName);
+  if (identifierFieldName) minimalMasterFields.push(identifierFieldName);
+
+  const allMasterRecords = await airtableService.fetchAllRecords(config.airtableMasterTable, [
+    ...new Set(minimalMasterFields)
+  ]);
+  const knownIpns = new Set(normalizedRows.map(row => String(row.ipn || '').trim().toUpperCase()));
+
+  for (const record of allMasterRecords) {
+    const fields = record?.fields || {};
+    const ipn = String(fields.IPN || '').trim();
+    if (!ipn) continue;
+    const ipnUpper = ipn.toUpperCase();
+    if (knownIpns.has(ipnUpper)) continue;
+    if (isExcludedIpn(ipnUpper)) continue;
+    if (hasLinkedCategoryValue(fields, categoryLinkFieldName)) continue;
+    if (statusFieldName && String(fields[statusFieldName] || '').trim().toLowerCase() === 'resolved') {
+      continue;
+    }
+
+    const storedPrefix = parseInt(String(fields['IPN Prefix'] || '').trim(), 10);
+    const ipnPrefix = Number.isFinite(storedPrefix) ? storedPrefix : parseIpnPrefixFromIpn(ipn);
+    if (!Number.isFinite(ipnPrefix)) continue;
+    const candidates = categoryIndex.get(String(ipnPrefix)) || [];
+
+    if (candidates.length === 1) {
+      const setFields = {
+        [categoryLinkFieldName]: [candidates[0].recordId]
+      };
+      if (statusFieldName) setFields[statusFieldName] = 'Resolved';
+      if (identifierFieldName && candidates[0].identifier) {
+        setFields[identifierFieldName] = candidates[0].identifier;
+      }
+      plan.updates.push({
+        id: record.id,
+        fields: setFields
+      });
+      summary.deterministicResolved += 1;
+      summary.categoryResolved += 1;
+      continue;
+    }
+
+    const taskType = candidates.length > 1 ? 'multi' : 'exception';
+    const taskReason = candidates.length > 1 ? 'multiple_category_definitions' : 'no_match';
+    const taskKey = buildTaskKey(ipnUpper, taskType);
+    const alreadyQueued = plan.clickupTasks.some(
+      task => buildTaskKey(task.ipn, task.type) === taskKey
+    );
+    if (alreadyQueued) continue;
+
+    const validOptions =
+      taskType === 'multi'
+        ? [...new Set(candidates.map(item => String(item.identifier || '').trim()).filter(Boolean))]
+        : [];
+
+    plan.clickupTasks.push({
+      taskKey,
+      ipn,
+      ipnPrefix,
+      masterRecordId: record.id,
+      categoryCode: '',
+      conditionsAndOptions: '',
+      partType: '',
+      modelYear: '',
+      modelName: '',
+      locationCode: '',
+      stockTicketNumber: '',
+      referenceNumber: '',
+      type: taskType,
+      reason: taskReason,
+      validOptions
+    });
+
+    if (taskType === 'multi') summary.multiCategoryTasksPlanned += 1;
+    else {
+      summary.exceptionTasksPlanned += 1;
+      if (!summary.unmappedPrefixes.includes(String(ipnPrefix))) {
+        summary.unmappedPrefixes.push(String(ipnPrefix));
+      }
+    }
+
+    if (statusFieldName) {
+      plan.updates.push({
+        id: record.id,
+        fields: {
+          [statusFieldName]: taskType === 'multi' ? 'Unresolved' : 'Exception'
+        }
+      });
+    }
+  }
 
   emitProgress(progressCallback, { stage: 'execute_airtable_writes', percent: 82, counts: summary });
   const totalToWrite = plan.creates.length + plan.updates.length;
@@ -282,9 +438,10 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
       token: config.clickupToken,
       listId: config.clickupListId
     });
-    let existingOpenTaskIpns = new Set();
+    let existingOpenTaskMap = new Map();
+    const taskIdFieldName = chooseTrackingField(masterFieldNames, 'ClickUp Task ID');
     try {
-      existingOpenTaskIpns = await clickupService.fetchOpenTaskIpnSet();
+      existingOpenTaskMap = await clickupService.fetchOpenTaskByKeyMap();
     } catch (error) {
       summary.errors.push(
         `ClickUp dedupe pre-check failed; continuing with local cache only: ${error.message}`
@@ -292,21 +449,69 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     }
 
     for (const task of plan.clickupTasks) {
-      const normalizedTaskIpn = ClickUpService.normalizeIpn(task.ipn);
-      if (existingOpenTaskIpns.has(normalizedTaskIpn)) {
-        summary.clickupTasksSkippedExisting += 1;
-        continue;
-      }
+      const taskKey = buildTaskKey(task.ipn, task.type);
 
       try {
-        await clickupService.createTask(task);
-        taskCache[task.taskKey] = {
+        const existingTask = existingOpenTaskMap.get(taskKey);
+        if (existingTask) {
+          const payload = ClickUpService.buildCategoryTaskPayload(task);
+          await clickupService.updateTask(existingTask.id, payload);
+          summary.clickupTasksUpdated += 1;
+          taskCache[taskKey] = {
+            updatedAt: new Date().toISOString(),
+            ipn: task.ipn,
+            type: task.type,
+            reason: task.reason
+          };
+
+          if (taskIdFieldName) {
+            try {
+              let masterId = String(task.masterRecordId || '').trim();
+              if (!masterId) {
+                const master = await airtableService.fetchMasterPartByIpn(task.ipn);
+                masterId = String(master?.id || '').trim();
+              }
+              if (masterId) {
+                await airtableService.updateMasterPartFields(masterId, {
+                  [taskIdFieldName]: String(existingTask.id || '').trim()
+                });
+              }
+            } catch (taskIdWriteError) {
+              summary.errors.push(`ClickUp Task ID update skipped for ${task.ipn}: ${taskIdWriteError.message}`);
+            }
+          }
+          continue;
+        }
+
+        const createdTask = await clickupService.createTask(task);
+        taskCache[taskKey] = {
           createdAt: new Date().toISOString(),
           ipn: task.ipn,
+          type: task.type,
           reason: task.reason
         };
         summary.clickupTasksCreated += 1;
-        existingOpenTaskIpns.add(normalizedTaskIpn);
+        existingOpenTaskMap.set(taskKey, createdTask || { id: 'created' });
+
+        if (taskIdFieldName) {
+          try {
+            const createdTaskId = String(createdTask?.id || '').trim();
+            if (createdTaskId) {
+              let masterId = String(task.masterRecordId || '').trim();
+              if (!masterId) {
+                const master = await airtableService.fetchMasterPartByIpn(task.ipn);
+                masterId = String(master?.id || '').trim();
+              }
+              if (masterId) {
+                await airtableService.updateMasterPartFields(masterId, {
+                  [taskIdFieldName]: createdTaskId
+                });
+              }
+            }
+          } catch (taskIdWriteError) {
+            summary.errors.push(`ClickUp Task ID update skipped for ${task.ipn}: ${taskIdWriteError.message}`);
+          }
+        }
       } catch (error) {
         const errorMsg = `ClickUp task failed for ${task.ipn}: ${error.message}`;
         summary.errors.push(errorMsg);

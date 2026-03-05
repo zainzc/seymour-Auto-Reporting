@@ -59,11 +59,13 @@ class ClickUpService {
       throw new Error('ClickUp list ID is missing.');
     }
 
+    const isMulti = String(task?.type || '').toLowerCase() === 'multi';
     const body = {
-      name: `Resolve Category - ${task.ipn}`,
+      name: isMulti ? `Category Selection - ${task.ipn}` : `Category Exception - ${task.ipn}`,
       description: [
         `IPN: ${task.ipn}`,
         `IPN Prefix: ${Number.isFinite(task.ipnPrefix) ? task.ipnPrefix : 'N/A'}`,
+        `MasterRecordID: ${task.masterRecordId || ''}`,
         `CategoryCode: ${task.categoryCode || ''}`,
         `ConditionsAndOptions: ${task.conditionsAndOptions || ''}`,
         `PartType: ${task.partType || ''}`,
@@ -72,11 +74,20 @@ class ClickUpService {
         `LocationCode: ${task.locationCode || ''}`,
         `StockTicketNumber: ${task.stockTicketNumber || ''}`,
         `ReferenceNumber: ${task.referenceNumber || ''}`,
-        `Reason: ${task.reason}`
-      ].join('\n')
+        `Reason: ${task.reason}`,
+        isMulti && Array.isArray(task.validOptions) && task.validOptions.length > 0
+          ? `Valid Category Identifiers: ${task.validOptions.join(' | ')}`
+          : ''
+      ]
+        .filter(Boolean)
+        .join('\n')
     };
 
-    const preferredStatus = 'Open / To-Do - Select Category';
+    if (Array.isArray(task.customFields) && task.customFields.length > 0) {
+      body.custom_fields = task.customFields;
+    }
+
+    const preferredStatus = String(task.preferredStatus || '').trim() || 'Open / To-Do - Select Category';
 
     try {
       return await this.request('POST', `/list/${this.listId}/task`, {
@@ -108,13 +119,51 @@ class ClickUpService {
     }
   }
 
+  async updateTask(taskId, updates = {}) {
+    const id = String(taskId || '').trim();
+    if (!id) throw new Error('ClickUp task ID is required.');
+    const payload = {};
+    if (updates.name) payload.name = String(updates.name);
+    if (updates.description) payload.description = String(updates.description);
+    if (updates.status) payload.status = String(updates.status);
+    if (Array.isArray(updates.custom_fields)) payload.custom_fields = updates.custom_fields;
+    if (Object.keys(payload).length === 0) return null;
+    return this.request('PUT', `/task/${id}`, { data: payload });
+  }
+
+  static buildCategoryTaskPayload(task = {}) {
+    const isMulti = String(task?.type || '').toLowerCase() === 'multi';
+    return {
+      name: isMulti ? `Category Selection - ${task.ipn}` : `Category Exception - ${task.ipn}`,
+      description: [
+        `IPN: ${task.ipn}`,
+        `IPN Prefix: ${Number.isFinite(task.ipnPrefix) ? task.ipnPrefix : 'N/A'}`,
+        `MasterRecordID: ${task.masterRecordId || ''}`,
+        `CategoryCode: ${task.categoryCode || ''}`,
+        `ConditionsAndOptions: ${task.conditionsAndOptions || ''}`,
+        `PartType: ${task.partType || ''}`,
+        `ModelYear: ${task.modelYear || ''}`,
+        `ModelName: ${task.modelName || ''}`,
+        `LocationCode: ${task.locationCode || ''}`,
+        `StockTicketNumber: ${task.stockTicketNumber || ''}`,
+        `ReferenceNumber: ${task.referenceNumber || ''}`,
+        `Reason: ${task.reason}`,
+        isMulti && Array.isArray(task.validOptions) && task.validOptions.length > 0
+          ? `Valid Category Identifiers: ${task.validOptions.join(' | ')}`
+          : ''
+      ].join('\n')
+    };
+  }
+
   static normalizeIpn(value) {
     return String(value || '').trim().toUpperCase();
   }
 
   static extractIpnFromTask(task = {}) {
     const title = String(task.name || '').trim();
-    const titleMatch = title.match(/^Resolve\s+Category\s*-\s*(.+)$/i);
+    const titleMatch = title.match(
+      /^(?:Resolve\s+Category|Category\s+Selection|Category\s+Exception)\s*-\s*(.+)$/i
+    );
     if (titleMatch && titleMatch[1]) {
       return ClickUpService.normalizeIpn(titleMatch[1]);
     }
@@ -126,6 +175,24 @@ class ClickUpService {
     }
 
     return '';
+  }
+
+  static extractTaskType(task = {}) {
+    const title = String(task?.name || '').toLowerCase();
+    if (title.includes('category selection')) return 'multi';
+    if (title.includes('category exception')) return 'exception';
+    if (title.includes('resolve category')) return 'multi';
+
+    const description = String(task?.description || '').toLowerCase();
+    if (description.includes('reason: multiple_category_definitions')) return 'multi';
+    if (description.includes('reason: no_match')) return 'exception';
+    return 'unknown';
+  }
+
+  static buildTaskIdentityKey(ipn, type = '') {
+    const ipnKey = ClickUpService.normalizeIpn(ipn);
+    const typeKey = String(type || '').trim().toLowerCase() || 'unknown';
+    return `${ipnKey}::${typeKey}`;
   }
 
   static extractCustomFieldText(task = {}, fieldName = '') {
@@ -312,6 +379,43 @@ class ClickUpService {
       }
     }
     return set;
+  }
+
+  async fetchOpenTaskByIpnMap() {
+    const tasks = await this.fetchTasksByStatuses([], {
+      includeClosed: false,
+      subtasks: false
+    });
+
+    const map = new Map();
+    for (const task of tasks) {
+      const ipn =
+        ClickUpService.extractIpnFromTask(task) ||
+        ClickUpService.extractCustomFieldText(task, 'IPN');
+      if (!ipn || map.has(ipn)) continue;
+      map.set(ipn, task);
+    }
+    return map;
+  }
+
+  async fetchOpenTaskByKeyMap() {
+    const tasks = await this.fetchTasksByStatuses([], {
+      includeClosed: false,
+      subtasks: false
+    });
+
+    const map = new Map();
+    for (const task of tasks) {
+      const ipn =
+        ClickUpService.extractIpnFromTask(task) ||
+        ClickUpService.extractCustomFieldText(task, 'IPN');
+      if (!ipn) continue;
+      const type = ClickUpService.extractTaskType(task);
+      const key = ClickUpService.buildTaskIdentityKey(ipn, type);
+      if (map.has(key)) continue;
+      map.set(key, task);
+    }
+    return map;
   }
 
   async fetchAllLists() {
