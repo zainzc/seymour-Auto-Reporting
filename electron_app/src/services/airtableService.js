@@ -320,14 +320,64 @@ class AirtableService {
       baseId: this.baseId
     });
 
-    const created = await schemaService.createField(masterTableId, {
-      name: String(preferredName || DEFAULT_CATEGORY_LINK_FIELD_NAME).trim() || DEFAULT_CATEGORY_LINK_FIELD_NAME,
-      type: 'multipleRecordLinks',
-      options: {
-        linkedTableId: categoryTableId,
-        isReversed: false
+    const fieldName =
+      String(preferredName || DEFAULT_CATEGORY_LINK_FIELD_NAME).trim() || DEFAULT_CATEGORY_LINK_FIELD_NAME;
+    const payloadVariants = [
+      {
+        name: fieldName,
+        type: 'multipleRecordLinks',
+        options: {
+          linkedTableId: categoryTableId
+        }
+      },
+      {
+        name: fieldName,
+        type: 'multipleRecordLinks',
+        options: {
+          linkedTableId: categoryTableId,
+          prefersSingleRecordLink: false
+        }
+      },
+      {
+        name: fieldName,
+        type: 'multipleRecordLinks',
+        options: {
+          linkedTableId: categoryTableId,
+          isReversed: false
+        }
       }
-    });
+    ];
+
+    let created = null;
+    let lastError = null;
+    for (const payload of payloadVariants) {
+      try {
+        created = await schemaService.createField(masterTableId, payload);
+        break;
+      } catch (error) {
+        lastError = error;
+        const status = error?.response?.status;
+        const message = String(
+          error?.response?.data?.error?.message ||
+            error?.response?.data?.error ||
+            error?.message ||
+            ''
+        ).toLowerCase();
+        const isSchemaValidation =
+          status === 422 &&
+          (message.includes('schema validation') ||
+            message.includes('invalid options') ||
+            message.includes('preferssinglerecordlink') ||
+            message.includes('isreversed'));
+        if (!isSchemaValidation) {
+          throw error;
+        }
+      }
+    }
+
+    if (!created) {
+      throw lastError || new Error('Failed to create category link field.');
+    }
 
     this.clearSchemaCache();
     const createdName = String(created?.name || preferredName || DEFAULT_CATEGORY_LINK_FIELD_NAME).trim();
