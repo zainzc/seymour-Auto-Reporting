@@ -3,12 +3,18 @@ const { chunkArray } = require('../utils/chunk');
 const { retryWithBackoff, sleep } = require('../utils/retry');
 const AirtableSchemaService = require('./airtableSchemaService');
 
+const DEFAULT_MASTER_TABLE_ID = 'tbl0tzQ3dxeWRcQzr';
+const DEFAULT_CATEGORY_TABLE_ID = 'tblbotUAVXn7RHeMB';
+const DEFAULT_CATEGORY_LINK_FIELD_NAME = 'Category Definitions Link';
+
 class AirtableService {
   constructor(config) {
     this.token = config.token;
     this.baseId = config.baseId;
     this.masterTable = config.masterTable;
     this.categoryTable = config.categoryTable;
+    this.masterTableId = String(config.masterTableId || DEFAULT_MASTER_TABLE_ID).trim();
+    this.categoryTableId = String(config.categoryTableId || DEFAULT_CATEGORY_TABLE_ID).trim();
     this.minIntervalMs = 220; // <= 5 req/sec
     this.lastRequestAt = 0;
 
@@ -26,6 +32,7 @@ class AirtableService {
     });
     this._schemaTablesCache = null;
     this._masterFieldNamesCache = null;
+    this._categoryLinkFieldNameCache = null;
   }
 
   async throttle() {
@@ -216,14 +223,34 @@ class AirtableService {
     return this._schemaTablesCache;
   }
 
+  clearSchemaCache() {
+    this._schemaTablesCache = null;
+    this._masterFieldNamesCache = null;
+    this._categoryLinkFieldNameCache = null;
+  }
+
+  findSchemaTable(tables = [], preferredId = '', preferredName = '') {
+    const id = String(preferredId || '').trim();
+    const name = String(preferredName || '').trim().toLowerCase();
+    if (id) {
+      const byId = tables.find(table => String(table?.id || '').trim() === id);
+      if (byId) return byId;
+    }
+    if (name) {
+      const byName = tables.find(
+        table => String(table?.name || '').trim().toLowerCase() === name
+      );
+      if (byName) return byName;
+    }
+    return null;
+  }
+
   async getMasterFieldNames() {
     if (this._masterFieldNamesCache) {
       return this._masterFieldNamesCache;
     }
     const tables = await this.getSchemaTables();
-    const masterTable = tables.find(
-      table => String(table?.name || '').trim().toLowerCase() === String(this.masterTable || '').trim().toLowerCase()
-    );
+    const masterTable = this.findSchemaTable(tables, this.masterTableId, this.masterTable);
     const names = new Set(
       (masterTable?.fields || []).map(field => String(field?.name || '').trim()).filter(Boolean)
     );
@@ -232,39 +259,80 @@ class AirtableService {
   }
 
   async resolveMasterCategoryLinkFieldName(preferredName = '') {
-    const preferred = String(preferredName || '').trim();
-    const tables = await this.getSchemaTables();
-    const masterTable = tables.find(
-      table => String(table?.name || '').trim().toLowerCase() === String(this.masterTable || '').trim().toLowerCase()
-    );
-    const categoryTable = tables.find(
-      table => String(table?.name || '').trim().toLowerCase() === String(this.categoryTable || '').trim().toLowerCase()
-    );
-    const fields = masterTable?.fields || [];
-
-    const byName = name =>
-      fields.find(field => String(field?.name || '').trim().toLowerCase() === String(name || '').trim().toLowerCase());
-
-    if (preferred && byName(preferred)) return preferred;
-    if (byName('Category Definitions')) return 'Category Definitions';
-    if (byName('Categories')) return 'Categories';
-
-    const categoryTableId = String(categoryTable?.id || '').trim();
-    if (categoryTableId) {
-      const linked = fields.find(field => {
-        if (String(field?.type || '').trim() !== 'multipleRecordLinks') return false;
-        const linkedTableId = String(field?.options?.linkedTableId || '').trim();
-        return linkedTableId && linkedTableId === categoryTableId;
-      });
-      if (linked?.name) return String(linked.name);
+    if (this._categoryLinkFieldNameCache) {
+      return this._categoryLinkFieldNameCache;
     }
 
-    const anyRecordLink = fields.find(
-      field => String(field?.type || '').trim() === 'multipleRecordLinks' && field?.name
-    );
-    if (anyRecordLink?.name) return String(anyRecordLink.name);
+    const preferred = String(preferredName || '').trim();
+    const tables = await this.getSchemaTables();
+    const masterTable = this.findSchemaTable(tables, this.masterTableId, this.masterTable);
+    const categoryTable =
+      this.findSchemaTable(tables, this.categoryTableId, this.categoryTable) ||
+      this.findSchemaTable(tables, '', 'Category Definitions');
+    const fields = masterTable?.fields || [];
+    const linkedTableId = String(categoryTable?.id || this.categoryTableId || '').trim();
 
-    return preferred || 'Category Definitions';
+    const match = fields.find(field => {
+      if (String(field?.type || '').trim() !== 'multipleRecordLinks') return false;
+      const fieldLinkedTableId = String(field?.options?.linkedTableId || '').trim();
+      if (!fieldLinkedTableId || !linkedTableId) return false;
+      return fieldLinkedTableId === linkedTableId;
+    });
+
+    if (match?.name) {
+      this._categoryLinkFieldNameCache = String(match.name);
+      return this._categoryLinkFieldNameCache;
+    }
+
+    if (preferred) {
+      const preferredField = fields.find(
+        field =>
+          String(field?.name || '').trim().toLowerCase() === preferred.toLowerCase() &&
+          String(field?.type || '').trim() === 'multipleRecordLinks'
+      );
+      if (preferredField?.name) {
+        this._categoryLinkFieldNameCache = String(preferredField.name);
+        return this._categoryLinkFieldNameCache;
+      }
+    }
+
+    return '';
+  }
+
+  async ensureMasterCategoryLinkField(preferredName = DEFAULT_CATEGORY_LINK_FIELD_NAME) {
+    const existing = await this.resolveMasterCategoryLinkFieldName(preferredName);
+    if (existing) return existing;
+
+    const tables = await this.getSchemaTables();
+    const masterTable = this.findSchemaTable(tables, this.masterTableId, this.masterTable);
+    const categoryTable =
+      this.findSchemaTable(tables, this.categoryTableId, this.categoryTable) ||
+      this.findSchemaTable(tables, '', 'Category Definitions');
+
+    const masterTableId = String(masterTable?.id || this.masterTableId || '').trim();
+    const categoryTableId = String(categoryTable?.id || this.categoryTableId || '').trim();
+    if (!masterTableId || !categoryTableId) {
+      throw new Error('Unable to resolve Airtable Master Parts or Category Definitions table schema.');
+    }
+
+    const schemaService = new AirtableSchemaService({
+      token: this.token,
+      baseId: this.baseId
+    });
+
+    const created = await schemaService.createField(masterTableId, {
+      name: String(preferredName || DEFAULT_CATEGORY_LINK_FIELD_NAME).trim() || DEFAULT_CATEGORY_LINK_FIELD_NAME,
+      type: 'multipleRecordLinks',
+      options: {
+        linkedTableId: categoryTableId,
+        isReversed: false
+      }
+    });
+
+    this.clearSchemaCache();
+    const createdName = String(created?.name || preferredName || DEFAULT_CATEGORY_LINK_FIELD_NAME).trim();
+    this._categoryLinkFieldNameCache = createdName;
+    return createdName;
   }
 
   async setMasterPartCategory(masterRecordId, categoryRecordId, options = {}) {
@@ -278,43 +346,28 @@ class AirtableService {
     }
 
     const preferredLinkField = String(options.linkFieldName || '').trim();
-    const resolvedLinkField = await this.resolveMasterCategoryLinkFieldName(preferredLinkField);
-    const candidates = [...new Set([preferredLinkField, resolvedLinkField, 'Category Definitions', 'Categories'].filter(Boolean))];
-    let lastError = null;
-
-    for (const fieldName of candidates) {
-      try {
-        const data = await this.request('PATCH', `/${encodeURIComponent(this.masterTable)}`, {
-          data: {
-            records: [
-              {
-                id: recordId,
-                fields: {
-                  [fieldName]: [categoryId]
-                }
-              }
-            ],
-            typecast: true
-          }
-        });
-        return (data?.records || [])[0] || null;
-      } catch (error) {
-        const detail = String(
-          error?.response?.data?.error?.message ||
-            error?.response?.data?.error ||
-            error?.message ||
-            ''
-        ).toLowerCase();
-        if (error?.response?.status === 422 && detail.includes('unknown field')) {
-          lastError = error;
-          continue;
-        }
-        throw error;
-      }
+    const resolvedLinkField = await this.ensureMasterCategoryLinkField(
+      preferredLinkField || DEFAULT_CATEGORY_LINK_FIELD_NAME
+    );
+    if (!resolvedLinkField) {
+      throw new Error('Category link field could not be resolved or created.');
     }
 
-    if (lastError) throw lastError;
-    throw new Error('Failed to update category link on Master Parts.');
+    const data = await this.request('PATCH', `/${encodeURIComponent(this.masterTable)}`, {
+      data: {
+        records: [
+          {
+            id: recordId,
+            fields: {
+              [resolvedLinkField]: [categoryId]
+            }
+          }
+        ],
+        typecast: true
+      }
+    });
+
+    return (data?.records || [])[0] || null;
   }
 
   async updateMasterPartFields(masterRecordId, fieldsToSet = {}) {
@@ -411,6 +464,7 @@ class AirtableService {
     const batches = chunkArray(records, 10);
     const totalBatches = batches.length;
     let batchIndex = 0;
+    const successfulRecordIds = [];
 
     for (const batch of batches) {
       batchIndex += 1;
@@ -421,6 +475,15 @@ class AirtableService {
         const successCount = (data.records || []).length;
         written += successCount;
         processed += batch.length;
+        if (method === 'PATCH') {
+          batch.forEach(record => {
+            if (record?.id) successfulRecordIds.push(String(record.id));
+          });
+        } else {
+          (data.records || []).forEach(record => {
+            if (record?.id) successfulRecordIds.push(String(record.id));
+          });
+        }
       } catch (batchError) {
         const status = batchError?.response?.status;
         if (status !== 422) {
@@ -435,6 +498,13 @@ class AirtableService {
               data: { records: [record], typecast: true }
             });
             written += (singleData.records || []).length;
+            if (method === 'PATCH') {
+              if (record?.id) successfulRecordIds.push(String(record.id));
+            } else {
+              (singleData.records || []).forEach(savedRecord => {
+                if (savedRecord?.id) successfulRecordIds.push(String(savedRecord.id));
+              });
+            }
           } catch (singleError) {
             failed += 1;
             const label = this.getRecordLabel(record, method);
@@ -467,7 +537,7 @@ class AirtableService {
       errors.push(`...and ${droppedErrorCount} additional Airtable write errors.`);
     }
 
-    return { count: written, errors };
+    return { count: written, errors, successfulRecordIds };
   }
 
   static async fetchAllBases(token) {

@@ -84,7 +84,7 @@ function buildPhase2Config(options = {}) {
       options.categoryLinkFieldName ||
       savedConfig.categoryLinkFieldName ||
       process.env.AIRTABLE_CATEGORY_LINK_FIELD ||
-      'Category Definitions',
+      'Category Definitions Link',
     phase2AutoRunEnabled:
       typeof options.phase2AutoRunEnabled !== 'undefined'
         ? parseBoolean(options.phase2AutoRunEnabled)
@@ -185,6 +185,8 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     created: 0,
     updated: 0,
     categoryResolved: 0,
+    selfHealingResolved: 0,
+    deterministicPlanned: 0,
     clickupTasksCreated: 0,
     clickupTasksUpdated: 0,
     clickupTasksSkippedExisting: 0,
@@ -281,8 +283,8 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     message: `Loaded category definitions: ${categoryRows.length}`
   });
   const categoryIndex = buildCategoryDefinitionsIndex(categoryRows);
-  const categoryLinkFieldName = await airtableService.resolveMasterCategoryLinkFieldName(
-    config.categoryLinkFieldName || 'Category Definitions'
+  const categoryLinkFieldName = await airtableService.ensureMasterCategoryLinkField(
+    config.categoryLinkFieldName || 'Category Definitions Link'
   );
   const masterFieldNames = await airtableService.getMasterFieldNames();
 
@@ -335,8 +337,7 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     categoryLinkFieldName,
     masterFieldNames
   });
-  summary.categoryResolved = plan.categoryResolved;
-  summary.deterministicResolved = plan.deterministicResolved || 0;
+  summary.deterministicPlanned = plan.deterministicPlanned || 0;
   summary.multiCategoryTasksPlanned = plan.multiCategoryTasksPlanned || 0;
   summary.exceptionTasksPlanned = plan.exceptionTasksPlanned || 0;
   summary.unmappedPrefixes = Array.isArray(plan.unmappedPrefixes) ? plan.unmappedPrefixes : [];
@@ -380,19 +381,14 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     const candidates = categoryIndex.get(String(ipnPrefix)) || [];
 
     if (candidates.length === 1) {
-      const setFields = {
-        [categoryLinkFieldName]: [candidates[0].recordId]
-      };
-      if (statusFieldName) setFields[statusFieldName] = 'Resolved';
-      if (identifierFieldName && candidates[0].identifier) {
-        setFields[identifierFieldName] = candidates[0].identifier;
-      }
-      plan.updates.push({
-        id: record.id,
-        fields: setFields
+      plan.categoryLinks.push({
+        ipn,
+        masterRecordId: record.id,
+        categoryRecordId: candidates[0].recordId,
+        identifier: candidates[0].identifier,
+        source: 'self_healing'
       });
-      summary.deterministicResolved += 1;
-      summary.categoryResolved += 1;
+      summary.deterministicPlanned += 1;
       continue;
     }
 
@@ -515,6 +511,89 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   }
 
   emitWriteProgress('Airtable write stage completed.');
+
+  const pendingLinkItems = Array.isArray(plan.categoryLinks) ? [...plan.categoryLinks] : [];
+  if (pendingLinkItems.length > 0) {
+    emitProgress(progressCallback, {
+      stage: 'execute_airtable_writes',
+      percent: 91,
+      counts: summary,
+      message: `Resolving category links: ${pendingLinkItems.length} pending`
+    });
+
+    const missingRecordIds = pendingLinkItems.filter(item => !String(item.masterRecordId || '').trim());
+    if (missingRecordIds.length > 0) {
+      const linkedRows = await airtableService.fetchMasterPartsByIpns(
+        missingRecordIds.map(item => item.ipn)
+      );
+      const linkedMap = new Map(linkedRows.map(record => [String(record?.fields?.IPN || '').trim().toUpperCase(), record]));
+      missingRecordIds.forEach(item => {
+        const record = linkedMap.get(String(item.ipn || '').trim().toUpperCase());
+        if (record?.id) {
+          item.masterRecordId = record.id;
+        }
+      });
+    }
+
+    const categoryLinkUpdates = [];
+    const linkSourceByRecordId = new Map();
+    for (const item of pendingLinkItems) {
+      const recordId = String(item.masterRecordId || '').trim();
+      const categoryRecordId = String(item.categoryRecordId || '').trim();
+      if (!recordId || !categoryRecordId) {
+        summary.errors.push(
+          `Category link skipped for IPN ${item.ipn}: missing master record ID or category record ID.`
+        );
+        continue;
+      }
+
+      const fields = {
+        [categoryLinkFieldName]: [categoryRecordId]
+      };
+      if (statusFieldName) fields[statusFieldName] = 'Resolved';
+      if (identifierFieldName && item.identifier) {
+        fields[identifierFieldName] = item.identifier;
+      }
+
+      categoryLinkUpdates.push({
+        id: recordId,
+        fields
+      });
+      linkSourceByRecordId.set(recordId, item.source || 'sheet');
+    }
+
+    if (categoryLinkUpdates.length > 0) {
+      let categoryLinkResult;
+      try {
+        categoryLinkResult = await airtableService.updateMasterParts(categoryLinkUpdates, progress => {
+          emitProgress(progressCallback, {
+            stage: 'execute_airtable_writes',
+            percent: 91,
+            counts: summary,
+            message: `Writing category links: ${progress.processedRecords}/${categoryLinkUpdates.length}`
+          });
+        });
+      } catch (error) {
+        throw new Error(formatDetailedServiceError(error, 'execute_category_link_writes'));
+      }
+
+      const successIds = new Set(categoryLinkResult.successfulRecordIds || []);
+      successIds.forEach(recordId => {
+        if (linkSourceByRecordId.get(recordId) === 'self_healing') {
+          summary.selfHealingResolved += 1;
+        } else {
+          summary.categoryResolved += 1;
+        }
+      });
+      summary.deterministicResolved = summary.categoryResolved + summary.selfHealingResolved;
+
+      if (Array.isArray(categoryLinkResult.errors) && categoryLinkResult.errors.length > 0) {
+        summary.errors.push(
+          ...categoryLinkResult.errors.map(message => `Airtable category link failed: ${message}`)
+        );
+      }
+    }
+  }
 
   emitProgress(progressCallback, { stage: 'create_clickup_tasks', percent: 92, counts: summary });
   if (plan.clickupTasks.length > 0) {

@@ -36,7 +36,7 @@ class Phase2WritebackService {
       clickupStatusDetermined: config.clickupStatusDetermined || 'Category Determined',
       clickupStatusCompleted: config.clickupStatusCompleted || 'Completed',
       clickupStatusNeedsReview: config.clickupStatusNeedsReview || 'Needs Review',
-      categoryLinkFieldName: config.categoryLinkFieldName || 'Category Definitions',
+      categoryLinkFieldName: config.categoryLinkFieldName || 'Category Definitions Link',
       ...config
     };
 
@@ -96,6 +96,7 @@ class Phase2WritebackService {
     const candidates = [
       this.categoryLinkFieldName,
       this.config.categoryLinkFieldName,
+      'Category Definitions Link',
       'Category Definitions',
       'Categories'
     ]
@@ -374,7 +375,7 @@ class Phase2WritebackService {
     this.ensureRequiredConfig();
     const summary = buildSummary();
     this.masterFieldNames = await this.airtableService.getMasterFieldNames();
-    this.categoryLinkFieldName = await this.airtableService.resolveMasterCategoryLinkFieldName(
+    this.categoryLinkFieldName = await this.airtableService.ensureMasterCategoryLinkField(
       this.config.categoryLinkFieldName
     );
 

@@ -607,6 +607,7 @@
         <div class="summary-item"><div class="summary-label">Created</div><div class="summary-value" id="sum-created">0</div></div>
         <div class="summary-item"><div class="summary-label">Updated</div><div class="summary-value" id="sum-updated">0</div></div>
         <div class="summary-item"><div class="summary-label">Category Resolved</div><div class="summary-value" id="sum-resolved">0</div></div>
+        <div class="summary-item"><div class="summary-label">Self-Healing Resolved</div><div class="summary-value" id="sum-self-healed">0</div></div>
         <div class="summary-item"><div class="summary-label">Tasks Created</div><div class="summary-value" id="sum-tasks">0</div></div>
         <div class="summary-item"><div class="summary-label">Skipped Missing IPN</div><div class="summary-value" id="sum-missing">0</div></div>
         <div class="summary-item"><div class="summary-label">Skipped Excluded Prefix</div><div class="summary-value" id="sum-excluded">0</div></div>
@@ -1639,6 +1640,7 @@
       document.getElementById('sum-created').textContent = summary.created || 0;
       document.getElementById('sum-updated').textContent = summary.updated || 0;
       document.getElementById('sum-resolved').textContent = summary.categoryResolved || 0;
+      document.getElementById('sum-self-healed').textContent = summary.selfHealingResolved || 0;
       document.getElementById('sum-tasks').textContent = summary.clickupTasksCreated || 0;
       document.getElementById('sum-missing').textContent = summary.skippedMissingIPN || 0;
       document.getElementById('sum-excluded').textContent = summary.skippedExcludedPrefix || 0;

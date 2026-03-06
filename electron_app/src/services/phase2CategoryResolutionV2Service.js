@@ -82,13 +82,14 @@ function buildPhase2PlanV2({
 }) {
   const creates = [];
   const updates = [];
+  const categoryLinks = [];
   const clickupTasks = [];
   const seenTaskKeys = new Set();
   const tracking = selectTrackingFields(masterFieldNames);
   const unmappedPrefixes = new Set();
 
   const summary = {
-    deterministicResolved: 0,
+    deterministicPlanned: 0,
     multiCategoryTasksPlanned: 0,
     exceptionTasksPlanned: 0
   };
@@ -113,7 +114,7 @@ function buildPhase2PlanV2({
       decision.reason = 'unique_prefix_match';
       decision.recordId = candidates[0].recordId;
       decision.identifier = candidates[0].identifier;
-      summary.deterministicResolved += 1;
+      summary.deterministicPlanned += 1;
     } else if (candidates.length > 1) {
       decision.type = 'multi';
       decision.reason = 'multiple_category_definitions';
@@ -130,17 +131,20 @@ function buildPhase2PlanV2({
         'Quantity (QOH)': row.qoh
       };
 
-      if (decision.type === 'deterministic' && decision.recordId) {
-        fields[categoryLinkFieldName] = [decision.recordId];
-        if (tracking.statusField) fields[tracking.statusField] = 'Resolved';
-        if (tracking.identifierField && decision.identifier) {
-          fields[tracking.identifierField] = decision.identifier;
-        }
-      } else if (tracking.statusField) {
+      if (decision.type !== 'deterministic' && tracking.statusField) {
         fields[tracking.statusField] = decision.type === 'multi' ? 'Unresolved' : 'Exception';
       }
 
       creates.push({ fields });
+      if (decision.type === 'deterministic' && decision.recordId) {
+        categoryLinks.push({
+          ipn: row.ipn,
+          masterRecordId: '',
+          categoryRecordId: decision.recordId,
+          identifier: decision.identifier,
+          source: 'sheet'
+        });
+      }
     } else {
       const fields = {};
       const existingQoh = getExistingQoh(existingFields);
@@ -148,18 +152,21 @@ function buildPhase2PlanV2({
         fields['Quantity (QOH)'] = row.qoh;
       }
 
-      if (!existingHasCategory && decision.type === 'deterministic' && decision.recordId) {
-        fields[categoryLinkFieldName] = [decision.recordId];
-        if (tracking.statusField) fields[tracking.statusField] = 'Resolved';
-        if (tracking.identifierField && decision.identifier) {
-          fields[tracking.identifierField] = decision.identifier;
-        }
-      } else if (!existingHasCategory && tracking.statusField) {
+      if (!existingHasCategory && decision.type !== 'deterministic' && tracking.statusField) {
         fields[tracking.statusField] = decision.type === 'multi' ? 'Unresolved' : 'Exception';
       }
 
       if (Object.keys(fields).length > 0) {
         updates.push({ id: existing.id, fields });
+      }
+      if (!existingHasCategory && decision.type === 'deterministic' && decision.recordId) {
+        categoryLinks.push({
+          ipn: row.ipn,
+          masterRecordId: existing.id,
+          categoryRecordId: decision.recordId,
+          identifier: decision.identifier,
+          source: 'sheet'
+        });
       }
     }
 
@@ -195,9 +202,9 @@ function buildPhase2PlanV2({
   return {
     creates,
     updates,
+    categoryLinks,
     clickupTasks,
-    categoryResolved: summary.deterministicResolved,
-    deterministicResolved: summary.deterministicResolved,
+    deterministicPlanned: summary.deterministicPlanned,
     multiCategoryTasksPlanned: summary.multiCategoryTasksPlanned,
     exceptionTasksPlanned: summary.exceptionTasksPlanned,
     unmappedPrefixes: [...unmappedPrefixes]

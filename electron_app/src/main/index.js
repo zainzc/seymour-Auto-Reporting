@@ -918,7 +918,7 @@ ipcMain.handle('phase2-get-config', async () => {
     clickupStatusDetermined: merged.clickupStatusDetermined || 'Category Determined',
     clickupStatusCompleted: merged.clickupStatusCompleted || 'Completed',
     clickupStatusNeedsReview: merged.clickupStatusNeedsReview || 'Needs Review',
-    categoryLinkFieldName: merged.categoryLinkFieldName || 'Category Definitions',
+    categoryLinkFieldName: merged.categoryLinkFieldName || 'Category Definitions Link',
     shipstationApiKey: stored.shipstationApiKey || phase3Config.shipstationApiKey || '',
     shipstationApiSecret: stored.shipstationApiSecret || phase3Config.shipstationApiSecret || '',
     shipstationStoreId: Number(phase3Config.shipstationStoreId || PARTSHUNTER_STORE_ID),
