@@ -584,7 +584,7 @@
                 <option value="true" selected>True (Since last mirror run)</option>
                 <option value="false">False (Full scan)</option>
               </select>
-              <div class="hint">Incremental uses last-modified/created field when available; otherwise falls back safely.</div>
+              <div class="hint">Routing is prefix-only (IPN Prefix -> one table per prefix). Incremental uses last-modified/created when available.</div>
             </div>
             <div class="btn-group">
               <button id="run-phase4-btn" class="btn btn-secondary" onclick="runPhase4()">Run Phase 4 Mirroring</button>
@@ -1725,7 +1725,7 @@
           if (Array.isArray(summary.routingFailureSamples) && summary.routingFailureSamples.length > 0) {
             summary.routingFailureSamples.forEach(sample => {
               logLine(
-                `Phase4 routing sample: IPN=${sample.ipn || ''}, Prefix=${sample.prefix || ''}, Category='${sample.categoryName || ''}', StoreCategory='${sample.storeCategory || ''}'`,
+                `Phase4 routing sample: IPN=${sample.ipn || ''}, Prefix=${sample.prefix || ''}`,
                 'error'
               );
             });

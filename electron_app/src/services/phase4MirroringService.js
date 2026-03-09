@@ -22,48 +22,6 @@ function emitProgress(progressCallback, payload = {}) {
   }
 }
 
-function normalizeLookupValue(value) {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'string') return value.trim();
-  if (typeof value === 'number') return String(value);
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const parsed = normalizeLookupValue(item);
-      if (parsed) return parsed;
-    }
-    return '';
-  }
-  if (typeof value === 'object') {
-    if (typeof value.name === 'string' && value.name.trim()) return value.name.trim();
-    if (typeof value.value === 'string' && value.value.trim()) return value.value.trim();
-    for (const child of Object.values(value)) {
-      const parsed = normalizeLookupValue(child);
-      if (parsed) return parsed;
-    }
-  }
-  return '';
-}
-
-function normalizeCategoryForRoute(value) {
-  // Route normalization keeps category-text variants stable across punctuation differences.
-  return String(value || '')
-    .trim()
-    .toLowerCase()
-    .replace(/&/g, 'and')
-    .replace(/[\/,_]/g, ' ')
-    .replace(/[()[\]{}.:;+]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/\s+/g, '')
-    .replace(/[^a-z0-9]/g, '');
-}
-
-function buildRouteKey(prefix, category) {
-  const prefixText = normalizeString(prefix);
-  const normalizedCategory = normalizeCategoryForRoute(category);
-  if (!prefixText || !normalizedCategory) return '';
-  return `${prefixText}-${normalizedCategory}`;
-}
-
 function parsePrefix(value) {
   const match = normalizeString(value).match(/^(\d{3})/);
   return match ? match[1] : '';
@@ -192,42 +150,33 @@ async function fetchMasterRecords(airtableService, tableName, selectFields = [],
 
 async function buildRoutingMap(itemSchemaService) {
   const tables = await itemSchemaService.listTables();
-  const routeMap = new Map();
+  const prefixRouteMap = new Map();
+  const duplicatePrefixes = [];
 
   for (const table of tables) {
     const tableName = normalizeString(table?.name);
     if (!/^\d{3}-/.test(tableName)) continue;
     const prefix = parsePrefix(tableName);
-    const categoryPart = tableName.slice(4);
-    const key = buildRouteKey(prefix, categoryPart);
-    if (!key) continue;
-    routeMap.set(key, {
+    if (!prefix) continue;
+    const current = {
       tableId: normalizeString(table?.id),
       tableName
-    });
-  }
-
-  return routeMap;
-}
-
-function resolveRoute(routeMap, prefix, categoryName, fallbackStoreCategory) {
-  const primaryKey = buildRouteKey(prefix, categoryName);
-  if (primaryKey && routeMap.has(primaryKey)) {
-    return {
-      route: routeMap.get(primaryKey),
-      matchedBy: 'category_name'
     };
+    if (prefixRouteMap.has(prefix)) {
+      duplicatePrefixes.push({
+        prefix,
+        tableA: prefixRouteMap.get(prefix)?.tableName || '',
+        tableB: current.tableName
+      });
+      continue;
+    }
+    prefixRouteMap.set(prefix, current);
   }
 
-  const fallbackKey = buildRouteKey(prefix, fallbackStoreCategory);
-  if (fallbackKey && routeMap.has(fallbackKey)) {
-    return {
-      route: routeMap.get(fallbackKey),
-      matchedBy: 'store_category'
-    };
-  }
-
-  return null;
+  return {
+    prefixRouteMap,
+    duplicatePrefixes
+  };
 }
 
 async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
@@ -270,7 +219,15 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     counts: summary,
     message: 'Building routing map from Item Specifics base schema...'
   });
-  const routeMap = await buildRoutingMap(itemSchemaService);
+  const { prefixRouteMap, duplicatePrefixes } = await buildRoutingMap(itemSchemaService);
+  if (duplicatePrefixes.length > 0) {
+    duplicatePrefixes.forEach(item => {
+      addError(
+        summary,
+        `Duplicate prefix '${item.prefix}' in Item Specifics tables: '${item.tableA}' vs '${item.tableB}'.`
+      );
+    });
+  }
 
   emitProgress(progressCallback, {
     stage: 'phase4_load_master',
@@ -281,9 +238,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
 
   const selectFields = [
     'IPN',
-    'IPN Prefix',
-    'Category Name (from Category Definitions)',
-    'eBay Store Category (from Category Definitions)'
+    'IPN Prefix'
   ];
 
   let masterRecords = [];
@@ -361,31 +316,26 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     const fields = record?.fields || {};
     const ipn = normalizeString(fields.IPN).toUpperCase();
     const prefix = parseMasterPrefix(fields['IPN Prefix']);
-    const categoryName = normalizeLookupValue(fields['Category Name (from Category Definitions)']);
-    const storeCategory = normalizeLookupValue(fields['eBay Store Category (from Category Definitions)']);
 
     if (!ipn) continue;
     if (!prefix || isExcludedPrefix(prefix)) continue;
-    if (!categoryName && !storeCategory) continue;
 
     summary.masterRecordsEligible += 1;
-    const resolved = resolveRoute(routeMap, prefix, categoryName, storeCategory);
-    if (!resolved?.route?.tableId) {
+    const route = prefixRouteMap.get(prefix);
+    if (!route?.tableId) {
       summary.routingFailures += 1;
       appendSample(
         summary.routingFailureSamples,
         {
           ipn,
-          prefix,
-          categoryName: categoryName || '',
-          storeCategory: storeCategory || ''
+          prefix
         },
         summary.sampleLimit
       );
       continue;
     }
 
-    const destinationTableId = resolved.route.tableId;
+    const destinationTableId = route.tableId;
     const existingRoute = ipnToTable.get(ipn);
     if (existingRoute && existingRoute !== destinationTableId) {
       summary.routingFailures += 1;
@@ -394,8 +344,6 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
         {
           ipn,
           prefix,
-          categoryName: categoryName || '',
-          storeCategory: storeCategory || '',
           reason: 'conflicting_destination_tables'
         },
         summary.sampleLimit
@@ -502,7 +450,6 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
 
 module.exports = {
   MIRROR_STATE_KEY,
-  normalizeCategoryForRoute,
   buildPhase4Config,
   runPhase4Mirroring
 };
