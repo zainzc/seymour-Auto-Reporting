@@ -31,6 +31,7 @@ const { startSchedule, stopSchedule, resumeSchedule, logExecution, getExecutionL
 const oauth2Service = require('../services/oauth2Service');
 const { runPhase2, buildPhase2Config } = require('../services/phase2Service');
 const { runPhase3, buildPhase3Config, PARTSHUNTER_STORE_ID } = require('../services/phase3Service');
+const { runPhase4Mirroring, buildPhase4Config, MIRROR_STATE_KEY } = require('../services/phase4MirroringService');
 const { runItemSpecificTableSync } = require('../scripts/syncItemSpecificTables');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
@@ -1218,6 +1219,55 @@ ipcMain.handle('phase3:run', async (event, options = {}) => {
     return {
       success: false,
       message: error.message
+    };
+  }
+});
+
+ipcMain.handle('phase4:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  const merged = buildPhase4Config(stored);
+  const state = getInventoryConfig(MIRROR_STATE_KEY) || {};
+
+  return {
+    airtableToken: stored.airtableToken || merged.airtableToken || '',
+    masterBaseId: merged.masterBaseId || '',
+    masterTable: merged.masterTable || 'Master Parts Table',
+    itemSpecificsBaseId: merged.itemSpecificsBaseId || '',
+    incrementalEnabled: Boolean(merged.incrementalEnabled),
+    dryRun: Boolean(merged.dryRun),
+    lastMirrorRunAt: state?.lastMirrorRunAt || '',
+    lastRunStatus: state?.lastRunStatus || ''
+  };
+});
+
+ipcMain.handle('phase4:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options
+    };
+
+    const summary = await runPhase4Mirroring(runOptions, progress => {
+      event.sender.send('phase4:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase4:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+
+    return {
+      success: false,
+      message
     };
   }
 });

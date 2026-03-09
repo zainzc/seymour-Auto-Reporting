@@ -93,6 +93,13 @@ contextBridge.exposeInMainWorld('phase3API', {
   onProgress: (callback) => ipcRenderer.on('phase3:progress', callback)
 });
 
+// Phase 4 API - Master Parts -> Item Specifics IPN mirroring
+contextBridge.exposeInMainWorld('phase4API', {
+  getConfig: () => ipcRenderer.invoke('phase4:get-config'),
+  run: (options) => ipcRenderer.invoke('phase4:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase4:progress', callback)
+});
+
 // Item Specific table automation API
 contextBridge.exposeInMainWorld('itemSpecificSyncAPI', {
   run: (options) => ipcRenderer.invoke('item-specific-sync:run', options),

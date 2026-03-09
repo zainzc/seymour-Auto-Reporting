@@ -564,6 +564,35 @@
           <div class="hint" id="phase3-status-text">Phase 3 status: idle</div>
         </div>
       </div>
+      <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px;">
+        <h3 class="section-title">Phase 4 (IPN Mirroring)</h3>
+        <div class="grid-2">
+          <div>
+            <div class="form-group">
+              <label for="phase4-dry-run">Phase 4 Dry Run</label>
+              <select id="phase4-dry-run">
+                <option value="true" selected>True (No Airtable Writes)</option>
+                <option value="false">False (Write Airtable)</option>
+              </select>
+              <div class="hint">Recommended first run mode. Builds routing/diff and reports planned inserts only.</div>
+            </div>
+          </div>
+          <div>
+            <div class="form-group">
+              <label for="phase4-incremental-enabled">Phase 4 Incremental Mode</label>
+              <select id="phase4-incremental-enabled">
+                <option value="true" selected>True (Since last mirror run)</option>
+                <option value="false">False (Full scan)</option>
+              </select>
+              <div class="hint">Incremental uses last-modified/created field when available; otherwise falls back safely.</div>
+            </div>
+            <div class="btn-group">
+              <button id="run-phase4-btn" class="btn btn-secondary" onclick="runPhase4()">Run Phase 4 Mirroring</button>
+            </div>
+            <div class="hint" id="phase4-status-text">Phase 4 status: idle</div>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="card">
@@ -618,6 +647,12 @@
         <div class="summary-item"><div class="summary-label">Phase3 Airtable Updated</div><div class="summary-value" id="sum3-updated">0</div></div>
         <div class="summary-item"><div class="summary-label">Phase3 Skipped Filled</div><div class="summary-value" id="sum3-skipped-filled">0</div></div>
       </div>
+      <div class="summary-grid" style="margin-top: 10px;">
+        <div class="summary-item"><div class="summary-label">Phase4 Master Scanned</div><div class="summary-value" id="sum4-scanned">0</div></div>
+        <div class="summary-item"><div class="summary-label">Phase4 Eligible</div><div class="summary-value" id="sum4-eligible">0</div></div>
+        <div class="summary-item"><div class="summary-label">Phase4 Rows Planned</div><div class="summary-value" id="sum4-planned">0</div></div>
+        <div class="summary-item"><div class="summary-label">Phase4 Rows Created</div><div class="summary-value" id="sum4-created">0</div></div>
+      </div>
     </section>
 
     <section class="card">
@@ -640,6 +675,7 @@
   <script>
     let isRunning = false;
     let isPhase3Running = false;
+    let isPhase4Running = false;
     let isItemSpecificSyncRunning = false;
     let lastRunFailed = false;
     let logsCollapsed = false;
@@ -653,6 +689,8 @@
     const DEFAULT_WRITEBACK_ENABLED = true;
     const DEFAULT_PHASE3_STORE_ID = 333796;
     const DEFAULT_PHASE3_LOOKBACK_DAYS = 90;
+    const DEFAULT_PHASE4_DRY_RUN = true;
+    const DEFAULT_PHASE4_INCREMENTAL_ENABLED = true;
     const REQUIRED_FIELDS = [
       ['sheet-id', 'Google Sheet ID'],
       ['tab-name', 'Google Tab Name'],
@@ -686,6 +724,14 @@
       stage4_update_airtable: 'Phase 3: Updating Airtable',
       completed: 'Phase 3 completed',
       error: 'Phase 3 failed'
+    };
+    const PHASE4_STAGE_LABELS = {
+      phase4_route_map: 'Phase 4: Building route map',
+      phase4_load_master: 'Phase 4: Loading master records',
+      phase4_plan: 'Phase 4: Planning mirror targets',
+      phase4_mirror: 'Phase 4: Mirroring IPN rows',
+      completed: 'Phase 4 completed',
+      error: 'Phase 4 failed'
     };
 
     window.addEventListener('load', async () => {
@@ -896,16 +942,26 @@
     function updateRunButtonState() {
       const runBtn = document.getElementById('run-sync-btn');
       const runPhase3Btn = document.getElementById('run-phase3-btn');
+      const runPhase4Btn = document.getElementById('run-phase4-btn');
       const runItemSpecificSyncBtn = document.getElementById('run-item-specific-sync-btn');
-      const busy = isRunning || isPhase3Running || isItemSpecificSyncRunning;
+      const busy = isRunning || isPhase3Running || isPhase4Running || isItemSpecificSyncRunning;
       const hasItemSpecificBaseId = Boolean(document.getElementById('item-specific-base-id').value.trim());
       runBtn.disabled = busy || !validateForm(false);
       runPhase3Btn.disabled = busy || !validatePhase3Form(false);
+      runPhase4Btn.disabled = busy || !hasItemSpecificBaseId;
       runItemSpecificSyncBtn.disabled = busy || !hasItemSpecificBaseId;
     }
 
     function attachFieldListeners() {
-      const allFieldIds = new Set([...REQUIRED_FIELDS.map(item => item[0]), ...REQUIRED_PHASE3_FIELDS.map(item => item[0]), 'phase3-lookback-days', 'phase3-dry-run', 'item-specific-base-id']);
+      const allFieldIds = new Set([
+        ...REQUIRED_FIELDS.map(item => item[0]),
+        ...REQUIRED_PHASE3_FIELDS.map(item => item[0]),
+        'phase3-lookback-days',
+        'phase3-dry-run',
+        'phase4-dry-run',
+        'phase4-incremental-enabled',
+        'item-specific-base-id'
+      ]);
       allFieldIds.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
@@ -930,6 +986,15 @@
       const stage = String(payload.stage || '').trim();
       const percent = Number(payload.percent || 0);
       const label = PHASE3_STAGE_LABELS[stage] || 'Phase 3 running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase4ProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE4_STAGE_LABELS[stage] || 'Phase 4 running';
       const message = String(payload.message || '').trim();
       if (message) return `${label} (${percent}%): ${message}`;
       return `${label} (${percent}%)`;
@@ -1045,6 +1110,24 @@
         document.getElementById('phase3-lookback-days').value = String(config.phase3LookbackDays || DEFAULT_PHASE3_LOOKBACK_DAYS);
         document.getElementById('phase3-dry-run').value = config.phase3DryRun ? 'true' : 'false';
         document.getElementById('item-specific-base-id').value = config.itemSpecificsBaseId || '';
+        document.getElementById('phase4-dry-run').value = DEFAULT_PHASE4_DRY_RUN ? 'true' : 'false';
+        document.getElementById('phase4-incremental-enabled').value = DEFAULT_PHASE4_INCREMENTAL_ENABLED ? 'true' : 'false';
+
+        if (window.phase4API && typeof window.phase4API.getConfig === 'function') {
+          const phase4Config = await window.phase4API.getConfig();
+          if (phase4Config && typeof phase4Config === 'object') {
+            if (phase4Config.itemSpecificsBaseId) {
+              document.getElementById('item-specific-base-id').value = phase4Config.itemSpecificsBaseId;
+            }
+            document.getElementById('phase4-dry-run').value = phase4Config.dryRun ? 'true' : 'false';
+            document.getElementById('phase4-incremental-enabled').value = phase4Config.incrementalEnabled === false ? 'false' : 'true';
+            const phase4StatusText = document.getElementById('phase4-status-text');
+            if (phase4Config.lastMirrorRunAt) {
+              const status = phase4Config.lastRunStatus || 'unknown';
+              phase4StatusText.textContent = `Phase 4 status: ${status}, last run: ${new Date(phase4Config.lastMirrorRunAt).toLocaleString()}`;
+            }
+          }
+        }
 
         if (config.airtableToken) {
           await fetchAirtableBases(true);
@@ -1266,7 +1349,9 @@
         shipstationStoreId: DEFAULT_PHASE3_STORE_ID,
         phase3LookbackDays: Number(document.getElementById('phase3-lookback-days').value.trim()) || DEFAULT_PHASE3_LOOKBACK_DAYS,
         phase3DryRun: document.getElementById('phase3-dry-run').value === 'true',
-        itemSpecificsBaseId: document.getElementById('item-specific-base-id').value.trim()
+        itemSpecificsBaseId: document.getElementById('item-specific-base-id').value.trim(),
+        phase4DryRun: document.getElementById('phase4-dry-run').value === 'true',
+        phase4IncrementalEnabled: document.getElementById('phase4-incremental-enabled').value === 'true'
       };
     }
 
@@ -1448,6 +1533,26 @@
         });
       }
 
+      if (window.phase4API && typeof window.phase4API.onProgress === 'function') {
+        window.phase4API.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase4ProgressText(payload);
+          const statusText = document.getElementById('phase4-status-text');
+          statusText.textContent = `Phase 4 status: ${formatPhase4ProgressText(payload)}`;
+
+          if (payload.counts) {
+            renderPhase4Summary(payload.counts);
+          }
+
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`Phase4 progress: ${formatPhase4ProgressText(payload)}`, level);
+          }
+        });
+      }
+
       if (window.itemSpecificSyncAPI && typeof window.itemSpecificSyncAPI.onProgress === 'function') {
         window.itemSpecificSyncAPI.onProgress((event, payload) => {
           if (!payload) return;
@@ -1576,6 +1681,72 @@
       }
     }
 
+    async function runPhase4() {
+      if (isPhase4Running || isRunning || isPhase3Running || isItemSpecificSyncRunning) return;
+      if (!window.phase4API || typeof window.phase4API.run !== 'function') {
+        showStatus('run-status', 'error', 'Phase 4 API is unavailable.');
+        return;
+      }
+
+      const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
+      if (!itemSpecificBaseId) {
+        setFieldError('item-specific-base-id', 'Item Specifics Base ID is required.');
+        showStatus('run-status', 'error', 'Enter Item Specifics Base ID before running Phase 4.');
+        return;
+      }
+
+      isPhase4Running = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 4 mirroring is in progress...');
+      showStatus('run-status', 'info', 'Phase 4 mirroring started...');
+      document.getElementById('phase4-status-text').textContent = 'Phase 4 status: running...';
+      logLine('Starting Phase 4 mirroring run.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase4API.run(config);
+
+        if (result?.success) {
+          renderPhase4Summary(result.summary || {});
+          const summary = result.summary || {};
+          const created = summary.ipnRowsCreated || 0;
+          const planned = summary.ipnRowsPlanned || 0;
+          const existing = summary.ipnRowsAlreadyPresent || 0;
+          const mode = summary.dryRun ? 'dry run' : 'write run';
+          setRunState('Success', 'Phase 4 completed successfully.');
+          showStatus('run-status', 'success', `Phase 4 completed (${mode}). Created=${created}, Planned=${planned}, Existing=${existing}.`);
+          document.getElementById('phase4-status-text').textContent =
+            `Phase 4 status: completed (${mode}). Created ${created}, Planned ${planned}, Existing ${existing}.`;
+          logLine(
+            `Phase 4 completed. Mode=${mode}, Scanned=${summary.masterRecordsScanned || 0}, Eligible=${summary.masterRecordsEligible || 0}, RoutingFailures=${summary.routingFailures || 0}, TablesTouched=${summary.tablesTouched || 0}, Planned=${planned}, Created=${created}, Existing=${existing}`
+          );
+
+          if (Array.isArray(summary.routingFailureSamples) && summary.routingFailureSamples.length > 0) {
+            summary.routingFailureSamples.forEach(sample => {
+              logLine(
+                `Phase4 routing sample: IPN=${sample.ipn || ''}, Prefix=${sample.prefix || ''}, Category='${sample.categoryName || ''}', StoreCategory='${sample.storeCategory || ''}'`,
+                'error'
+              );
+            });
+          }
+          if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+            summary.errors.forEach(err => logLine(`Phase4: ${err}`, 'error'));
+          }
+        } else {
+          throw new Error(result?.message || 'Phase 4 failed.');
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 4 failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 4 failed: ${err.message}`);
+        document.getElementById('phase4-status-text').textContent = `Phase 4 status: failed (${err.message})`;
+        logLine(`Phase 4 failed: ${err.message}`, 'error');
+      } finally {
+        isPhase4Running = false;
+        updateRunButtonState();
+      }
+    }
+
     async function runItemSpecificSync() {
       if (isRunning || isPhase3Running || isItemSpecificSyncRunning) return;
       if (!window.itemSpecificSyncAPI || typeof window.itemSpecificSyncAPI.run !== 'function') {
@@ -1651,6 +1822,13 @@
       document.getElementById('sum3-mapped').textContent = summary.skusMappedToIpn || 0;
       document.getElementById('sum3-updated').textContent = summary.ipnsUpdated || 0;
       document.getElementById('sum3-skipped-filled').textContent = summary.ipnsSkippedAlreadyFilled || 0;
+    }
+
+    function renderPhase4Summary(summary) {
+      document.getElementById('sum4-scanned').textContent = summary.masterRecordsScanned || 0;
+      document.getElementById('sum4-eligible').textContent = summary.masterRecordsEligible || 0;
+      document.getElementById('sum4-planned').textContent = summary.ipnRowsPlanned || 0;
+      document.getElementById('sum4-created').textContent = summary.ipnRowsCreated || 0;
     }
 
     function showStatus(id, type, message) {
