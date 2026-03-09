@@ -142,6 +142,13 @@ function parseIpnPrefixFromIpn(ipn) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function formatIdentifierWithPrefix(identifier, ipnPrefix) {
+  const text = String(identifier || '').trim();
+  if (!text) return '';
+  const prefix = Number(ipnPrefix);
+  return Number.isFinite(prefix) ? `${prefix}-${text}` : text;
+}
+
 function isExcludedIpn(ipn) {
   const normalized = String(ipn || '').trim().toUpperCase();
   return normalized.startsWith('900') || normalized.startsWith('950') || normalized.startsWith('999');
@@ -402,7 +409,13 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
 
     const validOptions =
       taskType === 'multi'
-        ? [...new Set(candidates.map(item => String(item.identifier || '').trim()).filter(Boolean))]
+        ? [
+            ...new Set(
+              candidates
+                .map(item => formatIdentifierWithPrefix(item.identifier, ipnPrefix))
+                .filter(Boolean)
+            )
+          ]
         : [];
 
     plan.clickupTasks.push({

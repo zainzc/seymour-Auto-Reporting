@@ -72,6 +72,13 @@ function buildTaskKey(ipn, type = '') {
   return `${ipnKey}::${typeKey}`;
 }
 
+function formatIdentifierWithPrefix(identifier, ipnPrefix) {
+  const text = normalizeText(identifier);
+  if (!text) return '';
+  const prefix = parsePrefix(ipnPrefix);
+  return Number.isFinite(prefix) ? `${prefix}-${text}` : text;
+}
+
 function buildPhase2PlanV2({
   normalizedRows,
   existingMap,
@@ -118,7 +125,13 @@ function buildPhase2PlanV2({
     } else if (candidates.length > 1) {
       decision.type = 'multi';
       decision.reason = 'multiple_category_definitions';
-      decision.options = [...new Set(candidates.map(item => normalizeText(item.identifier)).filter(Boolean))];
+      decision.options = [
+        ...new Set(
+          candidates
+            .map(item => formatIdentifierWithPrefix(item.identifier, row.ipnPrefix))
+            .filter(Boolean)
+        )
+      ];
       summary.multiCategoryTasksPlanned += 1;
     } else {
       if (prefixKey) unmappedPrefixes.add(prefixKey);

@@ -12,14 +12,14 @@ async function getInvoices({ dateFrom, dateTo, salesperson }) {
   const pool = getDB();
   
   let query = `
-    WITH FreightCredits AS (
+     WITH FreightCredits AS (
     /* Pre-calculate the total credit amount per invoice to roll it into the first row */
     SELECT 
         InvoiceID, 
         SUM(UnitPrice) AS TotalFreightCredit
     FROM dbo.INVOICE_LINEITEM
     WHERE LineItemType = 'CRED' 
-      AND (LineItemDescription LIKE '%Freight%' OR LineItemDescription LIKE 'CR:%')
+      AND (LineItemDescription LIKE '%Freight%' OR LineItemDescription LIKE 'CR: FREIGHT%')
     GROUP BY InvoiceID
 )
 SELECT
@@ -48,8 +48,7 @@ SELECT
     CASE 
         WHEN ROW_NUMBER() OVER(PARTITION BY i.InvoiceID ORDER BY li.LineItemID) = 1 
         THEN ISNULL(i.TotalFreightAmount, 0) + 
-             ISNULL(li.TotalFreightAmount, 0) + 
-             ISNULL(fc.TotalFreightCredit, 0) /* New logic for Freight Credit lines */
+             ISNULL(li.TotalFreightAmount, 0)+ ISNULL(fc.TotalFreightCredit, 0)
         ELSE 0 
     END AS Shipping,
 
@@ -138,7 +137,11 @@ SELECT
 FROM dbo.INVOICE i
 LEFT JOIN dbo.INVOICE_LINEITEM li
     ON li.InvoiceID = i.InvoiceID 
-    AND li.LineItemType NOT IN ('CRED', 'SERV')
+    AND li.LineItemType NOT IN ('SERV')
+    /* EXCLUDE the freight credits from the main rows so they don't double-count */
+    AND NOT (
+        li.LineItemType = 'CRED' 
+        AND (li.LineItemDescription LIKE '%Freight%' OR li.LineItemDescription LIKE 'CR: FREIGHT%'))
    
 LEFT JOIN dbo.INVENTORY inv
     ON inv.InventoryID = li.InventoryID

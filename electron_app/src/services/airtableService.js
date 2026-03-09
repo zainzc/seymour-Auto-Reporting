@@ -198,7 +198,8 @@ class AirtableService {
 
   async fetchCategoryRecordsByPrefixAndIdentifier(ipnPrefix, identifier) {
     const prefixText = String(ipnPrefix || '').trim();
-    const target = String(identifier || '').trim().toLowerCase();
+    const targetRaw = String(identifier || '').trim().toLowerCase();
+    const target = targetRaw.replace(/^\d{2,4}\s*[-–]\s*/, '');
     if (!prefixText || !target) return [];
     const rows = await this.fetchCategoryRecordsByPrefix(prefixText);
     return rows.filter(record => {
