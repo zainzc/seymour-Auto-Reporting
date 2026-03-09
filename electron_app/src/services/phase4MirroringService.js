@@ -33,6 +33,73 @@ function parseMasterPrefix(value) {
   return String(parsed).padStart(3, '0');
 }
 
+function normalizeCategoryToken(value) {
+  return normalizeString(value)
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[\/,_]/g, ' ')
+    .replace(/[()\[\]{}.:;+]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function getRouteCategoryKey(tableName) {
+  const match = normalizeString(tableName).match(/^\d{3}\s*-\s*(.+)$/);
+  return normalizeCategoryToken(match ? match[1] : '');
+}
+
+function classifyRoutingFailure(failureGroups, type, payload = {}) {
+  if (!failureGroups || !type) return;
+  if (!failureGroups[type]) {
+    failureGroups[type] = new Map();
+  }
+
+  if (type === 'ambiguousDuplicatePrefix') {
+    const key = `${payload.prefix || ''}::${payload.categoryName || ''}`;
+    if (!failureGroups[type].has(key)) {
+      failureGroups[type].set(key, {
+        prefix: payload.prefix || '',
+        categoryName: payload.categoryName || '',
+        candidateTables: Array.isArray(payload.candidateTables) ? payload.candidateTables : [],
+        count: 0
+      });
+    }
+    failureGroups[type].get(key).count += 1;
+    return;
+  }
+
+  const prefix = payload.prefix || '';
+  failureGroups[type].set(prefix, (failureGroups[type].get(prefix) || 0) + 1);
+}
+
+function flushRoutingFailureGroups(summary, failureGroups) {
+  if (!summary || !failureGroups) return;
+  const missing = failureGroups.missingPrefixTable || new Map();
+  const blank = failureGroups.blankCategoryForDuplicatePrefix || new Map();
+  const ambiguous = failureGroups.ambiguousDuplicatePrefix || new Map();
+
+  for (const [prefix, count] of missing.entries()) {
+    addError(summary, `[routing][missingPrefixTable] prefix=${prefix} count=${count}`);
+  }
+  for (const [prefix, count] of blank.entries()) {
+    addError(summary, `[routing][blankCategoryForDuplicatePrefix] prefix=${prefix} count=${count}`);
+  }
+  for (const item of ambiguous.values()) {
+    addError(
+      summary,
+      `[routing][ambiguousDuplicatePrefix] prefix=${item.prefix} categoryName='${item.categoryName}' count=${item.count} candidates=${item.candidateTables.join(' | ')}`
+    );
+  }
+
+  summary.routingFailureGroups = {
+    missingPrefixTable: Object.fromEntries(missing.entries()),
+    blankCategoryForDuplicatePrefix: Object.fromEntries(blank.entries()),
+    ambiguousDuplicatePrefix: [...ambiguous.values()]
+  };
+}
+
 function isExcludedPrefix(prefix) {
   return EXCLUDED_PREFIXES.has(normalizeString(prefix));
 }
@@ -150,7 +217,7 @@ async function fetchMasterRecords(airtableService, tableName, selectFields = [],
 
 async function buildRoutingMap(itemSchemaService) {
   const tables = await itemSchemaService.listTables();
-  const prefixRouteMap = new Map();
+  const tablesByPrefix = new Map();
   const duplicatePrefixes = [];
 
   for (const table of tables) {
@@ -160,21 +227,26 @@ async function buildRoutingMap(itemSchemaService) {
     if (!prefix) continue;
     const current = {
       tableId: normalizeString(table?.id),
-      tableName
+      tableName,
+      prefix,
+      categoryKey: getRouteCategoryKey(tableName)
     };
-    if (prefixRouteMap.has(prefix)) {
-      duplicatePrefixes.push({
-        prefix,
-        tableA: prefixRouteMap.get(prefix)?.tableName || '',
-        tableB: current.tableName
-      });
-      continue;
+    if (!tablesByPrefix.has(prefix)) {
+      tablesByPrefix.set(prefix, []);
     }
-    prefixRouteMap.set(prefix, current);
+    tablesByPrefix.get(prefix).push(current);
+  }
+
+  for (const [prefix, routes] of tablesByPrefix.entries()) {
+    if (routes.length <= 1) continue;
+    duplicatePrefixes.push({
+      prefix,
+      tables: routes.map(route => route.tableName)
+    });
   }
 
   return {
-    prefixRouteMap,
+    tablesByPrefix,
     duplicatePrefixes
   };
 }
@@ -219,15 +291,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     counts: summary,
     message: 'Building routing map from Item Specifics base schema...'
   });
-  const { prefixRouteMap, duplicatePrefixes } = await buildRoutingMap(itemSchemaService);
-  if (duplicatePrefixes.length > 0) {
-    duplicatePrefixes.forEach(item => {
-      addError(
-        summary,
-        `Duplicate prefix '${item.prefix}' in Item Specifics tables: '${item.tableA}' vs '${item.tableB}'.`
-      );
-    });
-  }
+  const { tablesByPrefix } = await buildRoutingMap(itemSchemaService);
 
   emitProgress(progressCallback, {
     stage: 'phase4_load_master',
@@ -238,7 +302,8 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
 
   const selectFields = [
     'IPN',
-    'IPN Prefix'
+    'IPN Prefix',
+    'Category Name'
   ];
 
   let masterRecords = [];
@@ -311,31 +376,14 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
 
   const desiredByTable = new Map();
   const ipnToTable = new Map();
+  const routingFailureGroups = {
+    missingPrefixTable: new Map(),
+    blankCategoryForDuplicatePrefix: new Map(),
+    ambiguousDuplicatePrefix: new Map()
+  };
 
-  for (const record of masterRecords) {
-    const fields = record?.fields || {};
-    const ipn = normalizeString(fields.IPN).toUpperCase();
-    const prefix = parseMasterPrefix(fields['IPN Prefix']);
-
-    if (!ipn) continue;
-    if (!prefix || isExcludedPrefix(prefix)) continue;
-
-    summary.masterRecordsEligible += 1;
-    const route = prefixRouteMap.get(prefix);
-    if (!route?.tableId) {
-      summary.routingFailures += 1;
-      appendSample(
-        summary.routingFailureSamples,
-        {
-          ipn,
-          prefix
-        },
-        summary.sampleLimit
-      );
-      continue;
-    }
-
-    const destinationTableId = route.tableId;
+  const unresolvedByPrefix = [];
+  const assignDestination = (ipn, prefix, destinationTableId) => {
     const existingRoute = ipnToTable.get(ipn);
     if (existingRoute && existingRoute !== destinationTableId) {
       summary.routingFailures += 1;
@@ -348,16 +396,98 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
         },
         summary.sampleLimit
       );
-      continue;
+      return false;
     }
     ipnToTable.set(ipn, destinationTableId);
-
     if (!desiredByTable.has(destinationTableId)) {
       desiredByTable.set(destinationTableId, new Set());
     }
     desiredByTable.get(destinationTableId).add(ipn);
+    return true;
+  };
+
+  for (const record of masterRecords) {
+    const fields = record?.fields || {};
+    const ipn = normalizeString(fields.IPN).toUpperCase();
+    const prefix = parseMasterPrefix(fields['IPN Prefix']);
+
+    if (!ipn) continue;
+    if (!prefix || isExcludedPrefix(prefix)) continue;
+
+    summary.masterRecordsEligible += 1;
+    const prefixRoutes = tablesByPrefix.get(prefix) || [];
+    if (prefixRoutes.length === 0) {
+      summary.routingFailures += 1;
+      classifyRoutingFailure(routingFailureGroups, 'missingPrefixTable', { prefix });
+      appendSample(
+        summary.routingFailureSamples,
+        {
+          ipn,
+          prefix,
+          reason: 'missing_prefix_table'
+        },
+        summary.sampleLimit
+      );
+      continue;
+    }
+
+    if (prefixRoutes.length === 1) {
+      assignDestination(ipn, prefix, prefixRoutes[0].tableId);
+      continue;
+    }
+
+    unresolvedByPrefix.push({
+      ipn,
+      prefix,
+      categoryName: normalizeString(fields['Category Name']),
+      routes: prefixRoutes
+    });
   }
 
+  for (const item of unresolvedByPrefix) {
+    const { ipn, prefix, categoryName, routes } = item;
+    if (!categoryName) {
+      summary.routingFailures += 1;
+      classifyRoutingFailure(routingFailureGroups, 'blankCategoryForDuplicatePrefix', { prefix });
+      appendSample(
+        summary.routingFailureSamples,
+        {
+          ipn,
+          prefix,
+          reason: 'blank_category_for_duplicate_prefix'
+        },
+        summary.sampleLimit
+      );
+      continue;
+    }
+
+    const categoryNameNorm = normalizeCategoryToken(categoryName);
+    const exactCategoryMatches = routes.filter(
+      route => normalizeString(route.categoryKey) === categoryNameNorm
+    );
+    if (exactCategoryMatches.length === 1) {
+      assignDestination(ipn, prefix, exactCategoryMatches[0].tableId);
+      continue;
+    }
+
+    summary.routingFailures += 1;
+    classifyRoutingFailure(routingFailureGroups, 'ambiguousDuplicatePrefix', {
+      prefix,
+      categoryName,
+      candidateTables: routes.map(route => route.tableName)
+    });
+    appendSample(
+      summary.routingFailureSamples,
+      {
+        ipn,
+        prefix,
+        reason: 'ambiguous_duplicate_prefix'
+      },
+      summary.sampleLimit
+    );
+  }
+
+  flushRoutingFailureGroups(summary, routingFailureGroups);
   summary.tablesTouched = desiredByTable.size;
 
   emitProgress(progressCallback, {
@@ -453,3 +583,4 @@ module.exports = {
   buildPhase4Config,
   runPhase4Mirroring
 };
+

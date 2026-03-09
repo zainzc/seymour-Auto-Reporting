@@ -144,10 +144,10 @@ function buildShipstationFieldsForBlankTargets(existingFields, dims) {
   const weightText = formatTextNumber(roundToTwo(dims.weightOz / 16), 2);
 
   const targets = [
-    ['Length (ShipStation)', lengthText],
-    ['Width (ShipStation)', widthText],
-    ['Height (ShipStation)', heightText],
-    ['Weight (ShipStation)', weightText]
+    ['Package Length (ShipStation)', lengthText],
+    ['Package Width (ShipStation)', widthText],
+    ['Package Height (ShipStation)', heightText],
+    ['Package Weight (ShipStation)', weightText]
   ];
 
   const fields = {};
