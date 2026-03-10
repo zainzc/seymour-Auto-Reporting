@@ -390,17 +390,30 @@ class Phase2WritebackService {
       return summary;
     }
 
-    let resolvedField = await this.clickupService.getCustomFieldByName(
-      this.config.clickupResolvedCategoryFieldName
-    );
+    const fieldNameCandidates = [
+      this.config.clickupResolvedCategoryFieldName,
+      'Category Identifier Selection',
+      'Resolved Category'
+    ]
+      .map(name => String(name || '').trim())
+      .filter(Boolean);
+    const uniqueCandidateNames = [...new Set(fieldNameCandidates)];
+
+    let resolvedField = null;
+    for (const fieldName of uniqueCandidateNames) {
+      resolvedField = await this.clickupService.getCustomFieldByName(fieldName);
+      if (resolvedField) {
+        this.config.clickupResolvedCategoryFieldName = fieldName;
+        break;
+      }
+    }
+
     if (!resolvedField) {
-      const targetName = String(this.config.clickupResolvedCategoryFieldName || '')
-        .trim()
-        .toLowerCase();
+      const normalizedCandidates = uniqueCandidateNames.map(name => name.toLowerCase());
       for (const task of tasks) {
         const customFields = Array.isArray(task?.custom_fields) ? task.custom_fields : [];
-        const match = customFields.find(
-          field => String(field?.name || '').trim().toLowerCase() === targetName
+        const match = customFields.find(field =>
+          normalizedCandidates.includes(String(field?.name || '').trim().toLowerCase())
         );
         if (match) {
           resolvedField = {
@@ -409,6 +422,7 @@ class Phase2WritebackService {
             type: match.type,
             type_config: match.type_config || {}
           };
+          this.config.clickupResolvedCategoryFieldName = String(match.name || '').trim();
           break;
         }
       }
@@ -416,7 +430,7 @@ class Phase2WritebackService {
 
     if (!resolvedField) {
       throw new Error(
-        `ClickUp custom field '${this.config.clickupResolvedCategoryFieldName}' not found in configured list/tasks. Verify list ID and field name.`
+        `ClickUp custom field not found. Tried: ${uniqueCandidateNames.join(', ')}. Verify list ID and field name.`
       );
     }
 

@@ -601,7 +601,7 @@
         <label>
           Write-back settings are auto-managed:
         </label>
-        <div class="hint">Resolved field: <code>Category Identifier Selection</code> | Source status: <code>Category Determined</code> | Complete status: <code>Completed</code> | Poll: <code>120 min</code></div>
+        <div class="hint">Resolved field: <code>Category Identifier Selection</code> | Source status: <code>Category Determined</code> | Complete status: <code>Completed</code> | Poll: <code>1 min</code></div>
       </div>
       <div class="btn-group">
         <button id="run-sync-btn" class="btn btn-primary" onclick="runPhase2()">Run Sync</button>
@@ -685,7 +685,7 @@
     const DEFAULT_RESOLVED_FIELD = 'Category Identifier Selection';
     const DEFAULT_STATUS_DETERMINED = 'Category Determined';
     const DEFAULT_STATUS_COMPLETED = 'Completed';
-    const DEFAULT_WRITEBACK_INTERVAL_MINUTES = 120;
+    const DEFAULT_WRITEBACK_INTERVAL_MINUTES = 1;
     const DEFAULT_WRITEBACK_ENABLED = true;
     const DEFAULT_PHASE3_STORE_ID = 333796;
     const DEFAULT_PHASE3_LOOKBACK_DAYS = 90;
@@ -1364,7 +1364,7 @@
       const active = status.active ? 'active' : 'stopped';
       const inFlight = status.inFlight ? ', running now' : '';
       const lastRun = status.lastRunAt ? `, last run: ${new Date(status.lastRunAt).toLocaleString()}` : '';
-      text.textContent = `Write-back status: ${active}${inFlight}, interval=${status.intervalMinutes || 120}m${lastRun}`;
+      text.textContent = `Write-back status: ${active}${inFlight}, interval=${status.intervalMinutes || 1}m${lastRun}`;
     }
 
     async function refreshWritebackStatus(silent = false) {

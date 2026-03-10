@@ -2,6 +2,10 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function normalizeIpnKey(value) {
+  return normalizeText(value).toUpperCase();
+}
+
 function normalizeLower(value) {
   return normalizeText(value).toLowerCase();
 }
@@ -94,6 +98,7 @@ function buildPhase2PlanV2({
   const seenTaskKeys = new Set();
   const tracking = selectTrackingFields(masterFieldNames);
   const unmappedPrefixes = new Set();
+  const plannedCreateByIpn = new Set();
 
   const summary = {
     deterministicPlanned: 0,
@@ -102,7 +107,8 @@ function buildPhase2PlanV2({
   };
 
   for (const row of normalizedRows) {
-    const existing = existingMap.get(row.ipn) || null;
+    const ipnKey = normalizeIpnKey(row.ipn);
+    const existing = existingMap.get(ipnKey) || null;
     const existingFields = existing?.fields || {};
     const existingHasCategory = hasLinkedCategory(existingFields, categoryLinkFieldName);
 
@@ -139,6 +145,12 @@ function buildPhase2PlanV2({
     }
 
     if (!existing) {
+      if (plannedCreateByIpn.has(ipnKey)) {
+        // Prevent duplicate creates for repeated IPNs in the same run.
+        continue;
+      }
+      plannedCreateByIpn.add(ipnKey);
+
       const fields = {
         IPN: row.ipn,
         'Quantity (QOH)': row.qoh
@@ -187,6 +199,9 @@ function buildPhase2PlanV2({
     if (shouldCreateOrUpdateTask) {
       const taskType = decision.type === 'multi' ? 'multi' : 'exception';
       const taskKey = buildTaskKey(row.ipn, taskType);
+      if (taskCache && taskCache[taskKey]) {
+        continue;
+      }
       if (seenTaskKeys.has(taskKey)) {
         continue;
       }

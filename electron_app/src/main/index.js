@@ -880,6 +880,11 @@ function buildPhase2WritebackConfig(overrides = {}) {
     ...stored,
     ...overrides
   });
+  const normalizedCategoryTable = String(merged.airtableCategoryTable || '').trim();
+  const resolvedCategoryTable =
+    normalizedCategoryTable.toLowerCase() === 'category names'
+      ? 'Category Definitions'
+      : normalizedCategoryTable || 'Category Definitions';
 
   return {
     clickupToken: merged.clickupToken,
@@ -887,13 +892,13 @@ function buildPhase2WritebackConfig(overrides = {}) {
     airtableToken: merged.airtableToken,
     airtableBaseId: merged.airtableBaseId,
     airtableMasterTable: merged.airtableMasterTable,
-    airtableCategoryTable: merged.airtableCategoryTable,
+    airtableCategoryTable: resolvedCategoryTable,
     clickupResolvedCategoryFieldName: merged.clickupResolvedCategoryFieldName,
     clickupStatusDetermined: merged.clickupStatusDetermined,
     clickupStatusCompleted: merged.clickupStatusCompleted,
     clickupStatusNeedsReview: merged.clickupStatusNeedsReview,
     categoryLinkFieldName: merged.categoryLinkFieldName,
-    pollIntervalMinutes: merged.writebackPollIntervalMinutes,
+    pollIntervalMinutes: 1,
     enabled: merged.phase2WritebackEnabled
   };
 }
@@ -914,7 +919,7 @@ ipcMain.handle('phase2-get-config', async () => {
     phase2AutoRunPollMinutes: Number(merged.phase2AutoRunPollMinutes || 3),
     phase2AutoRunCooldownMinutes: Number(merged.phase2AutoRunCooldownMinutes || 5),
     phase2WritebackEnabled: Boolean(merged.phase2WritebackEnabled),
-    writebackPollIntervalMinutes: Number(merged.writebackPollIntervalMinutes || 120),
+    writebackPollIntervalMinutes: 1,
     clickupResolvedCategoryFieldName: merged.clickupResolvedCategoryFieldName || 'Category Identifier Selection',
     clickupStatusDetermined: merged.clickupStatusDetermined || 'Category Determined',
     clickupStatusCompleted: merged.clickupStatusCompleted || 'Completed',
@@ -1350,7 +1355,7 @@ function createWindow() {
       if (parseBoolean(writebackConfig.enabled, false)) {
         phase2WritebackPoller.start(writebackConfig);
         console.log(
-          `Phase2 write-back poller started (${Number(writebackConfig.pollIntervalMinutes) || 120} min interval)`
+          `Phase2 write-back poller started (${Number(writebackConfig.pollIntervalMinutes) || 1} min interval)`
         );
       }
     } catch (err) {
@@ -1369,144 +1374,8 @@ const http = require('http');
 const url = require('url');
 const { shell } = require('electron');
 
-function normalizeStatusValue(value) {
-  return String(value || '').trim().toLowerCase();
-}
-
-function readRequestBody(req) {
-  return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => {
-      body += chunk;
-      if (body.length > 2 * 1024 * 1024) {
-        reject(new Error('Request body too large.'));
-        req.destroy();
-      }
-    });
-    req.on('end', () => resolve(body));
-    req.on('error', reject);
-  });
-}
-
-function tryExtractTaskIdFromWebhook(payload = {}) {
-  return String(
-    payload?.task_id ||
-      payload?.taskId ||
-      payload?.task?.id ||
-      payload?.history_items?.[0]?.task_id ||
-      ''
-  ).trim();
-}
-
-function collectStatusCandidates(payload = {}) {
-  const candidates = [];
-  const push = value => {
-    const normalized = normalizeStatusValue(value);
-    if (normalized) candidates.push(normalized);
-  };
-
-  push(payload?.status);
-  push(payload?.task_status);
-  push(payload?.task?.status?.status);
-  push(payload?.task?.status?.name);
-  push(payload?.task?.current_status);
-
-  const historyItems = Array.isArray(payload?.history_items) ? payload.history_items : [];
-  for (const item of historyItems) {
-    push(item?.after?.status);
-    push(item?.after?.name);
-    push(item?.before?.status);
-    push(item?.before?.name);
-    push(item?.value);
-  }
-
-  return candidates;
-}
-
-async function shouldTriggerWritebackFromClickUpWebhook(payload = {}, config = {}) {
-  const targetStatus = normalizeStatusValue(config?.clickupStatusDetermined || 'Category Determined');
-  if (!targetStatus) return false;
-
-  const candidates = collectStatusCandidates(payload);
-  if (candidates.includes(targetStatus)) {
-    return true;
-  }
-
-  const taskId = tryExtractTaskIdFromWebhook(payload);
-  if (!taskId || !config?.clickupToken) {
-    return false;
-  }
-
-  try {
-    const clickupService = new ClickUpService({
-      token: config.clickupToken,
-      listId: config.clickupListId
-    });
-    const task = await clickupService.getTask(taskId);
-    const liveStatus = normalizeStatusValue(task?.status?.status || task?.status?.name || '');
-    return liveStatus === targetStatus;
-  } catch (error) {
-    console.warn(`ClickUp webhook status lookup failed for task '${taskId}': ${error.message}`);
-    return false;
-  }
-}
-
-function sendJson(res, statusCode, payload) {
-  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-  res.end(JSON.stringify(payload));
-}
-
-async function handleClickUpWebhook(req, res) {
-  if (req.method !== 'POST') {
-    sendJson(res, 405, { ok: false, message: 'Method not allowed.' });
-    return;
-  }
-
-  const writebackConfig = buildPhase2WritebackConfig();
-  if (!parseBoolean(writebackConfig.enabled, false)) {
-    sendJson(res, 202, { ok: true, triggered: false, reason: 'writeback_disabled' });
-    return;
-  }
-
-  try {
-    const rawBody = await readRequestBody(req);
-    let payload = {};
-    if (rawBody) {
-      try {
-        payload = JSON.parse(rawBody);
-      } catch (error) {
-        sendJson(res, 400, { ok: false, message: 'Invalid JSON body.' });
-        return;
-      }
-    }
-
-    const shouldTrigger = await shouldTriggerWritebackFromClickUpWebhook(payload, writebackConfig);
-    if (!shouldTrigger) {
-      sendJson(res, 202, { ok: true, triggered: false, reason: 'status_not_determined' });
-      return;
-    }
-
-    // Acknowledge fast; perform write-back asynchronously.
-    sendJson(res, 202, { ok: true, triggered: true });
-    setImmediate(() => {
-      phase2WritebackPoller.executeOnce(writebackConfig).catch(error => {
-        console.error(`ClickUp webhook write-back run failed: ${error.message}`);
-      });
-    });
-  } catch (error) {
-    sendJson(res, 500, { ok: false, message: error.message });
-  }
-}
-
 http.createServer(async (req, res) => {
   const queryUrl = url.parse(req.url, true);
-  const pathname = String(queryUrl?.pathname || '/').trim();
-
-  if (pathname === '/clickup-webhook') {
-    await handleClickUpWebhook(req, res);
-    return;
-  }
-
   const code = queryUrl.query.code;
   const state = queryUrl.query.state;
   const authContext = state === 'inventory' ? 'inventory' : 'reporting';

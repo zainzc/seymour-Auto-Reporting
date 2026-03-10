@@ -154,6 +154,10 @@ function isExcludedIpn(ipn) {
   return normalized.startsWith('900') || normalized.startsWith('950') || normalized.startsWith('999');
 }
 
+function normalizeIpnKey(ipn) {
+  return String(ipn || '').trim().toUpperCase();
+}
+
 function hasLinkedCategoryValue(fields = {}, linkFieldName = '') {
   const candidates = [linkFieldName, 'Category Definitions', 'Categories']
     .map(item => String(item || '').trim())
@@ -181,6 +185,31 @@ function formatDetailedServiceError(error, stage = '') {
     'Unknown error';
   const base = status ? `HTTP ${status}: ${detail}` : String(detail);
   return stage ? `${stage} failed: ${base}` : base;
+}
+
+function readFirstTextField(fields = {}, candidates = []) {
+  for (const name of candidates) {
+    const key = String(name || '').trim();
+    if (!key) continue;
+    const value = fields?.[key];
+    if (value === null || value === undefined) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return '';
+}
+
+function withFallback(value, fallbackText) {
+  const text = String(value || '').trim();
+  return text || String(fallbackText || '').trim();
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = String(value || '').trim();
+    if (text) return text;
+  }
+  return '';
 }
 
 async function runPhase2(options = {}, progressCallback = () => {}) {
@@ -243,9 +272,30 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
 
   emitProgress(progressCallback, { stage: 'normalize_filter', percent: 25, counts: summary });
   const normalizedRows = [];
+  const sheetFallbackByIpn = new Map();
   const totalSourceRows = Math.max(0, values.length - 1);
   for (let i = 1; i < values.length; i += 1) {
     const rowObject = buildRowObject(matchedHeaders, values[i] || []);
+    const sourceIpn = normalizeIpnKey(rowObject.InventoryNumber);
+    if (sourceIpn) {
+      const existingFallback = sheetFallbackByIpn.get(sourceIpn) || {};
+      sheetFallbackByIpn.set(sourceIpn, {
+        categoryCode: firstNonEmpty(existingFallback.categoryCode, rowObject.CategoryCode),
+        conditionsAndOptions: firstNonEmpty(
+          existingFallback.conditionsAndOptions,
+          rowObject.ConditionsAndOptions
+        ),
+        partType: firstNonEmpty(existingFallback.partType, rowObject.PartType),
+        modelYear: firstNonEmpty(existingFallback.modelYear, rowObject.ModelYear),
+        modelName: firstNonEmpty(existingFallback.modelName, rowObject.ModelName),
+        locationCode: firstNonEmpty(existingFallback.locationCode, rowObject.LocationCode),
+        stockTicketNumber: firstNonEmpty(
+          existingFallback.stockTicketNumber,
+          rowObject.StockTicketNumber
+        ),
+        referenceNumber: firstNonEmpty(existingFallback.referenceNumber, rowObject.ReferenceNumber)
+      });
+    }
     const normalized = normalizeRow(rowObject, i + 1);
     if (normalized.skipReason === 'missing_ipn') {
       summary.skippedMissingIPN += 1;
@@ -332,7 +382,12 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   } catch (error) {
     throw new Error(formatDetailedServiceError(error, 'load_existing_master_parts'));
   }
-  const existingMap = new Map(existingRows.map(record => [record.fields?.IPN, record]));
+  const existingMap = new Map();
+  for (const record of existingRows) {
+    const key = normalizeIpnKey(record?.fields?.IPN);
+    if (!key || existingMap.has(key)) continue;
+    existingMap.set(key, record);
+  }
 
   emitProgress(progressCallback, { stage: 'plan_upserts', percent: 70, counts: summary });
   const taskCache = getInventoryConfig('phase2TaskCache') || {};
@@ -399,6 +454,10 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     const taskType = candidates.length > 1 ? 'multi' : 'exception';
     const taskReason = candidates.length > 1 ? 'multiple_category_definitions' : 'no_match';
     const taskKey = buildTaskKey(ipnUpper, taskType);
+    if (taskCache && taskCache[taskKey]) {
+      summary.clickupTasksSkippedExisting += 1;
+      continue;
+    }
     const alreadyQueued = plan.clickupTasks.some(
       task => buildTaskKey(task.ipn, task.type) === taskKey
     );
@@ -414,20 +473,52 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
             )
           ]
         : [];
+    const sheetFallback = sheetFallbackByIpn.get(ipnUpper) || {};
 
     plan.clickupTasks.push({
       taskKey,
       ipn,
       ipnPrefix,
       masterRecordId: record.id,
-      categoryCode: '',
-      conditionsAndOptions: '',
-      partType: '',
-      modelYear: '',
-      modelName: '',
-      locationCode: '',
-      stockTicketNumber: '',
-      referenceNumber: '',
+      categoryCode: firstNonEmpty(
+        sheetFallback.categoryCode,
+        readFirstTextField(fields, ['CategoryCode', 'Category Code'])
+      ),
+      conditionsAndOptions: withFallback(
+        firstNonEmpty(
+          sheetFallback.conditionsAndOptions,
+          readFirstTextField(fields, [
+            'ConditionsAndOptions',
+            'Conditions And Options',
+            'Conditions & Options'
+          ])
+        ),
+        'N/A (not present in current sheet rows)'
+      ),
+      partType: firstNonEmpty(
+        sheetFallback.partType,
+        readFirstTextField(fields, ['PartType', 'Part Type'])
+      ),
+      modelYear: firstNonEmpty(
+        sheetFallback.modelYear,
+        readFirstTextField(fields, ['ModelYear', 'Model Year'])
+      ),
+      modelName: firstNonEmpty(
+        sheetFallback.modelName,
+        readFirstTextField(fields, ['ModelName', 'Model Name'])
+      ),
+      locationCode: firstNonEmpty(
+        sheetFallback.locationCode,
+        readFirstTextField(fields, ['LocationCode', 'Location Code'])
+      ),
+      stockTicketNumber: firstNonEmpty(
+        sheetFallback.stockTicketNumber,
+        readFirstTextField(fields, ['StockTicketNumber', 'Stock Ticket Number'])
+      ),
+      referenceNumber: firstNonEmpty(
+        sheetFallback.referenceNumber,
+        readFirstTextField(fields, ['ReferenceNumber', 'Reference Number'])
+      ),
       type: taskType,
       reason: taskReason,
       validOptions
