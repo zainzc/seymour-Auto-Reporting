@@ -1369,8 +1369,144 @@ const http = require('http');
 const url = require('url');
 const { shell } = require('electron');
 
+function normalizeStatusValue(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 2 * 1024 * 1024) {
+        reject(new Error('Request body too large.'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => resolve(body));
+    req.on('error', reject);
+  });
+}
+
+function tryExtractTaskIdFromWebhook(payload = {}) {
+  return String(
+    payload?.task_id ||
+      payload?.taskId ||
+      payload?.task?.id ||
+      payload?.history_items?.[0]?.task_id ||
+      ''
+  ).trim();
+}
+
+function collectStatusCandidates(payload = {}) {
+  const candidates = [];
+  const push = value => {
+    const normalized = normalizeStatusValue(value);
+    if (normalized) candidates.push(normalized);
+  };
+
+  push(payload?.status);
+  push(payload?.task_status);
+  push(payload?.task?.status?.status);
+  push(payload?.task?.status?.name);
+  push(payload?.task?.current_status);
+
+  const historyItems = Array.isArray(payload?.history_items) ? payload.history_items : [];
+  for (const item of historyItems) {
+    push(item?.after?.status);
+    push(item?.after?.name);
+    push(item?.before?.status);
+    push(item?.before?.name);
+    push(item?.value);
+  }
+
+  return candidates;
+}
+
+async function shouldTriggerWritebackFromClickUpWebhook(payload = {}, config = {}) {
+  const targetStatus = normalizeStatusValue(config?.clickupStatusDetermined || 'Category Determined');
+  if (!targetStatus) return false;
+
+  const candidates = collectStatusCandidates(payload);
+  if (candidates.includes(targetStatus)) {
+    return true;
+  }
+
+  const taskId = tryExtractTaskIdFromWebhook(payload);
+  if (!taskId || !config?.clickupToken) {
+    return false;
+  }
+
+  try {
+    const clickupService = new ClickUpService({
+      token: config.clickupToken,
+      listId: config.clickupListId
+    });
+    const task = await clickupService.getTask(taskId);
+    const liveStatus = normalizeStatusValue(task?.status?.status || task?.status?.name || '');
+    return liveStatus === targetStatus;
+  } catch (error) {
+    console.warn(`ClickUp webhook status lookup failed for task '${taskId}': ${error.message}`);
+    return false;
+  }
+}
+
+function sendJson(res, statusCode, payload) {
+  res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(payload));
+}
+
+async function handleClickUpWebhook(req, res) {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { ok: false, message: 'Method not allowed.' });
+    return;
+  }
+
+  const writebackConfig = buildPhase2WritebackConfig();
+  if (!parseBoolean(writebackConfig.enabled, false)) {
+    sendJson(res, 202, { ok: true, triggered: false, reason: 'writeback_disabled' });
+    return;
+  }
+
+  try {
+    const rawBody = await readRequestBody(req);
+    let payload = {};
+    if (rawBody) {
+      try {
+        payload = JSON.parse(rawBody);
+      } catch (error) {
+        sendJson(res, 400, { ok: false, message: 'Invalid JSON body.' });
+        return;
+      }
+    }
+
+    const shouldTrigger = await shouldTriggerWritebackFromClickUpWebhook(payload, writebackConfig);
+    if (!shouldTrigger) {
+      sendJson(res, 202, { ok: true, triggered: false, reason: 'status_not_determined' });
+      return;
+    }
+
+    // Acknowledge fast; perform write-back asynchronously.
+    sendJson(res, 202, { ok: true, triggered: true });
+    setImmediate(() => {
+      phase2WritebackPoller.executeOnce(writebackConfig).catch(error => {
+        console.error(`ClickUp webhook write-back run failed: ${error.message}`);
+      });
+    });
+  } catch (error) {
+    sendJson(res, 500, { ok: false, message: error.message });
+  }
+}
+
 http.createServer(async (req, res) => {
   const queryUrl = url.parse(req.url, true);
+  const pathname = String(queryUrl?.pathname || '/').trim();
+
+  if (pathname === '/clickup-webhook') {
+    await handleClickUpWebhook(req, res);
+    return;
+  }
+
   const code = queryUrl.query.code;
   const state = queryUrl.query.state;
   const authContext = state === 'inventory' ? 'inventory' : 'reporting';

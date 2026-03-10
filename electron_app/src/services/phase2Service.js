@@ -378,9 +378,6 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     if (knownIpns.has(ipnUpper)) continue;
     if (isExcludedIpn(ipnUpper)) continue;
     if (hasLinkedCategoryValue(fields, categoryLinkFieldName)) continue;
-    if (statusFieldName && String(fields[statusFieldName] || '').trim().toLowerCase() === 'resolved') {
-      continue;
-    }
 
     const storedPrefix = parseInt(String(fields['IPN Prefix'] || '').trim(), 10);
     const ipnPrefix = Number.isFinite(storedPrefix) ? storedPrefix : parseIpnPrefixFromIpn(ipn);
