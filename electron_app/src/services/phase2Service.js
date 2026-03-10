@@ -14,6 +14,8 @@ const {
 } = require('./phase2CategoryResolutionV2Service');
 const { getInventoryConfig, saveInventoryConfig } = require('../config/configStore');
 
+let phase2RunInProgress = false;
+
 function parseBoolean(value, defaultValue = false) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') return value.toLowerCase() === 'true';
@@ -213,6 +215,12 @@ function firstNonEmpty(...values) {
 }
 
 async function runPhase2(options = {}, progressCallback = () => {}) {
+  if (phase2RunInProgress) {
+    throw new Error('Phase2 is already running. Wait for the current run to complete.');
+  }
+  phase2RunInProgress = true;
+
+  try {
   const summary = {
     totalRows: 0,
     validRows: 0,
@@ -403,6 +411,42 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   summary.multiCategoryTasksPlanned = plan.multiCategoryTasksPlanned || 0;
   summary.exceptionTasksPlanned = plan.exceptionTasksPlanned || 0;
   summary.unmappedPrefixes = Array.isArray(plan.unmappedPrefixes) ? plan.unmappedPrefixes : [];
+
+  // Re-check planned creates right before writes to avoid duplicates from overlapping runs.
+  if (Array.isArray(plan.creates) && plan.creates.length > 0) {
+    try {
+      const createIpns = [
+        ...new Set(
+          plan.creates
+            .map(item => String(item?.fields?.IPN || '').trim())
+            .filter(Boolean)
+        )
+      ];
+      if (createIpns.length > 0) {
+        const existingBeforeCreate = await airtableService.fetchMasterPartsByIpns(createIpns);
+        const existingIpnSet = new Set(
+          existingBeforeCreate
+            .map(record => normalizeIpnKey(record?.fields?.IPN))
+            .filter(Boolean)
+        );
+        if (existingIpnSet.size > 0) {
+          const filteredCreates = plan.creates.filter(item => {
+            const ipnKey = normalizeIpnKey(item?.fields?.IPN);
+            return ipnKey && !existingIpnSet.has(ipnKey);
+          });
+          const skippedDueToRecheck = plan.creates.length - filteredCreates.length;
+          if (skippedDueToRecheck > 0) {
+            summary.errors.push(
+              `Skipped ${skippedDueToRecheck} planned creates after pre-write duplicate recheck.`
+            );
+          }
+          plan.creates = filteredCreates;
+        }
+      }
+    } catch (error) {
+      summary.errors.push(`Pre-write duplicate recheck skipped: ${error.message}`);
+    }
+  }
 
   // Self-healing pass: re-check unresolved Master Parts even if not present in current sheet rows.
   const statusFieldName = chooseTrackingField(masterFieldNames, 'Category Resolution Status');
@@ -804,6 +848,9 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   emitProgress(progressCallback, { stage: 'completed', percent: 100, counts: summary });
   console.log('Phase2 completed', summary);
   return summary;
+  } finally {
+    phase2RunInProgress = false;
+  }
 }
 
 module.exports = {
