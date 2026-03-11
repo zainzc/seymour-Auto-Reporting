@@ -116,6 +116,44 @@ class Phase2WritebackService {
       .replace(/\s+/g, ' ');
   }
 
+  resolveDropDownValue(field = {}) {
+    const rawValue = field?.value;
+    if (rawValue === null || rawValue === undefined) return '';
+    const options = Array.isArray(field?.type_config?.options) ? field.type_config.options : [];
+    const valueId =
+      typeof rawValue === 'object'
+        ? String(rawValue?.id || rawValue?.value || rawValue?.orderindex || '')
+        : String(rawValue);
+    const valueName = typeof rawValue === 'object' ? String(rawValue?.name || '').trim() : '';
+    if (valueName) return valueName;
+    const option =
+      options.find(item => String(item?.id || '') === valueId) ||
+      options.find(item => String(item?.orderindex || '') === valueId);
+    return String(option?.name || '').trim();
+  }
+
+  fallbackIdentifierFromAnyCustomField(task = {}, ipnPrefix = null) {
+    const fields = Array.isArray(task?.custom_fields) ? task.custom_fields : [];
+    const prefixText = Number.isFinite(ipnPrefix) ? String(ipnPrefix).padStart(3, '0') : '';
+
+    for (const field of fields) {
+      let value = '';
+      if (String(field?.type || '').trim() === 'drop_down') {
+        value = this.resolveDropDownValue(field);
+      } else if (field?.value !== null && field?.value !== undefined) {
+        value = String(field.value).trim();
+      }
+      if (!value) continue;
+      const normalized = String(value).trim();
+      if (/^\d{3}\s*[-–].+/.test(normalized)) return normalized;
+      if (prefixText && /^(corner|fog|turn signal|park)/i.test(normalized)) {
+        return `${prefixText}-${normalized}`;
+      }
+    }
+
+    return '';
+  }
+
   parseResolvedSelection(rawValue, fallbackPrefix) {
     const raw = String(rawValue || '').trim();
     if (!raw) {
@@ -257,21 +295,30 @@ class Phase2WritebackService {
       return;
     }
 
+    const ipnPrefix = parseIpnPrefix(ipn);
+
     let selectedIdentifier =
       ClickUpService.getTaskCustomFieldDisplayValue(task, resolvedField) ||
       ClickUpService.extractCustomFieldText(task, this.config.clickupResolvedCategoryFieldName);
+    let detailedTask = null;
     if (!selectedIdentifier) {
       try {
-        const detailedTask = await this.clickupService.getTask(taskId);
+        detailedTask = await this.clickupService.getTask(taskId);
         selectedIdentifier =
           ClickUpService.getTaskCustomFieldDisplayValue(detailedTask, resolvedField) ||
           ClickUpService.extractCustomFieldText(
             detailedTask,
             this.config.clickupResolvedCategoryFieldName
           );
+        if (!selectedIdentifier) {
+          selectedIdentifier = this.fallbackIdentifierFromAnyCustomField(detailedTask, ipnPrefix);
+        }
       } catch (detailError) {
         // keep original path; missing detail fetch should not crash whole run
       }
+    }
+    if (!selectedIdentifier) {
+      selectedIdentifier = this.fallbackIdentifierFromAnyCustomField(task, ipnPrefix);
     }
     if (!selectedIdentifier) {
       summary.tasksErrored += 1;
@@ -307,7 +354,6 @@ class Phase2WritebackService {
       return;
     }
 
-    const ipnPrefix = parseIpnPrefix(ipn);
     if (!Number.isFinite(ipnPrefix)) {
       summary.tasksErrored += 1;
       await this.addCommentOnce(

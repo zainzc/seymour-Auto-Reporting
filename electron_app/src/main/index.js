@@ -33,6 +33,8 @@ const { runPhase2, buildPhase2Config } = require('../services/phase2Service');
 const { runPhase3, buildPhase3Config, PARTSHUNTER_STORE_ID } = require('../services/phase3Service');
 const { runPhase4Mirroring, buildPhase4Config, MIRROR_STATE_KEY } = require('../services/phase4MirroringService');
 const { runItemSpecificTableSync } = require('../scripts/syncItemSpecificTables');
+const { runPhase4RulesPopulate } = require('../scripts/runPhase4RulesPopulate');
+const { runPhase4BLite } = require('../scripts/runPhase4BLite');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
 const phase2WritebackPoller = require('../services/phase2WritebackPollerService');
@@ -931,6 +933,22 @@ ipcMain.handle('phase2-get-config', async () => {
     phase3LookbackDays: Number(phase3Config.phase3LookbackDays || 90),
     phase3DryRun: Boolean(phase3Config.phase3DryRun),
     itemSpecificsBaseId: stored.itemSpecificsBaseId || '',
+    phase4RulesDriveFile: stored.phase4RulesDriveFile || process.env.PHASE4_RULES_DRIVE_FILE || process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE || '',
+    phase4RulesLogicSheet: stored.phase4RulesLogicSheet || process.env.PHASE4_LOGIC_SHEET || 'Logic',
+    phase4GlobalDefaultsTable: stored.phase4GlobalDefaultsTable || process.env.PHASE4_GLOBAL_DEFAULTS_TABLE || 'Fixed Item Specifics (Global Defaults)',
+    phase4RulesDryRun:
+      typeof stored.phase4RulesDryRun === 'boolean'
+        ? stored.phase4RulesDryRun
+        : true,
+    phase4BLiteDryRun:
+      typeof stored.phase4BLiteDryRun === 'boolean'
+        ? stored.phase4BLiteDryRun
+        : true,
+    openaiApiKey: stored.openaiApiKey || '',
+    openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    openaiBaseUrl: stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '',
+    phase4BClickupOpenStatus:
+      stored.phase4BClickupOpenStatus || process.env.PHASE4B_CLICKUP_OPEN_STATUS || 'To Do',
     airtableToken: stored.airtableToken || '',
     clickupToken: stored.clickupToken || ''
   };
@@ -1270,6 +1288,170 @@ ipcMain.handle('phase4:run', async (event, options = {}) => {
       message
     });
 
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase4rules:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    rulesDriveFile:
+      String(
+        stored.phase4RulesDriveFile ||
+          process.env.PHASE4_RULES_DRIVE_FILE ||
+          process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+          ''
+      ).trim(),
+    globalDefaultsTable:
+      String(
+        stored.phase4GlobalDefaultsTable ||
+          process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+          'Fixed Item Specifics (Global Defaults)'
+      ).trim(),
+    logicSheetName: String(stored.phase4RulesLogicSheet || process.env.PHASE4_LOGIC_SHEET || 'Logic').trim(),
+    dryRun:
+      typeof stored.phase4RulesDryRun === 'boolean'
+        ? stored.phase4RulesDryRun
+        : true,
+    authContext: 'inventory'
+  };
+});
+
+ipcMain.handle('phase4rules:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const dryRun =
+      typeof options.phase4RulesDryRun === 'boolean'
+        ? options.phase4RulesDryRun
+        : typeof stored.phase4RulesDryRun === 'boolean'
+          ? stored.phase4RulesDryRun
+          : true;
+    const runOptions = {
+      ...stored,
+      ...options,
+      dryRun,
+      execute: !dryRun,
+      ruleTypes: ['F'],
+      authContext: 'inventory',
+      rulesDriveFile:
+        String(
+          options.phase4RulesDriveFile ||
+            stored.phase4RulesDriveFile ||
+            process.env.PHASE4_RULES_DRIVE_FILE ||
+            process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+            ''
+        ).trim(),
+      globalDefaultsTable: String(
+        options.phase4GlobalDefaultsTable ||
+          stored.phase4GlobalDefaultsTable ||
+          process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+          'Fixed Item Specifics (Global Defaults)'
+      ).trim(),
+      logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim()
+    };
+
+    const summary = await runPhase4RulesPopulate(runOptions, progress => {
+      event.sender.send('phase4rules:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase4rules:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase4blite:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    rulesDriveFile:
+      String(
+        stored.phase4RulesDriveFile ||
+          process.env.PHASE4_RULES_DRIVE_FILE ||
+          process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+          ''
+      ).trim(),
+    logicSheetName: String(stored.phase4RulesLogicSheet || process.env.PHASE4_LOGIC_SHEET || 'Logic').trim(),
+    dryRun:
+      typeof stored.phase4BLiteDryRun === 'boolean'
+        ? stored.phase4BLiteDryRun
+        : true,
+    openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+    openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+    clickupOpenStatus:
+      String(stored.phase4BClickupOpenStatus || process.env.PHASE4B_CLICKUP_OPEN_STATUS || 'To Do').trim(),
+    authContext: 'inventory'
+  };
+});
+
+ipcMain.handle('phase4blite:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const dryRun =
+      typeof options.phase4BLiteDryRun === 'boolean'
+        ? options.phase4BLiteDryRun
+        : typeof stored.phase4BLiteDryRun === 'boolean'
+          ? stored.phase4BLiteDryRun
+          : true;
+
+    const runOptions = {
+      ...stored,
+      ...options,
+      dryRun,
+      execute: !dryRun,
+      authContext: 'inventory',
+      rulesDriveFile:
+        String(
+          options.phase4RulesDriveFile ||
+            stored.phase4RulesDriveFile ||
+            process.env.PHASE4_RULES_DRIVE_FILE ||
+            process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+            ''
+        ).trim(),
+      logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+      openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+      clickupOpenStatus: String(
+        options.phase4BClickupOpenStatus ||
+          stored.phase4BClickupOpenStatus ||
+          process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
+          'To Do'
+      ).trim()
+    };
+
+    const summary = await runPhase4BLite(runOptions, progress => {
+      event.sender.send('phase4blite:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase4blite:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
     return {
       success: false,
       message

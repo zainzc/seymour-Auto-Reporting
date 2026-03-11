@@ -100,6 +100,20 @@ contextBridge.exposeInMainWorld('phase4API', {
   onProgress: (callback) => ipcRenderer.on('phase4:progress', callback)
 });
 
+// Phase 4 Rules API - Item Specific fixed rules population
+contextBridge.exposeInMainWorld('phase4RulesAPI', {
+  getConfig: () => ipcRenderer.invoke('phase4rules:get-config'),
+  run: (options) => ipcRenderer.invoke('phase4rules:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase4rules:progress', callback)
+});
+
+// Phase 4B-lite API - Item Specific VF/VMF AI evaluation
+contextBridge.exposeInMainWorld('phase4BLiteAPI', {
+  getConfig: () => ipcRenderer.invoke('phase4blite:get-config'),
+  run: (options) => ipcRenderer.invoke('phase4blite:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase4blite:progress', callback)
+});
+
 // Item Specific table automation API
 contextBridge.exposeInMainWorld('itemSpecificSyncAPI', {
   run: (options) => ipcRenderer.invoke('item-specific-sync:run', options),

@@ -178,6 +178,58 @@
       text-transform: uppercase;
     }
 
+    .phase-panel {
+      border: 1px solid #d5e1f0;
+      border-radius: 12px;
+      padding: 14px;
+      background: linear-gradient(180deg, #f9fcff 0%, #f4f8fd 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    }
+
+    .phase-panel + .phase-panel {
+      margin-top: 14px;
+    }
+
+    .phase-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .phase-panel-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 800;
+      color: #1f456f;
+      letter-spacing: 0.15px;
+    }
+
+    .phase-panel-content {
+      display: block;
+    }
+
+    .phase-panel-content.collapsed {
+      display: none;
+    }
+
+    .panel-toggle-btn {
+      border: 1px solid #bfd0e6;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #214668;
+      background: #e9f1fb;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .panel-toggle-btn:hover {
+      background: #dce9f8;
+    }
+
     .field-error {
       margin-top: 5px;
       color: #8f241f;
@@ -417,6 +469,7 @@
       .grid-2 { grid-template-columns: 1fr; }
       .grid-3 { grid-template-columns: 1fr; }
       .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .phase-panel-header { flex-wrap: wrap; }
     }
 
     @media (max-width: 680px) {
@@ -515,81 +568,169 @@
     </section>
 
     <section class="card">
-      <h2 class="card-title">2. Phase 3 (ShipStation)</h2>
-      <div class="grid-2">
-        <div>
-          <h3 class="section-title">Credentials</h3>
-          <div class="health-row">
-            <span id="health-phase3" class="health-pill warn">Phase 3: Missing fields</span>
-          </div>
-          <div class="form-group">
-            <label for="shipstation-api-key">ShipStation V1 API Key</label>
-            <input id="shipstation-api-key" type="password" placeholder="ShipStation API Key">
-            <div id="err-shipstation-api-key" class="field-error"></div>
-          </div>
-          <div class="form-group">
-            <label for="shipstation-api-secret">ShipStation V1 API Secret</label>
-            <input id="shipstation-api-secret" type="password" placeholder="ShipStation API Secret">
-            <div id="err-shipstation-api-secret" class="field-error"></div>
-          </div>
+      <h2 class="card-title">2. Phase Operations</h2>
+
+      <div class="phase-panel">
+        <div class="phase-panel-header">
+          <h3 class="phase-panel-title">Phase 3 (ShipStation)</h3>
+          <button id="toggle-phase3-panel-btn" class="panel-toggle-btn" type="button" aria-expanded="true" onclick="togglePhasePanel('phase3-panel-content', 'toggle-phase3-panel-btn')">Collapse</button>
         </div>
-        <div>
-          <h3 class="section-title">Run Options</h3>
-          <div class="form-group">
-            <label for="shipstation-store-id">ShipStation Store ID</label>
-            <input id="shipstation-store-id" type="text" value="333796" readonly>
-            <div class="hint">Locked to Partshunter203 store (333796).</div>
+        <div id="phase3-panel-content" class="phase-panel-content">
+          <div class="grid-2">
+            <div>
+              <h3 class="section-title">Credentials</h3>
+              <div class="health-row">
+                <span id="health-phase3" class="health-pill warn">Phase 3: Missing fields</span>
+              </div>
+              <div class="form-group">
+                <label for="shipstation-api-key">ShipStation V1 API Key</label>
+                <input id="shipstation-api-key" type="password" placeholder="ShipStation API Key">
+                <div id="err-shipstation-api-key" class="field-error"></div>
+              </div>
+              <div class="form-group">
+                <label for="shipstation-api-secret">ShipStation V1 API Secret</label>
+                <input id="shipstation-api-secret" type="password" placeholder="ShipStation API Secret">
+                <div id="err-shipstation-api-secret" class="field-error"></div>
+              </div>
+            </div>
+            <div>
+              <h3 class="section-title">Run Options</h3>
+              <div class="form-group">
+                <label for="shipstation-store-id">ShipStation Store ID</label>
+                <input id="shipstation-store-id" type="text" value="333796" readonly>
+                <div class="hint">Locked to Partshunter203 store (333796).</div>
+              </div>
+              <div class="form-group">
+                <label for="phase3-lookback-days">Phase 3 Lookback Days</label>
+                <input id="phase3-lookback-days" type="number" min="1" step="1" value="90">
+                <div id="err-phase3-lookback-days" class="field-error"></div>
+              </div>
+              <div class="form-group">
+                <label for="phase3-dry-run">Phase 3 Dry Run</label>
+                <select id="phase3-dry-run">
+                  <option value="false" selected>False (Write Airtable)</option>
+                  <option value="true">True (No Airtable Writes)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="item-specific-base-id">Item Specifics Base ID</label>
+                <input id="item-specific-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
+                <div class="hint">Base B: Item Specifics by Part Type.</div>
+                <div id="err-item-specific-base-id" class="field-error"></div>
+              </div>
+              <div class="btn-group">
+                <button id="run-phase3-btn" class="btn btn-secondary" onclick="runPhase3()">Run Phase 3</button>
+              </div>
+              <div class="hint" id="phase3-status-text">Phase 3 status: idle</div>
+            </div>
           </div>
-          <div class="form-group">
-            <label for="phase3-lookback-days">Phase 3 Lookback Days</label>
-            <input id="phase3-lookback-days" type="number" min="1" step="1" value="90">
-            <div id="err-phase3-lookback-days" class="field-error"></div>
-          </div>
-          <div class="form-group">
-            <label for="phase3-dry-run">Phase 3 Dry Run</label>
-            <select id="phase3-dry-run">
-              <option value="false" selected>False (Write Airtable)</option>
-              <option value="true">True (No Airtable Writes)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label for="item-specific-base-id">Item Specifics Base ID</label>
-            <input id="item-specific-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
-            <div class="hint">Base B: Item Specifics by Part Type.</div>
-            <div id="err-item-specific-base-id" class="field-error"></div>
-          </div>
-          <div class="btn-group">
-            <button id="run-phase3-btn" class="btn btn-secondary" onclick="runPhase3()">Run Phase 3</button>
-          </div>
-          <div class="hint" id="phase3-status-text">Phase 3 status: idle</div>
         </div>
       </div>
-      <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px;">
-        <h3 class="section-title">Phase 4 (IPN Mirroring)</h3>
-        <div class="grid-2">
-          <div>
-            <div class="form-group">
-              <label for="phase4-dry-run">Phase 4 Dry Run</label>
-              <select id="phase4-dry-run">
-                <option value="true" selected>True (No Airtable Writes)</option>
-                <option value="false">False (Write Airtable)</option>
-              </select>
-              <div class="hint">Recommended first run mode. Builds routing/diff and reports planned inserts only.</div>
+
+      <div class="phase-panel">
+        <div class="phase-panel-header">
+          <h3 class="phase-panel-title">Phase 4 (Item Specifics)</h3>
+          <button id="toggle-phase4-panel-btn" class="panel-toggle-btn" type="button" aria-expanded="true" onclick="togglePhasePanel('phase4-panel-content', 'toggle-phase4-panel-btn')">Collapse</button>
+        </div>
+        <div id="phase4-panel-content" class="phase-panel-content">
+          <h3 class="section-title">Phase 4 (IPN Mirroring)</h3>
+          <div class="grid-2">
+            <div>
+              <div class="form-group">
+                <label for="phase4-dry-run">Phase 4 Dry Run</label>
+                <select id="phase4-dry-run">
+                  <option value="true" selected>True (No Airtable Writes)</option>
+                  <option value="false">False (Write Airtable)</option>
+                </select>
+                <div class="hint">Recommended first run mode. Builds routing/diff and reports planned inserts only.</div>
+              </div>
+            </div>
+            <div>
+              <div class="form-group">
+                <label for="phase4-incremental-enabled">Phase 4 Incremental Mode</label>
+                <select id="phase4-incremental-enabled">
+                  <option value="true" selected>True (Since last mirror run)</option>
+                  <option value="false">False (Full scan)</option>
+                </select>
+                <div class="hint">Routing is prefix-only (IPN Prefix -> one table per prefix). Incremental uses last-modified/created when available.</div>
+              </div>
+              <div class="btn-group">
+                <button id="run-phase4-btn" class="btn btn-secondary" onclick="runPhase4()">Run Phase 4 Mirroring</button>
+              </div>
+              <div class="hint" id="phase4-status-text">Phase 4 status: idle</div>
             </div>
           </div>
-          <div>
-            <div class="form-group">
-              <label for="phase4-incremental-enabled">Phase 4 Incremental Mode</label>
-              <select id="phase4-incremental-enabled">
-                <option value="true" selected>True (Since last mirror run)</option>
-                <option value="false">False (Full scan)</option>
-              </select>
-              <div class="hint">Routing is prefix-only (IPN Prefix -> one table per prefix). Incremental uses last-modified/created when available.</div>
+
+          <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px;">
+            <h3 class="section-title">Phase 4A (Rules Populate: Fixed)</h3>
+            <div class="grid-2">
+              <div>
+                <div class="form-group">
+                  <label for="phase4-rules-drive-file">Rules File (Google Drive ID/URL)</label>
+                  <input id="phase4-rules-drive-file" type="text" placeholder="Google Drive file ID or full URL">
+                  <div class="hint">Source workbook is loaded from Google Drive using connected inventory Google auth.</div>
+                  <div id="err-phase4-rules-drive-file" class="field-error"></div>
+                </div>
+              <div class="form-group">
+                <label for="phase4-rules-logic-sheet">Rules Sheet Name</label>
+                <input id="phase4-rules-logic-sheet" type="text" value="Logic">
+              </div>
+              <div class="form-group">
+                <label for="phase4-global-defaults-table">Global Defaults Table</label>
+                <input id="phase4-global-defaults-table" type="text" value="Fixed Item Specifics (Global Defaults)">
+                <div class="hint">Airtable table in Item Specifics base used as fallback after Logic F values.</div>
+              </div>
             </div>
-            <div class="btn-group">
-              <button id="run-phase4-btn" class="btn btn-secondary" onclick="runPhase4()">Run Phase 4 Mirroring</button>
+              <div>
+                <div class="form-group">
+                  <label for="phase4-rules-dry-run">Phase 4A Dry Run</label>
+                  <select id="phase4-rules-dry-run">
+                    <option value="true" selected>True (No Airtable Writes)</option>
+                    <option value="false">False (Write Airtable)</option>
+                  </select>
+                  <div class="hint">Applies only Rule=F from Logic sheet. Blank-only updates, never overwrites existing values.</div>
+                </div>
+                <div class="btn-group">
+                  <button id="run-phase4-rules-btn" class="btn btn-secondary" onclick="runPhase4Rules()">Run Phase 4A Rules Populate</button>
+                </div>
+                <div class="hint" id="phase4-rules-status-text">Phase 4A status: idle</div>
+              </div>
             </div>
-            <div class="hint" id="phase4-status-text">Phase 4 status: idle</div>
+          </div>
+
+          <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px;">
+            <h3 class="section-title">Phase 4B-lite (VF + VMF)</h3>
+            <div class="grid-2">
+              <div>
+                <div class="form-group">
+                  <label for="openai-api-key">OpenAI API Key</label>
+                  <input id="openai-api-key" type="password" placeholder="sk-...">
+                  <div class="hint">Used only for Phase 4B-lite AI evaluation (Master Parts context only).</div>
+                </div>
+                <div class="form-group">
+                  <label for="openai-model">OpenAI Model</label>
+                  <input id="openai-model" type="text" value="gpt-4o-mini">
+                </div>
+                <div class="form-group">
+                  <label for="phase4b-clickup-open-status">ClickUp Open Status (VMF low confidence)</label>
+                  <input id="phase4b-clickup-open-status" type="text" value="To Do">
+                </div>
+              </div>
+              <div>
+                <div class="form-group">
+                  <label for="phase4blite-dry-run">Phase 4B-lite Dry Run</label>
+                  <select id="phase4blite-dry-run">
+                    <option value="true" selected>True (No Airtable/ClickUp Writes)</option>
+                    <option value="false">False (Write Airtable + ClickUp)</option>
+                  </select>
+                  <div class="hint">Processes only VF/VMF. Never overwrites non-blank Item Specific values.</div>
+                </div>
+                <div class="btn-group">
+                  <button id="run-phase4blite-btn" class="btn btn-secondary" onclick="runPhase4BLite()">Run Phase 4B-lite</button>
+                </div>
+                <div class="hint" id="phase4blite-status-text">Phase 4B-lite status: idle</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -676,6 +817,8 @@
     let isRunning = false;
     let isPhase3Running = false;
     let isPhase4Running = false;
+    let isPhase4RulesRunning = false;
+    let isPhase4BLiteRunning = false;
     let isItemSpecificSyncRunning = false;
     let lastRunFailed = false;
     let logsCollapsed = false;
@@ -691,6 +834,12 @@
     const DEFAULT_PHASE3_LOOKBACK_DAYS = 90;
     const DEFAULT_PHASE4_DRY_RUN = true;
     const DEFAULT_PHASE4_INCREMENTAL_ENABLED = true;
+    const DEFAULT_PHASE4_RULES_DRY_RUN = true;
+    const DEFAULT_PHASE4_RULES_LOGIC_SHEET = 'Logic';
+    const DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE = 'Fixed Item Specifics (Global Defaults)';
+    const DEFAULT_PHASE4BLITE_DRY_RUN = true;
+    const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+    const DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS = 'To Do';
     const REQUIRED_FIELDS = [
       ['sheet-id', 'Google Sheet ID'],
       ['tab-name', 'Google Tab Name'],
@@ -732,6 +881,19 @@
       phase4_mirror: 'Phase 4: Mirroring IPN rows',
       completed: 'Phase 4 completed',
       error: 'Phase 4 failed'
+    };
+    const PHASE4_RULES_STAGE_LABELS = {
+      phase4rules_load_rules: 'Phase 4A: Loading rules',
+      phase4rules_scan_tables: 'Phase 4A: Applying fixed rules',
+      completed: 'Phase 4A completed',
+      error: 'Phase 4A failed'
+    };
+    const PHASE4BLITE_STAGE_LABELS = {
+      phase4blite_load_rules: 'Phase 4B-lite: Loading rules',
+      phase4blite_load_master: 'Phase 4B-lite: Loading master records',
+      phase4blite_scan_tables: 'Phase 4B-lite: Evaluating VF/VMF fields',
+      completed: 'Phase 4B-lite completed',
+      error: 'Phase 4B-lite failed'
     };
 
     window.addEventListener('load', async () => {
@@ -800,6 +962,15 @@
       logsCollapsed = !logsCollapsed;
       document.getElementById('toggle-logs-btn').textContent = logsCollapsed ? 'Expand Logs' : 'Collapse Logs';
       renderLogs();
+    }
+
+    function togglePhasePanel(contentId, buttonId) {
+      const content = document.getElementById(contentId);
+      const button = document.getElementById(buttonId);
+      if (!content || !button) return;
+      const isCollapsed = content.classList.toggle('collapsed');
+      button.textContent = isCollapsed ? 'Expand' : 'Collapse';
+      button.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
     }
 
     function clearLogs() {
@@ -943,12 +1114,26 @@
       const runBtn = document.getElementById('run-sync-btn');
       const runPhase3Btn = document.getElementById('run-phase3-btn');
       const runPhase4Btn = document.getElementById('run-phase4-btn');
+      const runPhase4RulesBtn = document.getElementById('run-phase4-rules-btn');
+      const runPhase4BLiteBtn = document.getElementById('run-phase4blite-btn');
       const runItemSpecificSyncBtn = document.getElementById('run-item-specific-sync-btn');
-      const busy = isRunning || isPhase3Running || isPhase4Running || isItemSpecificSyncRunning;
+      const busy =
+        isRunning ||
+        isPhase3Running ||
+        isPhase4Running ||
+        isPhase4RulesRunning ||
+        isPhase4BLiteRunning ||
+        isItemSpecificSyncRunning;
       const hasItemSpecificBaseId = Boolean(document.getElementById('item-specific-base-id').value.trim());
+      const hasRulesDriveFile = Boolean(document.getElementById('phase4-rules-drive-file').value.trim());
+      const hasOpenAiKey = Boolean(document.getElementById('openai-api-key').value.trim());
       runBtn.disabled = busy || !validateForm(false);
       runPhase3Btn.disabled = busy || !validatePhase3Form(false);
       runPhase4Btn.disabled = busy || !hasItemSpecificBaseId;
+      runPhase4RulesBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile;
+      if (runPhase4BLiteBtn) {
+        runPhase4BLiteBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
+      }
       runItemSpecificSyncBtn.disabled = busy || !hasItemSpecificBaseId;
     }
 
@@ -960,7 +1145,15 @@
         'phase3-dry-run',
         'phase4-dry-run',
         'phase4-incremental-enabled',
-        'item-specific-base-id'
+        'item-specific-base-id',
+        'phase4-rules-drive-file',
+        'phase4-rules-logic-sheet',
+        'phase4-global-defaults-table',
+        'phase4-rules-dry-run',
+        'phase4blite-dry-run',
+        'openai-api-key',
+        'openai-model',
+        'phase4b-clickup-open-status'
       ]);
       allFieldIds.forEach(id => {
         const el = document.getElementById(id);
@@ -995,6 +1188,24 @@
       const stage = String(payload.stage || '').trim();
       const percent = Number(payload.percent || 0);
       const label = PHASE4_STAGE_LABELS[stage] || 'Phase 4 running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase4RulesProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE4_RULES_STAGE_LABELS[stage] || 'Phase 4A running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase4BLiteProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE4BLITE_STAGE_LABELS[stage] || 'Phase 4B-lite running';
       const message = String(payload.message || '').trim();
       if (message) return `${label} (${percent}%): ${message}`;
       return `${label} (${percent}%)`;
@@ -1112,6 +1323,15 @@
         document.getElementById('item-specific-base-id').value = config.itemSpecificsBaseId || '';
         document.getElementById('phase4-dry-run').value = DEFAULT_PHASE4_DRY_RUN ? 'true' : 'false';
         document.getElementById('phase4-incremental-enabled').value = DEFAULT_PHASE4_INCREMENTAL_ENABLED ? 'true' : 'false';
+        document.getElementById('phase4-rules-dry-run').value = DEFAULT_PHASE4_RULES_DRY_RUN ? 'true' : 'false';
+        document.getElementById('phase4blite-dry-run').value = DEFAULT_PHASE4BLITE_DRY_RUN ? 'true' : 'false';
+        document.getElementById('phase4-rules-logic-sheet').value = DEFAULT_PHASE4_RULES_LOGIC_SHEET;
+        document.getElementById('phase4-global-defaults-table').value = config.phase4GlobalDefaultsTable || DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE;
+        document.getElementById('phase4-rules-drive-file').value = config.phase4RulesDriveFile || '';
+        document.getElementById('openai-api-key').value = config.openaiApiKey || '';
+        document.getElementById('openai-model').value = config.openaiModel || DEFAULT_OPENAI_MODEL;
+        document.getElementById('phase4b-clickup-open-status').value =
+          config.phase4BClickupOpenStatus || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
 
         if (window.phase4API && typeof window.phase4API.getConfig === 'function') {
           const phase4Config = await window.phase4API.getConfig();
@@ -1126,6 +1346,31 @@
               const status = phase4Config.lastRunStatus || 'unknown';
               phase4StatusText.textContent = `Phase 4 status: ${status}, last run: ${new Date(phase4Config.lastMirrorRunAt).toLocaleString()}`;
             }
+          }
+        }
+        if (window.phase4RulesAPI && typeof window.phase4RulesAPI.getConfig === 'function') {
+          const rulesConfig = await window.phase4RulesAPI.getConfig();
+          if (rulesConfig && typeof rulesConfig === 'object') {
+            document.getElementById('phase4-rules-drive-file').value = rulesConfig.rulesDriveFile || document.getElementById('phase4-rules-drive-file').value;
+            document.getElementById('phase4-rules-logic-sheet').value = rulesConfig.logicSheetName || DEFAULT_PHASE4_RULES_LOGIC_SHEET;
+            document.getElementById('phase4-global-defaults-table').value = rulesConfig.globalDefaultsTable || DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE;
+            document.getElementById('phase4-rules-dry-run').value = rulesConfig.dryRun === false ? 'false' : 'true';
+          }
+        }
+        if (window.phase4BLiteAPI && typeof window.phase4BLiteAPI.getConfig === 'function') {
+          const liteConfig = await window.phase4BLiteAPI.getConfig();
+          if (liteConfig && typeof liteConfig === 'object') {
+            document.getElementById('phase4-rules-drive-file').value =
+              liteConfig.rulesDriveFile || document.getElementById('phase4-rules-drive-file').value;
+            document.getElementById('phase4-rules-logic-sheet').value =
+              liteConfig.logicSheetName || document.getElementById('phase4-rules-logic-sheet').value;
+            document.getElementById('phase4blite-dry-run').value = liteConfig.dryRun === false ? 'false' : 'true';
+            if (liteConfig.openaiApiKey) {
+              document.getElementById('openai-api-key').value = liteConfig.openaiApiKey;
+            }
+            document.getElementById('openai-model').value = liteConfig.openaiModel || DEFAULT_OPENAI_MODEL;
+            document.getElementById('phase4b-clickup-open-status').value =
+              liteConfig.clickupOpenStatus || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
           }
         }
 
@@ -1351,7 +1596,17 @@
         phase3DryRun: document.getElementById('phase3-dry-run').value === 'true',
         itemSpecificsBaseId: document.getElementById('item-specific-base-id').value.trim(),
         phase4DryRun: document.getElementById('phase4-dry-run').value === 'true',
-        phase4IncrementalEnabled: document.getElementById('phase4-incremental-enabled').value === 'true'
+        phase4IncrementalEnabled: document.getElementById('phase4-incremental-enabled').value === 'true',
+        phase4RulesDriveFile: document.getElementById('phase4-rules-drive-file').value.trim(),
+        phase4RulesLogicSheet: document.getElementById('phase4-rules-logic-sheet').value.trim() || DEFAULT_PHASE4_RULES_LOGIC_SHEET,
+        phase4GlobalDefaultsTable: document.getElementById('phase4-global-defaults-table').value.trim() || DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE,
+        phase4RulesDryRun: document.getElementById('phase4-rules-dry-run').value === 'true',
+        phase4BLiteDryRun: document.getElementById('phase4blite-dry-run').value === 'true',
+        openaiApiKey: document.getElementById('openai-api-key').value.trim(),
+        openaiModel: document.getElementById('openai-model').value.trim() || DEFAULT_OPENAI_MODEL,
+        phase4BClickupOpenStatus:
+          document.getElementById('phase4b-clickup-open-status').value.trim() ||
+          DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS
       };
     }
 
@@ -1549,6 +1804,38 @@
           if (payload.stage) {
             const level = payload.stage === 'error' ? 'error' : 'info';
             logLine(`Phase4 progress: ${formatPhase4ProgressText(payload)}`, level);
+          }
+        });
+      }
+
+      if (window.phase4RulesAPI && typeof window.phase4RulesAPI.onProgress === 'function') {
+        window.phase4RulesAPI.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase4RulesProgressText(payload);
+          const statusText = document.getElementById('phase4-rules-status-text');
+          statusText.textContent = `Phase 4A status: ${formatPhase4RulesProgressText(payload)}`;
+
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`Phase4A progress: ${formatPhase4RulesProgressText(payload)}`, level);
+          }
+        });
+      }
+
+      if (window.phase4BLiteAPI && typeof window.phase4BLiteAPI.onProgress === 'function') {
+        window.phase4BLiteAPI.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase4BLiteProgressText(payload);
+          const statusText = document.getElementById('phase4blite-status-text');
+          statusText.textContent = `Phase 4B-lite status: ${formatPhase4BLiteProgressText(payload)}`;
+
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`Phase4B-lite progress: ${formatPhase4BLiteProgressText(payload)}`, level);
           }
         });
       }
@@ -1801,6 +2088,153 @@
         logLine(`Item Specific sync failed: ${err.message}`, 'error');
       } finally {
         isItemSpecificSyncRunning = false;
+        updateRunButtonState();
+      }
+    }
+
+    async function runPhase4Rules() {
+      if (isPhase4RulesRunning || isRunning || isPhase3Running || isPhase4Running || isItemSpecificSyncRunning) return;
+      if (!window.phase4RulesAPI || typeof window.phase4RulesAPI.run !== 'function') {
+        showStatus('run-status', 'error', 'Phase 4A API is unavailable.');
+        return;
+      }
+
+      const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
+      const rulesDriveFile = document.getElementById('phase4-rules-drive-file').value.trim();
+      if (!itemSpecificBaseId) {
+        setFieldError('item-specific-base-id', 'Item Specifics Base ID is required.');
+        showStatus('run-status', 'error', 'Enter Item Specifics Base ID before running Phase 4A.');
+        return;
+      }
+      if (!rulesDriveFile) {
+        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4A.');
+        return;
+      }
+
+      isPhase4RulesRunning = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 4A rules populate is in progress...');
+      showStatus('run-status', 'info', 'Phase 4A rules populate started...');
+      document.getElementById('phase4-rules-status-text').textContent = 'Phase 4A status: running...';
+      logLine('Starting Phase 4A rules populate run.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase4RulesAPI.run(config);
+
+        if (result?.success) {
+          const summary = result.summary || {};
+          const mode = summary.dryRun ? 'dry run' : 'write run';
+          const planned = Number(summary.fixedFieldsPlanned || 0);
+          const updated = Number(summary.fixedFieldsUpdated || 0);
+          const skipped = Number(summary.fixedFieldsSkippedAlreadyFilled || 0);
+          setRunState('Success', 'Phase 4A completed successfully.');
+          showStatus(
+            'run-status',
+            'success',
+            `Phase 4A completed (${mode}). Planned=${planned}, Updated=${updated}, SkippedFilled=${skipped}.`
+          );
+          document.getElementById('phase4-rules-status-text').textContent =
+            `Phase 4A status: completed (${mode}). Planned ${planned}, Updated ${updated}.`;
+          logLine(
+            `Phase 4A completed. Mode=${mode}, Tables=${summary.tablesScanned || 0}, Rows=${summary.rowsScanned || 0}, Planned=${planned}, Updated=${updated}, SkippedFilled=${skipped}, MissingMaster=${summary.masterPartsMissing || 0}, TablesSkippedNoLogicPrefix=${summary.tablesSkippedNoLogicPrefix || 0}, GlobalDefaultCellsPlanned=${summary.globalDefaultCellsPlanned || 0}`
+          );
+          if (Array.isArray(summary.skippedNoLogicPrefixSamples) && summary.skippedNoLogicPrefixSamples.length > 0) {
+            summary.skippedNoLogicPrefixSamples.forEach(line => logLine(`Phase4A: ${line}`));
+          }
+          if (Array.isArray(summary.globalDefaultAppliedSamples) && summary.globalDefaultAppliedSamples.length > 0) {
+            summary.globalDefaultAppliedSamples.forEach(line => logLine(`Phase4A: ${line}`));
+          }
+          if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+            summary.errors.forEach(err => logLine(`Phase4A: ${err}`, 'error'));
+          }
+        } else {
+          throw new Error(result?.message || 'Phase 4A failed.');
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 4A failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 4A failed: ${err.message}`);
+        document.getElementById('phase4-rules-status-text').textContent = `Phase 4A status: failed (${err.message})`;
+        logLine(`Phase 4A failed: ${err.message}`, 'error');
+      } finally {
+        isPhase4RulesRunning = false;
+        updateRunButtonState();
+      }
+    }
+
+    async function runPhase4BLite() {
+      if (isPhase4BLiteRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isItemSpecificSyncRunning) return;
+      if (!window.phase4BLiteAPI || typeof window.phase4BLiteAPI.run !== 'function') {
+        showStatus('run-status', 'error', 'Phase 4B-lite API is unavailable.');
+        return;
+      }
+
+      const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
+      const rulesDriveFile = document.getElementById('phase4-rules-drive-file').value.trim();
+      const openaiApiKey = document.getElementById('openai-api-key').value.trim();
+      if (!itemSpecificBaseId) {
+        setFieldError('item-specific-base-id', 'Item Specifics Base ID is required.');
+        showStatus('run-status', 'error', 'Enter Item Specifics Base ID before running Phase 4B-lite.');
+        return;
+      }
+      if (!rulesDriveFile) {
+        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4B-lite.');
+        return;
+      }
+      if (!openaiApiKey) {
+        setFieldError('openai-api-key', 'OpenAI API Key is required.');
+        showStatus('run-status', 'error', 'Enter OpenAI API Key before running Phase 4B-lite.');
+        return;
+      }
+
+      isPhase4BLiteRunning = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 4B-lite is in progress...');
+      showStatus('run-status', 'info', 'Phase 4B-lite started...');
+      document.getElementById('phase4blite-status-text').textContent = 'Phase 4B-lite status: running...';
+      logLine('Starting Phase 4B-lite run.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase4BLiteAPI.run(config);
+
+        if (result?.success) {
+          const summary = result.summary || {};
+          const mode = summary.dryRun ? 'dry run' : 'write run';
+          setRunState('Success', 'Phase 4B-lite completed successfully.');
+          showStatus(
+            'run-status',
+            'success',
+            `Phase 4B-lite completed (${mode}). VF Updated=${summary.vfFieldsUpdated || 0}, VMF Updated=${summary.vmfFieldsUpdated || 0}, VMF Tasks Created=${summary.vmfLowConfidenceTasksCreated || 0}, VMF Tasks Updated=${summary.vmfLowConfidenceTasksUpdated || 0}.`
+          );
+          document.getElementById('phase4blite-status-text').textContent =
+            `Phase 4B-lite status: completed (${mode}). VF Updated ${summary.vfFieldsUpdated || 0}, VMF Updated ${summary.vmfFieldsUpdated || 0}.`;
+          logLine(
+            `Phase 4B-lite completed. Mode=${mode}, Tables=${summary.tablesScanned || 0}, Rows=${summary.rowsScanned || 0}, RowsWithIPN=${summary.rowsWithIPN || 0}, MissingMaster=${summary.masterPartsMissing || 0}, VFEvaluated=${summary.vfFieldsEvaluated || 0}, VFUpdated=${summary.vfFieldsUpdated || 0}, VFSkippedLowConfidence=${summary.vfFieldsLowConfidenceSkipped || 0}, VFDotSkipped=${summary.vfDotNumberSkipped || 0}, VMFEvaluated=${summary.vmfFieldsEvaluated || 0}, VMFUpdated=${summary.vmfFieldsUpdated || 0}, VMFTasksCreated=${summary.vmfLowConfidenceTasksCreated || 0}, VMFTasksUpdated=${summary.vmfLowConfidenceTasksUpdated || 0}, VMFTasksSkippedExisting=${summary.vmfLowConfidenceTasksSkippedExisting || 0}`
+          );
+          if (Array.isArray(summary.writeSamples) && summary.writeSamples.length > 0) {
+            summary.writeSamples.forEach(line => logLine(`Phase4B-lite: ${line}`));
+          }
+          if (Array.isArray(summary.vmfLowConfidenceTaskSamples) && summary.vmfLowConfidenceTaskSamples.length > 0) {
+            summary.vmfLowConfidenceTaskSamples.forEach(line => logLine(`Phase4B-lite: ${line}`));
+          }
+          if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+            summary.errors.forEach(err => logLine(`Phase4B-lite: ${err}`, 'error'));
+          }
+        } else {
+          throw new Error(result?.message || 'Phase 4B-lite failed.');
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 4B-lite failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 4B-lite failed: ${err.message}`);
+        document.getElementById('phase4blite-status-text').textContent = `Phase 4B-lite status: failed (${err.message})`;
+        logLine(`Phase 4B-lite failed: ${err.message}`, 'error');
+      } finally {
+        isPhase4BLiteRunning = false;
         updateRunButtonState();
       }
     }

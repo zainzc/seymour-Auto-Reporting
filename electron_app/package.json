@@ -14,6 +14,10 @@
     "sync-item-specific-tables": "node src/scripts/syncItemSpecificTables.js",
     "phase4-mirror-ipns": "node src/scripts/runPhase4Mirroring.js",
     "phase4-mirror-ipns:dry-run": "node src/scripts/runPhase4Mirroring.js --dry-run",
+    "phase4-rules-populate": "node src/scripts/runPhase4RulesPopulate.js",
+    "phase4-rules-populate:execute": "node src/scripts/runPhase4RulesPopulate.js --execute",
+    "phase4b-lite": "node src/scripts/runPhase4BLite.js",
+    "phase4b-lite:execute": "node src/scripts/runPhase4BLite.js --execute",
     "cleanup-master-duplicate-ipns": "node src/scripts/cleanupDuplicateMasterIpns.js",
     "cleanup-clickup-duplicate-tasks": "node src/scripts/cleanupDuplicateClickupTasks.js",
     "cleanup-clickup-duplicate-tasks:execute": "node src/scripts/cleanupDuplicateClickupTasks.js --execute"

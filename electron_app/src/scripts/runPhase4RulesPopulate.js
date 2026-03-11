@@ -1,0 +1,548 @@
+const { loadEnv } = require('../config/loadEnv');
+const AirtableService = require('../services/airtableService');
+const AirtableSchemaService = require('../services/airtableSchemaService');
+const { chunkArray } = require('../utils/chunk');
+const oauth2Service = require('../services/oauth2Service');
+const { google } = require('googleapis');
+const ElectronStore = require('electron-store').default;
+const ExcelJS = require('exceljs');
+const path = require('path');
+
+loadEnv();
+
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function normalizeFieldToken(value) {
+  return normalizeText(value)
+    .replace(/^C:\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+function emitProgress(progressCallback, payload = {}) {
+  if (typeof progressCallback === 'function') {
+    progressCallback(payload);
+  }
+}
+
+function parseArgs(argv = []) {
+  const getArg = name =>
+    argv.find(arg => arg.startsWith(`${name}=`))?.split('=').slice(1).join('=') || '';
+
+  return {
+    execute: argv.includes('--execute'),
+    dryRun: !argv.includes('--execute'),
+    ruleTypes: normalizeText(getArg('--rule-types') || 'F')
+      .split(',')
+      .map(item => normalizeText(item).toUpperCase())
+      .filter(Boolean),
+    authContext: normalizeText(getArg('--auth-context') || process.env.PHASE4_GOOGLE_AUTH_CONTEXT || 'inventory'),
+    rulesDriveFile: normalizeText(
+      getArg('--rules-drive-file') ||
+        process.env.PHASE4_RULES_DRIVE_FILE ||
+        process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+        ''
+    ),
+    globalDefaultsTable: normalizeText(
+      getArg('--global-defaults-table') ||
+        process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+        'Fixed Item Specifics (Global Defaults)'
+    ),
+    logicSheetName: normalizeText(getArg('--logic-sheet') || process.env.PHASE4_LOGIC_SHEET || 'Logic'),
+    sampleLimit: Number(getArg('--sample-limit') || 30) || 30
+  };
+}
+
+function loadPhaseConfigFromStore() {
+  try {
+    const cwd = path.join(process.env.APPDATA || '', 'electron demo');
+    const store = new ElectronStore({
+      cwd,
+      name: 'config',
+      encryptionKey: 'client-secret-key'
+    });
+    return store.get('inventoryWebhook.phase2Config') || {};
+  } catch (error) {
+    return {};
+  }
+}
+
+function parsePrefixFromTableName(tableName) {
+  const match = normalizeText(tableName).match(/^(\d{3})\s*-/);
+  return match ? match[1] : '';
+}
+
+function isBlankCell(value) {
+  if (value === null || value === undefined) return true;
+  if (typeof value === 'string') return normalizeText(value) === '';
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+function formatAirtableError(error) {
+  const status = error?.response?.status;
+  const payload = error?.response?.data;
+  const detail =
+    payload?.error?.message ||
+    payload?.error ||
+    payload?.err ||
+    payload?.message ||
+    error?.message ||
+    String(error);
+  return status ? `HTTP ${status}: ${detail}` : String(detail);
+}
+
+function extractDriveFileId(input) {
+  const text = normalizeText(input);
+  if (!text) return '';
+  if (/^[a-zA-Z0-9_-]{20,}$/.test(text)) return text;
+
+  const dMatch = text.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
+  if (dMatch?.[1]) return dMatch[1];
+
+  const idMatch = text.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
+  if (idMatch?.[1]) return idMatch[1];
+
+  return '';
+}
+
+async function loadWorkbookFromDrive(fileOrUrl, authContext = 'inventory') {
+  const fileId = extractDriveFileId(fileOrUrl);
+  if (!fileId) {
+    throw new Error('Invalid Google Drive file ID/URL for rules workbook.');
+  }
+  if (!oauth2Service.isAuthenticated(authContext)) {
+    throw new Error(`Google account is not connected for auth context '${authContext}'.`);
+  }
+
+  const auth = oauth2Service.getAuthenticatedClient(authContext);
+  const drive = google.drive({ version: 'v3', auth });
+  const response = await drive.files.get(
+    { fileId, alt: 'media' },
+    { responseType: 'arraybuffer' }
+  );
+
+  const wb = new ExcelJS.Workbook();
+  const buffer = Buffer.from(response.data);
+  await wb.xlsx.load(buffer);
+  return { workbook: wb, fileId };
+}
+
+async function fetchAllRecordsWithFallback(service, tableNameOrId, selectFields = []) {
+  try {
+    return await service.fetchAllRecords(tableNameOrId, selectFields);
+  } catch (error) {
+    if (error?.response?.status !== 422) throw error;
+    return service.fetchAllRecords(tableNameOrId, []);
+  }
+}
+
+function parseLogicWorksheet(ws, sheetName, ruleTypes = ['F']) {
+  if (!ws) {
+    throw new Error(`Rules sheet '${sheetName}' not found.`);
+  }
+
+  const header = ws.getRow(1).values.slice(1).map(value => normalizeText(value).toLowerCase());
+  const idxPrefix = header.indexOf('ipn prefix');
+  const idxField = header.indexOf('item specific');
+  const idxRule = header.indexOf('rule');
+  const idxFValue = header.indexOf('(f) value');
+
+  if (idxPrefix < 0 || idxField < 0 || idxRule < 0 || idxFValue < 0) {
+    throw new Error(`Rules sheet '${sheetName}' missing required columns.`);
+  }
+
+  const allowedRules = new Set(ruleTypes.map(item => normalizeText(item).toUpperCase()));
+  const byPrefix = new Map();
+  let scannedRows = 0;
+
+  for (let r = 2; r <= ws.rowCount; r += 1) {
+    const row = ws.getRow(r).values.slice(1);
+    const prefix = normalizeText(row[idxPrefix]);
+    const fieldName = normalizeText(row[idxField]);
+    const rule = normalizeText(row[idxRule]).toUpperCase();
+    const fixedValue = normalizeText(row[idxFValue]);
+    if (!prefix && !fieldName && !rule && !fixedValue) continue;
+
+    scannedRows += 1;
+    if (!allowedRules.has(rule)) continue;
+    if (!/^\d{3}$/.test(prefix)) continue;
+    if (!fieldName.startsWith('C:')) continue;
+    if (!fixedValue) continue;
+
+    if (!byPrefix.has(prefix)) byPrefix.set(prefix, new Map());
+    // first non-blank deterministic value wins to preserve spreadsheet order.
+    if (!byPrefix.get(prefix).has(fieldName)) {
+      byPrefix.get(prefix).set(fieldName, fixedValue);
+    }
+  }
+
+  return {
+    byPrefix,
+    scannedRows
+  };
+}
+
+async function patchTableRecords(itemService, tableId, updates = []) {
+  let updatedRecords = 0;
+  const successfulRecordIds = [];
+  const errors = [];
+
+  for (const batch of chunkArray(updates, 10)) {
+    try {
+      const data = await itemService.request('PATCH', `/${encodeURIComponent(tableId)}`, {
+        data: { records: batch, typecast: true }
+      });
+      const rows = Array.isArray(data?.records) ? data.records : [];
+      updatedRecords += rows.length;
+      rows.forEach(row => {
+        if (row?.id) successfulRecordIds.push(String(row.id));
+      });
+    } catch (batchError) {
+      if (batchError?.response?.status !== 422) throw batchError;
+      for (const record of batch) {
+        try {
+          const single = await itemService.request('PATCH', `/${encodeURIComponent(tableId)}`, {
+            data: { records: [record], typecast: true }
+          });
+          const rows = Array.isArray(single?.records) ? single.records : [];
+          updatedRecords += rows.length;
+          rows.forEach(row => {
+            if (row?.id) successfulRecordIds.push(String(row.id));
+          });
+        } catch (singleError) {
+          errors.push(`${record?.id || 'unknown'} -> ${formatAirtableError(singleError)}`);
+        }
+      }
+    }
+  }
+
+  return {
+    updatedRecords,
+    successfulRecordIds,
+    errors
+  };
+}
+
+function isFixedRuleLabel(ruleValue) {
+  const rule = normalizeText(ruleValue).toLowerCase();
+  return rule.includes('(f)') && rule.includes('fixed');
+}
+
+async function loadGlobalDefaultsMap(itemService, tableName) {
+  const rows = await fetchAllRecordsWithFallback(itemService, tableName, []);
+  const map = new Map();
+  for (const row of rows) {
+    const fields = row?.fields || {};
+    if (!isFixedRuleLabel(fields['Rule'])) continue;
+    const itemSpecific = normalizeText(fields['Item Specific (eBay Download Only)']);
+    const fixedValue = normalizeText(fields['(F) Value']);
+    if (!itemSpecific || !fixedValue) continue;
+    const token = normalizeFieldToken(itemSpecific);
+    if (token && !map.has(token)) map.set(token, fixedValue);
+  }
+  return map;
+}
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const result = await runPhase4RulesPopulate(args, progress => {
+    const stage = String(progress?.stage || 'running');
+    const message = normalizeText(progress?.message);
+    if (message) {
+      console.log(`[phase4-rules:${stage}] ${message}`);
+    } else {
+      console.log(`[phase4-rules:${stage}]`);
+    }
+  });
+  console.log('=== Phase 4 Rules Populate Summary ===');
+  console.log(JSON.stringify(result, null, 2));
+}
+
+async function runPhase4RulesPopulate(options = {}, progressCallback = () => {}) {
+  const args = {
+    ...parseArgs([]),
+    ...options
+  };
+  const stored = loadPhaseConfigFromStore();
+
+  const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
+  const masterBaseId = normalizeText(process.env.AIRTABLE_BASE_ID || stored.airtableBaseId);
+  const masterTable = normalizeText(
+    process.env.AIRTABLE_MASTER_TABLE || stored.airtableMasterTable || 'Master Parts Table'
+  );
+  const itemSpecificsBaseId = normalizeText(
+    process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
+      process.env.ITEM_SPECIFICS_BASE_ID ||
+      stored.itemSpecificsBaseId
+  );
+
+  if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
+  if (!masterBaseId) throw new Error('Missing AIRTABLE_BASE_ID (Master base).');
+  if (!itemSpecificsBaseId) {
+    throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID).');
+  }
+  if (!args.rulesDriveFile) {
+    throw new Error('Missing rules drive file. Provide --rules-drive-file=<FILE_ID_OR_URL>.');
+  }
+
+  emitProgress(progressCallback, {
+    stage: 'phase4rules_load_rules',
+    percent: 10,
+    message: 'Loading rules workbook from Google Drive...'
+  });
+
+  let fixedRulesByPrefix;
+  let logicRowsScanned = 0;
+  let rulesSource = '';
+  const { workbook, fileId } = await loadWorkbookFromDrive(args.rulesDriveFile, args.authContext);
+  const ws = workbook.getWorksheet(args.logicSheetName);
+  const parsed = parseLogicWorksheet(ws, args.logicSheetName, args.ruleTypes);
+  fixedRulesByPrefix = parsed.byPrefix;
+  logicRowsScanned = parsed.scannedRows;
+  rulesSource = `google_drive:${fileId}`;
+
+  const schemaService = new AirtableSchemaService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const itemService = new AirtableService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const masterService = new AirtableService({
+    token: airtableToken,
+    baseId: masterBaseId,
+    masterTable
+  });
+  const globalDefaultsMap = await loadGlobalDefaultsMap(itemService, args.globalDefaultsTable);
+
+  const masterRows = await fetchAllRecordsWithFallback(masterService, masterTable, ['IPN']);
+  const masterIpnSet = new Set(
+    masterRows.map(row => normalizeText(row?.fields?.IPN).toUpperCase()).filter(Boolean)
+  );
+
+  const tables = await schemaService.listTables();
+  const totalRoutableTables = tables.filter(table => {
+    const tableName = normalizeText(table?.name);
+    const tableId = normalizeText(table?.id);
+    const prefix = parsePrefixFromTableName(tableName);
+    return Boolean(prefix && tableId);
+  }).length;
+  emitProgress(progressCallback, {
+    stage: 'phase4rules_scan_tables',
+    percent: 20,
+    message: `Scanning Item Specific tables... total=${totalRoutableTables}`
+  });
+  const summary = {
+    dryRun: args.dryRun,
+    ruleTypes: args.ruleTypes,
+    rulesSource,
+    authContext: args.authContext,
+    rulesDriveFile: args.rulesDriveFile || '',
+    globalDefaultsTable: args.globalDefaultsTable,
+    globalDefaultsEntries: globalDefaultsMap.size,
+    logicSheetName: args.logicSheetName,
+    logicRowsScanned,
+    tablesScanned: 0,
+    tablesSkippedNoLogicPrefix: 0,
+    skippedNoLogicPrefixSamples: [],
+    rowsScanned: 0,
+    rowsWithIPN: 0,
+    masterPartsMissing: 0,
+    fixedFieldsPlanned: 0,
+    fixedFieldsUpdated: 0,
+    fixedFieldsSkippedAlreadyFilled: 0,
+    globalDefaultCellsPlanned: 0,
+    globalDefaultAppliedSamples: [],
+    fieldsMissingInTableSchema: 0,
+    errors: [],
+    perTable: []
+  };
+
+  const missingFieldSet = new Set();
+  let processedRoutableTables = 0;
+
+  for (const table of tables) {
+    const tableName = normalizeText(table?.name);
+    const tableId = normalizeText(table?.id);
+    const prefix = parsePrefixFromTableName(tableName);
+    if (!prefix || !tableId) continue;
+    processedRoutableTables += 1;
+    if (
+      processedRoutableTables === 1 ||
+      processedRoutableTables % 10 === 0 ||
+      processedRoutableTables === totalRoutableTables
+    ) {
+      const ratio = totalRoutableTables > 0 ? processedRoutableTables / totalRoutableTables : 1;
+      const percent = Math.min(95, 35 + Math.floor(ratio * 60));
+      emitProgress(progressCallback, {
+        stage: 'phase4rules_scan_tables',
+        percent,
+        counts: summary,
+        message: `Processing table ${processedRoutableTables}/${totalRoutableTables}: ${tableName}`
+      });
+    }
+
+    summary.tablesScanned += 1;
+    const prefixRules = fixedRulesByPrefix.get(prefix);
+    if (!prefixRules || prefixRules.size === 0) {
+      summary.tablesSkippedNoLogicPrefix += 1;
+      if (summary.skippedNoLogicPrefixSamples.length < args.sampleLimit) {
+        summary.skippedNoLogicPrefixSamples.push(
+          `[skip][no_logic_prefix] table='${tableName}' prefix='${prefix}' reason='prefix not found in Logic sheet F rules'`
+        );
+      }
+      continue;
+    }
+
+    const fieldNames = new Set(
+      (table?.fields || []).map(field => normalizeText(field?.name)).filter(Boolean)
+    );
+    const applicableFields = new Map();
+    for (const [fieldName, fixedValue] of prefixRules.entries()) {
+      if (fieldNames.has(fieldName)) {
+        applicableFields.set(fieldName, {
+          value: fixedValue,
+          source: 'logic'
+        });
+      } else {
+        missingFieldSet.add(`${tableName}::${fieldName}`);
+      }
+    }
+
+    // Add global defaults for existing C:* fields that have no Logic fixed value.
+    for (const fieldName of fieldNames) {
+      if (!fieldName.startsWith('C:')) continue;
+      if (applicableFields.has(fieldName)) continue;
+      const token = normalizeFieldToken(fieldName);
+      const defaultValue = normalizeText(globalDefaultsMap.get(token));
+      if (!defaultValue) continue;
+      applicableFields.set(fieldName, {
+        value: defaultValue,
+        source: 'global_default'
+      });
+    }
+    if (applicableFields.size === 0) continue;
+
+    const fetchFields = ['IPN', ...applicableFields.keys()];
+    const rows = await fetchAllRecordsWithFallback(itemService, tableId, fetchFields);
+    summary.rowsScanned += rows.length;
+
+    const updates = [];
+    const cellCountByRecord = new Map();
+    let tableRowsWithIpn = 0;
+    let tablePlannedCells = 0;
+    let tableSkippedFilled = 0;
+    let tableMasterMissing = 0;
+
+    for (const row of rows) {
+      const fields = row?.fields || {};
+      const ipn = normalizeText(fields.IPN).toUpperCase();
+      if (!ipn) continue;
+
+      summary.rowsWithIPN += 1;
+      tableRowsWithIpn += 1;
+
+      if (!masterIpnSet.has(ipn)) {
+        summary.masterPartsMissing += 1;
+        tableMasterMissing += 1;
+        continue;
+      }
+
+      const updateFields = {};
+      let recordPlannedCellCount = 0;
+      for (const [fieldName, fixedMeta] of applicableFields.entries()) {
+        const fixedValue = normalizeText(fixedMeta?.value);
+        if (!fixedValue) continue;
+        if (isBlankCell(fields[fieldName])) {
+          updateFields[fieldName] = fixedValue;
+          recordPlannedCellCount += 1;
+          if (fixedMeta?.source === 'global_default') {
+            summary.globalDefaultCellsPlanned += 1;
+            if (summary.globalDefaultAppliedSamples.length < args.sampleLimit) {
+              summary.globalDefaultAppliedSamples.push(
+                `[global_default] table='${tableName}' field='${fieldName}' value='${fixedValue}' ipn='${ipn}'`
+              );
+            }
+          }
+        } else {
+          summary.fixedFieldsSkippedAlreadyFilled += 1;
+          tableSkippedFilled += 1;
+        }
+      }
+
+      if (recordPlannedCellCount > 0) {
+        updates.push({
+          id: String(row.id),
+          fields: updateFields
+        });
+        cellCountByRecord.set(String(row.id), recordPlannedCellCount);
+        summary.fixedFieldsPlanned += recordPlannedCellCount;
+        tablePlannedCells += recordPlannedCellCount;
+      }
+    }
+
+    let updatedCells = 0;
+    if (!args.dryRun && updates.length > 0) {
+      const writeResult = await patchTableRecords(itemService, tableId, updates);
+      writeResult.successfulRecordIds.forEach(recordId => {
+        updatedCells += Number(cellCountByRecord.get(String(recordId)) || 0);
+      });
+      if (writeResult.errors.length > 0) {
+        summary.errors.push(
+          ...writeResult.errors.slice(0, 50).map(message => `${tableName}: ${message}`)
+        );
+      }
+    }
+    summary.fixedFieldsUpdated += updatedCells;
+
+    if (
+      tablePlannedCells > 0 ||
+      tableMasterMissing > 0 ||
+      tableSkippedFilled > 0
+    ) {
+      summary.perTable.push({
+        tableName,
+        prefix,
+        rowsScanned: rows.length,
+        rowsWithIPN: tableRowsWithIpn,
+        masterPartsMissing: tableMasterMissing,
+        applicableFixedFields: applicableFields.size,
+        fixedFieldsPlanned: tablePlannedCells,
+        fixedFieldsUpdated: updatedCells,
+        fixedFieldsSkippedAlreadyFilled: tableSkippedFilled
+      });
+    }
+  }
+
+  summary.fieldsMissingInTableSchema = missingFieldSet.size;
+  if (missingFieldSet.size > 0) {
+    const samples = Array.from(missingFieldSet).slice(0, args.sampleLimit);
+    summary.missingFieldSamples = samples;
+  }
+  if (summary.errors.length > args.sampleLimit) {
+    summary.errors = summary.errors.slice(0, args.sampleLimit);
+  }
+
+  emitProgress(progressCallback, {
+    stage: 'completed',
+    percent: 100,
+    counts: summary,
+    message: `Phase 4 rules populate completed (${args.dryRun ? 'dry run' : 'write run'}).`
+  });
+  return summary;
+}
+
+if (require.main === module) {
+  main().catch(error => {
+    console.error(`Phase 4 rules populate failed: ${formatAirtableError(error)}`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  runPhase4RulesPopulate
+};
