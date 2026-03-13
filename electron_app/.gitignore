@@ -95,3 +95,5 @@ out/
 .env.local
 google-credentials.json
 src/config/google-credentials.json
+
+Ebay Listing Example.csv

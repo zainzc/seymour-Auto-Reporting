@@ -114,6 +114,19 @@ contextBridge.exposeInMainWorld('phase4BLiteAPI', {
   onProgress: (callback) => ipcRenderer.on('phase4blite:progress', callback)
 });
 
+// Phase 4 Combined API - runs 4A then 4B-lite sequentially
+contextBridge.exposeInMainWorld('phase4CombinedAPI', {
+  run: (options) => ipcRenderer.invoke('phase4combined:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase4combined:progress', callback)
+});
+
+// eBay Listing Mock Import API
+contextBridge.exposeInMainWorld('ebayMockImportAPI', {
+  getConfig: () => ipcRenderer.invoke('ebaymock:get-config'),
+  run: (options) => ipcRenderer.invoke('ebaymock:run', options),
+  onProgress: (callback) => ipcRenderer.on('ebaymock:progress', callback)
+});
+
 // Item Specific table automation API
 contextBridge.exposeInMainWorld('itemSpecificSyncAPI', {
   run: (options) => ipcRenderer.invoke('item-specific-sync:run', options),

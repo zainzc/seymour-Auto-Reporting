@@ -35,6 +35,7 @@ const { runPhase4Mirroring, buildPhase4Config, MIRROR_STATE_KEY } = require('../
 const { runItemSpecificTableSync } = require('../scripts/syncItemSpecificTables');
 const { runPhase4RulesPopulate } = require('../scripts/runPhase4RulesPopulate');
 const { runPhase4BLite } = require('../scripts/runPhase4BLite');
+const { runEbayMockImport } = require('../scripts/runEbayMockImport');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
 const phase2WritebackPoller = require('../services/phase2WritebackPollerService');
@@ -731,7 +732,40 @@ const {
 } = require('../services/inventoryScheduleService');
 
 setPostPushHook(async payload => {
-  await phase2AutoRunService.onPhase1PushSuccess(payload);
+  const phase2Result = await phase2AutoRunService.onPhase1PushSuccess(payload);
+  if (phase2Result?.skipped) {
+    console.log('Phase3 auto-run skipped after Phase1 push: Phase2 did not run', {
+      reason: phase2Result.reason || 'unknown'
+    });
+    return;
+  }
+
+  const stored = getInventoryConfig('phase2Config') || {};
+  const phase3Config = buildPhase3Config(stored);
+  const hasPhase3MinimumConfig =
+    Boolean(phase3Config?.sheetId) &&
+    Boolean(phase3Config?.tabName) &&
+    Boolean(phase3Config?.airtableToken) &&
+    Boolean(phase3Config?.airtableBaseId) &&
+    Boolean(phase3Config?.shipstationApiKey) &&
+    Boolean(phase3Config?.shipstationApiSecret);
+
+  if (!hasPhase3MinimumConfig) {
+    console.log('Phase3 auto-run skipped after Phase2 success: missing Phase3 config');
+    return;
+  }
+
+  try {
+    const phase3Summary = await runPhase3(phase3Config, () => {});
+    console.log('Phase3 auto-run completed after Phase1+Phase2 success', {
+      shipmentsFetched: phase3Summary?.shipmentsFetched || 0,
+      skusMappedToIpn: phase3Summary?.skusMappedToIpn || 0,
+      ipnsUpdated: phase3Summary?.ipnsUpdated || 0,
+      dryRun: Boolean(phase3Config?.phase3DryRun)
+    });
+  } catch (error) {
+    console.error('Phase3 auto-run failed after Phase2 success:', error.message);
+  }
 });
 
 // Test Google Sheets connection
@@ -899,6 +933,7 @@ function buildPhase2WritebackConfig(overrides = {}) {
     clickupStatusDetermined: merged.clickupStatusDetermined,
     clickupStatusCompleted: merged.clickupStatusCompleted,
     clickupStatusNeedsReview: merged.clickupStatusNeedsReview,
+    clickupStatusWritebackError: merged.clickupStatusWritebackError,
     categoryLinkFieldName: merged.categoryLinkFieldName,
     pollIntervalMinutes: 1,
     enabled: merged.phase2WritebackEnabled
@@ -926,6 +961,7 @@ ipcMain.handle('phase2-get-config', async () => {
     clickupStatusDetermined: merged.clickupStatusDetermined || 'Category Determined',
     clickupStatusCompleted: merged.clickupStatusCompleted || 'Completed',
     clickupStatusNeedsReview: merged.clickupStatusNeedsReview || 'Needs Review',
+    clickupStatusWritebackError: merged.clickupStatusWritebackError || 'Writeback Error',
     categoryLinkFieldName: merged.categoryLinkFieldName || 'Category Definitions Link',
     shipstationApiKey: stored.shipstationApiKey || phase3Config.shipstationApiKey || '',
     shipstationApiSecret: stored.shipstationApiSecret || phase3Config.shipstationApiSecret || '',
@@ -949,6 +985,16 @@ ipcMain.handle('phase2-get-config', async () => {
     openaiBaseUrl: stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '',
     phase4BClickupOpenStatus:
       stored.phase4BClickupOpenStatus || process.env.PHASE4B_CLICKUP_OPEN_STATUS || 'To Do',
+    phase4BClickupListName:
+      stored.phase4BClickupListName || '',
+    phase4BClickupListId:
+      stored.phase4BClickupListId || process.env.PHASE4B_CLICKUP_LIST_ID || merged.clickupListId || '',
+    ebayMockCsvPath: stored.ebayMockCsvPath || '',
+    ebayMockTableName: stored.ebayMockTableName || 'eBay Listings (API) (Mock)',
+    ebayMockDryRun:
+      typeof stored.ebayMockDryRun === 'boolean'
+        ? stored.ebayMockDryRun
+        : true,
     airtableToken: stored.airtableToken || '',
     clickupToken: stored.clickupToken || ''
   };
@@ -1394,6 +1440,14 @@ ipcMain.handle('phase4blite:get-config', async () => {
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
     openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+    clickupListName: String(stored.phase4BClickupListName || '').trim(),
+    clickupListId: String(
+      stored.phase4BClickupListId ||
+        process.env.PHASE4B_CLICKUP_LIST_ID ||
+        stored.clickupListId ||
+        process.env.CLICKUP_LIST_ID ||
+        ''
+    ).trim(),
     clickupOpenStatus:
       String(stored.phase4BClickupOpenStatus || process.env.PHASE4B_CLICKUP_OPEN_STATUS || 'To Do').trim(),
     authContext: 'inventory'
@@ -1428,6 +1482,17 @@ ipcMain.handle('phase4blite:run', async (event, options = {}) => {
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
       openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+      phase4BClickupListName: String(
+        options.phase4BClickupListName || stored.phase4BClickupListName || ''
+      ).trim(),
+      phase4BClickupListId: String(
+        options.phase4BClickupListId ||
+          stored.phase4BClickupListId ||
+          process.env.PHASE4B_CLICKUP_LIST_ID ||
+          stored.clickupListId ||
+          process.env.CLICKUP_LIST_ID ||
+          ''
+      ).trim(),
       clickupOpenStatus: String(
         options.phase4BClickupOpenStatus ||
           stored.phase4BClickupOpenStatus ||
@@ -1447,6 +1512,197 @@ ipcMain.handle('phase4blite:run', async (event, options = {}) => {
   } catch (error) {
     const message = formatDetailedErrorMessage(error);
     event.sender.send('phase4blite:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase4combined:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const rulesDryRun =
+      typeof options.phase4RulesDryRun === 'boolean'
+        ? options.phase4RulesDryRun
+        : typeof stored.phase4RulesDryRun === 'boolean'
+          ? stored.phase4RulesDryRun
+          : true;
+    const bliteDryRun =
+      typeof options.phase4BLiteDryRun === 'boolean'
+        ? options.phase4BLiteDryRun
+        : typeof stored.phase4BLiteDryRun === 'boolean'
+          ? stored.phase4BLiteDryRun
+          : true;
+
+    const rulesRunOptions = {
+      ...stored,
+      ...options,
+      dryRun: rulesDryRun,
+      execute: !rulesDryRun,
+      ruleTypes: ['F'],
+      authContext: 'inventory',
+      rulesDriveFile:
+        String(
+          options.phase4RulesDriveFile ||
+            stored.phase4RulesDriveFile ||
+            process.env.PHASE4_RULES_DRIVE_FILE ||
+            process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+            ''
+        ).trim(),
+      globalDefaultsTable: String(
+        options.phase4GlobalDefaultsTable ||
+          stored.phase4GlobalDefaultsTable ||
+          process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+          'Fixed Item Specifics (Global Defaults)'
+      ).trim(),
+      logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim()
+    };
+
+    event.sender.send('phase4combined:progress', {
+      stage: 'phase4combined_start',
+      percent: 1,
+      counts: null,
+      message: 'Starting Phase 4 combined run (4A -> 4B-lite).'
+    });
+
+    const phase4ASummary = await runPhase4RulesPopulate(rulesRunOptions, progress => {
+      const innerPercent = Number(progress?.percent || 0);
+      const mappedPercent = Math.max(1, Math.min(49, Math.floor((innerPercent / 100) * 49)));
+      event.sender.send('phase4combined:progress', {
+        ...progress,
+        stage: `phase4combined_4a_${String(progress?.stage || 'running')}`,
+        percent: mappedPercent,
+        message: `[4A] ${String(progress?.message || '').trim()}`
+      });
+    });
+
+    const bliteRunOptions = {
+      ...stored,
+      ...options,
+      dryRun: bliteDryRun,
+      execute: !bliteDryRun,
+      authContext: 'inventory',
+      rulesDriveFile:
+        String(
+          options.phase4RulesDriveFile ||
+            stored.phase4RulesDriveFile ||
+            process.env.PHASE4_RULES_DRIVE_FILE ||
+            process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+            ''
+        ).trim(),
+      logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+      openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+      phase4BClickupListName: String(
+        options.phase4BClickupListName || stored.phase4BClickupListName || ''
+      ).trim(),
+      phase4BClickupListId: String(
+        options.phase4BClickupListId ||
+          stored.phase4BClickupListId ||
+          process.env.PHASE4B_CLICKUP_LIST_ID ||
+          stored.clickupListId ||
+          process.env.CLICKUP_LIST_ID ||
+          ''
+      ).trim(),
+      clickupOpenStatus: String(
+        options.phase4BClickupOpenStatus ||
+          stored.phase4BClickupOpenStatus ||
+          process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
+          'To Do'
+      ).trim()
+    };
+
+    const phase4BSummary = await runPhase4BLite(bliteRunOptions, progress => {
+      const innerPercent = Number(progress?.percent || 0);
+      const mappedPercent = Math.max(50, Math.min(99, 50 + Math.floor((innerPercent / 100) * 49)));
+      event.sender.send('phase4combined:progress', {
+        ...progress,
+        stage: `phase4combined_4b_${String(progress?.stage || 'running')}`,
+        percent: mappedPercent,
+        message: `[4B-lite] ${String(progress?.message || '').trim()}`
+      });
+    });
+
+    const summary = {
+      phase4A: phase4ASummary || {},
+      phase4BLite: phase4BSummary || {}
+    };
+
+    event.sender.send('phase4combined:progress', {
+      stage: 'completed',
+      percent: 100,
+      counts: summary,
+      message: 'Phase 4 combined run completed.'
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase4combined:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('ebaymock:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    csvPath: String(stored.ebayMockCsvPath || '').trim(),
+    tableName: String(stored.ebayMockTableName || 'eBay Listings (API) (Mock)').trim(),
+    dryRun:
+      typeof stored.ebayMockDryRun === 'boolean'
+        ? stored.ebayMockDryRun
+        : true
+  };
+});
+
+ipcMain.handle('ebaymock:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const dryRun =
+      typeof options.ebayMockDryRun === 'boolean'
+        ? options.ebayMockDryRun
+        : typeof stored.ebayMockDryRun === 'boolean'
+          ? stored.ebayMockDryRun
+          : true;
+    const runOptions = {
+      ...stored,
+      ...options,
+      dryRun,
+      csvPath: String(options.ebayMockCsvPath || stored.ebayMockCsvPath || '').trim(),
+      tableName: String(
+        options.ebayMockTableName || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+      ).trim()
+    };
+
+    const summary = await runEbayMockImport(runOptions, progress => {
+      event.sender.send('ebaymock:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('ebaymock:progress', {
       stage: 'error',
       percent: 100,
       counts: null,

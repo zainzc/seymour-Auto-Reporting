@@ -82,6 +82,11 @@ function buildPhase2Config(options = {}) {
       savedConfig.clickupStatusNeedsReview ||
       process.env.CLICKUP_STATUS_NEEDS_REVIEW ||
       'Needs Review',
+    clickupStatusWritebackError:
+      options.clickupStatusWritebackError ||
+      savedConfig.clickupStatusWritebackError ||
+      process.env.CLICKUP_STATUS_WRITEBACK_ERROR ||
+      'Writeback Error',
     categoryLinkFieldName:
       options.categoryLinkFieldName ||
       savedConfig.categoryLinkFieldName ||

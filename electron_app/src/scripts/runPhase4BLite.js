@@ -13,6 +13,19 @@ const path = require('path');
 loadEnv();
 
 const LOW_CONFIDENCE_THRESHOLD = 0.75;
+const DEFAULT_EBAY_MOCK_TABLE = 'eBay Listings (API) (Mock)';
+const EBAY_MOCK_TITLE_FIELD = 'Product Title';
+const EBAY_MOCK_CONDITIONS_FIELD = 'Listing Conditions and Options';
+const EBAY_MOCK_KEY_FIELDS = [
+  'C: partshunter203 ebay MOTORS interchange part number',
+  'IPN',
+  'IP',
+  'InventoryNumber',
+  'Inventory Number',
+  'SKU',
+  'RNumber',
+  'Record Key'
+];
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -20,6 +33,24 @@ function normalizeText(value) {
 
 function normalizeIpn(value) {
   return normalizeText(value).toUpperCase();
+}
+
+function getFieldValueByName(fields = {}, name = '') {
+  if (!fields || typeof fields !== 'object') return '';
+  if (Object.prototype.hasOwnProperty.call(fields, name)) return fields[name];
+  const target = normalizeText(name).toLowerCase();
+  if (!target) return '';
+  const key = Object.keys(fields).find(item => normalizeText(item).toLowerCase() === target);
+  if (!key) return '';
+  return fields[key];
+}
+
+function firstNonEmptyField(fields = {}, names = []) {
+  for (const name of names) {
+    const value = normalizeText(getFieldValueByName(fields, name));
+    if (value) return value;
+  }
+  return '';
 }
 
 function isBlankCell(value) {
@@ -86,9 +117,21 @@ function parseArgs(argv = []) {
       1,
       Number(getArg('--ai-max-attempts') || process.env.PHASE4B_AI_MAX_ATTEMPTS || 2) || 2
     ),
+    promptCacheEnabled:
+      normalizeText(getArg('--prompt-cache-enabled') || process.env.PHASE4B_PROMPT_CACHE_ENABLED || 'true')
+        .toLowerCase() !== 'false',
+    promptCacheKey: normalizeText(
+      getArg('--prompt-cache-key') ||
+        process.env.PHASE4B_PROMPT_CACHE_KEY ||
+        process.env.OPENAI_PROMPT_CACHE_KEY ||
+        'phase4blite_v1'
+    ),
     openaiApiKey: normalizeText(getArg('--openai-api-key') || process.env.OPENAI_API_KEY || ''),
     openaiModel: normalizeText(getArg('--openai-model') || process.env.OPENAI_MODEL || 'gpt-4o-mini'),
     openaiBaseUrl: normalizeText(getArg('--openai-base-url') || process.env.OPENAI_BASE_URL || ''),
+    phase4BClickupListId: normalizeText(
+      getArg('--phase4b-clickup-list-id') || process.env.PHASE4B_CLICKUP_LIST_ID || ''
+    ),
     clickupOpenStatus: normalizeText(getArg('--clickup-open-status') || process.env.PHASE4B_CLICKUP_OPEN_STATUS || 'To Do')
   };
 }
@@ -439,13 +482,22 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   const masterTable = normalizeText(
     process.env.AIRTABLE_MASTER_TABLE || stored.airtableMasterTable || 'Master Parts Table'
   );
+  const ebayMockTableName = normalizeText(
+    process.env.EBAY_MOCK_TABLE_NAME || stored.ebayMockTableName || DEFAULT_EBAY_MOCK_TABLE
+  );
   const itemSpecificsBaseId = normalizeText(
     process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
       process.env.ITEM_SPECIFICS_BASE_ID ||
       stored.itemSpecificsBaseId
   );
   const clickupToken = normalizeText(process.env.CLICKUP_TOKEN || stored.clickupToken);
-  const clickupListId = normalizeText(process.env.CLICKUP_LIST_ID || stored.clickupListId);
+  const clickupListId = normalizeText(
+    args.phase4BClickupListId ||
+      process.env.PHASE4B_CLICKUP_LIST_ID ||
+      stored.phase4BClickupListId ||
+      process.env.CLICKUP_LIST_ID ||
+      stored.clickupListId
+  );
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
   const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-4o-mini');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
@@ -479,7 +531,9 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     baseUrl: openaiBaseUrl || undefined,
     timeoutMs: args.aiTimeoutMs,
     maxAttempts: args.aiMaxAttempts,
-    baseDelayMs: 500
+    baseDelayMs: 500,
+    promptCacheEnabled: args.promptCacheEnabled,
+    promptCacheKey: args.promptCacheKey
   });
 
   const schemaService = new AirtableSchemaService({
@@ -513,6 +567,62 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     masterMap.set(ipn, row);
   }
 
+  emitProgress(progressCallback, {
+    stage: 'phase4blite_load_master',
+    percent: 19,
+    message: `Loading eBay mock listing context from '${ebayMockTableName}'...`
+  });
+  const ebayContextMap = new Map();
+  const ebayContextStats = {
+    rowsScanned: 0,
+    rowsMapped: 0,
+    rowsWithoutKey: 0,
+    rowsWithoutContext: 0
+  };
+  try {
+    const ebayRows = await fetchAllRecordsWithFallback(masterService, ebayMockTableName, [
+      ...EBAY_MOCK_KEY_FIELDS,
+      EBAY_MOCK_TITLE_FIELD,
+      EBAY_MOCK_CONDITIONS_FIELD
+    ]);
+    ebayContextStats.rowsScanned = ebayRows.length;
+    for (const row of ebayRows) {
+      const fields = row?.fields || {};
+      const keyRaw = firstNonEmptyField(fields, EBAY_MOCK_KEY_FIELDS);
+      const key = normalizeIpn(keyRaw);
+      if (!key) {
+        ebayContextStats.rowsWithoutKey += 1;
+        continue;
+      }
+
+      const productTitle = firstNonEmptyField(fields, [EBAY_MOCK_TITLE_FIELD, 'Title', 'Listing Title']);
+      const listingConditionsAndOptions = firstNonEmptyField(fields, [
+        EBAY_MOCK_CONDITIONS_FIELD,
+        'Listing Condition',
+        'Listing Conditions'
+      ]);
+      if (!productTitle && !listingConditionsAndOptions) {
+        ebayContextStats.rowsWithoutContext += 1;
+        continue;
+      }
+
+      const existing = ebayContextMap.get(key) || {};
+      ebayContextMap.set(key, {
+        productTitle: existing.productTitle || productTitle,
+        listingConditionsAndOptions: existing.listingConditionsAndOptions || listingConditionsAndOptions
+      });
+    }
+    ebayContextStats.rowsMapped = ebayContextMap.size;
+  } catch (error) {
+    // Keep run non-blocking if the mock table is unavailable.
+    const message = formatAirtableError(error);
+    emitProgress(progressCallback, {
+      stage: 'phase4blite_load_master',
+      percent: 19,
+      message: `eBay mock listing context unavailable: ${message}`
+    });
+  }
+
   const tables = await schemaService.listTables();
   const routableTables = tables.filter(table => Boolean(parsePrefixFromTableName(table?.name)));
 
@@ -525,12 +635,21 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     logicSheetName: args.logicSheetName,
     logicRowsScanned,
     openaiModel,
+    promptCacheEnabled: Boolean(args.promptCacheEnabled),
+    promptCacheKey: normalizeText(args.promptCacheKey),
+    phase4BClickupListId: clickupListId,
     aiConcurrency: args.aiConcurrency,
     aiTimeoutMs: args.aiTimeoutMs,
     aiMaxAttempts: args.aiMaxAttempts,
     aiCallsPlanned: 0,
     aiCallsCompleted: 0,
     aiCallsFailed: 0,
+    ebayContextRowsScanned: ebayContextStats.rowsScanned,
+    ebayContextRowsMapped: ebayContextStats.rowsMapped,
+    ebayContextRowsWithoutKey: ebayContextStats.rowsWithoutKey,
+    ebayContextRowsWithoutContext: ebayContextStats.rowsWithoutContext,
+    ebayContextMatchedRows: 0,
+    ebayContextMissingRows: 0,
     tablesScanned: 0,
     rowsScanned: 0,
     rowsWithIPN: 0,
@@ -650,6 +769,12 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       }
       const context = extractMasterPartsContext(master.fields || {});
       if (Object.keys(context).length === 0) continue;
+      const ebayContext = ebayContextMap.get(ipn) || {};
+      if (ebayContextMap.has(ipn)) {
+        summary.ebayContextMatchedRows += 1;
+      } else {
+        summary.ebayContextMissingRows += 1;
+      }
 
       for (const [fieldName, ruleMeta] of applicableRules.entries()) {
         if (!isBlankCell(rowFields[fieldName])) continue;
@@ -674,7 +799,9 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
           fieldName,
           ruleType,
           context,
-          allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : []
+          allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
+          listingTitle: normalizeText(ebayContext.productTitle),
+          listingConditionsAndOptions: normalizeText(ebayContext.listingConditionsAndOptions)
         });
       }
     }
@@ -703,7 +830,9 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
             fieldName: candidate.fieldName,
             ruleType: candidate.ruleType,
             masterPartsData: candidate.context,
-            allowedValues: candidate.allowedValues
+            allowedValues: candidate.allowedValues,
+            listingTitle: candidate.listingTitle,
+            listingConditionsAndOptions: candidate.listingConditionsAndOptions
           });
           summary.aiCallsCompleted += 1;
           tableAiCompleted += 1;
@@ -846,7 +975,10 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     stage: 'completed',
     percent: 100,
     counts: summary,
-    message: `Phase 4B-lite completed (${args.dryRun ? 'dry run' : 'write run'}).`
+    message:
+      `Phase 4B-lite completed (${args.dryRun ? 'dry run' : 'write run'}). ` +
+      `eBayContext rows=${summary.ebayContextRowsScanned}, mapped=${summary.ebayContextRowsMapped}, ` +
+      `matched=${summary.ebayContextMatchedRows}, missing=${summary.ebayContextMissingRows}.`
   });
   return summary;
 }

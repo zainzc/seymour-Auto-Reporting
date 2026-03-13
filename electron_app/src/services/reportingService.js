@@ -138,6 +138,7 @@ FROM dbo.INVOICE i
 LEFT JOIN dbo.INVOICE_LINEITEM li
     ON li.InvoiceID = i.InvoiceID 
     AND li.LineItemType NOT IN ('SERV')
+    AND li.InventoryID IS NOT NULL
     /* EXCLUDE the freight credits from the main rows so they don't double-count */
     AND NOT (
         li.LineItemType = 'CRED' 

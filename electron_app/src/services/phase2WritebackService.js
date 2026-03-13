@@ -36,6 +36,7 @@ class Phase2WritebackService {
       clickupStatusDetermined: config.clickupStatusDetermined || 'Category Determined',
       clickupStatusCompleted: config.clickupStatusCompleted || 'Completed',
       clickupStatusNeedsReview: config.clickupStatusNeedsReview || 'Needs Review',
+      clickupStatusWritebackError: config.clickupStatusWritebackError || 'Writeback Error',
       categoryLinkFieldName: config.categoryLinkFieldName || 'Category Definitions Link',
       ...config
     };
@@ -253,6 +254,40 @@ class Phase2WritebackService {
     await this.clickupService.updateTaskStatus(taskId, target);
   }
 
+  async moveTaskToWritebackError(taskId) {
+    const list = await this.clickupService.getList();
+    const statuses = Array.isArray(list?.statuses) ? list.statuses : [];
+    const allNames = statuses
+      .map(status => String(status?.status || '').trim())
+      .filter(Boolean);
+    const preferred = String(this.config.clickupStatusWritebackError || '').trim();
+    const byName = allNames.find(name => name.toLowerCase() === preferred.toLowerCase());
+    const candidates = allNames.filter(name => {
+      const lower = name.toLowerCase();
+      return (
+        lower.includes('writeback error') ||
+        lower.includes('automation error') ||
+        lower.includes('error') ||
+        lower.includes('failed')
+      );
+    });
+    const fallback = String(this.config.clickupStatusNeedsReview || '').trim();
+    const target = byName || candidates[0] || fallback;
+    if (!target) return;
+    await this.clickupService.updateTaskStatus(taskId, target);
+  }
+
+  async markTaskError(taskId, summary, reasonCode, message) {
+    summary.tasksErrored += 1;
+    summary.writebacksFailed += 1;
+    await this.addCommentOnce(taskId, reasonCode, message);
+    try {
+      await this.moveTaskToWritebackError(taskId);
+    } catch (statusError) {
+      // Keep write-back run resilient even if status transition fails.
+    }
+  }
+
   buildTrackingFields({ selectedIdentifier, status, taskId }) {
     const fields = {};
     if (this.masterFieldNames.has('Category Resolution Status') && status) {
@@ -274,9 +309,9 @@ class Phase2WritebackService {
       ClickUpService.extractIpnFromTask(task) || ClickUpService.extractCustomFieldText(task, 'IPN');
 
     if (!ipn) {
-      summary.tasksErrored += 1;
-      await this.addCommentOnce(
+      await this.markTaskError(
         taskId,
+        summary,
         'missing_ipn',
         'Write-back blocked: missing IPN in task title/description.'
       );
@@ -321,10 +356,9 @@ class Phase2WritebackService {
       selectedIdentifier = this.fallbackIdentifierFromAnyCustomField(task, ipnPrefix);
     }
     if (!selectedIdentifier) {
-      summary.tasksErrored += 1;
-      summary.writebacksFailed += 1;
-      await this.addCommentOnce(
+      await this.markTaskError(
         taskId,
+        summary,
         'missing_resolved_category',
         `Write-back blocked: select '${this.config.clickupResolvedCategoryFieldName}' before completion.`
       );
@@ -333,9 +367,9 @@ class Phase2WritebackService {
 
     const masterRecord = await this.airtableService.fetchMasterPartByIpn(ipn);
     if (!masterRecord) {
-      summary.tasksErrored += 1;
-      await this.addCommentOnce(
+      await this.markTaskError(
         taskId,
+        summary,
         `missing_master_${ipn}`,
         `Write-back blocked: Master Parts record not found for IPN ${ipn}.`
       );
@@ -355,9 +389,9 @@ class Phase2WritebackService {
     }
 
     if (!Number.isFinite(ipnPrefix)) {
-      summary.tasksErrored += 1;
-      await this.addCommentOnce(
+      await this.markTaskError(
         taskId,
+        summary,
         `invalid_prefix_${ipn}`,
         `Write-back blocked: could not parse numeric IPN prefix for ${ipn}.`
       );
@@ -371,18 +405,16 @@ class Phase2WritebackService {
     );
 
     if (matches.length !== 1) {
-      summary.tasksErrored += 1;
-      summary.writebacksFailed += 1;
       const reason =
         matches.length === 0
           ? `no category definition row for prefix ${ipnPrefix} and identifier '${selected}'`
           : `multiple category definition rows for prefix ${ipnPrefix} and identifier '${selected}'`;
-      await this.addCommentOnce(
+      await this.markTaskError(
         taskId,
+        summary,
         `category_mapping_${ipn}_${selected.toLowerCase()}`,
         `Write-back blocked: ${reason}.`
       );
-      await this.moveTaskToNeedsReview(taskId);
       return;
     }
 
@@ -428,8 +460,9 @@ class Phase2WritebackService {
     const tasks = await this.clickupService.fetchTasksByStatuses(
       [this.config.clickupStatusDetermined],
       {
-        includeClosed: true,
-        subtasks: false
+        includeClosed: false,
+        subtasks: false,
+        maxPages: 20
       }
     );
     if (tasks.length === 0) {
@@ -484,13 +517,12 @@ class Phase2WritebackService {
       try {
         await this.processTask(task, resolvedField, summary);
       } catch (error) {
-        summary.tasksErrored += 1;
         const taskId = String(task?.id || '').trim();
         if (taskId) {
           const code = `processing_error_${taskId}`;
           const message = `Write-back failed: ${error.message}`;
           try {
-            await this.addCommentOnce(taskId, code, message);
+            await this.markTaskError(taskId, summary, code, message);
           } catch (commentError) {
             // no-op: avoid failing the whole run due to comment errors
           }

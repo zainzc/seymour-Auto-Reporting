@@ -705,11 +705,19 @@
                 <div class="form-group">
                   <label for="openai-api-key">OpenAI API Key</label>
                   <input id="openai-api-key" type="password" placeholder="sk-...">
-                  <div class="hint">Used only for Phase 4B-lite AI evaluation (Master Parts context only).</div>
+                  <div class="hint">Used only for Phase 4B-lite AI evaluation (Master Parts + eBay listing context).</div>
                 </div>
                 <div class="form-group">
                   <label for="openai-model">OpenAI Model</label>
                   <input id="openai-model" type="text" value="gpt-4o-mini">
+                </div>
+                <div class="form-group">
+                  <label for="phase4b-clickup-list-name">ClickUp List Name (VMF low confidence)</label>
+                  <input id="phase4b-clickup-list-name" type="text" placeholder="Item Specifics Tasks">
+                </div>
+                <div class="form-group">
+                  <label for="phase4b-clickup-list-id">ClickUp List ID (VMF low confidence)</label>
+                  <input id="phase4b-clickup-list-id" type="text" placeholder="901113356398">
                 </div>
                 <div class="form-group">
                   <label for="phase4b-clickup-open-status">ClickUp Open Status (VMF low confidence)</label>
@@ -727,8 +735,39 @@
                 </div>
                 <div class="btn-group">
                   <button id="run-phase4blite-btn" class="btn btn-secondary" onclick="runPhase4BLite()">Run Phase 4B-lite</button>
+                  <button id="run-phase4-combined-btn" class="btn btn-primary" onclick="runPhase4Combined()">Run Phase 4 Combined (4A -> 4B-lite)</button>
                 </div>
                 <div class="hint" id="phase4blite-status-text">Phase 4B-lite status: idle</div>
+                <div class="hint" id="phase4-combined-status-text">Phase 4 Combined status: idle</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px;">
+            <h3 class="section-title">eBay Listings (API) Mock Import</h3>
+            <div class="grid-2">
+              <div>
+                <div class="form-group">
+                  <label for="ebay-mock-csv-path">CSV Path</label>
+                  <input id="ebay-mock-csv-path" type="text" placeholder="C:\Users\hp\Desktop\electron demo\Ebay Listing Example.csv">
+                </div>
+                <div class="form-group">
+                  <label for="ebay-mock-table-name">Airtable Table Name</label>
+                  <input id="ebay-mock-table-name" type="text" value="eBay Listings (API) (Mock)">
+                </div>
+              </div>
+              <div>
+                <div class="form-group">
+                  <label for="ebay-mock-dry-run">Mock Import Dry Run</label>
+                  <select id="ebay-mock-dry-run">
+                    <option value="true" selected>True (No Airtable Writes)</option>
+                    <option value="false">False (Create Table/Fields + Import Rows)</option>
+                  </select>
+                </div>
+                <div class="btn-group">
+                  <button id="run-ebay-mock-import-btn" class="btn btn-secondary" onclick="runEbayMockImport()">Run eBay Mock Import</button>
+                </div>
+                <div class="hint" id="ebay-mock-status-text">eBay Mock Import status: idle</div>
               </div>
             </div>
           </div>
@@ -819,6 +858,8 @@
     let isPhase4Running = false;
     let isPhase4RulesRunning = false;
     let isPhase4BLiteRunning = false;
+    let isPhase4CombinedRunning = false;
+    let isEbayMockImportRunning = false;
     let isItemSpecificSyncRunning = false;
     let lastRunFailed = false;
     let logsCollapsed = false;
@@ -840,6 +881,9 @@
     const DEFAULT_PHASE4BLITE_DRY_RUN = true;
     const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
     const DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS = 'To Do';
+    const DEFAULT_PHASE4B_CLICKUP_LIST_ID = '';
+    const DEFAULT_EBAY_MOCK_TABLE_NAME = 'eBay Listings (API) (Mock)';
+    const DEFAULT_EBAY_MOCK_DRY_RUN = true;
     const REQUIRED_FIELDS = [
       ['sheet-id', 'Google Sheet ID'],
       ['tab-name', 'Google Tab Name'],
@@ -894,6 +938,18 @@
       phase4blite_scan_tables: 'Phase 4B-lite: Evaluating VF/VMF fields',
       completed: 'Phase 4B-lite completed',
       error: 'Phase 4B-lite failed'
+    };
+    const PHASE4_COMBINED_STAGE_LABELS = {
+      phase4combined_start: 'Phase 4 Combined: Starting',
+      completed: 'Phase 4 Combined: Completed',
+      error: 'Phase 4 Combined: Failed'
+    };
+    const EBAY_MOCK_STAGE_LABELS = {
+      ebaymock_start: 'eBay Mock: Reading CSV',
+      ebaymock_prepare_table: 'eBay Mock: Preparing Airtable table',
+      ebaymock_import_rows: 'eBay Mock: Importing rows',
+      completed: 'eBay Mock: Completed',
+      error: 'eBay Mock: Failed'
     };
 
     window.addEventListener('load', async () => {
@@ -1116,6 +1172,8 @@
       const runPhase4Btn = document.getElementById('run-phase4-btn');
       const runPhase4RulesBtn = document.getElementById('run-phase4-rules-btn');
       const runPhase4BLiteBtn = document.getElementById('run-phase4blite-btn');
+      const runPhase4CombinedBtn = document.getElementById('run-phase4-combined-btn');
+      const runEbayMockImportBtn = document.getElementById('run-ebay-mock-import-btn');
       const runItemSpecificSyncBtn = document.getElementById('run-item-specific-sync-btn');
       const busy =
         isRunning ||
@@ -1123,6 +1181,8 @@
         isPhase4Running ||
         isPhase4RulesRunning ||
         isPhase4BLiteRunning ||
+        isPhase4CombinedRunning ||
+        isEbayMockImportRunning ||
         isItemSpecificSyncRunning;
       const hasItemSpecificBaseId = Boolean(document.getElementById('item-specific-base-id').value.trim());
       const hasRulesDriveFile = Boolean(document.getElementById('phase4-rules-drive-file').value.trim());
@@ -1133,6 +1193,14 @@
       runPhase4RulesBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile;
       if (runPhase4BLiteBtn) {
         runPhase4BLiteBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
+      }
+      if (runPhase4CombinedBtn) {
+        runPhase4CombinedBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
+      }
+      if (runEbayMockImportBtn) {
+        const hasCsvPath = Boolean(document.getElementById('ebay-mock-csv-path').value.trim());
+        const hasTableName = Boolean(document.getElementById('ebay-mock-table-name').value.trim());
+        runEbayMockImportBtn.disabled = busy || !hasCsvPath || !hasTableName || !validateForm(false);
       }
       runItemSpecificSyncBtn.disabled = busy || !hasItemSpecificBaseId;
     }
@@ -1153,7 +1221,13 @@
         'phase4blite-dry-run',
         'openai-api-key',
         'openai-model',
+        'phase4b-clickup-list-name',
+        'phase4b-clickup-list-id',
         'phase4b-clickup-open-status'
+        ,
+        'ebay-mock-csv-path',
+        'ebay-mock-table-name',
+        'ebay-mock-dry-run'
       ]);
       allFieldIds.forEach(id => {
         const el = document.getElementById(id);
@@ -1206,6 +1280,24 @@
       const stage = String(payload.stage || '').trim();
       const percent = Number(payload.percent || 0);
       const label = PHASE4BLITE_STAGE_LABELS[stage] || 'Phase 4B-lite running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase4CombinedProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE4_COMBINED_STAGE_LABELS[stage] || 'Phase 4 Combined running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatEbayMockProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = EBAY_MOCK_STAGE_LABELS[stage] || 'eBay Mock import running';
       const message = String(payload.message || '').trim();
       if (message) return `${label} (${percent}%): ${message}`;
       return `${label} (${percent}%)`;
@@ -1330,8 +1422,16 @@
         document.getElementById('phase4-rules-drive-file').value = config.phase4RulesDriveFile || '';
         document.getElementById('openai-api-key').value = config.openaiApiKey || '';
         document.getElementById('openai-model').value = config.openaiModel || DEFAULT_OPENAI_MODEL;
+        document.getElementById('phase4b-clickup-list-name').value = config.phase4BClickupListName || '';
+        document.getElementById('phase4b-clickup-list-id').value =
+          config.phase4BClickupListId || config.clickupListId || DEFAULT_PHASE4B_CLICKUP_LIST_ID;
         document.getElementById('phase4b-clickup-open-status').value =
           config.phase4BClickupOpenStatus || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
+        document.getElementById('ebay-mock-csv-path').value = config.ebayMockCsvPath || '';
+        document.getElementById('ebay-mock-table-name').value =
+          config.ebayMockTableName || DEFAULT_EBAY_MOCK_TABLE_NAME;
+        document.getElementById('ebay-mock-dry-run').value =
+          config.ebayMockDryRun === false ? 'false' : 'true';
 
         if (window.phase4API && typeof window.phase4API.getConfig === 'function') {
           const phase4Config = await window.phase4API.getConfig();
@@ -1369,8 +1469,23 @@
               document.getElementById('openai-api-key').value = liteConfig.openaiApiKey;
             }
             document.getElementById('openai-model').value = liteConfig.openaiModel || DEFAULT_OPENAI_MODEL;
+            document.getElementById('phase4b-clickup-list-name').value =
+              liteConfig.clickupListName || document.getElementById('phase4b-clickup-list-name').value;
+            document.getElementById('phase4b-clickup-list-id').value =
+              liteConfig.clickupListId || document.getElementById('phase4b-clickup-list-id').value;
             document.getElementById('phase4b-clickup-open-status').value =
               liteConfig.clickupOpenStatus || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
+          }
+        }
+        if (window.ebayMockImportAPI && typeof window.ebayMockImportAPI.getConfig === 'function') {
+          const mockConfig = await window.ebayMockImportAPI.getConfig();
+          if (mockConfig && typeof mockConfig === 'object') {
+            document.getElementById('ebay-mock-csv-path').value =
+              mockConfig.csvPath || document.getElementById('ebay-mock-csv-path').value;
+            document.getElementById('ebay-mock-table-name').value =
+              mockConfig.tableName || DEFAULT_EBAY_MOCK_TABLE_NAME;
+            document.getElementById('ebay-mock-dry-run').value =
+              mockConfig.dryRun === false ? 'false' : 'true';
           }
         }
 
@@ -1604,9 +1719,18 @@
         phase4BLiteDryRun: document.getElementById('phase4blite-dry-run').value === 'true',
         openaiApiKey: document.getElementById('openai-api-key').value.trim(),
         openaiModel: document.getElementById('openai-model').value.trim() || DEFAULT_OPENAI_MODEL,
+        phase4BClickupListName:
+          document.getElementById('phase4b-clickup-list-name').value.trim(),
+        phase4BClickupListId:
+          document.getElementById('phase4b-clickup-list-id').value.trim() ||
+          DEFAULT_PHASE4B_CLICKUP_LIST_ID,
         phase4BClickupOpenStatus:
           document.getElementById('phase4b-clickup-open-status').value.trim() ||
-          DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS
+          DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS,
+        ebayMockCsvPath: document.getElementById('ebay-mock-csv-path').value.trim(),
+        ebayMockTableName:
+          document.getElementById('ebay-mock-table-name').value.trim() || DEFAULT_EBAY_MOCK_TABLE_NAME,
+        ebayMockDryRun: document.getElementById('ebay-mock-dry-run').value === 'true'
       };
     }
 
@@ -1836,6 +1960,47 @@
           if (payload.stage) {
             const level = payload.stage === 'error' ? 'error' : 'info';
             logLine(`Phase4B-lite progress: ${formatPhase4BLiteProgressText(payload)}`, level);
+          }
+        });
+      }
+
+      if (window.phase4CombinedAPI && typeof window.phase4CombinedAPI.onProgress === 'function') {
+        window.phase4CombinedAPI.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase4CombinedProgressText(payload);
+          const combinedStatus = document.getElementById('phase4-combined-status-text');
+          if (combinedStatus) {
+            combinedStatus.textContent = `Phase 4 Combined status: ${formatPhase4CombinedProgressText(payload)}`;
+          }
+
+          const stage = String(payload.stage || '');
+          const message = String(payload.message || '');
+          if (stage.includes('phase4combined_4a_')) {
+            document.getElementById('phase4-rules-status-text').textContent = `Phase 4A status: ${message || formatPhase4CombinedProgressText(payload)}`;
+          } else if (stage.includes('phase4combined_4b_')) {
+            document.getElementById('phase4blite-status-text').textContent = `Phase 4B-lite status: ${message || formatPhase4CombinedProgressText(payload)}`;
+          }
+
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`Phase4 Combined progress: ${formatPhase4CombinedProgressText(payload)}`, level);
+          }
+        });
+      }
+
+      if (window.ebayMockImportAPI && typeof window.ebayMockImportAPI.onProgress === 'function') {
+        window.ebayMockImportAPI.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatEbayMockProgressText(payload);
+          const statusText = document.getElementById('ebay-mock-status-text');
+          statusText.textContent = `eBay Mock Import status: ${formatEbayMockProgressText(payload)}`;
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`eBayMock progress: ${formatEbayMockProgressText(payload)}`, level);
           }
         });
       }
@@ -2093,7 +2258,7 @@
     }
 
     async function runPhase4Rules() {
-      if (isPhase4RulesRunning || isRunning || isPhase3Running || isPhase4Running || isItemSpecificSyncRunning) return;
+      if (isPhase4RulesRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isItemSpecificSyncRunning) return;
       if (!window.phase4RulesAPI || typeof window.phase4RulesAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4A API is unavailable.');
         return;
@@ -2165,7 +2330,7 @@
     }
 
     async function runPhase4BLite() {
-      if (isPhase4BLiteRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isItemSpecificSyncRunning) return;
+      if (isPhase4BLiteRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isItemSpecificSyncRunning) return;
       if (!window.phase4BLiteAPI || typeof window.phase4BLiteAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4B-lite API is unavailable.');
         return;
@@ -2235,6 +2400,145 @@
         logLine(`Phase 4B-lite failed: ${err.message}`, 'error');
       } finally {
         isPhase4BLiteRunning = false;
+        updateRunButtonState();
+      }
+    }
+
+    async function runPhase4Combined() {
+      if (isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning) return;
+      if (!window.phase4CombinedAPI || typeof window.phase4CombinedAPI.run !== 'function') {
+        showStatus('run-status', 'error', 'Phase 4 Combined API is unavailable.');
+        return;
+      }
+
+      const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
+      const rulesDriveFile = document.getElementById('phase4-rules-drive-file').value.trim();
+      const openaiApiKey = document.getElementById('openai-api-key').value.trim();
+      if (!itemSpecificBaseId) {
+        setFieldError('item-specific-base-id', 'Item Specifics Base ID is required.');
+        showStatus('run-status', 'error', 'Enter Item Specifics Base ID before running Phase 4 Combined.');
+        return;
+      }
+      if (!rulesDriveFile) {
+        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4 Combined.');
+        return;
+      }
+      if (!openaiApiKey) {
+        setFieldError('openai-api-key', 'OpenAI API Key is required.');
+        showStatus('run-status', 'error', 'Enter OpenAI API Key before running Phase 4 Combined.');
+        return;
+      }
+
+      isPhase4CombinedRunning = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 4 Combined (4A -> 4B-lite) is in progress...');
+      showStatus('run-status', 'info', 'Phase 4 Combined started...');
+      document.getElementById('phase4-combined-status-text').textContent = 'Phase 4 Combined status: running...';
+      logLine('Starting Phase 4 Combined run (4A -> 4B-lite).');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase4CombinedAPI.run(config);
+
+        if (result?.success) {
+          const summary = result.summary || {};
+          const phase4A = summary.phase4A || {};
+          const phase4B = summary.phase4BLite || {};
+          const modeA = phase4A.dryRun ? 'dry run' : 'write run';
+          const modeB = phase4B.dryRun ? 'dry run' : 'write run';
+          setRunState('Success', 'Phase 4 Combined completed successfully.');
+          showStatus(
+            'run-status',
+            'success',
+            `Phase 4 Combined completed. 4A(${modeA}) Updated=${phase4A.fixedFieldsUpdated || 0}, 4B(${modeB}) VF Updated=${phase4B.vfFieldsUpdated || 0}, VMF Updated=${phase4B.vmfFieldsUpdated || 0}.`
+          );
+          document.getElementById('phase4-combined-status-text').textContent =
+            `Phase 4 Combined status: completed. 4A Updated ${phase4A.fixedFieldsUpdated || 0}, 4B VF ${phase4B.vfFieldsUpdated || 0}, VMF ${phase4B.vmfFieldsUpdated || 0}.`;
+          document.getElementById('phase4-rules-status-text').textContent =
+            `Phase 4A status: completed (${modeA}). Updated ${phase4A.fixedFieldsUpdated || 0}.`;
+          document.getElementById('phase4blite-status-text').textContent =
+            `Phase 4B-lite status: completed (${modeB}). VF Updated ${phase4B.vfFieldsUpdated || 0}, VMF Updated ${phase4B.vmfFieldsUpdated || 0}.`;
+          logLine(
+            `Phase 4 Combined completed. 4A Mode=${modeA}, Updated=${phase4A.fixedFieldsUpdated || 0}, SkippedFilled=${phase4A.fixedFieldsSkippedAlreadyFilled || 0}; 4B Mode=${modeB}, VFUpdated=${phase4B.vfFieldsUpdated || 0}, VMFUpdated=${phase4B.vmfFieldsUpdated || 0}, VMFTasksCreated=${phase4B.vmfLowConfidenceTasksCreated || 0}, VMFTasksUpdated=${phase4B.vmfLowConfidenceTasksUpdated || 0}`
+          );
+        } else {
+          throw new Error(result?.message || 'Phase 4 Combined failed.');
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 4 Combined failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 4 Combined failed: ${err.message}`);
+        document.getElementById('phase4-combined-status-text').textContent = `Phase 4 Combined status: failed (${err.message})`;
+        logLine(`Phase 4 Combined failed: ${err.message}`, 'error');
+      } finally {
+        isPhase4CombinedRunning = false;
+        updateRunButtonState();
+      }
+    }
+
+    async function runEbayMockImport() {
+      if (isEbayMockImportRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning) return;
+      if (!window.ebayMockImportAPI || typeof window.ebayMockImportAPI.run !== 'function') {
+        showStatus('run-status', 'error', 'eBay Mock Import API is unavailable.');
+        return;
+      }
+
+      const csvPath = document.getElementById('ebay-mock-csv-path').value.trim();
+      const tableName = document.getElementById('ebay-mock-table-name').value.trim();
+      if (!csvPath) {
+        setFieldError('ebay-mock-csv-path', 'CSV Path is required.');
+        showStatus('run-status', 'error', 'Enter CSV path before running eBay Mock Import.');
+        return;
+      }
+      if (!tableName) {
+        setFieldError('ebay-mock-table-name', 'Table name is required.');
+        showStatus('run-status', 'error', 'Enter table name before running eBay Mock Import.');
+        return;
+      }
+      if (!validateForm(true)) {
+        setRunState('Error', 'Airtable settings are required for eBay Mock Import.');
+        showStatus('run-status', 'error', 'Please complete Airtable token/base fields first.');
+        return;
+      }
+
+      isEbayMockImportRunning = true;
+      updateRunButtonState();
+      setRunState('Running', 'eBay Mock import is in progress...');
+      showStatus('run-status', 'info', 'eBay Mock import started...');
+      document.getElementById('ebay-mock-status-text').textContent = 'eBay Mock Import status: running...';
+      logLine('Starting eBay Mock import run.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.ebayMockImportAPI.run(config);
+        if (!result?.success) {
+          throw new Error(result?.message || 'eBay Mock import failed.');
+        }
+        const summary = result.summary || {};
+        const mode = summary.dryRun ? 'dry run' : 'write run';
+        setRunState('Success', 'eBay Mock import completed.');
+        showStatus(
+          'run-status',
+          'success',
+          `eBay Mock import completed (${mode}). Columns=${summary.columnsDetected || 0}, Rows=${summary.rowsScanned || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}.`
+        );
+        document.getElementById('ebay-mock-status-text').textContent =
+          `eBay Mock Import status: completed (${mode}). Rows ${summary.rowsScanned || 0}, Written ${summary.recordsWritten || 0}.`;
+        logLine(
+          `eBay Mock import completed. Mode=${mode}, Table=${summary.tableName || ''}, Columns=${summary.columnsDetected || 0}, Rows=${summary.rowsScanned || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}, FieldsCreated=${summary.fieldsCreated || 0}`
+        );
+        if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+          summary.errors.forEach(err => logLine(`eBayMock: ${err}`, 'error'));
+        }
+      } catch (err) {
+        setRunState('Error', `eBay Mock import failed: ${err.message}`);
+        showStatus('run-status', 'error', `eBay Mock import failed: ${err.message}`);
+        document.getElementById('ebay-mock-status-text').textContent = `eBay Mock Import status: failed (${err.message})`;
+        logLine(`eBay Mock import failed: ${err.message}`, 'error');
+      } finally {
+        isEbayMockImportRunning = false;
         updateRunButtonState();
       }
     }
