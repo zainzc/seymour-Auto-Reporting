@@ -605,19 +605,7 @@
                 <input id="phase3-lookback-days" type="number" min="1" step="1" value="90">
                 <div id="err-phase3-lookback-days" class="field-error"></div>
               </div>
-              <div class="form-group">
-                <label for="phase3-dry-run">Phase 3 Dry Run</label>
-                <select id="phase3-dry-run">
-                  <option value="false" selected>False (Write Airtable)</option>
-                  <option value="true">True (No Airtable Writes)</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="item-specific-base-id">Item Specifics Base ID</label>
-                <input id="item-specific-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
-                <div class="hint">Base B: Item Specifics by Part Type.</div>
-                <div id="err-item-specific-base-id" class="field-error"></div>
-              </div>
+              <input id="item-specific-base-id" type="hidden">
               <div class="btn-group">
                 <button id="run-phase3-btn" class="btn btn-secondary" onclick="runPhase3()">Run Phase 3</button>
               </div>
@@ -673,13 +661,6 @@
               <div class="form-group">
                 <label for="phase4-unified-listings-table">Listings Table Name</label>
                 <input id="phase4-unified-listings-table" type="text" value="eBay Listings (API)">
-              </div>
-              <div class="form-group">
-                <label for="phase4-unified-dry-run">Run Mode</label>
-                <select id="phase4-unified-dry-run">
-                  <option value="true" selected>Dry Run (No Writes)</option>
-                  <option value="false">Write Run (Apply Updates)</option>
-                </select>
               </div>
               <div class="btn-group">
                 <button id="run-phase4-pipeline-btn" class="btn btn-primary" onclick="runPhase4Pipeline()">Run Complete Phase 4 Automation</button>
@@ -1000,14 +981,14 @@
     const DEFAULT_WRITEBACK_ENABLED = true;
     const DEFAULT_PHASE3_STORE_ID = 333796;
     const DEFAULT_PHASE3_LOOKBACK_DAYS = 90;
-    const DEFAULT_PHASE4_DRY_RUN = true;
+    const DEFAULT_PHASE4_DRY_RUN = false;
     const DEFAULT_PHASE4_INCREMENTAL_ENABLED = true;
-    const DEFAULT_PHASE4_RULES_DRY_RUN = true;
+    const DEFAULT_PHASE4_RULES_DRY_RUN = false;
     const DEFAULT_PHASE4_RULES_LOGIC_SHEET = 'Logic';
     const DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE = 'Fixed Item Specifics (Global Defaults)';
-    const DEFAULT_PHASE4BLITE_DRY_RUN = true;
-    const DEFAULT_PHASE4CMF_DRY_RUN = true;
-    const DEFAULT_PHASE4D_DRY_RUN = true;
+    const DEFAULT_PHASE4BLITE_DRY_RUN = false;
+    const DEFAULT_PHASE4CMF_DRY_RUN = false;
+    const DEFAULT_PHASE4D_DRY_RUN = false;
     const DEFAULT_PHASE4D_LISTINGS_TABLE = 'eBay Listings (API)';
     const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
     const DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS = 'To Do';
@@ -1623,7 +1604,10 @@
         document.getElementById('shipstation-api-secret').value = config.shipstationApiSecret || '';
         document.getElementById('shipstation-store-id').value = String(config.shipstationStoreId || DEFAULT_PHASE3_STORE_ID);
         document.getElementById('phase3-lookback-days').value = String(config.phase3LookbackDays || DEFAULT_PHASE3_LOOKBACK_DAYS);
-        document.getElementById('phase3-dry-run').value = config.phase3DryRun ? 'true' : 'false';
+        const phase3DryRunEl = document.getElementById('phase3-dry-run');
+        if (phase3DryRunEl) {
+          phase3DryRunEl.value = 'false';
+        }
         document.getElementById('item-specific-base-id').value = config.itemSpecificsBaseId || '';
         document.getElementById('phase4-dry-run').value = DEFAULT_PHASE4_DRY_RUN ? 'true' : 'false';
         document.getElementById('phase4-incremental-enabled').value = DEFAULT_PHASE4_INCREMENTAL_ENABLED ? 'true' : 'false';
@@ -1864,7 +1848,7 @@
       const unifiedClickupId = document.getElementById('phase4-unified-clickup-list-id')?.value?.trim() || '';
       const unifiedClickupStatus = document.getElementById('phase4-unified-clickup-open-status')?.value?.trim() || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
       const unifiedListingsTable = document.getElementById('phase4-unified-listings-table')?.value?.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE;
-      const unifiedDryRun = document.getElementById('phase4-unified-dry-run')?.value === 'true';
+      const unifiedDryRun = false;
 
       if (unifiedBase) document.getElementById('item-specific-base-id').value = unifiedBase;
       if (unifiedRulesFile) document.getElementById('phase4-rules-drive-file').value = unifiedRulesFile;
@@ -1909,8 +1893,8 @@
         DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
       document.getElementById('phase4-unified-listings-table').value =
         document.getElementById('phase4d-listings-table').value.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE;
-      document.getElementById('phase4-unified-dry-run').value =
-        document.getElementById('phase4-rules-dry-run').value === 'false' ? 'false' : 'true';
+      const unifiedDryRunEl = document.getElementById('phase4-unified-dry-run');
+      if (unifiedDryRunEl) unifiedDryRunEl.value = 'false';
     }
 
     async function fetchAirtableBases(silent = false, strict = false) {
@@ -2027,17 +2011,17 @@
         shipstationApiSecret: document.getElementById('shipstation-api-secret').value.trim(),
         shipstationStoreId: DEFAULT_PHASE3_STORE_ID,
         phase3LookbackDays: Number(document.getElementById('phase3-lookback-days').value.trim()) || DEFAULT_PHASE3_LOOKBACK_DAYS,
-        phase3DryRun: document.getElementById('phase3-dry-run').value === 'true',
+        phase3DryRun: false,
         itemSpecificsBaseId: document.getElementById('item-specific-base-id').value.trim(),
-        phase4DryRun: document.getElementById('phase4-dry-run').value === 'true',
+        phase4DryRun: false,
         phase4IncrementalEnabled: document.getElementById('phase4-incremental-enabled').value === 'true',
         phase4RulesDriveFile: document.getElementById('phase4-rules-drive-file').value.trim(),
         phase4RulesLogicSheet: document.getElementById('phase4-rules-logic-sheet').value.trim() || DEFAULT_PHASE4_RULES_LOGIC_SHEET,
         phase4GlobalDefaultsTable: document.getElementById('phase4-global-defaults-table').value.trim() || DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE,
-        phase4RulesDryRun: document.getElementById('phase4-rules-dry-run').value === 'true',
-        phase4BLiteDryRun: document.getElementById('phase4blite-dry-run').value === 'true',
-        phase4CMFDryRun: document.getElementById('phase4cmf-dry-run').value === 'true',
-        phase4DDryRun: document.getElementById('phase4d-dry-run').value === 'true',
+        phase4RulesDryRun: false,
+        phase4BLiteDryRun: false,
+        phase4CMFDryRun: false,
+        phase4DDryRun: false,
         phase4DListingsTable: document.getElementById('phase4d-listings-table').value.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE,
         phase4RunMirror: true,
         phase4Run4A: true,
