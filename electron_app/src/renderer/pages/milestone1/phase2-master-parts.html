@@ -633,6 +633,64 @@
           <button id="toggle-phase4-panel-btn" class="panel-toggle-btn" type="button" aria-expanded="true" onclick="togglePhasePanel('phase4-panel-content', 'toggle-phase4-panel-btn')">Collapse</button>
         </div>
         <div id="phase4-panel-content" class="phase-panel-content">
+          <h3 class="section-title">Phase 4 Automation</h3>
+          <div class="grid-2">
+            <div>
+              <div class="form-group">
+                <label for="phase4-unified-item-specific-base-id">Item Specifics Base ID</label>
+                <input id="phase4-unified-item-specific-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
+              </div>
+              <div class="form-group">
+                <label for="phase4-unified-rules-drive-file">Rules File (Google Drive ID/URL)</label>
+                <input id="phase4-unified-rules-drive-file" type="text" placeholder="Google Drive file ID or full URL">
+              </div>
+              <div class="form-group">
+                <label for="phase4-unified-rules-logic-sheet">Rules Sheet Name</label>
+                <input id="phase4-unified-rules-logic-sheet" type="text" value="Logic">
+              </div>
+              <div class="form-group">
+                <label for="phase4-unified-openai-api-key">OpenAI API Key</label>
+                <input id="phase4-unified-openai-api-key" type="password" placeholder="sk-...">
+              </div>
+              <div class="form-group">
+                <label for="phase4-unified-openai-model">OpenAI Model</label>
+                <input id="phase4-unified-openai-model" type="text" value="gpt-4o-mini">
+              </div>
+            </div>
+            <div>
+              <div class="form-group">
+                <label for="phase4-unified-clickup-list-name">ClickUp List Name</label>
+                <input id="phase4-unified-clickup-list-name" type="text" placeholder="Item Specifics Tasks">
+              </div>
+              <div class="form-group">
+                <label for="phase4-unified-clickup-list-id">ClickUp List ID</label>
+                <input id="phase4-unified-clickup-list-id" type="text" placeholder="901113356398">
+              </div>
+              <div class="form-group">
+                <label for="phase4-unified-clickup-open-status">ClickUp Open Status</label>
+                <input id="phase4-unified-clickup-open-status" type="text" value="To Do">
+              </div>
+              <div class="form-group">
+                <label for="phase4-unified-listings-table">Listings Table Name</label>
+                <input id="phase4-unified-listings-table" type="text" value="eBay Listings (API)">
+              </div>
+              <div class="form-group">
+                <label for="phase4-unified-dry-run">Run Mode</label>
+                <select id="phase4-unified-dry-run">
+                  <option value="true" selected>Dry Run (No Writes)</option>
+                  <option value="false">Write Run (Apply Updates)</option>
+                </select>
+              </div>
+              <div class="btn-group">
+                <button id="run-phase4-pipeline-btn" class="btn btn-primary" onclick="runPhase4Pipeline()">Run Complete Phase 4 Automation</button>
+              </div>
+              <div class="hint" id="phase4-status-text-legacy">Phase 4 status: idle</div>
+              <div class="hint" id="phase4-pipeline-status-text">Phase 4 pipeline status: idle</div>
+              <div class="hint">Runs full Phase 4 flow automatically in sequence using the inputs on this form.</div>
+            </div>
+          </div>
+
+          <div id="phase4-legacy-controls" style="display:none;">
           <h3 class="section-title">Phase 4 (IPN Mirroring)</h3>
           <div class="grid-2">
             <div>
@@ -733,12 +791,77 @@
                   </select>
                   <div class="hint">Processes only VF/VMF. Never overwrites non-blank Item Specific values.</div>
                 </div>
+                <div class="form-group">
+                  <label for="phase4b-test-table-name">Phase 4B Test Table Name (optional)</label>
+                  <input id="phase4b-test-table-name" type="text" placeholder="e.g., 643-Lock Solenoid, Actuator">
+                  <div class="hint">Debug only. If set, only this exact table name is processed in Phase 4B.</div>
+                </div>
                 <div class="btn-group">
                   <button id="run-phase4blite-btn" class="btn btn-secondary" onclick="runPhase4BLite()">Run Phase 4B-lite</button>
                   <button id="run-phase4-combined-btn" class="btn btn-primary" onclick="runPhase4Combined()">Run Phase 4 Combined (4A -> 4B-lite)</button>
                 </div>
                 <div class="hint" id="phase4blite-status-text">Phase 4B-lite status: idle</div>
                 <div class="hint" id="phase4-combined-status-text">Phase 4 Combined status: idle</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px;">
+            <h3 class="section-title">Phase 4C (MF: Manual - Fixed)</h3>
+            <div class="grid-2">
+              <div>
+                <div class="form-group">
+                  <label for="phase4c-clickup-list-name">ClickUp List Name (MF manual tasks)</label>
+                  <input id="phase4c-clickup-list-name" type="text" placeholder="Item Specifics Tasks">
+                </div>
+                <div class="form-group">
+                  <label for="phase4c-clickup-list-id">ClickUp List ID (MF manual tasks)</label>
+                  <input id="phase4c-clickup-list-id" type="text" placeholder="901113356398">
+                </div>
+                <div class="form-group">
+                  <label for="phase4c-clickup-open-status">ClickUp Open Status (MF manual tasks)</label>
+                  <input id="phase4c-clickup-open-status" type="text" value="To Do">
+                </div>
+              </div>
+              <div>
+                <div class="form-group">
+                  <label for="phase4cmf-dry-run">Phase 4C Dry Run</label>
+                  <select id="phase4cmf-dry-run">
+                    <option value="true" selected>True (No Airtable/ClickUp Writes)</option>
+                    <option value="false">False (Write Airtable + ClickUp)</option>
+                  </select>
+                  <div class="hint">MF only: no AI. Blank MF fields create manual tasks; Value Determined tasks write back to Airtable.</div>
+                </div>
+                <div class="btn-group">
+                  <button id="run-phase4cmf-btn" class="btn btn-secondary" onclick="runPhase4CMF()">Run Phase 4C (MF)</button>
+                </div>
+                <div class="hint" id="phase4cmf-status-text">Phase 4C status: idle</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 14px; border-top: 1px solid var(--border); padding-top: 14px;">
+            <h3 class="section-title">Phase 4D (Listing-Only: FsV, V1, V2, VB)</h3>
+            <div class="grid-2">
+              <div>
+                <div class="form-group">
+                  <label for="phase4d-listings-table">Listings Table Name</label>
+                  <input id="phase4d-listings-table" type="text" value="eBay Listings (API)">
+                </div>
+              </div>
+              <div>
+                <div class="form-group">
+                  <label for="phase4d-dry-run">Phase 4D Dry Run</label>
+                  <select id="phase4d-dry-run">
+                    <option value="true" selected>True (No Airtable Writes)</option>
+                    <option value="false">False (Write to Listings Table)</option>
+                  </select>
+                  <div class="hint">Listing-only rules. No writes to Master Parts / Item Specifics. No ClickUp tasks.</div>
+                </div>
+                <div class="btn-group">
+                  <button id="run-phase4d-btn" class="btn btn-secondary" onclick="runPhase4D()">Run Phase 4D</button>
+                </div>
+                <div class="hint" id="phase4d-status-text">Phase 4D status: idle</div>
               </div>
             </div>
           </div>
@@ -770,6 +893,7 @@
                 <div class="hint" id="ebay-mock-status-text">eBay Mock Import status: idle</div>
               </div>
             </div>
+          </div>
           </div>
         </div>
       </div>
@@ -858,6 +982,9 @@
     let isPhase4Running = false;
     let isPhase4RulesRunning = false;
     let isPhase4BLiteRunning = false;
+    let isPhase4CMFRunning = false;
+    let isPhase4DRunning = false;
+    let isPhase4PipelineRunning = false;
     let isPhase4CombinedRunning = false;
     let isEbayMockImportRunning = false;
     let isItemSpecificSyncRunning = false;
@@ -879,9 +1006,14 @@
     const DEFAULT_PHASE4_RULES_LOGIC_SHEET = 'Logic';
     const DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE = 'Fixed Item Specifics (Global Defaults)';
     const DEFAULT_PHASE4BLITE_DRY_RUN = true;
+    const DEFAULT_PHASE4CMF_DRY_RUN = true;
+    const DEFAULT_PHASE4D_DRY_RUN = true;
+    const DEFAULT_PHASE4D_LISTINGS_TABLE = 'eBay Listings (API)';
     const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
     const DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS = 'To Do';
     const DEFAULT_PHASE4B_CLICKUP_LIST_ID = '';
+    const DEFAULT_PHASE4C_CLICKUP_OPEN_STATUS = 'To Do';
+    const DEFAULT_PHASE4C_CLICKUP_LIST_ID = '';
     const DEFAULT_EBAY_MOCK_TABLE_NAME = 'eBay Listings (API) (Mock)';
     const DEFAULT_EBAY_MOCK_DRY_RUN = true;
     const REQUIRED_FIELDS = [
@@ -936,8 +1068,28 @@
       phase4blite_load_rules: 'Phase 4B-lite: Loading rules',
       phase4blite_load_master: 'Phase 4B-lite: Loading master records',
       phase4blite_scan_tables: 'Phase 4B-lite: Evaluating VF/VMF fields',
+      phase4blite_manual_writeback: 'Phase 4B-lite: Writing back Value Determined tasks',
       completed: 'Phase 4B-lite completed',
       error: 'Phase 4B-lite failed'
+    };
+    const PHASE4CMF_STAGE_LABELS = {
+      phase4cmf_load_rules: 'Phase 4C: Loading MF rules',
+      phase4cmf_scan_tables: 'Phase 4C: Scanning MF fields',
+      phase4cmf_tasks: 'Phase 4C: Creating/updating MF tasks',
+      phase4cmf_writeback: 'Phase 4C: Writing back Value Determined tasks',
+      completed: 'Phase 4C completed',
+      error: 'Phase 4C failed'
+    };
+    const PHASE4D_STAGE_LABELS = {
+      phase4d_load_rules: 'Phase 4D: Loading listing-only rules',
+      phase4d_scan_listings: 'Phase 4D: Processing listings',
+      completed: 'Phase 4D completed',
+      error: 'Phase 4D failed'
+    };
+    const PHASE4_PIPELINE_STAGE_LABELS = {
+      phase4pipeline_start: 'Phase 4 Pipeline: Starting',
+      completed: 'Phase 4 Pipeline completed',
+      error: 'Phase 4 Pipeline failed'
     };
     const PHASE4_COMBINED_STAGE_LABELS = {
       phase4combined_start: 'Phase 4 Combined: Starting',
@@ -1172,6 +1324,9 @@
       const runPhase4Btn = document.getElementById('run-phase4-btn');
       const runPhase4RulesBtn = document.getElementById('run-phase4-rules-btn');
       const runPhase4BLiteBtn = document.getElementById('run-phase4blite-btn');
+      const runPhase4CMFBtn = document.getElementById('run-phase4cmf-btn');
+      const runPhase4DBtn = document.getElementById('run-phase4d-btn');
+      const runPhase4PipelineBtn = document.getElementById('run-phase4-pipeline-btn');
       const runPhase4CombinedBtn = document.getElementById('run-phase4-combined-btn');
       const runEbayMockImportBtn = document.getElementById('run-ebay-mock-import-btn');
       const runItemSpecificSyncBtn = document.getElementById('run-item-specific-sync-btn');
@@ -1181,6 +1336,9 @@
         isPhase4Running ||
         isPhase4RulesRunning ||
         isPhase4BLiteRunning ||
+        isPhase4CMFRunning ||
+        isPhase4DRunning ||
+        isPhase4PipelineRunning ||
         isPhase4CombinedRunning ||
         isEbayMockImportRunning ||
         isItemSpecificSyncRunning;
@@ -1194,8 +1352,17 @@
       if (runPhase4BLiteBtn) {
         runPhase4BLiteBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
       }
+      if (runPhase4CMFBtn) {
+        runPhase4CMFBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile;
+      }
+      if (runPhase4DBtn) {
+        runPhase4DBtn.disabled = busy || !hasRulesDriveFile || !hasOpenAiKey;
+      }
       if (runPhase4CombinedBtn) {
         runPhase4CombinedBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
+      }
+      if (runPhase4PipelineBtn) {
+        runPhase4PipelineBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
       }
       if (runEbayMockImportBtn) {
         const hasCsvPath = Boolean(document.getElementById('ebay-mock-csv-path').value.trim());
@@ -1219,12 +1386,27 @@
         'phase4-global-defaults-table',
         'phase4-rules-dry-run',
         'phase4blite-dry-run',
+        'phase4cmf-dry-run',
+        'phase4d-dry-run',
+        'phase4d-listings-table',
+        'phase4-unified-item-specific-base-id',
+        'phase4-unified-rules-drive-file',
+        'phase4-unified-rules-logic-sheet',
+        'phase4-unified-openai-api-key',
+        'phase4-unified-openai-model',
+        'phase4-unified-clickup-list-name',
+        'phase4-unified-clickup-list-id',
+        'phase4-unified-clickup-open-status',
+        'phase4-unified-listings-table',
+        'phase4-unified-dry-run',
         'openai-api-key',
         'openai-model',
         'phase4b-clickup-list-name',
         'phase4b-clickup-list-id',
-        'phase4b-clickup-open-status'
-        ,
+        'phase4b-clickup-open-status',
+        'phase4c-clickup-list-name',
+        'phase4c-clickup-list-id',
+        'phase4c-clickup-open-status',
         'ebay-mock-csv-path',
         'ebay-mock-table-name',
         'ebay-mock-dry-run'
@@ -1233,6 +1415,9 @@
         const el = document.getElementById(id);
         if (!el) return;
         el.addEventListener('input', () => {
+          if (id.startsWith('phase4-unified-')) {
+            syncPhase4UnifiedInputsToLegacy();
+          }
           clearFieldError(id);
           updateHealthBadges();
           updateRunButtonState();
@@ -1280,6 +1465,33 @@
       const stage = String(payload.stage || '').trim();
       const percent = Number(payload.percent || 0);
       const label = PHASE4BLITE_STAGE_LABELS[stage] || 'Phase 4B-lite running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase4CMFProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE4CMF_STAGE_LABELS[stage] || 'Phase 4C running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase4DProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE4D_STAGE_LABELS[stage] || 'Phase 4D running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase4PipelineProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE4_PIPELINE_STAGE_LABELS[stage] || 'Phase 4 Pipeline running';
       const message = String(payload.message || '').trim();
       if (message) return `${label} (${percent}%): ${message}`;
       return `${label} (${percent}%)`;
@@ -1417,6 +1629,14 @@
         document.getElementById('phase4-incremental-enabled').value = DEFAULT_PHASE4_INCREMENTAL_ENABLED ? 'true' : 'false';
         document.getElementById('phase4-rules-dry-run').value = DEFAULT_PHASE4_RULES_DRY_RUN ? 'true' : 'false';
         document.getElementById('phase4blite-dry-run').value = DEFAULT_PHASE4BLITE_DRY_RUN ? 'true' : 'false';
+        document.getElementById('phase4cmf-dry-run').value = DEFAULT_PHASE4CMF_DRY_RUN ? 'true' : 'false';
+        document.getElementById('phase4d-dry-run').value = DEFAULT_PHASE4D_DRY_RUN ? 'true' : 'false';
+        document.getElementById('phase4d-listings-table').value = config.phase4DListingsTable || DEFAULT_PHASE4D_LISTINGS_TABLE;
+        syncPhase4LegacyInputsToUnified();
+        const phase4bTestTableInput = document.getElementById('phase4b-test-table-name');
+        if (phase4bTestTableInput) {
+          phase4bTestTableInput.value = '';
+        }
         document.getElementById('phase4-rules-logic-sheet').value = DEFAULT_PHASE4_RULES_LOGIC_SHEET;
         document.getElementById('phase4-global-defaults-table').value = config.phase4GlobalDefaultsTable || DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE;
         document.getElementById('phase4-rules-drive-file').value = config.phase4RulesDriveFile || '';
@@ -1427,6 +1647,12 @@
           config.phase4BClickupListId || config.clickupListId || DEFAULT_PHASE4B_CLICKUP_LIST_ID;
         document.getElementById('phase4b-clickup-open-status').value =
           config.phase4BClickupOpenStatus || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
+        document.getElementById('phase4c-clickup-list-name').value =
+          config.phase4CClickupListName || config.phase4BClickupListName || '';
+        document.getElementById('phase4c-clickup-list-id').value =
+          config.phase4CClickupListId || config.phase4BClickupListId || DEFAULT_PHASE4C_CLICKUP_LIST_ID;
+        document.getElementById('phase4c-clickup-open-status').value =
+          config.phase4CClickupOpenStatus || config.phase4BClickupOpenStatus || DEFAULT_PHASE4C_CLICKUP_OPEN_STATUS;
         document.getElementById('ebay-mock-csv-path').value = config.ebayMockCsvPath || '';
         document.getElementById('ebay-mock-table-name').value =
           config.ebayMockTableName || DEFAULT_EBAY_MOCK_TABLE_NAME;
@@ -1465,6 +1691,10 @@
             document.getElementById('phase4-rules-logic-sheet').value =
               liteConfig.logicSheetName || document.getElementById('phase4-rules-logic-sheet').value;
             document.getElementById('phase4blite-dry-run').value = liteConfig.dryRun === false ? 'false' : 'true';
+            const phase4bTestTableInput = document.getElementById('phase4b-test-table-name');
+            if (phase4bTestTableInput) {
+              phase4bTestTableInput.value = '';
+            }
             if (liteConfig.openaiApiKey) {
               document.getElementById('openai-api-key').value = liteConfig.openaiApiKey;
             }
@@ -1475,6 +1705,34 @@
               liteConfig.clickupListId || document.getElementById('phase4b-clickup-list-id').value;
             document.getElementById('phase4b-clickup-open-status').value =
               liteConfig.clickupOpenStatus || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
+          }
+        }
+        if (window.phase4CMFAPI && typeof window.phase4CMFAPI.getConfig === 'function') {
+          const mfConfig = await window.phase4CMFAPI.getConfig();
+          if (mfConfig && typeof mfConfig === 'object') {
+            document.getElementById('phase4-rules-drive-file').value =
+              mfConfig.rulesDriveFile || document.getElementById('phase4-rules-drive-file').value;
+            document.getElementById('phase4-rules-logic-sheet').value =
+              mfConfig.logicSheetName || document.getElementById('phase4-rules-logic-sheet').value;
+            document.getElementById('phase4cmf-dry-run').value = mfConfig.dryRun === false ? 'false' : 'true';
+            document.getElementById('phase4c-clickup-list-name').value =
+              mfConfig.clickupListName || document.getElementById('phase4c-clickup-list-name').value;
+            document.getElementById('phase4c-clickup-list-id').value =
+              mfConfig.clickupListId || document.getElementById('phase4c-clickup-list-id').value;
+            document.getElementById('phase4c-clickup-open-status').value =
+              mfConfig.clickupOpenStatus || DEFAULT_PHASE4C_CLICKUP_OPEN_STATUS;
+          }
+        }
+        if (window.phase4DAPI && typeof window.phase4DAPI.getConfig === 'function') {
+          const phase4DConfig = await window.phase4DAPI.getConfig();
+          if (phase4DConfig && typeof phase4DConfig === 'object') {
+            document.getElementById('phase4-rules-drive-file').value =
+              phase4DConfig.rulesDriveFile || document.getElementById('phase4-rules-drive-file').value;
+            document.getElementById('phase4-rules-logic-sheet').value =
+              phase4DConfig.logicSheetName || document.getElementById('phase4-rules-logic-sheet').value;
+            document.getElementById('phase4d-dry-run').value = phase4DConfig.dryRun === false ? 'false' : 'true';
+            document.getElementById('phase4d-listings-table').value =
+              phase4DConfig.listingsTableName || DEFAULT_PHASE4D_LISTINGS_TABLE;
           }
         }
         if (window.ebayMockImportAPI && typeof window.ebayMockImportAPI.getConfig === 'function') {
@@ -1499,6 +1757,7 @@
           await pullSourceFromInventoryExport(true);
         }
         await refreshWritebackStatus(true);
+        syncPhase4LegacyInputsToUnified();
         setRunState('Idle', 'Configuration loaded. Validate setup, then run sync.');
         updateHealthBadges();
         updateRunButtonState();
@@ -1593,6 +1852,65 @@
       if (previousValue && items.some(item => item.value === previousValue)) {
         selectEl.value = previousValue;
       }
+    }
+
+    function syncPhase4UnifiedInputsToLegacy() {
+      const unifiedBase = document.getElementById('phase4-unified-item-specific-base-id')?.value?.trim() || '';
+      const unifiedRulesFile = document.getElementById('phase4-unified-rules-drive-file')?.value?.trim() || '';
+      const unifiedLogic = document.getElementById('phase4-unified-rules-logic-sheet')?.value?.trim() || DEFAULT_PHASE4_RULES_LOGIC_SHEET;
+      const unifiedOpenAiKey = document.getElementById('phase4-unified-openai-api-key')?.value?.trim() || '';
+      const unifiedOpenAiModel = document.getElementById('phase4-unified-openai-model')?.value?.trim() || DEFAULT_OPENAI_MODEL;
+      const unifiedClickupName = document.getElementById('phase4-unified-clickup-list-name')?.value?.trim() || '';
+      const unifiedClickupId = document.getElementById('phase4-unified-clickup-list-id')?.value?.trim() || '';
+      const unifiedClickupStatus = document.getElementById('phase4-unified-clickup-open-status')?.value?.trim() || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
+      const unifiedListingsTable = document.getElementById('phase4-unified-listings-table')?.value?.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE;
+      const unifiedDryRun = document.getElementById('phase4-unified-dry-run')?.value === 'true';
+
+      if (unifiedBase) document.getElementById('item-specific-base-id').value = unifiedBase;
+      if (unifiedRulesFile) document.getElementById('phase4-rules-drive-file').value = unifiedRulesFile;
+      document.getElementById('phase4-rules-logic-sheet').value = unifiedLogic;
+      if (unifiedOpenAiKey) document.getElementById('openai-api-key').value = unifiedOpenAiKey;
+      document.getElementById('openai-model').value = unifiedOpenAiModel;
+      document.getElementById('phase4b-clickup-list-name').value = unifiedClickupName;
+      document.getElementById('phase4c-clickup-list-name').value = unifiedClickupName;
+      document.getElementById('phase4b-clickup-list-id').value = unifiedClickupId;
+      document.getElementById('phase4c-clickup-list-id').value = unifiedClickupId;
+      document.getElementById('phase4b-clickup-open-status').value = unifiedClickupStatus;
+      document.getElementById('phase4c-clickup-open-status').value = unifiedClickupStatus;
+      document.getElementById('phase4d-listings-table').value = unifiedListingsTable;
+
+      document.getElementById('phase4-dry-run').value = unifiedDryRun ? 'true' : 'false';
+      document.getElementById('phase4-rules-dry-run').value = unifiedDryRun ? 'true' : 'false';
+      document.getElementById('phase4blite-dry-run').value = unifiedDryRun ? 'true' : 'false';
+      document.getElementById('phase4cmf-dry-run').value = unifiedDryRun ? 'true' : 'false';
+      document.getElementById('phase4d-dry-run').value = unifiedDryRun ? 'true' : 'false';
+    }
+
+    function syncPhase4LegacyInputsToUnified() {
+      document.getElementById('phase4-unified-item-specific-base-id').value =
+        document.getElementById('item-specific-base-id').value.trim();
+      document.getElementById('phase4-unified-rules-drive-file').value =
+        document.getElementById('phase4-rules-drive-file').value.trim();
+      document.getElementById('phase4-unified-rules-logic-sheet').value =
+        document.getElementById('phase4-rules-logic-sheet').value.trim() || DEFAULT_PHASE4_RULES_LOGIC_SHEET;
+      document.getElementById('phase4-unified-openai-api-key').value =
+        document.getElementById('openai-api-key').value.trim();
+      document.getElementById('phase4-unified-openai-model').value =
+        document.getElementById('openai-model').value.trim() || DEFAULT_OPENAI_MODEL;
+      document.getElementById('phase4-unified-clickup-list-name').value =
+        document.getElementById('phase4b-clickup-list-name').value.trim() ||
+        document.getElementById('phase4c-clickup-list-name').value.trim();
+      document.getElementById('phase4-unified-clickup-list-id').value =
+        document.getElementById('phase4b-clickup-list-id').value.trim() ||
+        document.getElementById('phase4c-clickup-list-id').value.trim();
+      document.getElementById('phase4-unified-clickup-open-status').value =
+        document.getElementById('phase4b-clickup-open-status').value.trim() ||
+        document.getElementById('phase4c-clickup-open-status').value.trim() ||
+        DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
+      document.getElementById('phase4-unified-listings-table').value =
+        document.getElementById('phase4d-listings-table').value.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE;
+      document.getElementById('phase4-unified-dry-run').value =
+        document.getElementById('phase4-rules-dry-run').value === 'false' ? 'false' : 'true';
     }
 
     async function fetchAirtableBases(silent = false, strict = false) {
@@ -1690,6 +2008,7 @@
     }
 
     function collectConfigFromForm() {
+      syncPhase4UnifiedInputsToLegacy();
       return {
         sheetId: document.getElementById('sheet-id').value.trim(),
         tabName: document.getElementById('tab-name').value.trim(),
@@ -1717,6 +2036,16 @@
         phase4GlobalDefaultsTable: document.getElementById('phase4-global-defaults-table').value.trim() || DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE,
         phase4RulesDryRun: document.getElementById('phase4-rules-dry-run').value === 'true',
         phase4BLiteDryRun: document.getElementById('phase4blite-dry-run').value === 'true',
+        phase4CMFDryRun: document.getElementById('phase4cmf-dry-run').value === 'true',
+        phase4DDryRun: document.getElementById('phase4d-dry-run').value === 'true',
+        phase4DListingsTable: document.getElementById('phase4d-listings-table').value.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE,
+        phase4RunMirror: true,
+        phase4Run4A: true,
+        phase4Run4B: true,
+        phase4Run4C: true,
+        phase4Run4D: true,
+        testTableName: '',
+        testMaxTables: 0,
         openaiApiKey: document.getElementById('openai-api-key').value.trim(),
         openaiModel: document.getElementById('openai-model').value.trim() || DEFAULT_OPENAI_MODEL,
         phase4BClickupListName:
@@ -1727,6 +2056,14 @@
         phase4BClickupOpenStatus:
           document.getElementById('phase4b-clickup-open-status').value.trim() ||
           DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS,
+        phase4CClickupListName:
+          document.getElementById('phase4c-clickup-list-name').value.trim(),
+        phase4CClickupListId:
+          document.getElementById('phase4c-clickup-list-id').value.trim() ||
+          DEFAULT_PHASE4C_CLICKUP_LIST_ID,
+        phase4CClickupOpenStatus:
+          document.getElementById('phase4c-clickup-open-status').value.trim() ||
+          DEFAULT_PHASE4C_CLICKUP_OPEN_STATUS,
         ebayMockCsvPath: document.getElementById('ebay-mock-csv-path').value.trim(),
         ebayMockTableName:
           document.getElementById('ebay-mock-table-name').value.trim() || DEFAULT_EBAY_MOCK_TABLE_NAME,
@@ -1917,17 +2254,22 @@
           if (!payload) return;
           const percent = Number(payload.percent || 0);
           document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
-          document.getElementById('progress-text').textContent = formatPhase4ProgressText(payload);
+          const progressText = formatPhase4ProgressText(payload);
+          document.getElementById('progress-text').textContent = progressText;
           const statusText = document.getElementById('phase4-status-text');
-          statusText.textContent = `Phase 4 status: ${formatPhase4ProgressText(payload)}`;
+          statusText.textContent = `Phase 4 status: ${progressText}`;
 
           if (payload.counts) {
             renderPhase4Summary(payload.counts);
           }
 
-          if (payload.stage) {
+          const hasProgressDetail =
+            Boolean(String(payload.message || '').trim()) ||
+            Boolean(payload.stage) ||
+            Boolean(payload.counts);
+          if (hasProgressDetail) {
             const level = payload.stage === 'error' ? 'error' : 'info';
-            logLine(`Phase4 progress: ${formatPhase4ProgressText(payload)}`, level);
+            logLine(`Phase4 progress: ${progressText}`, level);
           }
         });
       }
@@ -1964,6 +2306,38 @@
         });
       }
 
+      if (window.phase4CMFAPI && typeof window.phase4CMFAPI.onProgress === 'function') {
+        window.phase4CMFAPI.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase4CMFProgressText(payload);
+          const statusText = document.getElementById('phase4cmf-status-text');
+          statusText.textContent = `Phase 4C status: ${formatPhase4CMFProgressText(payload)}`;
+
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`Phase4C progress: ${formatPhase4CMFProgressText(payload)}`, level);
+          }
+        });
+      }
+
+      if (window.phase4DAPI && typeof window.phase4DAPI.onProgress === 'function') {
+        window.phase4DAPI.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase4DProgressText(payload);
+          const statusText = document.getElementById('phase4d-status-text');
+          statusText.textContent = `Phase 4D status: ${formatPhase4DProgressText(payload)}`;
+
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`Phase4D progress: ${formatPhase4DProgressText(payload)}`, level);
+          }
+        });
+      }
+
       if (window.phase4CombinedAPI && typeof window.phase4CombinedAPI.onProgress === 'function') {
         window.phase4CombinedAPI.onProgress((event, payload) => {
           if (!payload) return;
@@ -1986,6 +2360,36 @@
           if (payload.stage) {
             const level = payload.stage === 'error' ? 'error' : 'info';
             logLine(`Phase4 Combined progress: ${formatPhase4CombinedProgressText(payload)}`, level);
+          }
+        });
+      }
+
+      if (window.phase4PipelineAPI && typeof window.phase4PipelineAPI.onProgress === 'function') {
+        window.phase4PipelineAPI.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase4PipelineProgressText(payload);
+          const statusText = document.getElementById('phase4-pipeline-status-text');
+          if (statusText) {
+            statusText.textContent = `Phase 4 pipeline status: ${formatPhase4PipelineProgressText(payload)}`;
+          }
+          const message = String(payload.message || '').trim();
+          if (message.startsWith('[Mirror]')) {
+            document.getElementById('phase4-status-text').textContent = `Phase 4 status: ${message}`;
+          } else if (message.startsWith('[4A]')) {
+            document.getElementById('phase4-rules-status-text').textContent = `Phase 4A status: ${message}`;
+          } else if (message.startsWith('[4B]')) {
+            document.getElementById('phase4blite-status-text').textContent = `Phase 4B-lite status: ${message}`;
+          } else if (message.startsWith('[4C]')) {
+            document.getElementById('phase4cmf-status-text').textContent = `Phase 4C status: ${message}`;
+          } else if (message.startsWith('[4D]')) {
+            document.getElementById('phase4d-status-text').textContent = `Phase 4D status: ${message}`;
+          }
+
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`Phase4 Pipeline progress: ${formatPhase4PipelineProgressText(payload)}`, level);
           }
         });
       }
@@ -2019,6 +2423,16 @@
             const level = stage === 'failure' || stage === 'error' ? 'error' : 'info';
             logLine(`ItemSpecific: ${message}`, level);
           }
+        });
+      }
+
+      if (window.inventoryAutoChainAPI && typeof window.inventoryAutoChainAPI.onLog === 'function') {
+        window.inventoryAutoChainAPI.onLog((event, payload) => {
+          if (!payload) return;
+          const text = String(payload.message || '').trim();
+          if (!text) return;
+          const level = String(payload.level || 'info').toLowerCase() === 'error' ? 'error' : 'info';
+          logLine(`[Auto Chain] ${text}`, level);
         });
       }
     }
@@ -2134,7 +2548,7 @@
     }
 
     async function runPhase4() {
-      if (isPhase4Running || isRunning || isPhase3Running || isItemSpecificSyncRunning) return;
+      if (isPhase4PipelineRunning || isPhase4Running || isRunning || isPhase3Running || isItemSpecificSyncRunning) return;
       if (!window.phase4API || typeof window.phase4API.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4 API is unavailable.');
         return;
@@ -2199,8 +2613,76 @@
       }
     }
 
+    async function runPhase4Pipeline() {
+      if (isPhase4PipelineRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isItemSpecificSyncRunning) return;
+      if (!window.phase4PipelineAPI || typeof window.phase4PipelineAPI.run !== 'function') {
+        showStatus('run-status', 'error', 'Phase 4 pipeline API is unavailable.');
+        return;
+      }
+
+      syncPhase4UnifiedInputsToLegacy();
+      const rulesDriveFile = document.getElementById('phase4-rules-drive-file').value.trim();
+      const openaiApiKey = document.getElementById('openai-api-key').value.trim();
+      const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
+      const clickupListId = document.getElementById('phase4b-clickup-list-id').value.trim();
+      if (!rulesDriveFile) {
+        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4 pipeline.');
+        return;
+      }
+      if (!openaiApiKey) {
+        setFieldError('openai-api-key', 'OpenAI API Key is required.');
+        showStatus('run-status', 'error', 'Enter OpenAI API Key before running Phase 4 pipeline.');
+        return;
+      }
+      if (!itemSpecificBaseId) {
+        setFieldError('item-specific-base-id', 'Item Specifics Base ID is required.');
+        showStatus('run-status', 'error', 'Enter Item Specifics Base ID before running Phase 4.');
+        return;
+      }
+      if (!clickupListId) {
+        setFieldError('phase4b-clickup-list-id', 'ClickUp List ID is required.');
+        showStatus('run-status', 'error', 'Enter ClickUp List ID before running Phase 4.');
+        return;
+      }
+
+      isPhase4PipelineRunning = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 4 pipeline is in progress...');
+      showStatus('run-status', 'info', 'Phase 4 pipeline started...');
+      document.getElementById('progress-bar').style.width = '1%';
+      document.getElementById('progress-text').textContent = 'Phase 4 pipeline: starting...';
+      document.getElementById('phase4-pipeline-status-text').textContent = 'Phase 4 pipeline status: running...';
+      logLine('Starting Phase 4 pipeline run.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase4PipelineAPI.run(config);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Phase 4 pipeline failed.');
+        }
+        const summary = result.summary || {};
+        setRunState('Success', 'Phase 4 pipeline completed successfully.');
+        showStatus('run-status', 'success', 'Phase 4 pipeline completed.');
+        document.getElementById('phase4-pipeline-status-text').textContent = 'Phase 4 pipeline status: completed.';
+        logLine(
+          `Phase 4 pipeline completed. ` +
+          `Mirror=${summary.mirror ? 'yes' : 'no'}, 4A=${summary.phase4A ? 'yes' : 'no'}, 4B=${summary.phase4B ? 'yes' : 'no'}, 4C=${summary.phase4C ? 'yes' : 'no'}, 4D=${summary.phase4D ? 'yes' : 'no'}`
+        );
+      } catch (err) {
+        setRunState('Error', `Phase 4 pipeline failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 4 pipeline failed: ${err.message}`);
+        document.getElementById('phase4-pipeline-status-text').textContent = `Phase 4 pipeline status: failed (${err.message})`;
+        logLine(`Phase 4 pipeline failed: ${err.message}`, 'error');
+      } finally {
+        isPhase4PipelineRunning = false;
+        updateRunButtonState();
+      }
+    }
+
     async function runItemSpecificSync() {
-      if (isRunning || isPhase3Running || isItemSpecificSyncRunning) return;
+      if (isPhase4PipelineRunning || isRunning || isPhase3Running || isItemSpecificSyncRunning) return;
       if (!window.itemSpecificSyncAPI || typeof window.itemSpecificSyncAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Item Specific sync API is unavailable.');
         return;
@@ -2258,7 +2740,7 @@
     }
 
     async function runPhase4Rules() {
-      if (isPhase4RulesRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isItemSpecificSyncRunning) return;
+      if (isPhase4PipelineRunning || isPhase4RulesRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isItemSpecificSyncRunning) return;
       if (!window.phase4RulesAPI || typeof window.phase4RulesAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4A API is unavailable.');
         return;
@@ -2330,7 +2812,7 @@
     }
 
     async function runPhase4BLite() {
-      if (isPhase4BLiteRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isItemSpecificSyncRunning) return;
+      if (isPhase4PipelineRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isItemSpecificSyncRunning) return;
       if (!window.phase4BLiteAPI || typeof window.phase4BLiteAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4B-lite API is unavailable.');
         return;
@@ -2339,6 +2821,7 @@
       const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
       const rulesDriveFile = document.getElementById('phase4-rules-drive-file').value.trim();
       const openaiApiKey = document.getElementById('openai-api-key').value.trim();
+      const phase4BClickupListId = document.getElementById('phase4b-clickup-list-id').value.trim();
       if (!itemSpecificBaseId) {
         setFieldError('item-specific-base-id', 'Item Specifics Base ID is required.');
         showStatus('run-status', 'error', 'Enter Item Specifics Base ID before running Phase 4B-lite.');
@@ -2352,6 +2835,11 @@
       if (!openaiApiKey) {
         setFieldError('openai-api-key', 'OpenAI API Key is required.');
         showStatus('run-status', 'error', 'Enter OpenAI API Key before running Phase 4B-lite.');
+        return;
+      }
+      if (!phase4BClickupListId) {
+        setFieldError('phase4b-clickup-list-id', 'Phase 4B ClickUp List ID is required.');
+        showStatus('run-status', 'error', 'Enter Phase 4B ClickUp List ID before running Phase 4B-lite.');
         return;
       }
 
@@ -2374,12 +2862,12 @@
           showStatus(
             'run-status',
             'success',
-            `Phase 4B-lite completed (${mode}). VF Updated=${summary.vfFieldsUpdated || 0}, VMF Updated=${summary.vmfFieldsUpdated || 0}, VMF Tasks Created=${summary.vmfLowConfidenceTasksCreated || 0}, VMF Tasks Updated=${summary.vmfLowConfidenceTasksUpdated || 0}.`
+            `Phase 4B-lite completed (${mode}). VF Updated=${summary.vfFieldsUpdated || 0}, VMF Updated=${summary.vmfFieldsUpdated || 0}, VMF Tasks Created=${summary.vmfLowConfidenceTasksCreated || 0}, VMF Tasks Updated=${summary.vmfLowConfidenceTasksUpdated || 0}, VMF Writeback=${summary.vmfDeterminedWritebackSucceeded || 0}, VMF Closed=${summary.vmfDeterminedTasksClosed || 0}.`
           );
           document.getElementById('phase4blite-status-text').textContent =
             `Phase 4B-lite status: completed (${mode}). VF Updated ${summary.vfFieldsUpdated || 0}, VMF Updated ${summary.vmfFieldsUpdated || 0}.`;
           logLine(
-            `Phase 4B-lite completed. Mode=${mode}, Tables=${summary.tablesScanned || 0}, Rows=${summary.rowsScanned || 0}, RowsWithIPN=${summary.rowsWithIPN || 0}, MissingMaster=${summary.masterPartsMissing || 0}, VFEvaluated=${summary.vfFieldsEvaluated || 0}, VFUpdated=${summary.vfFieldsUpdated || 0}, VFSkippedLowConfidence=${summary.vfFieldsLowConfidenceSkipped || 0}, VFDotSkipped=${summary.vfDotNumberSkipped || 0}, VMFEvaluated=${summary.vmfFieldsEvaluated || 0}, VMFUpdated=${summary.vmfFieldsUpdated || 0}, VMFTasksCreated=${summary.vmfLowConfidenceTasksCreated || 0}, VMFTasksUpdated=${summary.vmfLowConfidenceTasksUpdated || 0}, VMFTasksSkippedExisting=${summary.vmfLowConfidenceTasksSkippedExisting || 0}`
+            `Phase 4B-lite completed. Mode=${mode}, Tables=${summary.tablesScanned || 0}, Rows=${summary.rowsScanned || 0}, RowsWithIPN=${summary.rowsWithIPN || 0}, MissingMaster=${summary.masterPartsMissing || 0}, VFEvaluated=${summary.vfFieldsEvaluated || 0}, VFUpdated=${summary.vfFieldsUpdated || 0}, VFSkippedLowConfidence=${summary.vfFieldsLowConfidenceSkipped || 0}, VFDotSkipped=${summary.vfDotNumberSkipped || 0}, VMFEvaluated=${summary.vmfFieldsEvaluated || 0}, VMFUpdated=${summary.vmfFieldsUpdated || 0}, VMFTasksCreated=${summary.vmfLowConfidenceTasksCreated || 0}, VMFTasksUpdated=${summary.vmfLowConfidenceTasksUpdated || 0}, VMFTasksSkippedExisting=${summary.vmfLowConfidenceTasksSkippedExisting || 0}, VMFDeterminedFound=${summary.vmfDeterminedTasksFound || 0}, VMFWritebackSucceeded=${summary.vmfDeterminedWritebackSucceeded || 0}, VMFWritebackFailed=${summary.vmfDeterminedWritebackFailed || 0}, VMFClosed=${summary.vmfDeterminedTasksClosed || 0}, VMFCloseFailed=${summary.vmfDeterminedTaskCloseFailed || 0}`
           );
           if (Array.isArray(summary.writeSamples) && summary.writeSamples.length > 0) {
             summary.writeSamples.forEach(line => logLine(`Phase4B-lite: ${line}`));
@@ -2404,8 +2892,155 @@
       }
     }
 
+    async function runPhase4CMF() {
+      if (isPhase4PipelineRunning || isPhase4CMFRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning) return;
+      if (!window.phase4CMFAPI || typeof window.phase4CMFAPI.run !== 'function') {
+        showStatus('run-status', 'error', 'Phase 4C API is unavailable.');
+        return;
+      }
+
+      const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
+      const rulesDriveFile = document.getElementById('phase4-rules-drive-file').value.trim();
+      const phase4CClickupListId = document.getElementById('phase4c-clickup-list-id').value.trim() || document.getElementById('phase4b-clickup-list-id').value.trim();
+      if (!itemSpecificBaseId) {
+        setFieldError('item-specific-base-id', 'Item Specifics Base ID is required.');
+        showStatus('run-status', 'error', 'Enter Item Specifics Base ID before running Phase 4C.');
+        return;
+      }
+      if (!rulesDriveFile) {
+        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4C.');
+        return;
+      }
+      if (!phase4CClickupListId) {
+        setFieldError('phase4c-clickup-list-id', 'Phase 4C ClickUp List ID is required.');
+        showStatus('run-status', 'error', 'Enter Phase 4C ClickUp List ID before running Phase 4C.');
+        return;
+      }
+
+      isPhase4CMFRunning = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 4C (MF) is in progress...');
+      showStatus('run-status', 'info', 'Phase 4C (MF) started...');
+      document.getElementById('phase4cmf-status-text').textContent = 'Phase 4C status: running...';
+      logLine('Starting Phase 4C (MF) run.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase4CMFAPI.run(config);
+
+        if (result?.success) {
+          const summary = result.summary || {};
+          const mode = summary.dryRun ? 'dry run' : 'write run';
+          setRunState('Success', 'Phase 4C completed successfully.');
+          showStatus(
+            'run-status',
+            'success',
+            `Phase 4C completed (${mode}). MF Tasks Created=${summary.mfTasksCreated || 0}, MF Tasks Updated=${summary.mfTasksUpdated || 0}, MF Writebacks=${summary.mfWritebacksCompleted || 0}.`
+          );
+          document.getElementById('phase4cmf-status-text').textContent =
+            `Phase 4C status: completed (${mode}). Tasks ${summary.mfTasksCreated || 0} created, ${summary.mfTasksUpdated || 0} updated, writebacks ${summary.mfWritebacksCompleted || 0}.`;
+          logLine(
+            `Phase 4C completed. Mode=${mode}, Tables=${summary.tablesScanned || 0}, Rows=${summary.rowsScanned || 0}, RowsWithIPN=${summary.rowsWithIPN || 0}, MFFieldsScanned=${summary.mfFieldsScanned || 0}, MFAlreadyFilled=${summary.mfFieldsAlreadyFilled || 0}, MFTasksCreated=${summary.mfTasksCreated || 0}, MFTasksUpdated=${summary.mfTasksUpdated || 0}, MFTasksSkippedExisting=${summary.mfTasksSkippedExisting || 0}, MFWritebacksCompleted=${summary.mfWritebacksCompleted || 0}, MFWritebacksSkippedAlreadyFilled=${summary.mfWritebacksSkippedAlreadyFilled || 0}, FieldsMissingInSchema=${summary.fieldsMissingInSchema || 0}`
+          );
+          if (Array.isArray(summary.mfTaskSamples) && summary.mfTaskSamples.length > 0) {
+            summary.mfTaskSamples.forEach(line => logLine(`Phase4C: ${line}`));
+          }
+          if (Array.isArray(summary.mfWritebackSamples) && summary.mfWritebackSamples.length > 0) {
+            summary.mfWritebackSamples.forEach(line => logLine(`Phase4C: ${line}`));
+          }
+          if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+            summary.errors.forEach(err => logLine(`Phase4C: ${err}`, 'error'));
+          }
+        } else {
+          throw new Error(result?.message || 'Phase 4C failed.');
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 4C failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 4C failed: ${err.message}`);
+        document.getElementById('phase4cmf-status-text').textContent = `Phase 4C status: failed (${err.message})`;
+        logLine(`Phase 4C failed: ${err.message}`, 'error');
+      } finally {
+        isPhase4CMFRunning = false;
+        updateRunButtonState();
+      }
+    }
+
+    async function runPhase4D() {
+      if (isPhase4PipelineRunning || isPhase4DRunning || isPhase4CMFRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning) return;
+      if (!window.phase4DAPI || typeof window.phase4DAPI.run !== 'function') {
+        showStatus('run-status', 'error', 'Phase 4D API is unavailable.');
+        return;
+      }
+
+      const rulesDriveFile = document.getElementById('phase4-rules-drive-file').value.trim();
+      const openaiApiKey = document.getElementById('openai-api-key').value.trim();
+      const listingsTable = document.getElementById('phase4d-listings-table').value.trim();
+      if (!rulesDriveFile) {
+        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4D.');
+        return;
+      }
+      if (!openaiApiKey) {
+        setFieldError('openai-api-key', 'OpenAI API Key is required.');
+        showStatus('run-status', 'error', 'Enter OpenAI API Key before running Phase 4D.');
+        return;
+      }
+      if (!listingsTable) {
+        setFieldError('phase4d-listings-table', 'Listings table name is required.');
+        showStatus('run-status', 'error', 'Enter listings table name before running Phase 4D.');
+        return;
+      }
+
+      isPhase4DRunning = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 4D is in progress...');
+      showStatus('run-status', 'info', 'Phase 4D started...');
+      document.getElementById('progress-bar').style.width = '1%';
+      document.getElementById('progress-text').textContent = 'Phase 4D: Starting...';
+      document.getElementById('phase4d-status-text').textContent = 'Phase 4D status: running...';
+      logLine('Starting Phase 4D run.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase4DAPI.run(config);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Phase 4D failed.');
+        }
+        const summary = result.summary || {};
+        const mode = summary.dryRun ? 'dry run' : 'write run';
+        setRunState('Success', 'Phase 4D completed successfully.');
+        showStatus(
+          'run-status',
+          'success',
+          `Phase 4D completed (${mode}). FsV=${summary.fsvFieldsUpdated || 0}, V1=${summary.v1FieldsUpdated || 0}, V2=${summary.v2FieldsUpdated || 0}, VB=${summary.vbFieldsUpdated || 0}.`
+        );
+        document.getElementById('phase4d-status-text').textContent =
+          `Phase 4D status: completed (${mode}). FsV ${summary.fsvFieldsUpdated || 0}, V1 ${summary.v1FieldsUpdated || 0}, V2 ${summary.v2FieldsUpdated || 0}, VB ${summary.vbFieldsUpdated || 0}.`;
+        logLine(
+          `Phase 4D completed. Mode=${mode}, ListingsScanned=${summary.listingsScanned || 0}, ListingsEligible=${summary.listingsEligible || 0}, MasterPartsMissing=${summary.masterPartsMissing || 0}, ListingFieldsCreated=${summary.listingFieldsCreated || 0}, FsVEvaluated=${summary.fsvFieldsEvaluated || 0}, FsVUpdated=${summary.fsvFieldsUpdated || 0}, FsVDNA=${summary.fsvDNAWritten || 0}, V1Evaluated=${summary.v1FieldsEvaluated || 0}, V1Updated=${summary.v1FieldsUpdated || 0}, V1DNA=${summary.v1DNAWritten || 0}, V2Evaluated=${summary.v2FieldsEvaluated || 0}, V2Updated=${summary.v2FieldsUpdated || 0}, V2DNA=${summary.v2DNAWritten || 0}, V2DNASkippedOverwrite=${summary.v2DNASkippedOverwrite || 0}, VBEvaluated=${summary.vbFieldsEvaluated || 0}, VBUpdated=${summary.vbFieldsUpdated || 0}, VBLowConfidenceLeftBlank=${summary.vbLowConfidenceLeftBlank || 0}, ManualOverrideSkipped=${summary.manualOverrideSkipped || 0}`
+        );
+        if (Array.isArray(summary.sampleOutputs) && summary.sampleOutputs.length > 0) {
+          summary.sampleOutputs.forEach(line => logLine(`Phase4D: ${line}`));
+        }
+        if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+          summary.errors.forEach(err => logLine(`Phase4D: ${err}`, 'error'));
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 4D failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 4D failed: ${err.message}`);
+        document.getElementById('phase4d-status-text').textContent = `Phase 4D status: failed (${err.message})`;
+        logLine(`Phase 4D failed: ${err.message}`, 'error');
+      } finally {
+        isPhase4DRunning = false;
+        updateRunButtonState();
+      }
+    }
+
     async function runPhase4Combined() {
-      if (isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning) return;
+      if (isPhase4PipelineRunning || isPhase4CombinedRunning || isPhase4CMFRunning || isPhase4DRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning) return;
       if (!window.phase4CombinedAPI || typeof window.phase4CombinedAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4 Combined API is unavailable.');
         return;
@@ -2414,6 +3049,7 @@
       const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
       const rulesDriveFile = document.getElementById('phase4-rules-drive-file').value.trim();
       const openaiApiKey = document.getElementById('openai-api-key').value.trim();
+      const phase4BClickupListId = document.getElementById('phase4b-clickup-list-id').value.trim();
       if (!itemSpecificBaseId) {
         setFieldError('item-specific-base-id', 'Item Specifics Base ID is required.');
         showStatus('run-status', 'error', 'Enter Item Specifics Base ID before running Phase 4 Combined.');
@@ -2427,6 +3063,11 @@
       if (!openaiApiKey) {
         setFieldError('openai-api-key', 'OpenAI API Key is required.');
         showStatus('run-status', 'error', 'Enter OpenAI API Key before running Phase 4 Combined.');
+        return;
+      }
+      if (!phase4BClickupListId) {
+        setFieldError('phase4b-clickup-list-id', 'Phase 4B ClickUp List ID is required.');
+        showStatus('run-status', 'error', 'Enter Phase 4B ClickUp List ID before running Phase 4 Combined.');
         return;
       }
 
@@ -2478,7 +3119,7 @@
     }
 
     async function runEbayMockImport() {
-      if (isEbayMockImportRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning) return;
+      if (isPhase4PipelineRunning || isEbayMockImportRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning) return;
       if (!window.ebayMockImportAPI || typeof window.ebayMockImportAPI.run !== 'function') {
         showStatus('run-status', 'error', 'eBay Mock Import API is unavailable.');
         return;

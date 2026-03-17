@@ -13,9 +13,24 @@ const path = require('path');
 loadEnv();
 
 const LOW_CONFIDENCE_THRESHOLD = 0.75;
+const DEFAULT_PHASE4B_DETERMINED_STATUS = 'Value Determined';
+const DEFAULT_PHASE4B_COMPLETED_STATUS = 'Completed / Closed';
 const DEFAULT_EBAY_MOCK_TABLE = 'eBay Listings (API) (Mock)';
+const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const EBAY_MOCK_TITLE_FIELD = 'Product Title';
 const EBAY_MOCK_CONDITIONS_FIELD = 'Listing Conditions and Options';
+const EBAY_MOCK_DESCRIPTION_FIELD = 'Description';
+const EBAY_LISTING_TITLE_FIELD = 'Product Title';
+const EBAY_LISTING_CONDITIONS_FIELD = 'c: partshunter203 ebay MOTORS conditions & options';
+const EBAY_LISTING_IPN_FIELD = 'c: partshunter203 ebay MOTORS interchange part number';
+const EBAY_LISTING_RECORD_KEY_FIELD = 'Record Key';
+const EBAY_LISTING_DESCRIPTION_FIELDS = [
+  'Description',
+  'Listing Description',
+  'Item Description',
+  'Product Description',
+  'c: partshunter203 ebay MOTORS description'
+];
 const EBAY_MOCK_KEY_FIELDS = [
   'C: partshunter203 ebay MOTORS interchange part number',
   'IPN',
@@ -53,10 +68,88 @@ function firstNonEmptyField(fields = {}, names = []) {
   return '';
 }
 
+function escapeAirtableFormulaValue(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function buildEbayLookupFormula(ipn) {
+  const safe = escapeAirtableFormulaValue(ipn);
+  const clauses = EBAY_MOCK_KEY_FIELDS.map(fieldName => `{${fieldName}}="${safe}"`);
+  return `OR(${clauses.join(',')})`;
+}
+
+async function fetchEbayContextByIpn(service, tableName, ipn) {
+  const key = normalizeIpn(ipn);
+  if (!key) return null;
+
+  const params = {
+    filterByFormula: buildEbayLookupFormula(key),
+    maxRecords: 10,
+    fields: [
+      ...EBAY_MOCK_KEY_FIELDS,
+      EBAY_MOCK_TITLE_FIELD,
+      EBAY_MOCK_CONDITIONS_FIELD,
+      EBAY_MOCK_DESCRIPTION_FIELD
+    ]
+  };
+  const data = await service.request('GET', `/${encodeURIComponent(tableName)}`, { params });
+  const records = Array.isArray(data?.records) ? data.records : [];
+  if (records.length === 0) return null;
+
+  for (const row of records) {
+    const fields = row?.fields || {};
+    const productTitle = firstNonEmptyField(fields, [EBAY_MOCK_TITLE_FIELD, 'Title', 'Listing Title']);
+    const listingConditionsAndOptions = firstNonEmptyField(fields, [
+      EBAY_MOCK_CONDITIONS_FIELD,
+      'Listing Condition',
+      'Listing Conditions'
+    ]);
+    const listingDescription = firstNonEmptyField(fields, [
+      EBAY_MOCK_DESCRIPTION_FIELD,
+      'Listing Description',
+      'Item Description',
+      'Product Description'
+    ]);
+    if (!productTitle && !listingConditionsAndOptions && !listingDescription) continue;
+    return {
+      productTitle,
+      listingConditionsAndOptions,
+      listingDescription
+    };
+  }
+  return null;
+}
+
 function isBlankCell(value) {
   if (value === null || value === undefined) return true;
   if (typeof value === 'string') return normalizeText(value) === '';
   if (Array.isArray(value)) return value.length === 0;
+  return false;
+}
+
+function isFixedLockValue(value) {
+  const text = normalizeText(value).toLowerCase();
+  if (!text) return false;
+  return text === 'f' || text === 'fixed (f)' || text === 'fixed';
+}
+
+function isFieldFixedLocked(rowFields = {}, fieldName = '') {
+  const name = normalizeText(fieldName);
+  if (!name) return false;
+  const candidates = [
+    `${name} Rule`,
+    `${name} Rule Type`,
+    `${name} Source`,
+    'Rule Type',
+    'Population Rule',
+    'Item Specific Rule',
+    'Value Source',
+    'Population Source'
+  ];
+  for (const candidate of candidates) {
+    const raw = getFieldValueByName(rowFields, candidate);
+    if (isFixedLockValue(raw)) return true;
+  }
   return false;
 }
 
@@ -116,6 +209,13 @@ function parseArgs(argv = []) {
     aiMaxAttempts: Math.max(
       1,
       Number(getArg('--ai-max-attempts') || process.env.PHASE4B_AI_MAX_ATTEMPTS || 2) || 2
+    ),
+    testTableName: normalizeText(
+      getArg('--test-table-name') || process.env.PHASE4B_TEST_TABLE_NAME || ''
+    ),
+    testMaxTables: Math.max(
+      0,
+      Number(getArg('--test-max-tables') || process.env.PHASE4B_TEST_MAX_TABLES || 0) || 0
     ),
     promptCacheEnabled:
       normalizeText(getArg('--prompt-cache-enabled') || process.env.PHASE4B_PROMPT_CACHE_ENABLED || 'true')
@@ -201,7 +301,7 @@ function parseAllowedValues(raw) {
     .filter(Boolean);
 }
 
-function parseLogicWorksheet(ws, sheetName) {
+function parseLogicWorksheet(ws, sheetName, allowedRules = ['VF', 'VMF']) {
   if (!ws) {
     throw new Error(`Rules sheet '${sheetName}' not found.`);
   }
@@ -220,6 +320,7 @@ function parseLogicWorksheet(ws, sheetName) {
   const byPrefix = new Map();
   let scannedRows = 0;
 
+  const allowed = new Set((allowedRules || []).map(value => normalizeText(value).toUpperCase()).filter(Boolean));
   for (let r = 2; r <= ws.rowCount; r += 1) {
     const row = ws.getRow(r).values.slice(1);
     const prefix = normalizeText(row[idxPrefix]);
@@ -227,7 +328,7 @@ function parseLogicWorksheet(ws, sheetName) {
     const rule = normalizeText(row[idxRule]).toUpperCase();
     if (!prefix && !fieldName && !rule) continue;
     scannedRows += 1;
-    if (!['VF', 'VMF'].includes(rule)) continue;
+    if (!allowed.has(rule)) continue;
     if (!/^\d{3}$/.test(prefix)) continue;
     if (!fieldName.startsWith('C:')) continue;
 
@@ -301,6 +402,199 @@ function extractMasterPartsContext(fields = {}) {
 function summarizeContext(context = {}, maxPairs = 12) {
   const pairs = Object.entries(context).slice(0, maxPairs);
   return pairs.map(([k, v]) => `${k}: ${v}`).join('\n');
+}
+
+function parseTaskDescriptionLine(description = '', label = '') {
+  const safeLabel = String(label || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!safeLabel) return '';
+  const regex = new RegExp(`(?:^|\\n)\\s*${safeLabel}:\\s*([^\\n\\r]+)`, 'i');
+  const match = String(description || '').match(regex);
+  return normalizeText(match?.[1] || '');
+}
+
+function parsePhase4BTaskMetadata(task = {}) {
+  const description = String(task?.description || '');
+  return {
+    taskId: normalizeText(task?.id),
+    taskKey: parseTaskDescriptionLine(description, 'TaskKey'),
+    ipn: parseTaskDescriptionLine(description, 'IPN'),
+    prefix: parseTaskDescriptionLine(description, 'Prefix'),
+    tableName: parseTaskDescriptionLine(description, 'Table'),
+    recordId: parseTaskDescriptionLine(description, 'ItemSpecificRecordID'),
+    fieldName: parseTaskDescriptionLine(description, 'Field')
+  };
+}
+
+function extractFinalValueFromTask(task = {}) {
+  const customFieldCandidates = [
+    'Final Value',
+    'Value Determined',
+    'Determined Value',
+    'Resolved Value',
+    'Research Value',
+    'Manual Value'
+  ];
+  for (const candidate of customFieldCandidates) {
+    const value = normalizeText(ClickUpService.extractCustomFieldText(task, candidate));
+    if (value) return value;
+  }
+
+  const description = String(task?.description || '');
+  const descriptionCandidates = [
+    'Final Value',
+    'Value Determined',
+    'Determined Value',
+    'Resolved Value',
+    'Research Value',
+    'Manual Value'
+  ];
+  for (const label of descriptionCandidates) {
+    const value = parseTaskDescriptionLine(description, label);
+    if (value) return value;
+  }
+
+  return '';
+}
+
+function resolvePreferredClosedStatus(listData = {}, preferred = DEFAULT_PHASE4B_COMPLETED_STATUS) {
+  const statuses = Array.isArray(listData?.statuses) ? listData.statuses : [];
+  const preferredText = normalizeText(preferred).toLowerCase();
+  if (preferredText) {
+    const exact = statuses.find(
+      status => normalizeText(status?.status).toLowerCase() === preferredText
+    );
+    if (exact?.status) return String(exact.status);
+  }
+
+  const closed = statuses.find(
+    status => normalizeText(status?.type).toLowerCase() === 'closed'
+  );
+  if (closed?.status) return String(closed.status);
+
+  const byName = statuses.find(status => {
+    const text = normalizeText(status?.status).toLowerCase();
+    return text.includes('completed') || text.includes('closed') || text.includes('done');
+  });
+  if (byName?.status) return String(byName.status);
+
+  return '';
+}
+
+function buildFixedLockFields(tableFieldNames = new Set(), targetFieldName = '') {
+  const updates = {};
+  const setF = name => {
+    if (tableFieldNames.has(name)) updates[name] = 'F';
+  };
+  const setFixedF = name => {
+    if (tableFieldNames.has(name)) updates[name] = 'Fixed (F)';
+  };
+
+  const specificRule = `${targetFieldName} Rule`;
+  const specificRuleType = `${targetFieldName} Rule Type`;
+  const specificSource = `${targetFieldName} Source`;
+  setF(specificRule);
+  setF(specificRuleType);
+  setFixedF(specificSource);
+
+  setF('Rule Type');
+  setF('Population Rule');
+  setF('Item Specific Rule');
+  setFixedF('Value Source');
+  setFixedF('Population Source');
+
+  return updates;
+}
+
+async function runVmfDeterminedWriteback(itemService, clickupService, summary, options = {}) {
+  const dryRun = Boolean(options.dryRun);
+  const sampleLimit = Number(options.sampleLimit || 20);
+  const determinedStatus = normalizeText(options.determinedStatus || DEFAULT_PHASE4B_DETERMINED_STATUS);
+  const preferredCompletedStatus = normalizeText(options.completedStatus || DEFAULT_PHASE4B_COMPLETED_STATUS);
+  const tablesByName = options.tablesByName || new Map();
+  const tableFieldsByName = options.tableFieldsByName || new Map();
+
+  const determinedTasks = await clickupService.fetchTasksByStatuses([determinedStatus], {
+    includeClosed: false,
+    subtasks: false
+  });
+  summary.vmfDeterminedTasksFound = determinedTasks.length;
+  if (determinedTasks.length === 0) return;
+
+  const closeStatus = dryRun ? '' : resolvePreferredClosedStatus(await clickupService.getList(), preferredCompletedStatus);
+  if (!dryRun && !closeStatus) {
+    summary.errors.push('Phase4B writeback: unable to resolve a closed/completed status in ClickUp list.');
+  }
+
+  for (const task of determinedTasks) {
+    summary.vmfDeterminedTasksProcessed += 1;
+    const meta = parsePhase4BTaskMetadata(task);
+    const finalValue = extractFinalValueFromTask(task);
+    if (!meta.tableName || !meta.recordId || !meta.fieldName) {
+      summary.vmfDeterminedTasksMissingMeta += 1;
+      if (summary.errors.length < sampleLimit) {
+        summary.errors.push(`Phase4B writeback skipped task ${meta.taskId || 'unknown'}: missing metadata (table/record/field).`);
+      }
+      continue;
+    }
+    if (!finalValue) {
+      summary.vmfDeterminedTasksMissingValue += 1;
+      if (summary.errors.length < sampleLimit) {
+        summary.errors.push(`Phase4B writeback skipped task ${meta.taskId || 'unknown'}: missing final researched value.`);
+      }
+      continue;
+    }
+
+    const tableId = tablesByName.get(meta.tableName.toLowerCase()) || '';
+    if (!tableId) {
+      summary.vmfDeterminedWritebackFailed += 1;
+      if (summary.errors.length < sampleLimit) {
+        summary.errors.push(`Phase4B writeback failed task ${meta.taskId || 'unknown'}: table '${meta.tableName}' not found.`);
+      }
+      continue;
+    }
+
+    const tableFieldNames = tableFieldsByName.get(meta.tableName.toLowerCase()) || new Set();
+    const lockFields = buildFixedLockFields(tableFieldNames, meta.fieldName);
+    const updateFields = {
+      [meta.fieldName]: finalValue,
+      ...lockFields
+    };
+    if (Object.keys(lockFields).length > 0) {
+      summary.vmfDeterminedFixedLocked += 1;
+    }
+
+    if (!dryRun) {
+      const writeResult = await patchTableRecords(itemService, tableId, [{ id: meta.recordId, fields: updateFields }]);
+      if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
+        summary.vmfDeterminedWritebackFailed += 1;
+        if (summary.errors.length < sampleLimit) {
+          const err = writeResult.errors[0] || 'unknown Airtable writeback error';
+          summary.errors.push(`Phase4B writeback failed task ${meta.taskId || 'unknown'}: ${err}`);
+        }
+        continue;
+      }
+    }
+
+    summary.vmfDeterminedWritebackSucceeded += 1;
+    if (dryRun) {
+      summary.vmfDeterminedTasksClosed += 1;
+      continue;
+    }
+
+    if (closeStatus) {
+      try {
+        await clickupService.updateTaskStatus(meta.taskId, closeStatus);
+        summary.vmfDeterminedTasksClosed += 1;
+      } catch (error) {
+        summary.vmfDeterminedTaskCloseFailed += 1;
+        if (summary.errors.length < sampleLimit) {
+          summary.errors.push(`Phase4B close failed task ${meta.taskId || 'unknown'}: ${error.message}`);
+        }
+      }
+    } else {
+      summary.vmfDeterminedTaskCloseFailed += 1;
+    }
+  }
 }
 
 function buildVmfTaskKey({ ipn, prefix, fieldName }) {
@@ -384,6 +678,7 @@ async function upsertVmfLowConfidenceTasks(clickupService, summary, tasks = [], 
   const dryRun = Boolean(options.dryRun);
   const sampleLimit = Number(options.sampleLimit || 20);
   const openStatus = normalizeText(options.openStatus || 'To Do');
+  const progressCallback = options.progressCallback;
 
   if (!clickupService || tasks.length === 0) return;
 
@@ -398,7 +693,17 @@ async function upsertVmfLowConfidenceTasks(clickupService, summary, tasks = [], 
     existingMap.set(taskKey, task);
   }
 
+  emitProgress(progressCallback, {
+    stage: 'phase4blite_scan_tables',
+    percent: 97,
+    counts: summary,
+    message:
+      `VMF task upsert started: total=${tasks.length}, existingOpen=${existingMap.size}, mode=${dryRun ? 'dry-run' : 'write'}`
+  });
+
+  let processed = 0;
   for (const item of tasks) {
+    processed += 1;
     const payload = buildVmfTaskPayload(item, openStatus);
     const existing = existingMap.get(item.taskKey);
     if (!existing) {
@@ -467,6 +772,280 @@ async function upsertVmfLowConfidenceTasks(clickupService, summary, tasks = [], 
         `[vmf_low_confidence] task=update ipn='${item.ipn}' field='${item.fieldName}' confidence='${Number(item.confidence || 0).toFixed(2)}'`
       );
     }
+
+    if (processed === 1 || processed % 100 === 0 || processed === tasks.length) {
+      emitProgress(progressCallback, {
+        stage: 'phase4blite_scan_tables',
+        percent: 97,
+        counts: summary,
+        message:
+          `VMF task upsert progress ${processed}/${tasks.length} ` +
+          `(created=${summary.vmfLowConfidenceTasksCreated || 0}, updated=${summary.vmfLowConfidenceTasksUpdated || 0}, ` +
+          `skipped=${summary.vmfLowConfidenceTasksSkippedExisting || 0})`
+      });
+    }
+  }
+}
+
+function buildMfTaskKey({ ipn, prefix, fieldName }) {
+  return `phase=4C|rule=MF|ipn=${normalizeIpn(ipn)}|prefix=${normalizeText(prefix)}|field=${normalizeText(fieldName)}`;
+}
+
+function buildMfTaskPayload(task = {}, openStatus = '') {
+  const name = `[Phase4][MF] ${task.ipn} | ${task.fieldName} | ${task.prefix}`;
+  const description = [
+    'Phase: 4C',
+    'RuleType: MF',
+    `TaskKey: ${task.taskKey}`,
+    `IPN: ${task.ipn}`,
+    `Prefix: ${task.prefix}`,
+    `Table: ${task.tableName}`,
+    `ItemSpecificRecordID: ${task.recordId || ''}`,
+    `Field: ${task.fieldName}`,
+    'AIAllowed: No',
+    'Reason: MF field requires manual research.'
+  ].join('\n');
+
+  return {
+    name,
+    description,
+    status: normalizeText(openStatus)
+  };
+}
+
+async function upsertMfManualTasks(clickupService, summary, tasks = [], options = {}) {
+  const dryRun = Boolean(options.dryRun);
+  const sampleLimit = Number(options.sampleLimit || 20);
+  const openStatus = normalizeText(options.openStatus || 'To Do');
+
+  if (!clickupService || tasks.length === 0) return;
+
+  const openTasks = await clickupService.fetchTasksByStatuses([], {
+    includeClosed: false,
+    subtasks: false
+  });
+  const existingMap = new Map();
+  for (const task of openTasks) {
+    const taskKey = extractTaskKeyFromTask(task);
+    if (!taskKey || existingMap.has(taskKey)) continue;
+    existingMap.set(taskKey, task);
+  }
+
+  for (const item of tasks) {
+    const payload = buildMfTaskPayload(item, openStatus);
+    const existing = existingMap.get(item.taskKey);
+    if (!existing) {
+      if (dryRun) {
+        summary.mfTasksCreated += 1;
+      } else {
+        try {
+          await clickupService.request('POST', `/list/${clickupService.listId}/task`, {
+            data: payload.status
+              ? {
+                  name: payload.name,
+                  description: payload.description,
+                  status: payload.status
+                }
+              : {
+                  name: payload.name,
+                  description: payload.description
+                }
+          });
+          summary.mfTasksCreated += 1;
+        } catch (error) {
+          if (error?.response?.status === 400 && payload.status) {
+            await clickupService.request('POST', `/list/${clickupService.listId}/task`, {
+              data: {
+                name: payload.name,
+                description: payload.description
+              }
+            });
+            summary.mfTasksCreated += 1;
+          } else {
+            summary.errors.push(`MF ClickUp create failed for ${item.ipn}/${item.fieldName}: ${error.message}`);
+          }
+        }
+      }
+      if (summary.mfTaskSamples.length < sampleLimit) {
+        summary.mfTaskSamples.push(`[mf_manual] task=create title='${payload.name}'`);
+      }
+      continue;
+    }
+
+    const existingName = normalizeText(existing.name);
+    const existingDescription = normalizeText(existing.description);
+    if (existingName === payload.name && existingDescription === normalizeText(payload.description)) {
+      summary.mfTasksSkippedExisting += 1;
+      continue;
+    }
+
+    if (dryRun) {
+      summary.mfTasksUpdated += 1;
+    } else {
+      try {
+        await clickupService.updateTask(existing.id, {
+          name: payload.name,
+          description: payload.description,
+          status: payload.status
+        });
+        summary.mfTasksUpdated += 1;
+      } catch (error) {
+        summary.errors.push(`MF ClickUp update failed for ${item.ipn}/${item.fieldName}: ${error.message}`);
+      }
+    }
+    if (summary.mfTaskSamples.length < sampleLimit) {
+      summary.mfTaskSamples.push(`[mf_manual] task=update title='${payload.name}'`);
+    }
+  }
+}
+
+async function findRecordIdByIpn(itemService, tableId, ipn) {
+  const key = normalizeIpn(ipn);
+  if (!key) return '';
+  const safe = escapeAirtableFormulaValue(key);
+  const data = await itemService.request('GET', `/${encodeURIComponent(tableId)}`, {
+    params: {
+      filterByFormula: `{IPN}="${safe}"`,
+      maxRecords: 1,
+      fields: ['IPN']
+    }
+  });
+  const records = Array.isArray(data?.records) ? data.records : [];
+  return normalizeText(records[0]?.id || '');
+}
+
+async function fetchItemSpecificRecord(itemService, tableId, recordId) {
+  const id = normalizeText(recordId);
+  if (!id) return null;
+  return itemService.request('GET', `/${encodeURIComponent(tableId)}/${encodeURIComponent(id)}`);
+}
+
+async function runMfDeterminedWriteback(itemService, clickupService, summary, options = {}) {
+  const dryRun = Boolean(options.dryRun);
+  const sampleLimit = Number(options.sampleLimit || 20);
+  const determinedStatus = normalizeText(options.determinedStatus || DEFAULT_PHASE4B_DETERMINED_STATUS);
+  const preferredCompletedStatus = normalizeText(options.completedStatus || DEFAULT_PHASE4B_COMPLETED_STATUS);
+  const tablesByName = options.tablesByName || new Map();
+  const tableFieldsByName = options.tableFieldsByName || new Map();
+
+  const determinedTasks = await clickupService.fetchTasksByStatuses([determinedStatus], {
+    includeClosed: false,
+    subtasks: false
+  });
+  const mfTasks = determinedTasks.filter(task => {
+    const description = String(task?.description || '');
+    const ruleType = normalizeText(parseTaskDescriptionLine(description, 'RuleType')).toUpperCase();
+    const taskKey = normalizeText(parseTaskDescriptionLine(description, 'TaskKey'));
+    return ruleType === 'MF' || taskKey.includes('phase=4C|rule=MF');
+  });
+
+  const closeStatus = dryRun ? '' : resolvePreferredClosedStatus(await clickupService.getList(), preferredCompletedStatus);
+  if (!dryRun && !closeStatus) {
+    summary.errors.push('Phase4C writeback: unable to resolve a closed/completed status in ClickUp list.');
+  }
+
+  for (const task of mfTasks) {
+    const meta = parsePhase4BTaskMetadata(task);
+    const finalValue = extractFinalValueFromTask(task);
+
+    if (!meta.tableName || !meta.fieldName) {
+      if (summary.errors.length < sampleLimit) {
+        summary.errors.push(`Phase4C writeback skipped task ${meta.taskId || 'unknown'}: missing table/field metadata.`);
+      }
+      continue;
+    }
+    if (!finalValue) {
+      if (summary.errors.length < sampleLimit) {
+        summary.errors.push(`Phase4C writeback skipped task ${meta.taskId || 'unknown'}: missing final researched value.`);
+      }
+      continue;
+    }
+
+    const tableId = tablesByName.get(meta.tableName.toLowerCase()) || '';
+    if (!tableId) {
+      summary.errors.push(`Phase4C writeback failed task ${meta.taskId || 'unknown'}: table '${meta.tableName}' not found.`);
+      continue;
+    }
+
+    const tableFieldNames = tableFieldsByName.get(meta.tableName.toLowerCase()) || new Set();
+    if (!tableFieldNames.has(meta.fieldName)) {
+      summary.fieldsMissingInSchema += 1;
+      if (summary.errors.length < sampleLimit) {
+        summary.errors.push(`Phase4C writeback failed task ${meta.taskId || 'unknown'}: field '${meta.fieldName}' missing in schema.`);
+      }
+      continue;
+    }
+
+    let recordId = normalizeText(meta.recordId);
+    if (!recordId) {
+      recordId = await findRecordIdByIpn(itemService, tableId, meta.ipn);
+    }
+    if (!recordId) {
+      if (summary.errors.length < sampleLimit) {
+        summary.errors.push(`Phase4C writeback failed task ${meta.taskId || 'unknown'}: row not found for IPN '${meta.ipn}'.`);
+      }
+      continue;
+    }
+
+    let record;
+    try {
+      record = await fetchItemSpecificRecord(itemService, tableId, recordId);
+    } catch (error) {
+      if (summary.errors.length < sampleLimit) {
+        summary.errors.push(`Phase4C writeback failed task ${meta.taskId || 'unknown'}: ${formatAirtableError(error)}`);
+      }
+      continue;
+    }
+
+    const currentValue = normalizeText(record?.fields?.[meta.fieldName]);
+    if (currentValue) {
+      summary.mfWritebacksSkippedAlreadyFilled += 1;
+      if (!dryRun) {
+        try {
+          await clickupService.addTaskComment(meta.taskId, `No writeback needed. Airtable already has '${meta.fieldName}' value '${currentValue}'.`);
+        } catch (_) {}
+        if (closeStatus) {
+          try {
+            await clickupService.updateTaskStatus(meta.taskId, closeStatus);
+          } catch (_) {}
+        }
+      }
+      continue;
+    }
+
+    const lockFields = buildFixedLockFields(tableFieldNames, meta.fieldName);
+    const updateFields = {
+      [meta.fieldName]: finalValue,
+      ...lockFields
+    };
+    if (Object.keys(lockFields).length > 0) {
+      summary.mfFixedLocked = Number(summary.mfFixedLocked || 0) + 1;
+    }
+
+    if (!dryRun) {
+      const writeResult = await patchTableRecords(itemService, tableId, [{ id: recordId, fields: updateFields }]);
+      if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
+        if (summary.errors.length < sampleLimit) {
+          const err = writeResult.errors[0] || 'unknown Airtable writeback error';
+          summary.errors.push(`Phase4C writeback failed task ${meta.taskId || 'unknown'}: ${err}`);
+        }
+        continue;
+      }
+    }
+
+    summary.mfWritebacksCompleted += 1;
+    if (summary.mfWritebackSamples.length < sampleLimit) {
+      summary.mfWritebackSamples.push(`[mf_writeback] ipn='${meta.ipn}' table='${meta.tableName}' field='${meta.fieldName}' value='${finalValue}'`);
+    }
+    if (!dryRun && closeStatus) {
+      try {
+        await clickupService.updateTaskStatus(meta.taskId, closeStatus);
+      } catch (error) {
+        if (summary.errors.length < sampleLimit) {
+          summary.errors.push(`Phase4C close failed task ${meta.taskId || 'unknown'}: ${error.message}`);
+        }
+      }
+    }
   }
 }
 
@@ -494,9 +1073,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   const clickupListId = normalizeText(
     args.phase4BClickupListId ||
       process.env.PHASE4B_CLICKUP_LIST_ID ||
-      stored.phase4BClickupListId ||
-      process.env.CLICKUP_LIST_ID ||
-      stored.clickupListId
+      stored.phase4BClickupListId
   );
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
   const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-4o-mini');
@@ -507,7 +1084,10 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   if (!itemSpecificsBaseId) throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID).');
   if (!args.rulesDriveFile) throw new Error('Missing rules drive file. Provide --rules-drive-file=<FILE_ID_OR_URL>.');
   if (!openaiApiKey) throw new Error('Missing OpenAI API key for Phase 4B-lite.');
-  if (!clickupToken || !clickupListId) throw new Error('Missing ClickUp token/list for VMF low-confidence tasks.');
+  if (!clickupToken) throw new Error('Missing ClickUp token for VMF low-confidence tasks.');
+  if (!clickupListId) {
+    throw new Error('Missing Phase 4B ClickUp List ID for VMF low-confidence tasks.');
+  }
 
   emitProgress(progressCallback, {
     stage: 'phase4blite_load_rules',
@@ -570,61 +1150,56 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   emitProgress(progressCallback, {
     stage: 'phase4blite_load_master',
     percent: 19,
-    message: `Loading eBay mock listing context from '${ebayMockTableName}'...`
+    message: `Preparing eBay mock listing lookup from '${ebayMockTableName}'...`
   });
-  const ebayContextMap = new Map();
+  const ebayContextCache = new Map();
   const ebayContextStats = {
-    rowsScanned: 0,
-    rowsMapped: 0,
-    rowsWithoutKey: 0,
-    rowsWithoutContext: 0
+    lookups: 0,
+    lookupHits: 0,
+    lookupMisses: 0,
+    lookupErrors: 0,
+    cacheHits: 0
   };
-  try {
-    const ebayRows = await fetchAllRecordsWithFallback(masterService, ebayMockTableName, [
-      ...EBAY_MOCK_KEY_FIELDS,
-      EBAY_MOCK_TITLE_FIELD,
-      EBAY_MOCK_CONDITIONS_FIELD
-    ]);
-    ebayContextStats.rowsScanned = ebayRows.length;
-    for (const row of ebayRows) {
-      const fields = row?.fields || {};
-      const keyRaw = firstNonEmptyField(fields, EBAY_MOCK_KEY_FIELDS);
-      const key = normalizeIpn(keyRaw);
-      if (!key) {
-        ebayContextStats.rowsWithoutKey += 1;
-        continue;
-      }
 
-      const productTitle = firstNonEmptyField(fields, [EBAY_MOCK_TITLE_FIELD, 'Title', 'Listing Title']);
-      const listingConditionsAndOptions = firstNonEmptyField(fields, [
-        EBAY_MOCK_CONDITIONS_FIELD,
-        'Listing Condition',
-        'Listing Conditions'
-      ]);
-      if (!productTitle && !listingConditionsAndOptions) {
-        ebayContextStats.rowsWithoutContext += 1;
-        continue;
-      }
-
-      const existing = ebayContextMap.get(key) || {};
-      ebayContextMap.set(key, {
-        productTitle: existing.productTitle || productTitle,
-        listingConditionsAndOptions: existing.listingConditionsAndOptions || listingConditionsAndOptions
-      });
+  async function getEbayContextForIpn(ipn) {
+    const key = normalizeIpn(ipn);
+    if (!key) return null;
+    if (ebayContextCache.has(key)) {
+      ebayContextStats.cacheHits += 1;
+      return ebayContextCache.get(key);
     }
-    ebayContextStats.rowsMapped = ebayContextMap.size;
-  } catch (error) {
-    // Keep run non-blocking if the mock table is unavailable.
-    const message = formatAirtableError(error);
-    emitProgress(progressCallback, {
-      stage: 'phase4blite_load_master',
-      percent: 19,
-      message: `eBay mock listing context unavailable: ${message}`
-    });
+
+    ebayContextStats.lookups += 1;
+    try {
+      const context = await fetchEbayContextByIpn(masterService, ebayMockTableName, key);
+      if (context) {
+        ebayContextStats.lookupHits += 1;
+        ebayContextCache.set(key, context);
+      } else {
+        ebayContextStats.lookupMisses += 1;
+        ebayContextCache.set(key, null);
+      }
+      return context;
+    } catch (error) {
+      ebayContextStats.lookupErrors += 1;
+      ebayContextCache.set(key, null);
+      return null;
+    }
   }
 
   const tables = await schemaService.listTables();
-  const routableTables = tables.filter(table => Boolean(parsePrefixFromTableName(table?.name)));
+  const allRoutableTables = tables.filter(table => Boolean(parsePrefixFromTableName(table?.name)));
+  const requestedTableName = normalizeText(args.testTableName);
+  const routableTables = requestedTableName
+    ? allRoutableTables.filter(
+        table => normalizeText(table?.name).toLowerCase() === requestedTableName.toLowerCase()
+      )
+    : Number(args.testMaxTables || 0) > 0
+      ? allRoutableTables.slice(0, Number(args.testMaxTables))
+      : allRoutableTables;
+  if (requestedTableName && routableTables.length === 0) {
+    throw new Error(`Test table not found: '${requestedTableName}'. Use exact Airtable table name.`);
+  }
 
   const summary = {
     dryRun: args.dryRun,
@@ -638,16 +1213,23 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     promptCacheEnabled: Boolean(args.promptCacheEnabled),
     promptCacheKey: normalizeText(args.promptCacheKey),
     phase4BClickupListId: clickupListId,
+    testTableName: requestedTableName,
+    testMaxTables: Number(args.testMaxTables || 0),
     aiConcurrency: args.aiConcurrency,
     aiTimeoutMs: args.aiTimeoutMs,
     aiMaxAttempts: args.aiMaxAttempts,
     aiCallsPlanned: 0,
     aiCallsCompleted: 0,
     aiCallsFailed: 0,
-    ebayContextRowsScanned: ebayContextStats.rowsScanned,
-    ebayContextRowsMapped: ebayContextStats.rowsMapped,
-    ebayContextRowsWithoutKey: ebayContextStats.rowsWithoutKey,
-    ebayContextRowsWithoutContext: ebayContextStats.rowsWithoutContext,
+    ebayContextRowsScanned: 0,
+    ebayContextRowsMapped: 0,
+    ebayContextRowsWithoutKey: 0,
+    ebayContextRowsWithoutContext: 0,
+    ebayContextLookupCount: ebayContextStats.lookups,
+    ebayContextLookupHits: ebayContextStats.lookupHits,
+    ebayContextLookupMisses: ebayContextStats.lookupMisses,
+    ebayContextLookupErrors: ebayContextStats.lookupErrors,
+    ebayContextCacheHits: ebayContextStats.cacheHits,
     ebayContextMatchedRows: 0,
     ebayContextMissingRows: 0,
     tablesScanned: 0,
@@ -657,12 +1239,23 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     vfFieldsEvaluated: 0,
     vfFieldsUpdated: 0,
     vfFieldsLowConfidenceSkipped: 0,
+    vfFixedLockedSkipped: 0,
     vfDotNumberSkipped: 0,
     vmfFieldsEvaluated: 0,
     vmfFieldsUpdated: 0,
+    vmfFixedLockedSkipped: 0,
     vmfLowConfidenceTasksCreated: 0,
     vmfLowConfidenceTasksUpdated: 0,
     vmfLowConfidenceTasksSkippedExisting: 0,
+    vmfDeterminedTasksFound: 0,
+    vmfDeterminedTasksProcessed: 0,
+    vmfDeterminedTasksMissingMeta: 0,
+    vmfDeterminedTasksMissingValue: 0,
+    vmfDeterminedWritebackSucceeded: 0,
+    vmfDeterminedWritebackFailed: 0,
+    vmfDeterminedTasksClosed: 0,
+    vmfDeterminedTaskCloseFailed: 0,
+    vmfDeterminedFixedLocked: 0,
     fieldsMissingInSchema: 0,
     fieldsMissingInSchemaSamples: [],
     writeSamples: [],
@@ -672,12 +1265,28 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
 
   const missingFieldSet = new Set();
   const vmfLowConfidenceTasks = [];
+  const tablesByName = new Map(
+    (tables || [])
+      .map(table => [normalizeText(table?.name).toLowerCase(), normalizeText(table?.id)])
+      .filter(([name, id]) => Boolean(name && id))
+  );
+  const tableFieldsByName = new Map(
+    (tables || [])
+      .map(table => [
+        normalizeText(table?.name).toLowerCase(),
+        new Set((table?.fields || []).map(field => normalizeText(field?.name)).filter(Boolean))
+      ])
+      .filter(([name]) => Boolean(name))
+  );
 
   emitProgress(progressCallback, {
     stage: 'phase4blite_load_rules',
     percent: 14,
     counts: summary,
-    message: `Rules parsed: prefixes=${rulesByPrefix.size}, rows=${logicRowsScanned}, aiConcurrency=${args.aiConcurrency}, aiTimeoutMs=${args.aiTimeoutMs}, aiMaxAttempts=${args.aiMaxAttempts}`
+    message:
+      `Rules parsed: prefixes=${rulesByPrefix.size}, rows=${logicRowsScanned}, aiConcurrency=${args.aiConcurrency}, aiTimeoutMs=${args.aiTimeoutMs}, aiMaxAttempts=${args.aiMaxAttempts}` +
+      `${summary.testTableName ? `, testTableName='${summary.testTableName}'` : ''}` +
+      `${summary.testMaxTables > 0 ? `, testMaxTables=${summary.testMaxTables}` : ''}`
   });
 
   for (let i = 0; i < routableTables.length; i += 1) {
@@ -769,16 +1378,32 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       }
       const context = extractMasterPartsContext(master.fields || {});
       if (Object.keys(context).length === 0) continue;
-      const ebayContext = ebayContextMap.get(ipn) || {};
-      if (ebayContextMap.has(ipn)) {
+      const ebayContext = (await getEbayContextForIpn(ipn)) || {};
+      summary.ebayContextLookupCount = ebayContextStats.lookups;
+      summary.ebayContextLookupHits = ebayContextStats.lookupHits;
+      summary.ebayContextLookupMisses = ebayContextStats.lookupMisses;
+      summary.ebayContextLookupErrors = ebayContextStats.lookupErrors;
+      summary.ebayContextCacheHits = ebayContextStats.cacheHits;
+      summary.ebayContextRowsScanned = ebayContextStats.lookups;
+      summary.ebayContextRowsMapped = ebayContextStats.lookupHits;
+      summary.ebayContextRowsWithoutContext = ebayContextStats.lookupMisses;
+      if (
+        ebayContext &&
+        (ebayContext.productTitle || ebayContext.listingConditionsAndOptions || ebayContext.listingDescription)
+      ) {
         summary.ebayContextMatchedRows += 1;
       } else {
         summary.ebayContextMissingRows += 1;
       }
 
       for (const [fieldName, ruleMeta] of applicableRules.entries()) {
-        if (!isBlankCell(rowFields[fieldName])) continue;
         const ruleType = normalizeText(ruleMeta?.ruleType).toUpperCase();
+        if (isFieldFixedLocked(rowFields, fieldName)) {
+          if (ruleType === 'VF') summary.vfFixedLockedSkipped += 1;
+          if (ruleType === 'VMF') summary.vmfFixedLockedSkipped += 1;
+          continue;
+        }
+        if (!isBlankCell(rowFields[fieldName])) continue;
 
         if (ruleType === 'VF') {
           if (isDotNumberIpn(ipn)) {
@@ -801,6 +1426,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
           context,
           allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
           listingTitle: normalizeText(ebayContext.productTitle),
+          listingDescription: normalizeText(ebayContext.listingDescription),
           listingConditionsAndOptions: normalizeText(ebayContext.listingConditionsAndOptions)
         });
       }
@@ -832,6 +1458,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
             masterPartsData: candidate.context,
             allowedValues: candidate.allowedValues,
             listingTitle: candidate.listingTitle,
+            listingDescription: candidate.listingDescription,
             listingConditionsAndOptions: candidate.listingConditionsAndOptions
           });
           summary.aiCallsCompleted += 1;
@@ -960,7 +1587,23 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   await upsertVmfLowConfidenceTasks(clickupService, summary, Array.from(vmfTaskMap.values()), {
     dryRun: args.dryRun,
     openStatus: args.clickupOpenStatus,
-    sampleLimit: args.sampleLimit
+    sampleLimit: args.sampleLimit,
+    progressCallback
+  });
+
+  emitProgress(progressCallback, {
+    stage: 'phase4blite_manual_writeback',
+    percent: 98,
+    counts: summary,
+    message: `Processing VMF determined-value writeback tasks (status='${DEFAULT_PHASE4B_DETERMINED_STATUS}')...`
+  });
+  await runVmfDeterminedWriteback(itemService, clickupService, summary, {
+    dryRun: args.dryRun,
+    sampleLimit: args.sampleLimit,
+    determinedStatus: DEFAULT_PHASE4B_DETERMINED_STATUS,
+    completedStatus: DEFAULT_PHASE4B_COMPLETED_STATUS,
+    tablesByName,
+    tableFieldsByName
   });
 
   summary.fieldsMissingInSchema = missingFieldSet.size;
@@ -977,8 +1620,891 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     counts: summary,
     message:
       `Phase 4B-lite completed (${args.dryRun ? 'dry run' : 'write run'}). ` +
-      `eBayContext rows=${summary.ebayContextRowsScanned}, mapped=${summary.ebayContextRowsMapped}, ` +
+      `eBayContext lookups=${summary.ebayContextLookupCount || 0}, hits=${summary.ebayContextLookupHits || 0}, cacheHits=${summary.ebayContextCacheHits || 0}, ` +
       `matched=${summary.ebayContextMatchedRows}, missing=${summary.ebayContextMissingRows}.`
+  });
+  return summary;
+}
+
+async function runPhase4BWritebackOnly(options = {}, progressCallback = () => {}) {
+  const args = {
+    ...parseArgs([]),
+    ...options,
+    dryRun: false,
+    execute: true
+  };
+  const stored = loadPhaseConfigFromStore();
+
+  const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
+  const itemSpecificsBaseId = normalizeText(
+    process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
+      process.env.ITEM_SPECIFICS_BASE_ID ||
+      stored.itemSpecificsBaseId
+  );
+  const clickupToken = normalizeText(process.env.CLICKUP_TOKEN || stored.clickupToken);
+  const clickupListId = normalizeText(
+    args.phase4BClickupListId ||
+      args.phase4CClickupListId ||
+      process.env.PHASE4B_CLICKUP_LIST_ID ||
+      process.env.PHASE4C_CLICKUP_LIST_ID ||
+      stored.phase4BClickupListId ||
+      stored.phase4CClickupListId
+  );
+
+  if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
+  if (!itemSpecificsBaseId) throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID).');
+  if (!clickupToken) throw new Error('Missing ClickUp token for Phase 4B writeback poller.');
+  if (!clickupListId) throw new Error('Missing Phase 4B ClickUp List ID for writeback poller.');
+
+  const schemaService = new AirtableSchemaService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const itemService = new AirtableService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const clickupService = new ClickUpService({
+    token: clickupToken,
+    listId: clickupListId
+  });
+
+  const summary = {
+    dryRun: false,
+    phase4BClickupListId: clickupListId,
+    vmfDeterminedTasksFound: 0,
+    vmfDeterminedTasksProcessed: 0,
+    vmfDeterminedTasksMissingMeta: 0,
+    vmfDeterminedTasksMissingValue: 0,
+    vmfDeterminedWritebackSucceeded: 0,
+    vmfDeterminedWritebackFailed: 0,
+    vmfDeterminedTasksClosed: 0,
+    vmfDeterminedTaskCloseFailed: 0,
+    vmfDeterminedFixedLocked: 0,
+    errors: []
+  };
+
+  emitProgress(progressCallback, {
+    stage: 'phase4blite_manual_writeback',
+    percent: 10,
+    counts: summary,
+    message: `Phase 4B writeback poller: checking '${DEFAULT_PHASE4B_DETERMINED_STATUS}' tasks...`
+  });
+
+  const tables = await schemaService.listTables();
+  const tablesByName = new Map(
+    (tables || [])
+      .map(table => [normalizeText(table?.name).toLowerCase(), normalizeText(table?.id)])
+      .filter(([name, id]) => Boolean(name && id))
+  );
+  const tableFieldsByName = new Map(
+    (tables || [])
+      .map(table => [
+        normalizeText(table?.name).toLowerCase(),
+        new Set((table?.fields || []).map(field => normalizeText(field?.name)).filter(Boolean))
+      ])
+      .filter(([name]) => Boolean(name))
+  );
+
+  await runVmfDeterminedWriteback(itemService, clickupService, summary, {
+    dryRun: false,
+    sampleLimit: Number(args.sampleLimit || 20),
+    determinedStatus: DEFAULT_PHASE4B_DETERMINED_STATUS,
+    completedStatus: DEFAULT_PHASE4B_COMPLETED_STATUS,
+    tablesByName,
+    tableFieldsByName
+  });
+
+  emitProgress(progressCallback, {
+    stage: 'completed',
+    percent: 100,
+    counts: summary,
+    message:
+      `Phase 4B writeback poller completed. Found=${summary.vmfDeterminedTasksFound || 0}, ` +
+      `WritebackSucceeded=${summary.vmfDeterminedWritebackSucceeded || 0}, Closed=${summary.vmfDeterminedTasksClosed || 0}.`
+  });
+
+  return summary;
+}
+
+async function runPhase4CMFWritebackOnly(options = {}, progressCallback = () => {}) {
+  const args = {
+    ...parseArgs([]),
+    ...options,
+    dryRun: false,
+    execute: true
+  };
+  const stored = loadPhaseConfigFromStore();
+
+  const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
+  const itemSpecificsBaseId = normalizeText(
+    process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
+      process.env.ITEM_SPECIFICS_BASE_ID ||
+      stored.itemSpecificsBaseId
+  );
+  const clickupToken = normalizeText(process.env.CLICKUP_TOKEN || stored.clickupToken);
+  const clickupListId = normalizeText(
+    args.phase4CClickupListId ||
+      args.phase4BClickupListId ||
+      process.env.PHASE4C_CLICKUP_LIST_ID ||
+      process.env.PHASE4B_CLICKUP_LIST_ID ||
+      stored.phase4CClickupListId ||
+      stored.phase4BClickupListId
+  );
+
+  if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
+  if (!itemSpecificsBaseId) throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID).');
+  if (!clickupToken) throw new Error('Missing ClickUp token for Phase 4C writeback poller.');
+  if (!clickupListId) throw new Error('Missing Phase 4C ClickUp List ID for writeback poller.');
+
+  const schemaService = new AirtableSchemaService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const itemService = new AirtableService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const clickupService = new ClickUpService({
+    token: clickupToken,
+    listId: clickupListId
+  });
+
+  const summary = {
+    dryRun: false,
+    phase4CClickupListId: clickupListId,
+    mfWritebacksCompleted: 0,
+    mfWritebacksSkippedAlreadyFilled: 0,
+    mfFixedLocked: 0,
+    mfWritebackSamples: [],
+    errors: []
+  };
+
+  emitProgress(progressCallback, {
+    stage: 'phase4cmf_writeback',
+    percent: 10,
+    counts: summary,
+    message: `Phase 4C writeback poller: checking '${DEFAULT_PHASE4B_DETERMINED_STATUS}' tasks...`
+  });
+
+  const tables = await schemaService.listTables();
+  const tablesByName = new Map(
+    (tables || [])
+      .map(table => [normalizeText(table?.name).toLowerCase(), normalizeText(table?.id)])
+      .filter(([name, id]) => Boolean(name && id))
+  );
+  const tableFieldsByName = new Map(
+    (tables || [])
+      .map(table => [
+        normalizeText(table?.name).toLowerCase(),
+        new Set((table?.fields || []).map(field => normalizeText(field?.name)).filter(Boolean))
+      ])
+      .filter(([name]) => Boolean(name))
+  );
+
+  await runMfDeterminedWriteback(itemService, clickupService, summary, {
+    dryRun: false,
+    sampleLimit: Number(args.sampleLimit || 20),
+    determinedStatus: DEFAULT_PHASE4B_DETERMINED_STATUS,
+    completedStatus: DEFAULT_PHASE4B_COMPLETED_STATUS,
+    tablesByName,
+    tableFieldsByName
+  });
+
+  emitProgress(progressCallback, {
+    stage: 'completed',
+    percent: 100,
+    counts: summary,
+    message:
+      `Phase 4C writeback poller completed. Writebacks=${summary.mfWritebacksCompleted || 0}, ` +
+      `SkippedAlreadyFilled=${summary.mfWritebacksSkippedAlreadyFilled || 0}.`
+  });
+
+  return summary;
+}
+
+async function runPhase4CMF(options = {}, progressCallback = () => {}) {
+  const args = {
+    ...parseArgs([]),
+    ...options
+  };
+  const stored = loadPhaseConfigFromStore();
+
+  const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
+  const itemSpecificsBaseId = normalizeText(
+    process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
+      process.env.ITEM_SPECIFICS_BASE_ID ||
+      stored.itemSpecificsBaseId
+  );
+  const clickupToken = normalizeText(process.env.CLICKUP_TOKEN || stored.clickupToken);
+  const clickupListId = normalizeText(
+    args.phase4CClickupListId ||
+      args.phase4BClickupListId ||
+      process.env.PHASE4C_CLICKUP_LIST_ID ||
+      process.env.PHASE4B_CLICKUP_LIST_ID ||
+      stored.phase4CClickupListId ||
+      stored.phase4BClickupListId
+  );
+  const openStatus = normalizeText(
+    args.phase4CClickupOpenStatus ||
+      args.clickupOpenStatus ||
+      process.env.PHASE4C_CLICKUP_OPEN_STATUS ||
+      process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
+      stored.phase4CClickupOpenStatus ||
+      stored.phase4BClickupOpenStatus ||
+      'To Do'
+  );
+
+  if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
+  if (!itemSpecificsBaseId) throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID).');
+  if (!args.rulesDriveFile) throw new Error('Missing rules drive file. Provide --rules-drive-file=<FILE_ID_OR_URL>.');
+  if (!clickupToken) throw new Error('Missing ClickUp token for Phase 4C MF tasks.');
+  if (!clickupListId) throw new Error('Missing Phase 4C ClickUp List ID for MF tasks.');
+
+  emitProgress(progressCallback, {
+    stage: 'phase4cmf_load_rules',
+    percent: 10,
+    message: 'Loading MF rules workbook from Google Drive...'
+  });
+
+  const { workbook, fileId } = await loadWorkbookFromDrive(args.rulesDriveFile, args.authContext);
+  const ws = workbook.getWorksheet(args.logicSheetName);
+  const parsed = parseLogicWorksheet(ws, args.logicSheetName, ['MF']);
+  const rulesByPrefix = parsed.byPrefix;
+
+  const schemaService = new AirtableSchemaService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const itemService = new AirtableService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const clickupService = new ClickUpService({
+    token: clickupToken,
+    listId: clickupListId
+  });
+
+  const tables = await schemaService.listTables();
+  const allRoutableTables = tables.filter(table => Boolean(parsePrefixFromTableName(table?.name)));
+  const requestedTableName = normalizeText(args.testTableName);
+  const routableTables = requestedTableName
+    ? allRoutableTables.filter(
+        table => normalizeText(table?.name).toLowerCase() === requestedTableName.toLowerCase()
+      )
+    : Number(args.testMaxTables || 0) > 0
+      ? allRoutableTables.slice(0, Number(args.testMaxTables))
+      : allRoutableTables;
+  if (requestedTableName && routableTables.length === 0) {
+    throw new Error(`Test table not found: '${requestedTableName}'. Use exact Airtable table name.`);
+  }
+
+  const tablesByName = new Map(
+    (tables || [])
+      .map(table => [normalizeText(table?.name).toLowerCase(), normalizeText(table?.id)])
+      .filter(([name, id]) => Boolean(name && id))
+  );
+  const tableFieldsByName = new Map(
+    (tables || [])
+      .map(table => [
+        normalizeText(table?.name).toLowerCase(),
+        new Set((table?.fields || []).map(field => normalizeText(field?.name)).filter(Boolean))
+      ])
+      .filter(([name]) => Boolean(name))
+  );
+
+  const summary = {
+    dryRun: Boolean(args.dryRun),
+    rulesSource: `google_drive:${fileId}`,
+    tablesScanned: 0,
+    rowsScanned: 0,
+    rowsWithIPN: 0,
+    mfFieldsScanned: 0,
+    mfFieldsAlreadyFilled: 0,
+    mfFieldsFixedLockedSkipped: 0,
+    mfTasksCreated: 0,
+    mfTasksUpdated: 0,
+    mfTasksSkippedExisting: 0,
+    mfWritebacksCompleted: 0,
+    mfWritebacksSkippedAlreadyFilled: 0,
+    mfFixedLocked: 0,
+    fieldsMissingInSchema: 0,
+    mfTaskSamples: [],
+    mfWritebackSamples: [],
+    errors: []
+  };
+
+  const pendingMfTasks = [];
+  emitProgress(progressCallback, {
+    stage: 'phase4cmf_scan_tables',
+    percent: 20,
+    counts: summary,
+    message: `Scanning MF fields across ${routableTables.length} tables...`
+  });
+
+  for (let i = 0; i < routableTables.length; i += 1) {
+    const table = routableTables[i];
+    const tableName = normalizeText(table?.name);
+    const tableId = normalizeText(table?.id);
+    const prefix = parsePrefixFromTableName(tableName);
+    if (!tableId || !prefix) continue;
+
+    summary.tablesScanned += 1;
+    const mfFieldsMap = rulesByPrefix.get(prefix);
+    if (!mfFieldsMap || mfFieldsMap.size === 0) continue;
+
+    const tableFieldNames = tableFieldsByName.get(tableName.toLowerCase()) || new Set();
+    const mfFieldNames = Array.from(mfFieldsMap.keys()).filter(field => tableFieldNames.has(field));
+    const missingMfFields = Array.from(mfFieldsMap.keys()).filter(field => !tableFieldNames.has(field));
+    summary.fieldsMissingInSchema += missingMfFields.length;
+    if (mfFieldNames.length === 0) continue;
+
+    const rows = await fetchAllRecordsWithFallback(itemService, tableId, ['IPN', ...mfFieldNames]);
+    summary.rowsScanned += rows.length;
+
+    for (const row of rows) {
+      const rowId = normalizeText(row?.id);
+      const fields = row?.fields || {};
+      const ipn = normalizeIpn(fields.IPN);
+      if (!ipn) continue;
+      summary.rowsWithIPN += 1;
+
+      for (const fieldName of mfFieldNames) {
+        summary.mfFieldsScanned += 1;
+        if (isFieldFixedLocked(fields, fieldName)) {
+          summary.mfFieldsFixedLockedSkipped += 1;
+          continue;
+        }
+        const currentValue = normalizeText(fields[fieldName]);
+        if (currentValue) {
+          summary.mfFieldsAlreadyFilled += 1;
+          continue;
+        }
+
+        pendingMfTasks.push({
+          taskKey: buildMfTaskKey({ ipn, prefix, fieldName }),
+          ipn,
+          prefix,
+          tableName,
+          recordId: rowId,
+          fieldName
+        });
+      }
+    }
+
+    if (i === 0 || (i + 1) % 10 === 0 || i + 1 === routableTables.length) {
+      const ratio = routableTables.length > 0 ? (i + 1) / routableTables.length : 1;
+      emitProgress(progressCallback, {
+        stage: 'phase4cmf_scan_tables',
+        percent: Math.min(80, 20 + Math.floor(ratio * 50)),
+        counts: summary,
+        message: `Scanning table ${i + 1}/${routableTables.length}: ${tableName}`
+      });
+    }
+  }
+
+  const mfTaskMap = new Map();
+  for (const task of pendingMfTasks) {
+    if (!mfTaskMap.has(task.taskKey)) mfTaskMap.set(task.taskKey, task);
+  }
+
+  emitProgress(progressCallback, {
+    stage: 'phase4cmf_tasks',
+    percent: 85,
+    counts: summary,
+    message: `Upserting MF manual tasks: unique=${mfTaskMap.size}`
+  });
+  await upsertMfManualTasks(clickupService, summary, Array.from(mfTaskMap.values()), {
+    dryRun: args.dryRun,
+    sampleLimit: args.sampleLimit,
+    openStatus
+  });
+
+  emitProgress(progressCallback, {
+    stage: 'phase4cmf_writeback',
+    percent: 92,
+    counts: summary,
+    message: `Processing MF determined-value writeback tasks (status='${DEFAULT_PHASE4B_DETERMINED_STATUS}')...`
+  });
+  await runMfDeterminedWriteback(itemService, clickupService, summary, {
+    dryRun: args.dryRun,
+    sampleLimit: args.sampleLimit,
+    determinedStatus: DEFAULT_PHASE4B_DETERMINED_STATUS,
+    completedStatus: DEFAULT_PHASE4B_COMPLETED_STATUS,
+    tablesByName,
+    tableFieldsByName
+  });
+
+  if (summary.errors.length > args.sampleLimit) {
+    summary.errors = summary.errors.slice(0, args.sampleLimit);
+  }
+
+  emitProgress(progressCallback, {
+    stage: 'completed',
+    percent: 100,
+    counts: summary,
+    message:
+      `Phase 4C (MF) completed (${args.dryRun ? 'dry run' : 'write run'}). ` +
+      `TasksCreated=${summary.mfTasksCreated}, TasksUpdated=${summary.mfTasksUpdated}, ` +
+      `Writebacks=${summary.mfWritebacksCompleted}.`
+  });
+
+  return summary;
+}
+
+function parseBoolean(value, defaultValue = false) {
+  if (typeof value === 'boolean') return value;
+  const text = normalizeText(value).toLowerCase();
+  if (!text) return defaultValue;
+  if (['true', '1', 'yes', 'y'].includes(text)) return true;
+  if (['false', '0', 'no', 'n'].includes(text)) return false;
+  return defaultValue;
+}
+
+function resolveFieldByKeywords(fields = {}, keywords = []) {
+  const entries = Object.entries(fields || {});
+  const targetKeywords = keywords.map(item => normalizeText(item).toLowerCase()).filter(Boolean);
+  if (targetKeywords.length === 0) return '';
+  for (const [name, rawValue] of entries) {
+    const value = normalizeText(rawValue);
+    if (!value) continue;
+    const key = normalizeText(name).toLowerCase();
+    if (targetKeywords.every(word => key.includes(word))) return value;
+  }
+  return '';
+}
+
+function compactText(value, maxLength = 4000) {
+  const text = normalizeText(value);
+  if (!text) return '';
+  return text.length > maxLength ? text.slice(0, maxLength) : text;
+}
+
+function buildAiMasterContext(masterFields = {}) {
+  const context = extractMasterPartsContext(masterFields);
+  const entries = Object.entries(context)
+    .slice(0, 40)
+    .map(([key, value]) => [key, compactText(value, 600)]);
+  return Object.fromEntries(entries);
+}
+
+function resolveFsVMasterValue(fieldName, masterFields = {}) {
+  const field = normalizeText(fieldName).toLowerCase();
+  if (!field) return '';
+
+  if (field.includes('length')) {
+    return (
+      resolveFieldByKeywords(masterFields, ['shipstation', 'length']) ||
+      resolveFieldByKeywords(masterFields, ['locked', 'length']) ||
+      resolveFieldByKeywords(masterFields, ['package', 'length']) ||
+      resolveFieldByKeywords(masterFields, ['length'])
+    );
+  }
+  if (field.includes('width')) {
+    return (
+      resolveFieldByKeywords(masterFields, ['shipstation', 'width']) ||
+      resolveFieldByKeywords(masterFields, ['locked', 'width']) ||
+      resolveFieldByKeywords(masterFields, ['package', 'width']) ||
+      resolveFieldByKeywords(masterFields, ['width'])
+    );
+  }
+  if (field.includes('height')) {
+    return (
+      resolveFieldByKeywords(masterFields, ['shipstation', 'height']) ||
+      resolveFieldByKeywords(masterFields, ['locked', 'height']) ||
+      resolveFieldByKeywords(masterFields, ['package', 'height']) ||
+      resolveFieldByKeywords(masterFields, ['height'])
+    );
+  }
+  if (field.includes('weight')) {
+    return (
+      resolveFieldByKeywords(masterFields, ['shipstation', 'weight']) ||
+      resolveFieldByKeywords(masterFields, ['locked', 'weight']) ||
+      resolveFieldByKeywords(masterFields, ['package', 'weight']) ||
+      resolveFieldByKeywords(masterFields, ['weight'])
+    );
+  }
+
+  return '';
+}
+
+function isManualOverrideForField(listingFields = {}, fieldName = '') {
+  const globalCandidates = ['Manual Override', 'Manual Edit', 'Manual Edited'];
+  for (const name of globalCandidates) {
+    const value = getFieldValueByName(listingFields, name);
+    if (parseBoolean(value, false)) return true;
+  }
+
+  const specificCandidates = [
+    `${fieldName} Manual Override`,
+    `${fieldName} Override`,
+    `${fieldName} Locked`,
+    `${fieldName} Manual`
+  ];
+  for (const name of specificCandidates) {
+    const value = getFieldValueByName(listingFields, name);
+    if (parseBoolean(value, false)) return true;
+  }
+
+  return false;
+}
+
+function isListingRowInScope(listingFields = {}) {
+  const statusCandidates = [
+    'Phase 4 Status',
+    'Listing Enrichment Status',
+    'Enrichment Status',
+    'Queue Status'
+  ];
+  for (const name of statusCandidates) {
+    const raw = normalizeText(getFieldValueByName(listingFields, name)).toLowerCase();
+    if (!raw) continue;
+    if (
+      raw.includes('pending') ||
+      raw.includes('new') ||
+      raw.includes('queue') ||
+      raw.includes('working') ||
+      raw.includes('in progress')
+    ) {
+      return true;
+    }
+    return false;
+  }
+  return true;
+}
+
+async function ensureListingCFields(schemaService, tableId, tableName, tableFieldsByName, requiredFields = [], dryRun = true) {
+  const key = normalizeText(tableName).toLowerCase();
+  const existing = tableFieldsByName.get(key) || new Set();
+  const created = [];
+  for (const fieldName of requiredFields) {
+    if (!fieldName.startsWith('C:')) continue;
+    if (existing.has(fieldName)) continue;
+    if (!dryRun) {
+      await schemaService.createField(tableId, {
+        name: fieldName,
+        type: 'singleLineText'
+      });
+    }
+    existing.add(fieldName);
+    created.push(fieldName);
+  }
+  tableFieldsByName.set(key, existing);
+  return created;
+}
+
+async function runPhase4DListing(options = {}, progressCallback = () => {}) {
+  const args = {
+    ...parseArgs([]),
+    ...options
+  };
+  const stored = loadPhaseConfigFromStore();
+
+  const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
+  const masterBaseId = normalizeText(process.env.AIRTABLE_BASE_ID || stored.airtableBaseId);
+  const masterTable = normalizeText(
+    process.env.AIRTABLE_MASTER_TABLE || stored.airtableMasterTable || 'Master Parts Table'
+  );
+  const listingsTable = normalizeText(
+    args.phase4DListingsTable ||
+      process.env.PHASE4D_LISTINGS_TABLE ||
+      stored.phase4DListingsTable ||
+      DEFAULT_EBAY_LISTINGS_TABLE
+  );
+  const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
+  const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-4o-mini');
+  const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
+
+  if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
+  if (!masterBaseId) throw new Error('Missing AIRTABLE_BASE_ID.');
+  if (!args.rulesDriveFile) throw new Error('Missing rules drive file. Provide --rules-drive-file=<FILE_ID_OR_URL>.');
+  if (!openaiApiKey) throw new Error('Missing OpenAI API key for Phase 4D.');
+
+  emitProgress(progressCallback, {
+    stage: 'phase4d_load_rules',
+    percent: 8,
+    message: 'Loading listing-only rules workbook from Google Drive...'
+  });
+
+  const { workbook, fileId } = await loadWorkbookFromDrive(args.rulesDriveFile, args.authContext);
+  const ws = workbook.getWorksheet(args.logicSheetName);
+  const parsed = parseLogicWorksheet(ws, args.logicSheetName, ['FSV', 'V1', 'V2', 'VB']);
+  const rulesByPrefix = parsed.byPrefix;
+
+  const schemaService = new AirtableSchemaService({
+    token: airtableToken,
+    baseId: masterBaseId
+  });
+  const airtableService = new AirtableService({
+    token: airtableToken,
+    baseId: masterBaseId
+  });
+  const aiService = new Phase4AiEvaluatorService({
+    apiKey: openaiApiKey,
+    model: openaiModel,
+    baseUrl: openaiBaseUrl || undefined,
+    timeoutMs: args.aiTimeoutMs,
+    maxAttempts: args.aiMaxAttempts,
+    baseDelayMs: 500,
+    promptCacheEnabled: args.promptCacheEnabled,
+    promptCacheKey: args.promptCacheKey
+  });
+
+  const tables = await schemaService.listTables();
+  const listingsTableObj = (tables || []).find(
+    table => normalizeText(table?.name).toLowerCase() === listingsTable.toLowerCase()
+  );
+  if (!listingsTableObj?.id) {
+    throw new Error(`Listing table not found: '${listingsTable}'.`);
+  }
+  const listingsTableId = normalizeText(listingsTableObj.id);
+  const tableFieldsByName = new Map(
+    (tables || [])
+      .map(table => [
+        normalizeText(table?.name).toLowerCase(),
+        new Set((table?.fields || []).map(field => normalizeText(field?.name)).filter(Boolean))
+      ])
+      .filter(([name]) => Boolean(name))
+  );
+
+  const masterRows = await fetchAllRecordsWithFallback(airtableService, masterTable, []);
+  const masterByIpn = new Map();
+  for (const row of masterRows) {
+    const ipn = normalizeIpn(row?.fields?.IPN);
+    if (!ipn || masterByIpn.has(ipn)) continue;
+    masterByIpn.set(ipn, row);
+  }
+
+  emitProgress(progressCallback, {
+    stage: 'phase4d_scan_listings',
+    percent: 20,
+    message: `Loading listings from '${listingsTable}'...`
+  });
+
+  const listingsRows = await fetchAllRecordsWithFallback(
+    airtableService,
+    listingsTableId,
+    [
+      EBAY_LISTING_RECORD_KEY_FIELD,
+      EBAY_LISTING_IPN_FIELD,
+      EBAY_LISTING_TITLE_FIELD,
+      EBAY_LISTING_CONDITIONS_FIELD,
+      ...EBAY_LISTING_DESCRIPTION_FIELDS
+    ]
+  );
+
+  const summary = {
+    dryRun: Boolean(args.dryRun),
+    rulesSource: `google_drive:${fileId}`,
+    rulesDriveFile: args.rulesDriveFile || '',
+    listingsTable,
+    listingsScanned: listingsRows.length,
+    listingsEligible: 0,
+    masterPartsMissing: 0,
+    listingFieldsCreated: 0,
+    fsvFieldsEvaluated: 0,
+    fsvFieldsUpdated: 0,
+    fsvDNAWritten: 0,
+    v1FieldsEvaluated: 0,
+    v1FieldsUpdated: 0,
+    v1DNAWritten: 0,
+    v1LowConfidenceLeftBlank: 0,
+    v2FieldsEvaluated: 0,
+    v2FieldsUpdated: 0,
+    v2DNAWritten: 0,
+    v2LowConfidenceLeftBlank: 0,
+    v2DNASkippedOverwrite: 0,
+    vbFieldsEvaluated: 0,
+    vbFieldsUpdated: 0,
+    vbLowConfidenceLeftBlank: 0,
+    manualOverrideSkipped: 0,
+    sampleOutputs: [],
+    errors: []
+  };
+  let aiCalls = 0;
+  let writesDone = 0;
+  let lastProgressAt = Date.now();
+
+  for (let i = 0; i < listingsRows.length; i += 1) {
+    const row = listingsRows[i];
+    const listingFields = row?.fields || {};
+    const recordId = normalizeText(row?.id);
+    const recordKey = normalizeText(listingFields[EBAY_LISTING_RECORD_KEY_FIELD] || recordId);
+    const ipn = normalizeIpn(listingFields[EBAY_LISTING_IPN_FIELD]);
+    if (!ipn) continue;
+    if (!isListingRowInScope(listingFields)) continue;
+
+    const master = masterByIpn.get(ipn);
+    if (!master) {
+      summary.masterPartsMissing += 1;
+      continue;
+    }
+    const prefix = normalizeText(master?.fields?.['IPN Prefix'] || parsePrefixFromTableName(ipn));
+    const prefixRules = rulesByPrefix.get(prefix);
+    if (!prefixRules || prefixRules.size === 0) continue;
+    summary.listingsEligible += 1;
+
+    const ruleFieldNames = Array.from(prefixRules.keys());
+    const createdFields = await ensureListingCFields(
+      schemaService,
+      listingsTableId,
+      listingsTable,
+      tableFieldsByName,
+      ruleFieldNames,
+      Boolean(args.dryRun)
+    );
+    if (!args.dryRun) {
+      summary.listingFieldsCreated += createdFields.length;
+    }
+
+    for (const fieldName of ruleFieldNames) {
+      const ruleMeta = prefixRules.get(fieldName) || {};
+      const ruleType = normalizeText(ruleMeta.ruleType).toUpperCase();
+      const currentValue = normalizeText(listingFields[fieldName]);
+      if (isManualOverrideForField(listingFields, fieldName)) {
+        summary.manualOverrideSkipped += 1;
+        continue;
+      }
+
+      if (ruleType === 'FSV') {
+        summary.fsvFieldsEvaluated += 1;
+        const sourceValue = resolveFsVMasterValue(fieldName, master?.fields || {});
+        const nextValue = sourceValue || 'Does Not Apply';
+        const canWrite =
+          !currentValue ||
+          currentValue.toLowerCase() === 'does not apply';
+        if (!canWrite || currentValue === nextValue) continue;
+        if (args.dryRun) continue;
+        if (!args.dryRun) {
+          const writeResult = await patchTableRecords(airtableService, listingsTableId, [{ id: recordId, fields: { [fieldName]: nextValue } }]);
+          if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
+            if (summary.errors.length < args.sampleLimit) {
+              summary.errors.push(`FsV write failed record='${recordKey}' field='${fieldName}'`);
+            }
+            continue;
+          }
+        }
+        summary.fsvFieldsUpdated += 1;
+        writesDone += 1;
+        if (nextValue === 'Does Not Apply') summary.fsvDNAWritten += 1;
+        listingFields[fieldName] = nextValue;
+        if (summary.sampleOutputs.length < args.sampleLimit) {
+          summary.sampleOutputs.push(`[FsV] record='${recordKey}' ipn='${ipn}' field='${fieldName}' value='${nextValue}'`);
+        }
+        continue;
+      }
+
+      if (ruleType === 'V1') {
+        summary.v1FieldsEvaluated += 1;
+        if (currentValue && currentValue.toLowerCase() !== 'does not apply') continue;
+      } else if (ruleType === 'V2') {
+        summary.v2FieldsEvaluated += 1;
+        if (currentValue && currentValue.toLowerCase() === 'does not apply') {
+          summary.v2DNASkippedOverwrite += 1;
+          continue;
+        }
+        if (currentValue) continue;
+      } else if (ruleType === 'VB') {
+        summary.vbFieldsEvaluated += 1;
+        if (currentValue) continue;
+      } else {
+        continue;
+      }
+
+      let aiResult;
+      try {
+        aiCalls += 1;
+        aiResult = await aiService.evaluateField({
+          recordKey,
+          ipn,
+          prefix,
+          tableName: listingsTable,
+          fieldName,
+          ruleType,
+          masterPartsData: buildAiMasterContext(master?.fields || {}),
+          allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
+          listingTitle: compactText(listingFields[EBAY_LISTING_TITLE_FIELD], 1000),
+          listingDescription: compactText(firstNonEmptyField(listingFields, EBAY_LISTING_DESCRIPTION_FIELDS), 4000),
+          listingConditionsAndOptions: compactText(listingFields[EBAY_LISTING_CONDITIONS_FIELD], 2000)
+        });
+      } catch (error) {
+        if (summary.errors.length < args.sampleLimit) {
+          summary.errors.push(`${ruleType} AI failed record='${recordKey}' field='${fieldName}': ${error.message}`);
+        }
+        continue;
+      }
+
+      const confidence = Number(aiResult?.confidence || 0);
+      const candidateValue = normalizeText(aiResult?.value);
+      let nextValue = '';
+      if (confidence >= LOW_CONFIDENCE_THRESHOLD && candidateValue) {
+        nextValue = candidateValue;
+      } else {
+        if (ruleType === 'VB') {
+          summary.vbLowConfidenceLeftBlank += 1;
+        } else if (ruleType === 'V1') {
+          summary.v1LowConfidenceLeftBlank = Number(summary.v1LowConfidenceLeftBlank || 0) + 1;
+        } else if (ruleType === 'V2') {
+          summary.v2LowConfidenceLeftBlank = Number(summary.v2LowConfidenceLeftBlank || 0) + 1;
+        }
+        continue;
+      }
+      if (currentValue === nextValue) continue;
+      if (args.dryRun) continue;
+
+      if (!args.dryRun) {
+        const writeResult = await patchTableRecords(airtableService, listingsTableId, [{ id: recordId, fields: { [fieldName]: nextValue } }]);
+        if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
+          if (summary.errors.length < args.sampleLimit) {
+            summary.errors.push(`${ruleType} write failed record='${recordKey}' field='${fieldName}'`);
+          }
+          continue;
+        }
+      }
+
+      if (ruleType === 'V1') {
+        summary.v1FieldsUpdated += 1;
+      } else if (ruleType === 'V2') {
+        summary.v2FieldsUpdated += 1;
+      } else if (ruleType === 'VB') {
+        summary.vbFieldsUpdated += 1;
+      }
+      writesDone += 1;
+      listingFields[fieldName] = nextValue;
+      if (summary.sampleOutputs.length < args.sampleLimit) {
+        summary.sampleOutputs.push(`[${ruleType}] record='${recordKey}' ipn='${ipn}' field='${fieldName}' value='${nextValue}' confidence='${confidence.toFixed(2)}'`);
+      }
+    }
+
+    const now = Date.now();
+    if (
+      i === 0 ||
+      (i + 1) % 100 === 0 ||
+      i + 1 === listingsRows.length ||
+      now - lastProgressAt >= 10000
+    ) {
+      lastProgressAt = now;
+      emitProgress(progressCallback, {
+        stage: 'phase4d_scan_listings',
+        percent: Math.min(95, 20 + Math.floor(((i + 1) / Math.max(1, listingsRows.length)) * 70)),
+        counts: summary,
+        message:
+          `Processing listing ${i + 1}/${listingsRows.length} ` +
+          `(recordKey='${recordKey || recordId}', eligible=${summary.listingsEligible}, aiCalls=${aiCalls}, writes=${writesDone}, ` +
+          `FsV=${summary.fsvFieldsUpdated}, V1=${summary.v1FieldsUpdated}, V2=${summary.v2FieldsUpdated}, VB=${summary.vbFieldsUpdated}, ` +
+          `manualSkipped=${summary.manualOverrideSkipped}, masterMissing=${summary.masterPartsMissing})`
+      });
+    }
+  }
+
+  if (summary.errors.length > args.sampleLimit) {
+    summary.errors = summary.errors.slice(0, args.sampleLimit);
+  }
+  emitProgress(progressCallback, {
+    stage: 'completed',
+    percent: 100,
+    counts: summary,
+    message: `Phase 4D completed (${args.dryRun ? 'dry run' : 'write run'}).`
   });
   return summary;
 }
@@ -1006,5 +2532,9 @@ if (require.main === module) {
 }
 
 module.exports = {
-  runPhase4BLite
+  runPhase4BLite,
+  runPhase4BWritebackOnly,
+  runPhase4CMFWritebackOnly,
+  runPhase4CMF,
+  runPhase4DListing
 };

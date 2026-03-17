@@ -59,6 +59,7 @@ class Phase4AiEvaluatorService {
 
   async evaluateField(payload = {}) {
     const promptInput = {
+      recordKey: normalizeText(payload.recordKey),
       ipn: normalizeText(payload.ipn),
       prefix: normalizeText(payload.prefix),
       tableName: normalizeText(payload.tableName),
@@ -67,6 +68,7 @@ class Phase4AiEvaluatorService {
       masterPartsData: payload.masterPartsData || {},
       allowedValues: Array.isArray(payload.allowedValues) ? payload.allowedValues : [],
       listingTitle: normalizeText(payload.listingTitle),
+      listingDescription: normalizeText(payload.listingDescription),
       listingConditionsAndOptions: normalizeText(payload.listingConditionsAndOptions)
     };
 
@@ -78,7 +80,7 @@ class Phase4AiEvaluatorService {
         {
           role: 'system',
           content:
-            'Return only JSON. Decide a value for one item-specific field using provided inventory context (Master Parts) and listing context (title/conditions). If uncertain, return low confidence.'
+            'Return only JSON. Decide a value for one item-specific field using provided inventory context (Master Parts) and listing context (title/description/conditions). If uncertain, return low confidence.'
         },
         {
           role: 'user',

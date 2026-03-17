@@ -45,6 +45,69 @@ function normalizeCategoryToken(value) {
     .replace(/[^a-z0-9]/g, '');
 }
 
+function readLinkedRecordIds(fields = {}, candidates = []) {
+  for (const name of candidates) {
+    const key = normalizeString(name);
+    if (!key) continue;
+    const raw = fields?.[key];
+    if (!Array.isArray(raw) || raw.length === 0) continue;
+    return raw
+      .map(item => {
+        if (!item) return '';
+        if (typeof item === 'string') return normalizeString(item);
+        if (typeof item === 'object') return normalizeString(item.id || item.recordId || '');
+        return '';
+      })
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function extractEbayCategoryLeaf(value) {
+  const raw = normalizeString(value);
+  if (!raw) return '';
+  const parts = raw
+    .split('»')
+    .map(item => normalizeString(item))
+    .filter(Boolean);
+  if (parts.length > 0) return parts[parts.length - 1];
+  return raw;
+}
+
+function buildCategoryDefinitionLookup(categoryRecords = []) {
+  const byId = new Map();
+  for (const record of categoryRecords) {
+    const id = normalizeString(record?.id);
+    if (!id) continue;
+    const fields = record?.fields || {};
+    const prefix = parseMasterPrefix(fields['IPN Prefix']);
+    const tokens = new Set();
+    const ebayCategoryLeaf = extractEbayCategoryLeaf(
+      fields['eBay Category Name'] || fields['eBay Category'] || fields['eBay Category Path']
+    );
+    const ebayCategoryToken = normalizeCategoryToken(ebayCategoryLeaf);
+    if (ebayCategoryToken) tokens.add(ebayCategoryToken);
+    byId.set(id, {
+      prefix,
+      tokens
+    });
+  }
+  return byId;
+}
+
+function resolveIdentifierTokensForPrefix(linkedIds = [], categoryLookup = new Map(), prefix = '') {
+  const resolved = new Set();
+  for (const recordId of linkedIds) {
+    const entry = categoryLookup.get(recordId);
+    if (!entry) continue;
+    if (entry.prefix && prefix && entry.prefix !== prefix) continue;
+    for (const token of entry.tokens || []) {
+      if (token) resolved.add(token);
+    }
+  }
+  return resolved;
+}
+
 function getRouteCategoryKey(tableName) {
   const match = normalizeString(tableName).match(/^\d{3}\s*-\s*(.+)$/);
   return normalizeCategoryToken(match ? match[1] : '');
@@ -117,6 +180,7 @@ function buildPhase4Config(options = {}) {
     airtableToken: normalizeString(merged.airtableToken || process.env.AIRTABLE_TOKEN),
     masterBaseId: normalizeString(merged.airtableBaseId || process.env.AIRTABLE_BASE_ID),
     masterTable: normalizeString(merged.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'),
+    categoryTable: normalizeString(merged.airtableCategoryTable || process.env.AIRTABLE_CATEGORY_TABLE || 'Category Definitions'),
     itemSpecificsBaseId: normalizeString(
       merged.itemSpecificsBaseId ||
         process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
@@ -199,9 +263,16 @@ function buildIncrementalFormula(fieldName, sinceIso) {
   return `IS_AFTER({${safeField}}, "${safeIso}")`;
 }
 
-async function fetchMasterRecords(airtableService, tableName, selectFields = [], filterByFormula = '') {
+async function fetchMasterRecords(
+  airtableService,
+  tableName,
+  selectFields = [],
+  filterByFormula = '',
+  onPage = null
+) {
   const records = [];
   let offset = null;
+  let page = 0;
   do {
     const params = {};
     if (offset) params.offset = offset;
@@ -210,6 +281,14 @@ async function fetchMasterRecords(airtableService, tableName, selectFields = [],
 
     const data = await airtableService.request('GET', `/${encodeURIComponent(tableName)}`, { params });
     records.push(...(data?.records || []));
+    page += 1;
+    if (typeof onPage === 'function') {
+      onPage({
+        page,
+        loaded: records.length,
+        pageSize: Array.isArray(data?.records) ? data.records.length : 0
+      });
+    }
     offset = data?.offset || null;
   } while (offset);
   return records;
@@ -291,7 +370,23 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     counts: summary,
     message: 'Building routing map from Item Specifics base schema...'
   });
-  const { tablesByPrefix } = await buildRoutingMap(itemSchemaService);
+  const { tablesByPrefix, duplicatePrefixes } = await buildRoutingMap(itemSchemaService);
+
+  let categoryDefinitionLookup = new Map();
+  if (duplicatePrefixes.length > 0) {
+    emitProgress(progressCallback, {
+      stage: 'phase4_route_map',
+      percent: 15,
+      counts: summary,
+      message: `Loading Category Definitions for duplicate-prefix routing (${duplicatePrefixes.length} prefixes)...`
+    });
+    try {
+      const categoryRecords = await masterService.fetchAllRecords(config.categoryTable, []);
+      categoryDefinitionLookup = buildCategoryDefinitionLookup(categoryRecords);
+    } catch (error) {
+      addError(summary, `Category Definitions fallback unavailable: ${error.message}`);
+    }
+  }
 
   emitProgress(progressCallback, {
     stage: 'phase4_load_master',
@@ -303,11 +398,26 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
   const selectFields = [
     'IPN',
     'IPN Prefix',
-    'Category Name'
+    'Category Name',
+    'Category Definitions Link',
+    'Category Definitions',
+    'Categories'
   ];
 
   let masterRecords = [];
   let runMode = 'full_scan';
+  let lastLoadProgressCount = 0;
+  const reportMasterLoadProgress = ({ page = 0, loaded = 0 } = {}) => {
+    // Keep logs useful without flooding: first page + every 1000 loaded.
+    if (page !== 1 && loaded - lastLoadProgressCount < 1000) return;
+    lastLoadProgressCount = loaded;
+    emitProgress(progressCallback, {
+      stage: 'phase4_load_master',
+      percent: 20,
+      counts: summary,
+      message: `Loading Master Parts records... loaded=${loaded} (pages=${page})`
+    });
+  };
 
   if (config.incrementalEnabled && lastMirrorRunAt) {
     try {
@@ -320,7 +430,8 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
           masterService,
           config.masterTable,
           selectFields,
-          formula
+          formula,
+          reportMasterLoadProgress
         );
         runMode = `incremental_${incrementalField.type}`;
       }
@@ -333,13 +444,25 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
 
   if (masterRecords.length === 0 && runMode === 'full_scan') {
     try {
-      masterRecords = await fetchMasterRecords(masterService, config.masterTable, selectFields);
+      masterRecords = await fetchMasterRecords(
+        masterService,
+        config.masterTable,
+        selectFields,
+        '',
+        reportMasterLoadProgress
+      );
     } catch (error) {
       addError(
         summary,
         `Field-limited master fetch failed; retrying full field scan: ${error.message}`
       );
-      masterRecords = await fetchMasterRecords(masterService, config.masterTable, []);
+      masterRecords = await fetchMasterRecords(
+        masterService,
+        config.masterTable,
+        [],
+        '',
+        reportMasterLoadProgress
+      );
     }
   } else if (masterRecords.length === 0 && runMode.startsWith('incremental')) {
     // Incremental run may legitimately find no changed records.
@@ -366,6 +489,12 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
 
   summary.runMode = runMode;
   summary.masterRecordsScanned = masterRecords.length;
+  emitProgress(progressCallback, {
+    stage: 'phase4_load_master',
+    percent: 22,
+    counts: summary,
+    message: `Loaded Master Parts records: ${masterRecords.length}`
+  });
 
   emitProgress(progressCallback, {
     stage: 'phase4_plan',
@@ -436,17 +565,27 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
       continue;
     }
 
+    const categoryIdentifierTokens = resolveIdentifierTokensForPrefix(
+      readLinkedRecordIds(fields, ['Category Definitions Link', 'Category Definitions', 'Categories']),
+      categoryDefinitionLookup,
+      prefix
+    );
+
     unresolvedByPrefix.push({
       ipn,
       prefix,
       categoryName: normalizeString(fields['Category Name']),
+      categoryIdentifierTokens,
       routes: prefixRoutes
     });
   }
 
   for (const item of unresolvedByPrefix) {
-    const { ipn, prefix, categoryName, routes } = item;
-    if (!categoryName) {
+    const { ipn, prefix, categoryName, categoryIdentifierTokens, routes } = item;
+    const hasResolvedIdentifier =
+      categoryIdentifierTokens && categoryIdentifierTokens.size > 0;
+
+    if (!hasResolvedIdentifier) {
       summary.routingFailures += 1;
       classifyRoutingFailure(routingFailureGroups, 'blankCategoryForDuplicatePrefix', { prefix });
       appendSample(
@@ -454,26 +593,25 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
         {
           ipn,
           prefix,
-          reason: 'blank_category_for_duplicate_prefix'
+          reason: 'missing_resolved_ebay_category_name_for_duplicate_prefix'
         },
         summary.sampleLimit
       );
       continue;
     }
 
-    const categoryNameNorm = normalizeCategoryToken(categoryName);
-    const exactCategoryMatches = routes.filter(
-      route => normalizeString(route.categoryKey) === categoryNameNorm
+    const identifierMatches = routes.filter(route =>
+      categoryIdentifierTokens && categoryIdentifierTokens.has(normalizeString(route.categoryKey))
     );
-    if (exactCategoryMatches.length === 1) {
-      assignDestination(ipn, prefix, exactCategoryMatches[0].tableId);
+    if (identifierMatches.length === 1) {
+      assignDestination(ipn, prefix, identifierMatches[0].tableId);
       continue;
     }
 
     summary.routingFailures += 1;
     classifyRoutingFailure(routingFailureGroups, 'ambiguousDuplicatePrefix', {
       prefix,
-      categoryName,
+      categoryName: categoryName || [...categoryIdentifierTokens].join(' | '),
       candidateTables: routes.map(route => route.tableName)
     });
     appendSample(

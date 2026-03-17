@@ -77,6 +77,16 @@ function getMockListingConditionsAndOptions(rowIndex = 0) {
   return MOCK_LISTING_CONDITIONS_OPTIONS[rowIndex % MOCK_LISTING_CONDITIONS_OPTIONS.length];
 }
 
+function findHeaderIndex(headers = [], target = '') {
+  const normalizedTarget = normalizeText(target).toLowerCase();
+  if (!normalizedTarget) return -1;
+  return headers.findIndex(name => normalizeText(name).toLowerCase() === normalizedTarget);
+}
+
+function isRowCompletelyBlank(values = []) {
+  return values.every(value => normalizeText(value) === '');
+}
+
 function parseCsvRowsStream(filePath) {
   const MAX_QUEUE_ROWS = 500;
   const RESUME_QUEUE_ROWS = 150;
@@ -331,6 +341,7 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
     headerNames.push(LISTING_CONDITIONS_OPTIONS_FIELD);
   }
   summary.columnsDetected = headerNames.length;
+  const categoryIndex = findHeaderIndex(headerNames, 'Category');
 
   const schemaService = new AirtableSchemaService({
     token: airtableToken,
@@ -364,6 +375,18 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
   async function processRow(values = []) {
     rowNumber += 1;
     summary.rowsScanned += 1;
+
+    if (isRowCompletelyBlank(values)) {
+      return;
+    }
+
+    if (categoryIndex >= 0) {
+      const categoryValue = categoryIndex < values.length ? values[categoryIndex] : '';
+      if (normalizeText(categoryValue) === '') {
+        return;
+      }
+    }
+
     const fields = {};
     const rowKey = String(summary.rowsScanned);
     fields[PRIMARY_KEY_FIELD] = rowKey;

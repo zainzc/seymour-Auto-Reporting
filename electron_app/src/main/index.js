@@ -34,7 +34,7 @@ const { runPhase3, buildPhase3Config, PARTSHUNTER_STORE_ID } = require('../servi
 const { runPhase4Mirroring, buildPhase4Config, MIRROR_STATE_KEY } = require('../services/phase4MirroringService');
 const { runItemSpecificTableSync } = require('../scripts/syncItemSpecificTables');
 const { runPhase4RulesPopulate } = require('../scripts/runPhase4RulesPopulate');
-const { runPhase4BLite } = require('../scripts/runPhase4BLite');
+const { runPhase4BLite, runPhase4BWritebackOnly, runPhase4CMFWritebackOnly, runPhase4CMF, runPhase4DListing } = require('../scripts/runPhase4BLite');
 const { runEbayMockImport } = require('../scripts/runEbayMockImport');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
@@ -43,6 +43,8 @@ const phase2AutoRunService = require('../services/phase2AutoRunService');
 
 let mainWindow;
 let autoSyncInterval = null;
+let phase4WritebackInterval = null;
+let isPhase4WritebackPollerRunning = false;
 let dbReady = false;
 
 function parseBoolean(value, defaultValue = false) {
@@ -61,6 +63,27 @@ function formatDetailedErrorMessage(error) {
     error?.message ||
     'Unknown error';
   return status ? `HTTP ${status}: ${detail}` : String(detail);
+}
+
+function emitInventoryAutoChainLog(text, level = 'info') {
+  const message = String(text || '').trim();
+  if (!message) return;
+
+  if (level === 'error') {
+    console.error(message);
+  } else {
+    console.log(message);
+  }
+
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      mainWindow.webContents.send('inventory:auto-chain-log', {
+        at: new Date().toISOString(),
+        level,
+        message
+      });
+    }
+  } catch (_) {}
 }
 
 /* ---------------------------
@@ -734,9 +757,9 @@ const {
 setPostPushHook(async payload => {
   const phase2Result = await phase2AutoRunService.onPhase1PushSuccess(payload);
   if (phase2Result?.skipped) {
-    console.log('Phase3 auto-run skipped after Phase1 push: Phase2 did not run', {
-      reason: phase2Result.reason || 'unknown'
-    });
+    emitInventoryAutoChainLog(
+      `Phase3/Phase4 auto-run skipped after Phase1 push: Phase2 did not run (reason=${phase2Result.reason || 'unknown'})`
+    );
     return;
   }
 
@@ -751,20 +774,190 @@ setPostPushHook(async payload => {
     Boolean(phase3Config?.shipstationApiSecret);
 
   if (!hasPhase3MinimumConfig) {
-    console.log('Phase3 auto-run skipped after Phase2 success: missing Phase3 config');
+    emitInventoryAutoChainLog('Phase3/Phase4 auto-run skipped after Phase2 success: missing Phase3 config');
     return;
   }
 
   try {
     const phase3Summary = await runPhase3(phase3Config, () => {});
-    console.log('Phase3 auto-run completed after Phase1+Phase2 success', {
-      shipmentsFetched: phase3Summary?.shipmentsFetched || 0,
-      skusMappedToIpn: phase3Summary?.skusMappedToIpn || 0,
-      ipnsUpdated: phase3Summary?.ipnsUpdated || 0,
-      dryRun: Boolean(phase3Config?.phase3DryRun)
-    });
+    emitInventoryAutoChainLog(
+      `Phase3 auto-run completed after Phase1+Phase2 success ` +
+        `(shipmentsFetched=${phase3Summary?.shipmentsFetched || 0}, ` +
+        `skusMappedToIpn=${phase3Summary?.skusMappedToIpn || 0}, ` +
+        `ipnsUpdated=${phase3Summary?.ipnsUpdated || 0}, ` +
+        `dryRun=${Boolean(phase3Config?.phase3DryRun)})`
+    );
   } catch (error) {
-    console.error('Phase3 auto-run failed after Phase2 success:', error.message);
+    emitInventoryAutoChainLog(
+      `Phase3 auto-run failed after Phase2 success. Phase4 auto-run blocked: ${error.message}`,
+      'error'
+    );
+    return;
+  }
+
+  const phase4Stored = getInventoryConfig('phase2Config') || {};
+  const phase4RulesDriveFile = String(
+    phase4Stored.phase4RulesDriveFile ||
+      process.env.PHASE4_RULES_DRIVE_FILE ||
+      process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+      ''
+  ).trim();
+  const phase4OpenAiKey = String(
+    phase4Stored.openaiApiKey ||
+      process.env.OPENAI_API_KEY ||
+      ''
+  ).trim();
+  const phase4BListId = String(
+    phase4Stored.phase4BClickupListId ||
+      process.env.PHASE4B_CLICKUP_LIST_ID ||
+      ''
+  ).trim();
+  const phase4CListId = String(
+    phase4Stored.phase4CClickupListId ||
+      process.env.PHASE4C_CLICKUP_LIST_ID ||
+      phase4BListId
+  ).trim();
+  const hasPhase4MinimumConfig =
+    Boolean(phase4Stored?.airtableToken) &&
+    Boolean(phase4Stored?.airtableBaseId) &&
+    Boolean(phase4Stored?.itemSpecificsBaseId) &&
+    Boolean(phase4Stored?.clickupToken) &&
+    Boolean(phase4RulesDriveFile) &&
+    Boolean(phase4OpenAiKey) &&
+    Boolean(phase4BListId) &&
+    Boolean(phase4CListId);
+  if (!hasPhase4MinimumConfig) {
+    emitInventoryAutoChainLog('Phase4 auto-run skipped after Phase3 success: missing Phase4 config');
+    return;
+  }
+
+  try {
+    emitInventoryAutoChainLog('Phase4 auto-run started after Phase1+Phase2+Phase3 success');
+
+    const mirrorOptions = {
+      ...phase4Stored,
+      authContext: 'inventory',
+      itemSpecificsBaseId: String(phase4Stored.itemSpecificsBaseId || '').trim(),
+      dryRun:
+        typeof phase4Stored.phase4DryRun === 'boolean'
+          ? phase4Stored.phase4DryRun
+          : true,
+      incrementalEnabled:
+        typeof phase4Stored.phase4IncrementalEnabled === 'boolean'
+          ? phase4Stored.phase4IncrementalEnabled
+          : true
+    };
+    const mirrorSummary = await runPhase4Mirroring(mirrorOptions, () => {});
+    emitInventoryAutoChainLog(
+      `Phase4 auto-run: mirroring completed ` +
+        `(scanned=${mirrorSummary?.masterRecordsScanned || 0}, ` +
+        `eligible=${mirrorSummary?.masterRecordsEligible || 0}, ` +
+        `created=${mirrorSummary?.ipnRowsCreated || 0}, ` +
+        `planned=${mirrorSummary?.ipnRowsPlanned || 0})`
+    );
+
+    const rulesDryRun =
+      typeof phase4Stored.phase4RulesDryRun === 'boolean'
+        ? phase4Stored.phase4RulesDryRun
+        : true;
+    const phase4ASummary = await runPhase4RulesPopulate({
+      ...phase4Stored,
+      dryRun: rulesDryRun,
+      execute: !rulesDryRun,
+      ruleTypes: ['F'],
+      authContext: 'inventory',
+      rulesDriveFile: phase4RulesDriveFile,
+      globalDefaultsTable: String(
+        phase4Stored.phase4GlobalDefaultsTable ||
+          process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+          'Fixed Item Specifics (Global Defaults)'
+      ).trim(),
+      logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim()
+    }, () => {});
+    emitInventoryAutoChainLog(
+      `Phase4 auto-run: 4A completed (updated=${phase4ASummary?.fixedFieldsUpdated || 0})`
+    );
+
+    const bliteDryRun =
+      typeof phase4Stored.phase4BLiteDryRun === 'boolean'
+        ? phase4Stored.phase4BLiteDryRun
+        : true;
+    const phase4BSummary = await runPhase4BLite({
+      ...phase4Stored,
+      dryRun: bliteDryRun,
+      execute: !bliteDryRun,
+      authContext: 'inventory',
+      rulesDriveFile: phase4RulesDriveFile,
+      logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
+      openaiApiKey: phase4OpenAiKey,
+      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiBaseUrl: String(phase4Stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+      phase4BClickupListName: String(phase4Stored.phase4BClickupListName || '').trim(),
+      phase4BClickupListId: phase4BListId,
+      clickupOpenStatus: String(
+        phase4Stored.phase4BClickupOpenStatus ||
+          process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
+          'To Do'
+      ).trim()
+    }, () => {});
+    emitInventoryAutoChainLog(
+      `Phase4 auto-run: 4B completed ` +
+        `(vmfUpdated=${phase4BSummary?.vmfFieldsUpdated || 0}, ` +
+        `vmfTasksCreated=${phase4BSummary?.vmfTasksCreated || 0})`
+    );
+
+    const cmfDryRun =
+      typeof phase4Stored.phase4CMFDryRun === 'boolean'
+        ? phase4Stored.phase4CMFDryRun
+        : true;
+    const phase4CSummary = await runPhase4CMF({
+      ...phase4Stored,
+      dryRun: cmfDryRun,
+      execute: !cmfDryRun,
+      authContext: 'inventory',
+      rulesDriveFile: phase4RulesDriveFile,
+      logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
+      phase4CClickupListName: String(phase4Stored.phase4CClickupListName || phase4Stored.phase4BClickupListName || '').trim(),
+      phase4CClickupListId: phase4CListId,
+      phase4CClickupOpenStatus: String(
+        phase4Stored.phase4CClickupOpenStatus ||
+          phase4Stored.phase4BClickupOpenStatus ||
+          process.env.PHASE4C_CLICKUP_OPEN_STATUS ||
+          process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
+          'To Do'
+      ).trim()
+    }, () => {});
+    emitInventoryAutoChainLog(
+      `Phase4 auto-run: 4C completed ` +
+        `(mfTasksCreated=${phase4CSummary?.mfTasksCreated || 0}, ` +
+        `mfWritebacksCompleted=${phase4CSummary?.mfWritebacksCompleted || 0})`
+    );
+
+    const dDryRun =
+      typeof phase4Stored.phase4DDryRun === 'boolean'
+        ? phase4Stored.phase4DDryRun
+        : true;
+    const phase4DSummary = await runPhase4DListing({
+      ...phase4Stored,
+      dryRun: dDryRun,
+      execute: !dDryRun,
+      authContext: 'inventory',
+      rulesDriveFile: phase4RulesDriveFile,
+      logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
+      phase4DListingsTable: String(phase4Stored.phase4DListingsTable || 'eBay Listings (API)').trim(),
+      openaiApiKey: phase4OpenAiKey,
+      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiBaseUrl: String(phase4Stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
+    }, () => {});
+    emitInventoryAutoChainLog(
+      `Phase4 auto-run: 4D completed ` +
+        `(listingsEligible=${phase4DSummary?.listingsEligible || 0}, ` +
+        `writes=${(phase4DSummary?.fsvFieldsUpdated || 0) + (phase4DSummary?.v1FieldsUpdated || 0) + (phase4DSummary?.v2FieldsUpdated || 0) + (phase4DSummary?.vbFieldsUpdated || 0)})`
+    );
+
+    emitInventoryAutoChainLog('Phase4 auto-run completed after Phase1+Phase2+Phase3 success');
+  } catch (error) {
+    emitInventoryAutoChainLog(`Phase4 auto-run failed after Phase3 success: ${error.message}`, 'error');
   }
 });
 
@@ -940,6 +1133,46 @@ function buildPhase2WritebackConfig(overrides = {}) {
   };
 }
 
+function stopPhase4WritebackPoller() {
+  if (phase4WritebackInterval) {
+    clearInterval(phase4WritebackInterval);
+    phase4WritebackInterval = null;
+  }
+}
+
+function startPhase4WritebackPoller() {
+  stopPhase4WritebackPoller();
+
+  phase4WritebackInterval = setInterval(async () => {
+    if (isPhase4WritebackPollerRunning) return;
+    isPhase4WritebackPollerRunning = true;
+    try {
+      const vmfSummary = await runPhase4BWritebackOnly({}, () => {});
+      const mfSummary = await runPhase4CMFWritebackOnly({}, () => {});
+
+      const vmfFound = vmfSummary?.vmfDeterminedTasksFound || 0;
+      const vmfWritten = vmfSummary?.vmfDeterminedWritebackSucceeded || 0;
+      const vmfClosed = vmfSummary?.vmfDeterminedTasksClosed || 0;
+      const vmfFailed = vmfSummary?.vmfDeterminedWritebackFailed || 0;
+      const mfWritten = mfSummary?.mfWritebacksCompleted || 0;
+      const mfSkipped = mfSummary?.mfWritebacksSkippedAlreadyFilled || 0;
+      const mfErrors = Array.isArray(mfSummary?.errors) ? mfSummary.errors.length : 0;
+
+      if (vmfFound > 0 || vmfWritten > 0 || vmfClosed > 0 || mfWritten > 0 || mfSkipped > 0 || mfErrors > 0) {
+        console.log(
+          `Phase4 writeback poller: ` +
+            `VMF(found=${vmfFound}, writeback=${vmfWritten}, closed=${vmfClosed}, failed=${vmfFailed}) ` +
+            `MF(writeback=${mfWritten}, skippedAlreadyFilled=${mfSkipped}, errors=${mfErrors})`
+        );
+      }
+    } catch (error) {
+      console.error(`Phase4 writeback poller failed: ${formatDetailedErrorMessage(error)}`);
+    } finally {
+      isPhase4WritebackPollerRunning = false;
+    }
+  }, 60 * 1000);
+}
+
 ipcMain.handle('phase2-get-config', async () => {
   const stored = getInventoryConfig('phase2Config') || {};
   const merged = buildPhase2Config(stored);
@@ -980,6 +1213,8 @@ ipcMain.handle('phase2-get-config', async () => {
       typeof stored.phase4BLiteDryRun === 'boolean'
         ? stored.phase4BLiteDryRun
         : true,
+    testTableName: '',
+    testMaxTables: 0,
     openaiApiKey: stored.openaiApiKey || '',
     openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini',
     openaiBaseUrl: stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '',
@@ -1437,6 +1672,8 @@ ipcMain.handle('phase4blite:get-config', async () => {
       typeof stored.phase4BLiteDryRun === 'boolean'
         ? stored.phase4BLiteDryRun
         : true,
+    testTableName: '',
+    testMaxTables: 0,
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
     openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
@@ -1444,8 +1681,6 @@ ipcMain.handle('phase4blite:get-config', async () => {
     clickupListId: String(
       stored.phase4BClickupListId ||
         process.env.PHASE4B_CLICKUP_LIST_ID ||
-        stored.clickupListId ||
-        process.env.CLICKUP_LIST_ID ||
         ''
     ).trim(),
     clickupOpenStatus:
@@ -1479,6 +1714,8 @@ ipcMain.handle('phase4blite:run', async (event, options = {}) => {
             ''
         ).trim(),
       logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+      testTableName: '',
+      testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
       openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
@@ -1489,8 +1726,6 @@ ipcMain.handle('phase4blite:run', async (event, options = {}) => {
         options.phase4BClickupListId ||
           stored.phase4BClickupListId ||
           process.env.PHASE4B_CLICKUP_LIST_ID ||
-          stored.clickupListId ||
-          process.env.CLICKUP_LIST_ID ||
           ''
       ).trim(),
       clickupOpenStatus: String(
@@ -1512,6 +1747,479 @@ ipcMain.handle('phase4blite:run', async (event, options = {}) => {
   } catch (error) {
     const message = formatDetailedErrorMessage(error);
     event.sender.send('phase4blite:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase4cmf:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    rulesDriveFile:
+      String(
+        stored.phase4RulesDriveFile ||
+          process.env.PHASE4_RULES_DRIVE_FILE ||
+          process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+          ''
+      ).trim(),
+    logicSheetName: String(stored.phase4RulesLogicSheet || process.env.PHASE4_LOGIC_SHEET || 'Logic').trim(),
+    dryRun:
+      typeof stored.phase4CMFDryRun === 'boolean'
+        ? stored.phase4CMFDryRun
+        : true,
+    testTableName: '',
+    testMaxTables: 0,
+    clickupListName: String(stored.phase4CClickupListName || stored.phase4BClickupListName || '').trim(),
+    clickupListId: String(
+      stored.phase4CClickupListId ||
+        stored.phase4BClickupListId ||
+        process.env.PHASE4C_CLICKUP_LIST_ID ||
+        process.env.PHASE4B_CLICKUP_LIST_ID ||
+        ''
+    ).trim(),
+    clickupOpenStatus: String(
+      stored.phase4CClickupOpenStatus ||
+        stored.phase4BClickupOpenStatus ||
+        process.env.PHASE4C_CLICKUP_OPEN_STATUS ||
+        process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
+        'To Do'
+    ).trim(),
+    authContext: 'inventory'
+  };
+});
+
+ipcMain.handle('phase4cmf:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const dryRun =
+      typeof options.phase4CMFDryRun === 'boolean'
+        ? options.phase4CMFDryRun
+        : typeof stored.phase4CMFDryRun === 'boolean'
+          ? stored.phase4CMFDryRun
+          : true;
+    const runOptions = {
+      ...stored,
+      ...options,
+      dryRun,
+      execute: !dryRun,
+      authContext: 'inventory',
+      rulesDriveFile:
+        String(
+          options.phase4RulesDriveFile ||
+            stored.phase4RulesDriveFile ||
+            process.env.PHASE4_RULES_DRIVE_FILE ||
+            process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+            ''
+        ).trim(),
+      logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+      testTableName: '',
+      testMaxTables: 0,
+      phase4CClickupListName: String(
+        options.phase4CClickupListName ||
+          stored.phase4CClickupListName ||
+          stored.phase4BClickupListName ||
+          ''
+      ).trim(),
+      phase4CClickupListId: String(
+        options.phase4CClickupListId ||
+          stored.phase4CClickupListId ||
+          stored.phase4BClickupListId ||
+          process.env.PHASE4C_CLICKUP_LIST_ID ||
+          process.env.PHASE4B_CLICKUP_LIST_ID ||
+          ''
+      ).trim(),
+      phase4CClickupOpenStatus: String(
+        options.phase4CClickupOpenStatus ||
+          stored.phase4CClickupOpenStatus ||
+          stored.phase4BClickupOpenStatus ||
+          process.env.PHASE4C_CLICKUP_OPEN_STATUS ||
+          process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
+          'To Do'
+      ).trim()
+    };
+
+    const summary = await runPhase4CMF(runOptions, progress => {
+      event.sender.send('phase4cmf:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase4cmf:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase4d:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    rulesDriveFile:
+      String(
+        stored.phase4RulesDriveFile ||
+          process.env.PHASE4_RULES_DRIVE_FILE ||
+          process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+          ''
+      ).trim(),
+    logicSheetName: String(stored.phase4RulesLogicSheet || process.env.PHASE4_LOGIC_SHEET || 'Logic').trim(),
+    dryRun:
+      typeof stored.phase4DDryRun === 'boolean'
+        ? stored.phase4DDryRun
+        : true,
+    listingsTableName: String(stored.phase4DListingsTable || process.env.PHASE4D_LISTINGS_TABLE || 'eBay Listings (API)').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+    authContext: 'inventory'
+  };
+});
+
+ipcMain.handle('phase4d:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const dryRun =
+      typeof options.phase4DDryRun === 'boolean'
+        ? options.phase4DDryRun
+        : typeof stored.phase4DDryRun === 'boolean'
+          ? stored.phase4DDryRun
+          : true;
+    const runOptions = {
+      ...stored,
+      ...options,
+      dryRun,
+      execute: !dryRun,
+      authContext: 'inventory',
+      rulesDriveFile:
+        String(
+          options.phase4RulesDriveFile ||
+            stored.phase4RulesDriveFile ||
+            process.env.PHASE4_RULES_DRIVE_FILE ||
+            process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+            ''
+        ).trim(),
+      logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+      phase4DListingsTable: String(
+        options.phase4DListingsTable ||
+          stored.phase4DListingsTable ||
+          process.env.PHASE4D_LISTINGS_TABLE ||
+          'eBay Listings (API)'
+      ).trim(),
+      testTableName: '',
+      testMaxTables: 0,
+      openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
+    };
+
+    event.sender.send('phase4d:progress', {
+      stage: 'phase4d_load_rules',
+      percent: 1,
+      counts: null,
+      message: 'Starting Phase 4D run...'
+    });
+
+    const summary = await runPhase4DListing(runOptions, progress => {
+      event.sender.send('phase4d:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase4d:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runMirror = options.phase4RunMirror !== false;
+    const run4A = options.phase4Run4A !== false;
+    const run4B = options.phase4Run4B !== false;
+    const run4C = options.phase4Run4C !== false;
+    const run4D = options.phase4Run4D !== false;
+
+    const phases = [];
+    if (runMirror) phases.push('mirror');
+    if (run4A) phases.push('4a');
+    if (run4B) phases.push('4b');
+    if (run4C) phases.push('4c');
+    if (run4D) phases.push('4d');
+    if (phases.length === 0) {
+      return { success: false, message: 'Select at least one Phase 4 subphase.' };
+    }
+
+    const phaseSummary = {};
+    const progressBase = 2;
+    const progressSpan = 96;
+    const segment = Math.max(1, Math.floor(progressSpan / phases.length));
+    let phaseIndex = 0;
+
+    const mapProgress = (innerPercent = 0) =>
+      Math.min(
+        98,
+        progressBase + phaseIndex * segment + Math.floor((Math.max(0, Math.min(100, Number(innerPercent || 0))) / 100) * segment)
+      );
+
+    event.sender.send('phase4pipeline:progress', {
+      stage: 'phase4pipeline_start',
+      percent: 1,
+      counts: null,
+      message: `Starting Phase 4 pipeline (${phases.join(' -> ')})...`
+    });
+
+    if (runMirror) {
+      const mirrorOptions = {
+        ...stored,
+        ...options,
+        authContext: 'inventory',
+        itemSpecificsBaseId: String(options.itemSpecificsBaseId || stored.itemSpecificsBaseId || '').trim(),
+        dryRun:
+          typeof options.phase4DryRun === 'boolean'
+            ? options.phase4DryRun
+            : true,
+        incrementalEnabled:
+          typeof options.phase4IncrementalEnabled === 'boolean'
+            ? options.phase4IncrementalEnabled
+            : true
+      };
+      const mirrorSummary = await runPhase4Mirroring(mirrorOptions, progress => {
+        event.sender.send('phase4pipeline:progress', {
+          ...progress,
+          stage: `phase4pipeline_mirror_${String(progress?.stage || 'running')}`,
+          percent: mapProgress(progress?.percent),
+          message: `[Mirror] ${String(progress?.message || '').trim()}`
+        });
+      });
+      phaseSummary.mirror = mirrorSummary || {};
+      phaseIndex += 1;
+    }
+
+    if (run4A) {
+      const rulesDryRun =
+        typeof options.phase4RulesDryRun === 'boolean'
+          ? options.phase4RulesDryRun
+          : typeof stored.phase4RulesDryRun === 'boolean'
+            ? stored.phase4RulesDryRun
+            : true;
+      const rulesOptions = {
+        ...stored,
+        ...options,
+        dryRun: rulesDryRun,
+        execute: !rulesDryRun,
+        ruleTypes: ['F'],
+        authContext: 'inventory',
+        rulesDriveFile:
+          String(
+            options.phase4RulesDriveFile ||
+              stored.phase4RulesDriveFile ||
+              process.env.PHASE4_RULES_DRIVE_FILE ||
+              process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+              ''
+          ).trim(),
+        globalDefaultsTable: String(
+          options.phase4GlobalDefaultsTable ||
+            stored.phase4GlobalDefaultsTable ||
+            process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+            'Fixed Item Specifics (Global Defaults)'
+        ).trim(),
+        logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim()
+      };
+      const phase4ASummary = await runPhase4RulesPopulate(rulesOptions, progress => {
+        event.sender.send('phase4pipeline:progress', {
+          ...progress,
+          stage: `phase4pipeline_4a_${String(progress?.stage || 'running')}`,
+          percent: mapProgress(progress?.percent),
+          message: `[4A] ${String(progress?.message || '').trim()}`
+        });
+      });
+      phaseSummary.phase4A = phase4ASummary || {};
+      phaseIndex += 1;
+    }
+
+    if (run4B) {
+      const bliteDryRun =
+        typeof options.phase4BLiteDryRun === 'boolean'
+          ? options.phase4BLiteDryRun
+          : typeof stored.phase4BLiteDryRun === 'boolean'
+            ? stored.phase4BLiteDryRun
+            : true;
+      const bliteOptions = {
+        ...stored,
+        ...options,
+        dryRun: bliteDryRun,
+        execute: !bliteDryRun,
+        authContext: 'inventory',
+        rulesDriveFile:
+          String(
+            options.phase4RulesDriveFile ||
+              stored.phase4RulesDriveFile ||
+              process.env.PHASE4_RULES_DRIVE_FILE ||
+              process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+              ''
+          ).trim(),
+        logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+        testTableName: '',
+        testMaxTables: 0,
+        openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+        openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+        phase4BClickupListName: String(
+          options.phase4BClickupListName || stored.phase4BClickupListName || ''
+        ).trim(),
+        phase4BClickupListId: String(
+          options.phase4BClickupListId ||
+            stored.phase4BClickupListId ||
+            process.env.PHASE4B_CLICKUP_LIST_ID ||
+            ''
+        ).trim(),
+        clickupOpenStatus: String(
+          options.phase4BClickupOpenStatus ||
+            stored.phase4BClickupOpenStatus ||
+            process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
+            'To Do'
+        ).trim()
+      };
+      const phase4BSummary = await runPhase4BLite(bliteOptions, progress => {
+        event.sender.send('phase4pipeline:progress', {
+          ...progress,
+          stage: `phase4pipeline_4b_${String(progress?.stage || 'running')}`,
+          percent: mapProgress(progress?.percent),
+          message: `[4B] ${String(progress?.message || '').trim()}`
+        });
+      });
+      phaseSummary.phase4B = phase4BSummary || {};
+      phaseIndex += 1;
+    }
+
+    if (run4C) {
+      const cmfDryRun =
+        typeof options.phase4CMFDryRun === 'boolean'
+          ? options.phase4CMFDryRun
+          : typeof stored.phase4CMFDryRun === 'boolean'
+            ? stored.phase4CMFDryRun
+            : true;
+      const cmfOptions = {
+        ...stored,
+        ...options,
+        dryRun: cmfDryRun,
+        execute: !cmfDryRun,
+        authContext: 'inventory',
+        rulesDriveFile:
+          String(
+            options.phase4RulesDriveFile ||
+              stored.phase4RulesDriveFile ||
+              process.env.PHASE4_RULES_DRIVE_FILE ||
+              process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+              ''
+          ).trim(),
+        logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+        phase4CClickupListName: String(
+          options.phase4CClickupListName || stored.phase4CClickupListName || ''
+        ).trim(),
+        phase4CClickupListId: String(
+          options.phase4CClickupListId ||
+            stored.phase4CClickupListId ||
+            process.env.PHASE4C_CLICKUP_LIST_ID ||
+            ''
+        ).trim(),
+        phase4CClickupOpenStatus: String(
+          options.phase4CClickupOpenStatus ||
+            stored.phase4CClickupOpenStatus ||
+            process.env.PHASE4C_CLICKUP_OPEN_STATUS ||
+            'To Do'
+        ).trim()
+      };
+      const phase4CSummary = await runPhase4CMF(cmfOptions, progress => {
+        event.sender.send('phase4pipeline:progress', {
+          ...progress,
+          stage: `phase4pipeline_4c_${String(progress?.stage || 'running')}`,
+          percent: mapProgress(progress?.percent),
+          message: `[4C] ${String(progress?.message || '').trim()}`
+        });
+      });
+      phaseSummary.phase4C = phase4CSummary || {};
+      phaseIndex += 1;
+    }
+
+    if (run4D) {
+      const dDryRun =
+        typeof options.phase4DDryRun === 'boolean'
+          ? options.phase4DDryRun
+          : typeof stored.phase4DDryRun === 'boolean'
+            ? stored.phase4DDryRun
+            : true;
+      const dOptions = {
+        ...stored,
+        ...options,
+        dryRun: dDryRun,
+        execute: !dDryRun,
+        authContext: 'inventory',
+        rulesDriveFile:
+          String(
+            options.phase4RulesDriveFile ||
+              stored.phase4RulesDriveFile ||
+              process.env.PHASE4_RULES_DRIVE_FILE ||
+              process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+              ''
+          ).trim(),
+        logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+        phase4DListingsTable: String(options.phase4DListingsTable || stored.phase4DListingsTable || 'eBay Listings (API)').trim(),
+        openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+        openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
+      };
+      const phase4DSummary = await runPhase4DListing(dOptions, progress => {
+        event.sender.send('phase4pipeline:progress', {
+          ...progress,
+          stage: `phase4pipeline_4d_${String(progress?.stage || 'running')}`,
+          percent: mapProgress(progress?.percent),
+          message: `[4D] ${String(progress?.message || '').trim()}`
+        });
+      });
+      phaseSummary.phase4D = phase4DSummary || {};
+    }
+
+    event.sender.send('phase4pipeline:progress', {
+      stage: 'completed',
+      percent: 100,
+      counts: phaseSummary,
+      message: 'Phase 4 pipeline completed.'
+    });
+
+    return {
+      success: true,
+      summary: phaseSummary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase4pipeline:progress', {
       stage: 'error',
       percent: 100,
       counts: null,
@@ -1597,6 +2305,8 @@ ipcMain.handle('phase4combined:run', async (event, options = {}) => {
             ''
         ).trim(),
       logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+      testTableName: '',
+      testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
       openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
@@ -1607,8 +2317,6 @@ ipcMain.handle('phase4combined:run', async (event, options = {}) => {
         options.phase4BClickupListId ||
           stored.phase4BClickupListId ||
           process.env.PHASE4B_CLICKUP_LIST_ID ||
-          stored.clickupListId ||
-          process.env.CLICKUP_LIST_ID ||
           ''
       ).trim(),
       clickupOpenStatus: String(
@@ -1796,6 +2504,8 @@ function createWindow() {
           `Phase2 write-back poller started (${Number(writebackConfig.pollIntervalMinutes) || 1} min interval)`
         );
       }
+      startPhase4WritebackPoller();
+      console.log('Phase4 writeback poller started (1 min interval)');
     } catch (err) {
       console.error('❌ DB init failed:', err.message);
       dbReady = false;
@@ -1870,10 +2580,12 @@ app.whenReady().then(createWindow);
 app.on('before-quit', () => {
   phase2AutoRunService.stop();
   phase2WritebackPoller.stop();
+  stopPhase4WritebackPoller();
 });
 
 app.on('window-all-closed', () => {
   phase2AutoRunService.stop();
   phase2WritebackPoller.stop();
+  stopPhase4WritebackPoller();
   if (process.platform !== 'darwin') app.quit();
 });

@@ -120,6 +120,23 @@ contextBridge.exposeInMainWorld('phase4CombinedAPI', {
   onProgress: (callback) => ipcRenderer.on('phase4combined:progress', callback)
 });
 
+contextBridge.exposeInMainWorld('phase4CMFAPI', {
+  getConfig: () => ipcRenderer.invoke('phase4cmf:get-config'),
+  run: (options) => ipcRenderer.invoke('phase4cmf:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase4cmf:progress', callback)
+});
+
+contextBridge.exposeInMainWorld('phase4DAPI', {
+  getConfig: () => ipcRenderer.invoke('phase4d:get-config'),
+  run: (options) => ipcRenderer.invoke('phase4d:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase4d:progress', callback)
+});
+
+contextBridge.exposeInMainWorld('phase4PipelineAPI', {
+  run: (options) => ipcRenderer.invoke('phase4pipeline:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase4pipeline:progress', callback)
+});
+
 // eBay Listing Mock Import API
 contextBridge.exposeInMainWorld('ebayMockImportAPI', {
   getConfig: () => ipcRenderer.invoke('ebaymock:get-config'),
@@ -131,4 +148,8 @@ contextBridge.exposeInMainWorld('ebayMockImportAPI', {
 contextBridge.exposeInMainWorld('itemSpecificSyncAPI', {
   run: (options) => ipcRenderer.invoke('item-specific-sync:run', options),
   onProgress: (callback) => ipcRenderer.on('item-specific-sync:progress', callback)
+});
+
+contextBridge.exposeInMainWorld('inventoryAutoChainAPI', {
+  onLog: (callback) => ipcRenderer.on('inventory:auto-chain-log', callback)
 });
