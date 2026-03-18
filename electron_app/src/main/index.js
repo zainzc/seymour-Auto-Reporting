@@ -35,6 +35,7 @@ const { runPhase4Mirroring, buildPhase4Config, MIRROR_STATE_KEY } = require('../
 const { runItemSpecificTableSync } = require('../scripts/syncItemSpecificTables');
 const { runPhase4RulesPopulate } = require('../scripts/runPhase4RulesPopulate');
 const { runPhase4BLite, runPhase4BWritebackOnly, runPhase4CMFWritebackOnly, runPhase4CMF, runPhase4DListing } = require('../scripts/runPhase4BLite');
+const { runPhase6Fitment } = require('../scripts/runPhase6Fitment');
 const { runEbayMockImport } = require('../scripts/runEbayMockImport');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
@@ -2220,6 +2221,89 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
   } catch (error) {
     const message = formatDetailedErrorMessage(error);
     event.sender.send('phase4pipeline:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase6:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    listingsTableName: String(stored.phase6ListingsTable || process.env.PHASE6_LISTINGS_TABLE || 'eBay Listings (API) (Mock)').trim(),
+    masterTableName: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+    promptCacheEnabled:
+      String(stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
+      'false',
+    promptCacheKey: String(
+      stored.phase6PromptCacheKey || process.env.PHASE6_PROMPT_CACHE_KEY || process.env.OPENAI_PROMPT_CACHE_KEY || 'phase6_fitment_v1'
+    ).trim(),
+    testIpns: String(stored.phase6TestIpns || process.env.PHASE6_TEST_IPNS || '').trim(),
+    maxIpns: Number(stored.phase6MaxIpns || process.env.PHASE6_MAX_IPNS || 0) || 0,
+    sampleLimit: Number(stored.phase6SampleLimit || process.env.PHASE6_SAMPLE_LIMIT || 20) || 20
+  };
+});
+
+ipcMain.handle('phase6:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options,
+      phase6ListingsTable: String(
+        options.phase6ListingsTable || stored.phase6ListingsTable || process.env.PHASE6_LISTINGS_TABLE || 'eBay Listings (API) (Mock)'
+      ).trim(),
+      airtableMasterTable: String(
+        options.airtableMasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
+      ).trim(),
+      openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+      phase6PromptCacheEnabled:
+        String(options.phase6PromptCacheEnabled ?? stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true')
+          .trim()
+          .toLowerCase() !== 'false',
+      phase6PromptCacheKey: String(
+        options.phase6PromptCacheKey ||
+          stored.phase6PromptCacheKey ||
+          process.env.PHASE6_PROMPT_CACHE_KEY ||
+          process.env.OPENAI_PROMPT_CACHE_KEY ||
+          'phase6_fitment_v1'
+      ).trim(),
+      phase6TestIpns: String(
+        options.phase6TestIpns || stored.phase6TestIpns || process.env.PHASE6_TEST_IPNS || ''
+      ).trim(),
+      phase6MaxIpns: Number(
+        options.phase6MaxIpns || stored.phase6MaxIpns || process.env.PHASE6_MAX_IPNS || 0
+      ) || 0,
+      sampleLimit: Number(options.sampleLimit || stored.phase6SampleLimit || process.env.PHASE6_SAMPLE_LIMIT || 20) || 20
+    };
+
+    event.sender.send('phase6:progress', {
+      stage: 'phase6_scan_listings',
+      percent: 1,
+      counts: null,
+      message: 'Starting Phase 6 fitment extraction...'
+    });
+
+    const summary = await runPhase6Fitment(runOptions, progress => {
+      event.sender.send('phase6:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase6:progress', {
       stage: 'error',
       percent: 100,
       counts: null,

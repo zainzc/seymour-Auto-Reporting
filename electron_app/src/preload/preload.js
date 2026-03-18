@@ -137,6 +137,12 @@ contextBridge.exposeInMainWorld('phase4PipelineAPI', {
   onProgress: (callback) => ipcRenderer.on('phase4pipeline:progress', callback)
 });
 
+contextBridge.exposeInMainWorld('phase6API', {
+  getConfig: () => ipcRenderer.invoke('phase6:get-config'),
+  run: (options) => ipcRenderer.invoke('phase6:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase6:progress', callback)
+});
+
 // eBay Listing Mock Import API
 contextBridge.exposeInMainWorld('ebayMockImportAPI', {
   getConfig: () => ipcRenderer.invoke('ebaymock:get-config'),

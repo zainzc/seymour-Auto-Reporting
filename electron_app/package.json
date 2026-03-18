@@ -18,6 +18,7 @@
     "phase4-rules-populate:execute": "node src/scripts/runPhase4RulesPopulate.js --execute",
     "phase4b-lite": "node src/scripts/runPhase4BLite.js",
     "phase4b-lite:execute": "node src/scripts/runPhase4BLite.js --execute",
+    "phase6-fitment": "node src/scripts/runPhase6Fitment.js",
     "ebay-mock-import": "node src/scripts/runEbayMockImport.js",
     "ebay-mock-import:execute": "node src/scripts/runEbayMockImport.js --execute",
     "cleanup-master-duplicate-ipns": "node src/scripts/cleanupDuplicateMasterIpns.js",

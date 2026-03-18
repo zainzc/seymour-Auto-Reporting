@@ -21,6 +21,14 @@ function tryParseJson(text) {
   }
 }
 
+function extractJsonObject(text) {
+  const direct = tryParseJson(text);
+  if (direct) return direct;
+  const match = String(text || '').match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  return tryParseJson(match[0]);
+}
+
 function isPromptCacheUnsupported(error) {
   const status = Number(error?.response?.status || 0);
   if (status !== 400) return false;
@@ -139,6 +147,77 @@ class Phase4AiEvaluatorService {
       value,
       confidence,
       reason
+    };
+  }
+
+  async rewriteFitment(payload = {}) {
+    const promptInput = {
+      ipn: normalizeText(payload.ipn),
+      productTitle: normalizeText(payload.productTitle),
+      conditionsAndOptions: normalizeText(payload.conditionsAndOptions),
+      rawFitmentText: normalizeText(payload.rawFitmentText)
+    };
+
+    const requestBody = {
+      model: this.model,
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Return only JSON. Rewrite compatibility text into concise buyer-friendly wording. Preserve meaning, avoid verbatim copying, avoid unsupported assumptions, and do not add marketing fluff.'
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            task: 'phase6_fitment_rewrite',
+            expectedOutput: {
+              fitment: 'rewritten_text_only'
+            },
+            input: promptInput
+          })
+        }
+      ]
+    };
+
+    const shouldUsePromptCache = this.promptCacheEnabled && this.promptCacheKey;
+    if (shouldUsePromptCache) {
+      requestBody.prompt_cache_key = this.promptCacheKey;
+    }
+
+    let response;
+    try {
+      response = await retryWithBackoff(
+        async () => this.client.post('/chat/completions', requestBody),
+        {
+          maxAttempts: this.maxAttempts,
+          baseDelayMs: this.baseDelayMs
+        }
+      );
+    } catch (error) {
+      if (!shouldUsePromptCache || !isPromptCacheUnsupported(error)) {
+        throw error;
+      }
+      this.promptCacheEnabled = false;
+      delete requestBody.prompt_cache_key;
+      response = await retryWithBackoff(
+        async () => this.client.post('/chat/completions', requestBody),
+        {
+          maxAttempts: this.maxAttempts,
+          baseDelayMs: this.baseDelayMs
+        }
+      );
+    }
+
+    const content = String(
+      response?.data?.choices?.[0]?.message?.content || ''
+    ).trim();
+    const parsed = extractJsonObject(content) || {};
+    const fitment = normalizeText(parsed.fitment || parsed.value || parsed.rewrittenFitment || '');
+
+    return {
+      fitment
     };
   }
 }
