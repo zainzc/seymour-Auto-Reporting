@@ -181,6 +181,54 @@ function formatAirtableError(error) {
   return status ? `HTTP ${status}: ${detail}` : String(detail);
 }
 
+function truncateText(value, maxLength = 180) {
+  const text = normalizeText(value);
+  if (!text) return '';
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
+function classifyAiError(error) {
+  const status = Number(error?.response?.status || 0);
+  if (Number.isFinite(status) && status > 0) return `http_${status}`;
+  const code = normalizeText(error?.code || '').toLowerCase();
+  if (code.includes('etimedout') || code.includes('timeout') || code.includes('econnaborted')) {
+    return 'timeout';
+  }
+  if (code.includes('enotfound') || code.includes('econnreset') || code.includes('eai_again')) {
+    return 'network';
+  }
+  const message = normalizeText(error?.message || '').toLowerCase();
+  if (message.includes('rate limit') || message.includes('too many requests')) return 'rate_limit';
+  if (message.includes('timeout')) return 'timeout';
+  if (message.includes('network') || message.includes('socket')) return 'network';
+  return 'unknown';
+}
+
+function formatAiErrorShort(error) {
+  const status = Number(error?.response?.status || 0);
+  const detail =
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.message ||
+    error?.message ||
+    String(error);
+  const text = truncateText(detail, 200);
+  return status > 0 ? `HTTP ${status}: ${text}` : text;
+}
+
+function incrementCounter(mapObj, key) {
+  const bucket = normalizeText(key) || 'unknown';
+  mapObj[bucket] = Number(mapObj[bucket] || 0) + 1;
+}
+
+function formatTopErrorStats(mapObj = {}, top = 3) {
+  const rows = Object.entries(mapObj)
+    .sort((a, b) => Number(b[1] || 0) - Number(a[1] || 0))
+    .slice(0, top)
+    .map(([k, v]) => `${k}:${v}`);
+  return rows.join(', ');
+}
+
 function parseArgs(argv = []) {
   const getArg = name =>
     argv.find(arg => arg.startsWith(`${name}=`))?.split('=').slice(1).join('=') || '';
@@ -1221,6 +1269,8 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     aiCallsPlanned: 0,
     aiCallsCompleted: 0,
     aiCallsFailed: 0,
+    aiFailureTypes: {},
+    aiFailureSamples: [],
     ebayContextRowsScanned: 0,
     ebayContextRowsMapped: 0,
     ebayContextRowsWithoutKey: 0,
@@ -1442,6 +1492,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
 
     let tableAiCompleted = 0;
     let tableAiFailed = 0;
+    const tableAiFailureTypes = {};
     let lastAiProgressAt = Date.now();
     await processWithConcurrency(
       evaluationCandidates,
@@ -1466,6 +1517,14 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         } catch (error) {
           summary.aiCallsFailed += 1;
           tableAiFailed += 1;
+          const failureType = classifyAiError(error);
+          incrementCounter(summary.aiFailureTypes, failureType);
+          incrementCounter(tableAiFailureTypes, failureType);
+          if (summary.aiFailureSamples.length < args.sampleLimit) {
+            summary.aiFailureSamples.push(
+              `${candidate.tableName} | ${candidate.ipn} | ${candidate.fieldName} | ${candidate.ruleType} | ${failureType} | ${formatAiErrorShort(error)}`
+            );
+          }
           summary.errors.push(
             `AI evaluation failed for ${candidate.ipn}/${candidate.fieldName} (${candidate.ruleType}): ${error.message}`
           );
@@ -1545,7 +1604,10 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
             stage: 'phase4blite_scan_tables',
             percent: Math.min(95, 20 + Math.floor(ratio * 70)),
             counts: summary,
-            message: `AI progress table ${i + 1}/${routableTables.length}: ${tableName} (${completed}/${evaluationCandidates.length}, done=${tableAiCompleted}, failed=${tableAiFailed})`
+            message:
+              `AI progress table ${i + 1}/${routableTables.length}: ${tableName} ` +
+              `(${completed}/${evaluationCandidates.length}, done=${tableAiCompleted}, failed=${tableAiFailed}` +
+              `${tableAiFailed > 0 ? `, failTypes=${formatTopErrorStats(tableAiFailureTypes)}` : ''})`
           });
         }
       }
@@ -1620,6 +1682,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     counts: summary,
     message:
       `Phase 4B-lite completed (${args.dryRun ? 'dry run' : 'write run'}). ` +
+      `AI failed=${summary.aiCallsFailed || 0}${summary.aiCallsFailed > 0 ? ` (types: ${formatTopErrorStats(summary.aiFailureTypes)})` : ''}. ` +
       `eBayContext lookups=${summary.ebayContextLookupCount || 0}, hits=${summary.ebayContextLookupHits || 0}, cacheHits=${summary.ebayContextCacheHits || 0}, ` +
       `matched=${summary.ebayContextMatchedRows}, missing=${summary.ebayContextMissingRows}.`
   });

@@ -669,6 +669,7 @@
                 <input id="phase4-unified-listings-table" type="text" value="eBay Listings (API)">
               </div>
               <div class="btn-group">
+                <button id="run-item-specific-sync-phase4-btn" class="btn btn-secondary" onclick="runItemSpecificSync()">Sync Item Specific Tables</button>
                 <button id="run-phase4-pipeline-btn" class="btn btn-primary" onclick="runPhase4Pipeline()">Run Complete Phase 4 Automation</button>
               </div>
               <div class="hint" id="phase4-status-text-legacy">Phase 4 status: idle</div>
@@ -1355,6 +1356,7 @@
       const runPhase4DBtn = document.getElementById('run-phase4d-btn');
       const runPhase4PipelineBtn = document.getElementById('run-phase4-pipeline-btn');
       const runPhase4CombinedBtn = document.getElementById('run-phase4-combined-btn');
+      const runItemSpecificSyncPhase4Btn = document.getElementById('run-item-specific-sync-phase4-btn');
       const runPhase6Btn = document.getElementById('run-phase6-btn');
       const runEbayMockImportBtn = document.getElementById('run-ebay-mock-import-btn');
       const runItemSpecificSyncBtn = document.getElementById('run-item-specific-sync-btn');
@@ -1395,6 +1397,9 @@
       }
       if (runPhase4PipelineBtn) {
         runPhase4PipelineBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
+      }
+      if (runItemSpecificSyncPhase4Btn) {
+        runItemSpecificSyncPhase4Btn.disabled = busy || !hasItemSpecificBaseId;
       }
       if (runPhase6Btn) {
         runPhase6Btn.disabled = busy || !hasAirtableCore || !hasOpenAiKey;
