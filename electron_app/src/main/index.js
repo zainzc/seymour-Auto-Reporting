@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+﻿const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const { loadEnv } = require('../config/loadEnv');
 loadEnv();
@@ -36,6 +36,8 @@ const { runItemSpecificTableSync } = require('../scripts/syncItemSpecificTables'
 const { runPhase4RulesPopulate } = require('../scripts/runPhase4RulesPopulate');
 const { runPhase4BLite, runPhase4BWritebackOnly, runPhase4CMFWritebackOnly, runPhase4CMF, runPhase4DListing } = require('../scripts/runPhase4BLite');
 const { runPhase6Fitment } = require('../scripts/runPhase6Fitment');
+const { runPhase72FitmentImage } = require('../scripts/runPhase72FitmentImage');
+const { runPhase74TitleDescription } = require('../scripts/runPhase74TitleDescription');
 const { runEbayMockImport } = require('../scripts/runEbayMockImport');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
@@ -123,9 +125,9 @@ function startAutoSync() {
   autoSyncInterval = setInterval(async () => {
     try {
       await syncTables(selectedTables);
-      console.log(`✅ Auto-synced ${selectedTables.length} tables: ${selectedTables.join(', ')}`);
+      console.log(`âœ… Auto-synced ${selectedTables.length} tables: ${selectedTables.join(', ')}`);
     } catch (err) {
-      console.error('❌ Auto-sync failed:', err.message);
+      console.error('âŒ Auto-sync failed:', err.message);
     }
   }, 5 * 60 * 1000);
 }
@@ -160,8 +162,8 @@ ipcMain.handle('test-windows-auth', async (_, config) => {
   try {
     const sql = require('mssql/msnodesqlv8');
     
-    console.log(`🔐 Testing Windows Auth connection to ${config.server}...`);
-    console.log(`💾 Database: ${config.database}`);
+    console.log(`ðŸ” Testing Windows Auth connection to ${config.server}...`);
+    console.log(`ðŸ’¾ Database: ${config.database}`);
     
     const poolConfig = {
       connectionString: `Driver={ODBC Driver 18 for SQL Server};Server=${config.server};Database=${config.database};Trusted_Connection=yes;TrustServerCertificate=yes;Connection Timeout=30;`,
@@ -176,35 +178,35 @@ ipcMain.handle('test-windows-auth', async (_, config) => {
     
     const pool = new sql.ConnectionPool(poolConfig);
     pool.on('error', err => {
-      console.error('❌ Pool error:', err.message);
+      console.error('âŒ Pool error:', err.message);
     });
     
-    console.log('⏳ Connecting...');
+    console.log('â³ Connecting...');
     await pool.connect();
-    console.log('✅ Connected! Testing query...');
+    console.log('âœ… Connected! Testing query...');
     
     const result = await pool.request().query('SELECT @@VERSION as version');
-    console.log('✅ Query successful');
+    console.log('âœ… Query successful');
     
     await pool.close();
     
     return { success: true, message: 'Connection successful!' };
   } catch (err) {
-    console.error('❌ Raw error:', err);
-    console.error('❌ Error type:', typeof err);
-    console.error('❌ Error constructor:', err?.constructor?.name);
+    console.error('âŒ Raw error:', err);
+    console.error('âŒ Error type:', typeof err);
+    console.error('âŒ Error constructor:', err?.constructor?.name);
     
     let errorMsg = 'Unknown error';
     
     if (err?.originalError) {
-      console.error('❌ Original error:', err.originalError);
+      console.error('âŒ Original error:', err.originalError);
       errorMsg = String(err.originalError);
     } else if (err?.message && err.message !== '[object Object]') {
       errorMsg = String(err.message);
     } else if (typeof err === 'string') {
       errorMsg = err;
     } else {
-      console.error('❌ Error properties:', {
+      console.error('âŒ Error properties:', {
         code: err?.code,
         state: err?.state,
         sqlState: err?.sqlState,
@@ -217,7 +219,7 @@ ipcMain.handle('test-windows-auth', async (_, config) => {
       }
     }
     
-    console.error('❌ Final error message:', errorMsg);
+    console.error('âŒ Final error message:', errorMsg);
     return { success: false, message: errorMsg };
   }
 });
@@ -229,9 +231,9 @@ ipcMain.handle('test-db-connection', async (_, config) => {
     // Use server name exactly as provided (SSMS uses just "STR" without port)
     let serverName = config.server.trim();
     
-    console.log(`🔐 Testing connection to ${serverName}...`);
-    console.log(`👤 User: ${config.user}`);
-    console.log(`💾 Database: ${config.database}`);
+    console.log(`ðŸ” Testing connection to ${serverName}...`);
+    console.log(`ðŸ‘¤ User: ${config.user}`);
+    console.log(`ðŸ’¾ Database: ${config.database}`);
     
     const poolConfig = {
       connectionString: `Driver={ODBC Driver 18 for SQL Server};Server=${serverName};Database=${config.database};Uid=${config.user};Pwd=${config.password};Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=30;`,
@@ -246,30 +248,30 @@ ipcMain.handle('test-db-connection', async (_, config) => {
     
     const pool = new sql.ConnectionPool(poolConfig);
     pool.on('error', err => {
-      console.error('❌ Pool error:', err.message);
+      console.error('âŒ Pool error:', err.message);
     });
     
-    console.log('⏳ Connecting...');
+    console.log('â³ Connecting...');
     await pool.connect();
-    console.log('✅ Connected! Testing query...');
+    console.log('âœ… Connected! Testing query...');
     
     const result = await pool.request().query('SELECT @@VERSION as version');
-    console.log('✅ Query successful');
+    console.log('âœ… Query successful');
     
     await pool.close();
     
     return { success: true, message: 'Connection successful!' };
   } catch (err) {
-    console.error('❌ Raw error:', err);
-    console.error('❌ Error type:', typeof err);
-    console.error('❌ Error constructor:', err?.constructor?.name);
+    console.error('âŒ Raw error:', err);
+    console.error('âŒ Error type:', typeof err);
+    console.error('âŒ Error constructor:', err?.constructor?.name);
     
     // Try to extract the real error message
     let errorMsg = 'Unknown error';
     
     // Check if there's an underlying ODBC error
     if (err?.originalError) {
-      console.error('❌ Original error:', err.originalError);
+      console.error('âŒ Original error:', err.originalError);
       errorMsg = String(err.originalError);
     } else if (err?.message && err.message !== '[object Object]') {
       errorMsg = String(err.message);
@@ -277,7 +279,7 @@ ipcMain.handle('test-db-connection', async (_, config) => {
       errorMsg = err;
     } else {
       // Try to extract info from the error object itself
-      console.error('❌ Error properties:', {
+      console.error('âŒ Error properties:', {
         code: err?.code,
         state: err?.state,
         sqlState: err?.sqlState,
@@ -290,7 +292,7 @@ ipcMain.handle('test-db-connection', async (_, config) => {
       }
     }
     
-    console.error('❌ Final error message:', errorMsg);
+    console.error('âŒ Final error message:', errorMsg);
     return { success: false, message: errorMsg };
   }
 });
@@ -484,7 +486,7 @@ ipcMain.handle('reporting-save-schedule', async (_, scheduleConfig) => {
         spreadsheetId: scheduleConfig.spreadsheetId
       });
       
-      console.log(`✅ Successfully verified access to sheet: ${response.data.properties.title}`);
+      console.log(`âœ… Successfully verified access to sheet: ${response.data.properties.title}`);
       
       // Check if RAW tab exists
       const sheetNames = response.data.sheets.map(s => s.properties.title);
@@ -495,7 +497,7 @@ ipcMain.handle('reporting-save-schedule', async (_, scheduleConfig) => {
         };
       }
       
-      console.log('✅ RAW tab found');
+      console.log('âœ… RAW tab found');
       
     } catch (err) {
       return {
@@ -891,7 +893,7 @@ setPostPushHook(async payload => {
       rulesDriveFile: phase4RulesDriveFile,
       logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
       openaiApiKey: phase4OpenAiKey,
-      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
       openaiBaseUrl: String(phase4Stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase4BClickupListName: String(phase4Stored.phase4BClickupListName || '').trim(),
       phase4BClickupListId: phase4BListId,
@@ -945,9 +947,9 @@ setPostPushHook(async payload => {
       authContext: 'inventory',
       rulesDriveFile: phase4RulesDriveFile,
       logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
-      phase4DListingsTable: String(phase4Stored.phase4DListingsTable || 'eBay Listings (API)').trim(),
+      phase4DListingsTable: String(phase4Stored.phase4DListingsTable || 'eBay Listings (API) (Mock)').trim(),
       openaiApiKey: phase4OpenAiKey,
-      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
       openaiBaseUrl: String(phase4Stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
     }, () => {});
     emitInventoryAutoChainLog(
@@ -1057,7 +1059,7 @@ ipcMain.handle('inventory-sheets-stop', async () => {
 });
 
 // Push inventory to Google Sheets now (manual test)
-ipcMain.handle('inventory-sheets-push-now', async (_, spreadsheetId, worksheetName) => {
+ipcMain.handle('inventory-sheets-push-now', async (event, spreadsheetId, worksheetName) => {
   try {
     const isAuthenticated = await oauth2Service.isAuthenticated('inventory');
     if (!isAuthenticated) {
@@ -1067,7 +1069,17 @@ ipcMain.handle('inventory-sheets-push-now', async (_, spreadsheetId, worksheetNa
       };
     }
 
-    const result = await executeInventoryPush(spreadsheetId, worksheetName);
+    const result = await executeInventoryPush(
+      spreadsheetId,
+      worksheetName,
+      progress => {
+        event.sender.send('inventory-sheets:progress', {
+          stage: String(progress?.stage || 'running'),
+          percent: Number(progress?.percent || 0),
+          message: String(progress?.message || '')
+        });
+      }
+    );
     return result;
   } catch (error) {
     return {
@@ -1217,7 +1229,7 @@ ipcMain.handle('phase2-get-config', async () => {
     testTableName: '',
     testMaxTables: 0,
     openaiApiKey: stored.openaiApiKey || '',
-    openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini',
     openaiBaseUrl: stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '',
     phase4BClickupOpenStatus:
       stored.phase4BClickupOpenStatus || process.env.PHASE4B_CLICKUP_OPEN_STATUS || 'To Do',
@@ -1673,10 +1685,11 @@ ipcMain.handle('phase4blite:get-config', async () => {
       typeof stored.phase4BLiteDryRun === 'boolean'
         ? stored.phase4BLiteDryRun
         : true,
-    testTableName: '',
+    testTableName: String(stored.testTableName || process.env.PHASE4B_TEST_TABLE_NAME || '').trim(),
+    testIpn: String(stored.phase4BTestIpn || process.env.PHASE4B_TEST_IPN || '').trim(),
     testMaxTables: 0,
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
     clickupListName: String(stored.phase4BClickupListName || '').trim(),
     clickupListId: String(
@@ -1715,10 +1728,11 @@ ipcMain.handle('phase4blite:run', async (event, options = {}) => {
             ''
         ).trim(),
       logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
-      testTableName: '',
+      testTableName: String(options.testTableName || stored.testTableName || process.env.PHASE4B_TEST_TABLE_NAME || '').trim(),
+      phase4BTestIpn: String(options.phase4BTestIpn || stored.phase4BTestIpn || process.env.PHASE4B_TEST_IPN || '').trim(),
       testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase4BClickupListName: String(
         options.phase4BClickupListName || stored.phase4BClickupListName || ''
@@ -1884,8 +1898,9 @@ ipcMain.handle('phase4d:get-config', async () => {
       typeof stored.phase4DDryRun === 'boolean'
         ? stored.phase4DDryRun
         : true,
-    listingsTableName: String(stored.phase4DListingsTable || process.env.PHASE4D_LISTINGS_TABLE || 'eBay Listings (API)').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+    listingsTableName: String(stored.phase4DListingsTable || process.env.PHASE4D_LISTINGS_TABLE || 'eBay Listings (API) (Mock)').trim(),
+    testIpn: String(stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
     authContext: 'inventory'
   };
 });
@@ -1918,12 +1933,13 @@ ipcMain.handle('phase4d:run', async (event, options = {}) => {
         options.phase4DListingsTable ||
           stored.phase4DListingsTable ||
           process.env.PHASE4D_LISTINGS_TABLE ||
-          'eBay Listings (API)'
+          'eBay Listings (API) (Mock)'
       ).trim(),
+      phase4DTestIpn: String(options.phase4DTestIpn || stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
       testTableName: '',
       testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
     };
 
@@ -2089,7 +2105,7 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
         testTableName: '',
         testMaxTables: 0,
         openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
         openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
         phase4BClickupListName: String(
           options.phase4BClickupListName || stored.phase4BClickupListName || ''
@@ -2191,9 +2207,10 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
               ''
           ).trim(),
         logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
-        phase4DListingsTable: String(options.phase4DListingsTable || stored.phase4DListingsTable || 'eBay Listings (API)').trim(),
+        phase4DListingsTable: String(options.phase4DListingsTable || stored.phase4DListingsTable || 'eBay Listings (API) (Mock)').trim(),
+        phase4DTestIpn: String(options.phase4DTestIpn || stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
         openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
         openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
       };
       const phase4DSummary = await runPhase4DListing(dOptions, progress => {
@@ -2238,7 +2255,7 @@ ipcMain.handle('phase6:get-config', async () => {
   return {
     listingsTableName: String(stored.phase6ListingsTable || process.env.PHASE6_LISTINGS_TABLE || 'eBay Listings (API) (Mock)').trim(),
     masterTableName: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
     promptCacheEnabled:
       String(stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
       'false',
@@ -2264,7 +2281,7 @@ ipcMain.handle('phase6:run', async (event, options = {}) => {
         options.airtableMasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
       ).trim(),
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase6PromptCacheEnabled:
         String(options.phase6PromptCacheEnabled ?? stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true')
@@ -2304,6 +2321,164 @@ ipcMain.handle('phase6:run', async (event, options = {}) => {
   } catch (error) {
     const message = formatDetailedErrorMessage(error);
     event.sender.send('phase6:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase72:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    masterTableName: String(stored.phase72MasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
+    driveFolderId: String(stored.phase72DriveFolderId || process.env.PHASE72_DRIVE_FOLDER_ID || '').trim(),
+    testIpns: String(stored.phase72TestIpns || process.env.PHASE72_TEST_IPNS || '').trim(),
+    maxIpns: Number(stored.phase72MaxIpns || process.env.PHASE72_MAX_IPNS || 0) || 0,
+    forceRegenerate:
+      String(stored.phase72ForceRegenerate ?? process.env.PHASE72_FORCE_REGENERATE ?? 'false').trim().toLowerCase() === 'true',
+    sampleLimit: Number(stored.phase72SampleLimit || process.env.PHASE72_SAMPLE_LIMIT || 20) || 20
+  };
+});
+
+ipcMain.handle('phase72:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options,
+      phase72MasterTable: String(
+        options.phase72MasterTable || stored.phase72MasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
+      ).trim(),
+      phase72DriveFolderId: String(
+        options.phase72DriveFolderId || stored.phase72DriveFolderId || process.env.PHASE72_DRIVE_FOLDER_ID || ''
+      ).trim(),
+      phase72TestIpns: String(
+        options.phase72TestIpns || stored.phase72TestIpns || process.env.PHASE72_TEST_IPNS || ''
+      ).trim(),
+      phase72MaxIpns: Number(
+        options.phase72MaxIpns || stored.phase72MaxIpns || process.env.PHASE72_MAX_IPNS || 0
+      ) || 0,
+      phase72ForceRegenerate:
+        String(options.phase72ForceRegenerate ?? stored.phase72ForceRegenerate ?? process.env.PHASE72_FORCE_REGENERATE ?? 'false')
+          .trim()
+          .toLowerCase() === 'true',
+      sampleLimit: Number(options.sampleLimit || stored.phase72SampleLimit || process.env.PHASE72_SAMPLE_LIMIT || 20) || 20
+    };
+
+    event.sender.send('phase72:progress', {
+      stage: 'phase72_load_master',
+      percent: 1,
+      counts: null,
+      message: 'Starting Phase 7.2 fitment image generation...'
+    });
+
+    const summary = await runPhase72FitmentImage(runOptions, progress => {
+      event.sender.send('phase72:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase72:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase74:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    listingsTableName: String(
+      stored.phase6ListingsTable || stored.ebayMockTableName || stored.phase74ListingsTable || process.env.PHASE74_LISTINGS_TABLE || 'eBay Listings (API) (Mock)'
+    ).trim(),
+    masterTableName: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+    promptCacheEnabled:
+      String(stored.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
+      'false',
+    promptCacheKey: String(
+      stored.phase74PromptCacheKey || process.env.PHASE74_PROMPT_CACHE_KEY || process.env.OPENAI_PROMPT_CACHE_KEY || 'phase74_title_description_v1'
+    ).trim(),
+    testIpns: String(stored.phase74TestIpns || process.env.PHASE74_TEST_IPNS || '').trim(),
+    maxListings: Number(stored.phase74MaxListings || process.env.PHASE74_MAX_LISTINGS || 0) || 0,
+    sampleLimit: Number(stored.phase74SampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20
+  };
+});
+
+ipcMain.handle('phase74:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options,
+      phase74ListingsTable: String(
+        options.phase74ListingsTable ||
+          stored.phase6ListingsTable ||
+          stored.ebayMockTableName ||
+          stored.phase74ListingsTable ||
+          process.env.PHASE74_LISTINGS_TABLE ||
+          'eBay Listings (API) (Mock)'
+      ).trim(),
+      airtableMasterTable: String(
+        options.airtableMasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
+      ).trim(),
+      openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+      openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+      phase74PromptCacheEnabled:
+        String(options.phase74PromptCacheEnabled ?? stored.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true')
+          .trim()
+          .toLowerCase() !== 'false',
+      phase74PromptCacheKey: String(
+        options.phase74PromptCacheKey ||
+          stored.phase74PromptCacheKey ||
+          process.env.PHASE74_PROMPT_CACHE_KEY ||
+          process.env.OPENAI_PROMPT_CACHE_KEY ||
+          'phase74_title_description_v1'
+      ).trim(),
+      phase74TestIpns: String(
+        options.phase74TestIpns || stored.phase74TestIpns || process.env.PHASE74_TEST_IPNS || ''
+      ).trim(),
+      phase74MaxListings: Number(
+        options.phase74MaxListings || stored.phase74MaxListings || process.env.PHASE74_MAX_LISTINGS || 0
+      ) || 0,
+      sampleLimit: Number(options.sampleLimit || stored.phase74SampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20
+    };
+
+    event.sender.send('phase74:progress', {
+      stage: 'phase74_prepare',
+      percent: 1,
+      counts: null,
+      message: 'Starting Phase 7.4 title/description generation...'
+    });
+
+    const summary = await runPhase74TitleDescription(runOptions, progress => {
+      event.sender.send('phase74:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase74:progress', {
       stage: 'error',
       percent: 100,
       counts: null,
@@ -2392,7 +2567,7 @@ ipcMain.handle('phase4combined:run', async (event, options = {}) => {
       testTableName: '',
       testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase4BClickupListName: String(
         options.phase4BClickupListName || stored.phase4BClickupListName || ''
@@ -2550,7 +2725,7 @@ function createWindow() {
     webhook: !!webhook
   });
 
-  // 🚦 STRICT ROUTING - Show page immediately
+  // ðŸš¦ STRICT ROUTING - Show page immediately
   if (!dbConfig) {
     return loadSetup();
   }
@@ -2573,7 +2748,7 @@ function createWindow() {
       }
       dbReady = true;
       // startAutoSync(); // Removed: Only sync on manual button click
-      console.log('✅ DB ready');
+      console.log('âœ… DB ready');
       
       // Resume any active reporting schedules
       resumeSchedule();
@@ -2591,7 +2766,7 @@ function createWindow() {
       startPhase4WritebackPoller();
       console.log('Phase4 writeback poller started (1 min interval)');
     } catch (err) {
-      console.error('❌ DB init failed:', err.message);
+      console.error('âŒ DB init failed:', err.message);
       dbReady = false;
     }
   });
@@ -2673,3 +2848,4 @@ app.on('window-all-closed', () => {
   stopPhase4WritebackPoller();
   if (process.platform !== 'darwin') app.quit();
 });
+

@@ -59,7 +59,8 @@ contextBridge.exposeInMainWorld('inventorySheetsAPI', {
   stopSchedule: () => ipcRenderer.invoke('inventory-sheets-stop'),
   pushNow: (spreadsheetId, worksheetName) => ipcRenderer.invoke('inventory-sheets-push-now', spreadsheetId, worksheetName),
   getStatus: () => ipcRenderer.invoke('inventory-sheets-get-status'),
-  getLogs: () => ipcRenderer.invoke('inventory-sheets-get-logs')
+  getLogs: () => ipcRenderer.invoke('inventory-sheets-get-logs'),
+  onProgress: (callback) => ipcRenderer.on('inventory-sheets:progress', callback)
 });
 
 // Phase 2 API - Google Sheets -> Airtable Master Parts
@@ -141,6 +142,18 @@ contextBridge.exposeInMainWorld('phase6API', {
   getConfig: () => ipcRenderer.invoke('phase6:get-config'),
   run: (options) => ipcRenderer.invoke('phase6:run', options),
   onProgress: (callback) => ipcRenderer.on('phase6:progress', callback)
+});
+
+contextBridge.exposeInMainWorld('phase72API', {
+  getConfig: () => ipcRenderer.invoke('phase72:get-config'),
+  run: (options) => ipcRenderer.invoke('phase72:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase72:progress', callback)
+});
+
+contextBridge.exposeInMainWorld('phase74API', {
+  getConfig: () => ipcRenderer.invoke('phase74:get-config'),
+  run: (options) => ipcRenderer.invoke('phase74:run', options),
+  onProgress: (callback) => ipcRenderer.on('phase74:progress', callback)
 });
 
 // eBay Listing Mock Import API

@@ -19,6 +19,8 @@
     "phase4b-lite": "node src/scripts/runPhase4BLite.js",
     "phase4b-lite:execute": "node src/scripts/runPhase4BLite.js --execute",
     "phase6-fitment": "node src/scripts/runPhase6Fitment.js",
+    "phase72-fitment-image": "node src/scripts/runPhase72FitmentImage.js",
+    "phase74-title-description": "node src/scripts/runPhase74TitleDescription.js",
     "ebay-mock-import": "node src/scripts/runEbayMockImport.js",
     "ebay-mock-import:execute": "node src/scripts/runEbayMockImport.js --execute",
     "cleanup-master-duplicate-ipns": "node src/scripts/cleanupDuplicateMasterIpns.js",

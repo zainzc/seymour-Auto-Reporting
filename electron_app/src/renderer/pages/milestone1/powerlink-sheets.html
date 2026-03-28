@@ -488,6 +488,18 @@
       await loadSheetsConfig();
       await loadScheduleStatus();
       await loadExecutionLogs();
+
+      if (window.inventorySheetsAPI && typeof window.inventorySheetsAPI.onProgress === 'function') {
+        window.inventorySheetsAPI.onProgress((event, payload) => {
+          const statusDiv = document.getElementById('manual-sync-status');
+          const percent = Number(payload?.percent || 0);
+          const message = String(payload?.message || '').trim();
+          const text = message
+            ? `Manual sync in progress (${percent}%): ${message}`
+            : `Manual sync in progress (${percent}%).`;
+          showStatus(statusDiv, 'info', text);
+        });
+      }
     });
 
     async function checkGoogleAuth() {

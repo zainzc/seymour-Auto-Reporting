@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -648,7 +648,7 @@
               </div>
               <div class="form-group">
                 <label for="phase4-unified-openai-model">OpenAI Model</label>
-                <input id="phase4-unified-openai-model" type="text" value="gpt-4o-mini">
+                <input id="phase4-unified-openai-model" type="text" value="gpt-5.4-mini">
               </div>
             </div>
             <div>
@@ -666,10 +666,22 @@
               </div>
               <div class="form-group">
                 <label for="phase4-unified-listings-table">Listings Table Name</label>
-                <input id="phase4-unified-listings-table" type="text" value="eBay Listings (API)">
+                <input id="phase4-unified-listings-table" type="text" value="eBay Listings (API) (Mock)">
+              </div>
+              <div class="form-group">
+                <label for="phase4-unified-test-ipn">Phase 4B Test IPN (optional)</label>
+                <input id="phase4-unified-test-ipn" type="text" placeholder="e.g., 604-59029">
+                <div class="hint">Run/debug Phase 4B-lite for a single IPN and log its prompt payload once.</div>
+              </div>
+              <div class="form-group">
+                <label for="phase4-unified-test-ipn-4d">Phase 4D Test IPN (optional)</label>
+                <input id="phase4-unified-test-ipn-4d" type="text" placeholder="e.g., 114-58944L">
+                <div class="hint">Logs Phase 4D AI prompt payload for this IPN.</div>
               </div>
               <div class="btn-group">
                 <button id="run-item-specific-sync-phase4-btn" class="btn btn-secondary" onclick="runItemSpecificSync()">Sync Item Specific Tables</button>
+                <button id="run-phase4blite-unified-btn" class="btn btn-secondary" onclick="runPhase4BLite()">Run Phase 4B-lite</button>
+                <button id="run-phase4d-unified-btn" class="btn btn-secondary" onclick="runPhase4D()">Run Phase 4D</button>
                 <button id="run-phase4-pipeline-btn" class="btn btn-primary" onclick="runPhase4Pipeline()">Run Complete Phase 4 Automation</button>
               </div>
               <div class="hint" id="phase4-status-text-legacy">Phase 4 status: idle</div>
@@ -755,7 +767,7 @@
                 </div>
                 <div class="form-group">
                   <label for="openai-model">OpenAI Model</label>
-                  <input id="openai-model" type="text" value="gpt-4o-mini">
+                  <input id="openai-model" type="text" value="gpt-5.4-mini">
                 </div>
                 <div class="form-group">
                   <label for="phase4b-clickup-list-name">ClickUp List Name (VMF low confidence)</label>
@@ -783,6 +795,11 @@
                   <label for="phase4b-test-table-name">Phase 4B Test Table Name (optional)</label>
                   <input id="phase4b-test-table-name" type="text" placeholder="e.g., 643-Lock Solenoid, Actuator">
                   <div class="hint">Debug only. If set, only this exact table name is processed in Phase 4B.</div>
+                </div>
+                <div class="form-group">
+                  <label for="phase4b-test-ipn">Phase 4B Test IPN (optional)</label>
+                  <input id="phase4b-test-ipn" type="text" placeholder="e.g., 604-59029">
+                  <div class="hint">If set, only this IPN is processed and its prompt payload is logged once.</div>
                 </div>
                 <div class="btn-group">
                   <button id="run-phase4blite-btn" class="btn btn-secondary" onclick="runPhase4BLite()">Run Phase 4B-lite</button>
@@ -834,7 +851,12 @@
               <div>
                 <div class="form-group">
                   <label for="phase4d-listings-table">Listings Table Name</label>
-                  <input id="phase4d-listings-table" type="text" value="eBay Listings (API)">
+                  <input id="phase4d-listings-table" type="text" value="eBay Listings (API) (Mock)">
+                </div>
+                <div class="form-group">
+                  <label for="phase4d-test-ipn">Phase 4D Test IPN (optional)</label>
+                  <input id="phase4d-test-ipn" type="text" placeholder="e.g., 114-58944L">
+                  <div class="hint">Debug only. Logs AI prompt for this IPN during Phase 4D.</div>
                 </div>
               </div>
               <div>
@@ -911,6 +933,62 @@
             <button id="run-phase6-btn" class="btn btn-primary" onclick="runPhase6()">Run Phase 6 Fitment</button>
           </div>
           <div class="hint" id="phase6-status-text">Phase 6 status: idle</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">Phase 7.2 (Fitment Image)</h2>
+      <div class="grid-2">
+        <div>
+          <div class="form-group">
+            <label for="phase72-max-ipns">Max IPNs (Testing)</label>
+            <input id="phase72-max-ipns" type="number" min="0" step="1" value="5">
+            <div class="hint">Use 4-5 for testing. Set 0 for full run.</div>
+          </div>
+          <div class="form-group">
+            <label for="phase72-drive-folder-id">Google Drive Folder (ID or URL)</label>
+            <input id="phase72-drive-folder-id" type="text" placeholder="https://drive.google.com/drive/folders/...">
+            <div class="hint">Generated fitment images upload directly to this folder; no local files are stored.</div>
+          </div>
+        </div>
+        <div>
+          <div class="form-group">
+            <label for="phase72-test-ipns">Test IPNs (optional)</label>
+            <textarea id="phase72-test-ipns" placeholder="Enter IPNs separated by comma or new lines"></textarea>
+          </div>
+          <div class="btn-group">
+            <button id="run-phase72-btn" class="btn btn-primary" onclick="runPhase72()">Run Phase 7.2 Fitment Image</button>
+          </div>
+          <div class="hint" id="phase72-status-text">Phase 7.2 status: idle</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">Phase 7.4 (Title & Description)</h2>
+      <div class="grid-2">
+        <div>
+          <div class="form-group">
+            <label for="phase74-listings-table">Listings Table Name</label>
+            <input id="phase74-listings-table" type="text" value="eBay Listings (API) (Mock)">
+          </div>
+          <div class="form-group">
+            <label for="phase74-max-listings">Max Listings (Testing)</label>
+            <input id="phase74-max-listings" type="number" min="0" step="1" value="5">
+            <div class="hint">Use 4-5 for testing. Set 0 for full run.</div>
+          </div>
+        </div>
+        <div>
+          <div class="form-group">
+            <label for="phase74-test-ipns">Test IPNs (optional)</label>
+            <textarea id="phase74-test-ipns" placeholder="Enter IPNs separated by comma or new lines"></textarea>
+            <div class="hint">Generated title writes to <code>Product Title(New)</code>.</div>
+          </div>
+          <div class="btn-group">
+            <button id="run-phase74-btn" class="btn btn-primary" onclick="runPhase74()">Run Phase 7.4 Title/Description</button>
+          </div>
+          <div class="hint" id="phase74-status-text">Phase 7.4 status: idle</div>
         </div>
       </div>
     </section>
@@ -1005,6 +1083,8 @@
     let isPhase4CombinedRunning = false;
     let isEbayMockImportRunning = false;
     let isItemSpecificSyncRunning = false;
+    let isPhase72Running = false;
+    let isPhase74Running = false;
     let lastRunFailed = false;
     let logsCollapsed = false;
     const logEntries = [];
@@ -1025,8 +1105,8 @@
     const DEFAULT_PHASE4BLITE_DRY_RUN = false;
     const DEFAULT_PHASE4CMF_DRY_RUN = false;
     const DEFAULT_PHASE4D_DRY_RUN = false;
-    const DEFAULT_PHASE4D_LISTINGS_TABLE = 'eBay Listings (API)';
-    const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+    const DEFAULT_PHASE4D_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+    const DEFAULT_OPENAI_MODEL = 'gpt-5.4-mini';
     const DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS = 'To Do';
     const DEFAULT_PHASE4B_CLICKUP_LIST_ID = '';
     const DEFAULT_PHASE4C_CLICKUP_OPEN_STATUS = 'To Do';
@@ -1035,6 +1115,9 @@
     const DEFAULT_EBAY_MOCK_DRY_RUN = true;
     const DEFAULT_PHASE6_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
     const DEFAULT_PHASE6_MAX_IPNS = 5;
+    const DEFAULT_PHASE72_MAX_IPNS = 5;
+    const DEFAULT_PHASE74_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+    const DEFAULT_PHASE74_MAX_LISTINGS = 5;
     const REQUIRED_FIELDS = [
       ['sheet-id', 'Google Sheet ID'],
       ['tab-name', 'Google Tab Name'],
@@ -1113,6 +1196,22 @@
       phase6_write_master: 'Phase 6: Writing fitment to Master Parts',
       completed: 'Phase 6 completed',
       error: 'Phase 6 failed'
+    };
+    const PHASE72_STAGE_LABELS = {
+      phase72_load_master: 'Phase 7.2: Loading Master Parts',
+      phase72_parse_fitment: 'Phase 7.2: Parsing fitment content',
+      phase72_render_image: 'Phase 7.2: Rendering fitment image',
+      phase72_write_airtable: 'Phase 7.2: Writing image to Airtable',
+      completed: 'Phase 7.2 completed',
+      error: 'Phase 7.2 failed'
+    };
+    const PHASE74_STAGE_LABELS = {
+      phase74_prepare: 'Phase 7.4: Preparing output fields',
+      phase74_load_listings: 'Phase 7.4: Loading listings',
+      phase74_generate: 'Phase 7.4: Generating title/description',
+      phase74_write: 'Phase 7.4: Writing outputs to listings',
+      completed: 'Phase 7.4 completed',
+      error: 'Phase 7.4 failed'
     };
     const PHASE4_PIPELINE_STAGE_LABELS = {
       phase4pipeline_start: 'Phase 4 Pipeline: Starting',
@@ -1352,12 +1451,16 @@
       const runPhase4Btn = document.getElementById('run-phase4-btn');
       const runPhase4RulesBtn = document.getElementById('run-phase4-rules-btn');
       const runPhase4BLiteBtn = document.getElementById('run-phase4blite-btn');
+      const runPhase4BLiteUnifiedBtn = document.getElementById('run-phase4blite-unified-btn');
+      const runPhase4DUnifiedBtn = document.getElementById('run-phase4d-unified-btn');
       const runPhase4CMFBtn = document.getElementById('run-phase4cmf-btn');
       const runPhase4DBtn = document.getElementById('run-phase4d-btn');
       const runPhase4PipelineBtn = document.getElementById('run-phase4-pipeline-btn');
       const runPhase4CombinedBtn = document.getElementById('run-phase4-combined-btn');
       const runItemSpecificSyncPhase4Btn = document.getElementById('run-item-specific-sync-phase4-btn');
       const runPhase6Btn = document.getElementById('run-phase6-btn');
+      const runPhase72Btn = document.getElementById('run-phase72-btn');
+      const runPhase74Btn = document.getElementById('run-phase74-btn');
       const runEbayMockImportBtn = document.getElementById('run-ebay-mock-import-btn');
       const runItemSpecificSyncBtn = document.getElementById('run-item-specific-sync-btn');
       const busy =
@@ -1371,6 +1474,8 @@
         isPhase6Running ||
         isPhase4PipelineRunning ||
         isPhase4CombinedRunning ||
+        isPhase72Running ||
+        isPhase74Running ||
         isEbayMockImportRunning ||
         isItemSpecificSyncRunning;
       const hasItemSpecificBaseId = Boolean(document.getElementById('item-specific-base-id').value.trim());
@@ -1379,6 +1484,7 @@
       const hasAirtableCore =
         Boolean(document.getElementById('airtable-token').value.trim()) &&
         Boolean(document.getElementById('airtable-base-id').value.trim());
+      const hasPhase72DriveFolder = Boolean(document.getElementById('phase72-drive-folder-id').value.trim());
       runBtn.disabled = busy || !validateForm(false);
       runPhase3Btn.disabled = busy || !validatePhase3Form(false);
       runPhase4Btn.disabled = busy || !hasItemSpecificBaseId;
@@ -1386,11 +1492,17 @@
       if (runPhase4BLiteBtn) {
         runPhase4BLiteBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
       }
+      if (runPhase4BLiteUnifiedBtn) {
+        runPhase4BLiteUnifiedBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
+      }
       if (runPhase4CMFBtn) {
         runPhase4CMFBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile;
       }
       if (runPhase4DBtn) {
         runPhase4DBtn.disabled = busy || !hasRulesDriveFile || !hasOpenAiKey;
+      }
+      if (runPhase4DUnifiedBtn) {
+        runPhase4DUnifiedBtn.disabled = busy || !hasRulesDriveFile || !hasOpenAiKey;
       }
       if (runPhase4CombinedBtn) {
         runPhase4CombinedBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
@@ -1403,6 +1515,12 @@
       }
       if (runPhase6Btn) {
         runPhase6Btn.disabled = busy || !hasAirtableCore || !hasOpenAiKey;
+      }
+      if (runPhase72Btn) {
+        runPhase72Btn.disabled = busy || !hasAirtableCore || !hasPhase72DriveFolder;
+      }
+      if (runPhase74Btn) {
+        runPhase74Btn.disabled = busy || !hasAirtableCore || !hasOpenAiKey;
       }
       if (runEbayMockImportBtn) {
         const hasCsvPath = Boolean(document.getElementById('ebay-mock-csv-path').value.trim());
@@ -1426,9 +1544,12 @@
         'phase4-global-defaults-table',
         'phase4-rules-dry-run',
         'phase4blite-dry-run',
+        'phase4b-test-table-name',
+        'phase4b-test-ipn',
         'phase4cmf-dry-run',
         'phase4d-dry-run',
         'phase4d-listings-table',
+        'phase4d-test-ipn',
         'phase4-unified-item-specific-base-id',
         'phase4-unified-rules-drive-file',
         'phase4-unified-rules-logic-sheet',
@@ -1438,6 +1559,8 @@
         'phase4-unified-clickup-list-id',
         'phase4-unified-clickup-open-status',
         'phase4-unified-listings-table',
+        'phase4-unified-test-ipn',
+        'phase4-unified-test-ipn-4d',
         'phase4-unified-dry-run',
         'openai-api-key',
         'openai-model',
@@ -1450,6 +1573,12 @@
         'phase6-listings-table',
         'phase6-test-ipns',
         'phase6-max-ipns',
+        'phase72-test-ipns',
+        'phase72-max-ipns',
+        'phase72-drive-folder-id',
+        'phase74-listings-table',
+        'phase74-test-ipns',
+        'phase74-max-listings',
         'ebay-mock-csv-path',
         'ebay-mock-table-name',
         'ebay-mock-dry-run'
@@ -1535,6 +1664,24 @@
       const stage = String(payload.stage || '').trim();
       const percent = Number(payload.percent || 0);
       const label = PHASE6_STAGE_LABELS[stage] || 'Phase 6 running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase72ProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE72_STAGE_LABELS[stage] || 'Phase 7.2 running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase74ProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE74_STAGE_LABELS[stage] || 'Phase 7.4 running';
       const message = String(payload.message || '').trim();
       if (message) return `${label} (${percent}%): ${message}`;
       return `${label} (${percent}%)`;
@@ -1690,7 +1837,19 @@
         syncPhase4LegacyInputsToUnified();
         const phase4bTestTableInput = document.getElementById('phase4b-test-table-name');
         if (phase4bTestTableInput) {
-          phase4bTestTableInput.value = '';
+          phase4bTestTableInput.value = config.testTableName || '';
+        }
+        const phase4bTestIpnInput = document.getElementById('phase4b-test-ipn');
+        if (phase4bTestIpnInput) {
+          phase4bTestIpnInput.value = config.phase4BTestIpn || '';
+        }
+        const phase4dTestIpnInput = document.getElementById('phase4d-test-ipn');
+        if (phase4dTestIpnInput) {
+          phase4dTestIpnInput.value = config.phase4DTestIpn || '';
+        }
+        const phase4dUnifiedTestIpnInput = document.getElementById('phase4-unified-test-ipn-4d');
+        if (phase4dUnifiedTestIpnInput) {
+          phase4dUnifiedTestIpnInput.value = config.phase4DTestIpn || '';
         }
         document.getElementById('phase4-rules-logic-sheet').value = DEFAULT_PHASE4_RULES_LOGIC_SHEET;
         document.getElementById('phase4-global-defaults-table').value = config.phase4GlobalDefaultsTable || DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE;
@@ -1713,6 +1872,17 @@
         document.getElementById('phase6-test-ipns').value = config.phase6TestIpns || '';
         document.getElementById('phase6-max-ipns').value = String(
           Number(config.phase6MaxIpns || DEFAULT_PHASE6_MAX_IPNS) || DEFAULT_PHASE6_MAX_IPNS
+        );
+        document.getElementById('phase72-test-ipns').value = config.phase72TestIpns || '';
+        document.getElementById('phase72-max-ipns').value = String(
+          Number(config.phase72MaxIpns || DEFAULT_PHASE72_MAX_IPNS) || DEFAULT_PHASE72_MAX_IPNS
+        );
+        document.getElementById('phase72-drive-folder-id').value = config.phase72DriveFolderId || '';
+        document.getElementById('phase74-listings-table').value =
+          config.phase74ListingsTable || DEFAULT_PHASE74_LISTINGS_TABLE;
+        document.getElementById('phase74-test-ipns').value = config.phase74TestIpns || '';
+        document.getElementById('phase74-max-listings').value = String(
+          Number(config.phase74MaxListings || DEFAULT_PHASE74_MAX_LISTINGS) || DEFAULT_PHASE74_MAX_LISTINGS
         );
         document.getElementById('ebay-mock-csv-path').value = config.ebayMockCsvPath || '';
         document.getElementById('ebay-mock-table-name').value =
@@ -1754,7 +1924,11 @@
             document.getElementById('phase4blite-dry-run').value = liteConfig.dryRun === false ? 'false' : 'true';
             const phase4bTestTableInput = document.getElementById('phase4b-test-table-name');
             if (phase4bTestTableInput) {
-              phase4bTestTableInput.value = '';
+              phase4bTestTableInput.value = liteConfig.testTableName || config.testTableName || '';
+            }
+            const phase4bTestIpnInput = document.getElementById('phase4b-test-ipn');
+            if (phase4bTestIpnInput) {
+              phase4bTestIpnInput.value = liteConfig.testIpn || config.phase4BTestIpn || '';
             }
             if (liteConfig.openaiApiKey) {
               document.getElementById('openai-api-key').value = liteConfig.openaiApiKey;
@@ -1794,6 +1968,14 @@
             document.getElementById('phase4d-dry-run').value = phase4DConfig.dryRun === false ? 'false' : 'true';
             document.getElementById('phase4d-listings-table').value =
               phase4DConfig.listingsTableName || DEFAULT_PHASE4D_LISTINGS_TABLE;
+            const phase4dTestIpnInput = document.getElementById('phase4d-test-ipn');
+            if (phase4dTestIpnInput) {
+              phase4dTestIpnInput.value = phase4DConfig.testIpn || config.phase4DTestIpn || '';
+            }
+            const phase4dUnifiedTestIpnInput = document.getElementById('phase4-unified-test-ipn-4d');
+            if (phase4dUnifiedTestIpnInput) {
+              phase4dUnifiedTestIpnInput.value = phase4DConfig.testIpn || config.phase4DTestIpn || '';
+            }
           }
         }
         if (window.phase6API && typeof window.phase6API.getConfig === 'function') {
@@ -1806,6 +1988,32 @@
             document.getElementById('phase6-max-ipns').value = String(
               Number(phase6Config.maxIpns || document.getElementById('phase6-max-ipns').value || DEFAULT_PHASE6_MAX_IPNS) ||
                 DEFAULT_PHASE6_MAX_IPNS
+            );
+          }
+        }
+        if (window.phase72API && typeof window.phase72API.getConfig === 'function') {
+          const phase72Config = await window.phase72API.getConfig();
+          if (phase72Config && typeof phase72Config === 'object') {
+            document.getElementById('phase72-test-ipns').value =
+              phase72Config.testIpns || document.getElementById('phase72-test-ipns').value;
+            document.getElementById('phase72-max-ipns').value = String(
+              Number(phase72Config.maxIpns || document.getElementById('phase72-max-ipns').value || DEFAULT_PHASE72_MAX_IPNS) ||
+                DEFAULT_PHASE72_MAX_IPNS
+            );
+            document.getElementById('phase72-drive-folder-id').value =
+              phase72Config.driveFolderId || document.getElementById('phase72-drive-folder-id').value;
+          }
+        }
+        if (window.phase74API && typeof window.phase74API.getConfig === 'function') {
+          const phase74Config = await window.phase74API.getConfig();
+          if (phase74Config && typeof phase74Config === 'object') {
+            document.getElementById('phase74-listings-table').value =
+              phase74Config.listingsTableName || document.getElementById('phase74-listings-table').value;
+            document.getElementById('phase74-test-ipns').value =
+              phase74Config.testIpns || document.getElementById('phase74-test-ipns').value;
+            document.getElementById('phase74-max-listings').value = String(
+              Number(phase74Config.maxListings || document.getElementById('phase74-max-listings').value || DEFAULT_PHASE74_MAX_LISTINGS) ||
+                DEFAULT_PHASE74_MAX_LISTINGS
             );
           }
         }
@@ -1938,6 +2146,8 @@
       const unifiedClickupId = document.getElementById('phase4-unified-clickup-list-id')?.value?.trim() || '';
       const unifiedClickupStatus = document.getElementById('phase4-unified-clickup-open-status')?.value?.trim() || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
       const unifiedListingsTable = document.getElementById('phase4-unified-listings-table')?.value?.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE;
+      const unifiedTestIpn = document.getElementById('phase4-unified-test-ipn')?.value?.trim() || '';
+      const unifiedTestIpn4D = document.getElementById('phase4-unified-test-ipn-4d')?.value?.trim() || '';
       const unifiedDryRun = false;
 
       if (unifiedBase) document.getElementById('item-specific-base-id').value = unifiedBase;
@@ -1952,6 +2162,8 @@
       document.getElementById('phase4b-clickup-open-status').value = unifiedClickupStatus;
       document.getElementById('phase4c-clickup-open-status').value = unifiedClickupStatus;
       document.getElementById('phase4d-listings-table').value = unifiedListingsTable;
+      document.getElementById('phase4b-test-ipn').value = unifiedTestIpn;
+      document.getElementById('phase4d-test-ipn').value = unifiedTestIpn4D;
 
       document.getElementById('phase4-dry-run').value = unifiedDryRun ? 'true' : 'false';
       document.getElementById('phase4-rules-dry-run').value = unifiedDryRun ? 'true' : 'false';
@@ -1983,6 +2195,10 @@
         DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
       document.getElementById('phase4-unified-listings-table').value =
         document.getElementById('phase4d-listings-table').value.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE;
+      document.getElementById('phase4-unified-test-ipn').value =
+        document.getElementById('phase4b-test-ipn').value.trim();
+      document.getElementById('phase4-unified-test-ipn-4d').value =
+        document.getElementById('phase4d-test-ipn').value.trim();
       const unifiedDryRunEl = document.getElementById('phase4-unified-dry-run');
       if (unifiedDryRunEl) unifiedDryRunEl.value = 'false';
     }
@@ -2113,12 +2329,14 @@
         phase4CMFDryRun: false,
         phase4DDryRun: false,
         phase4DListingsTable: document.getElementById('phase4d-listings-table').value.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE,
+        phase4DTestIpn: document.getElementById('phase4d-test-ipn').value.trim(),
         phase4RunMirror: true,
         phase4Run4A: true,
         phase4Run4B: true,
         phase4Run4C: true,
         phase4Run4D: true,
-        testTableName: '',
+        testTableName: document.getElementById('phase4b-test-table-name').value.trim(),
+        phase4BTestIpn: document.getElementById('phase4b-test-ipn').value.trim(),
         testMaxTables: 0,
         openaiApiKey: document.getElementById('openai-api-key').value.trim(),
         openaiModel: document.getElementById('openai-model').value.trim() || DEFAULT_OPENAI_MODEL,
@@ -2144,6 +2362,18 @@
           document.getElementById('phase6-test-ipns').value.trim(),
         phase6MaxIpns:
           Number(document.getElementById('phase6-max-ipns').value.trim()) || 0,
+        phase72TestIpns:
+          document.getElementById('phase72-test-ipns').value.trim(),
+        phase72MaxIpns:
+          Number(document.getElementById('phase72-max-ipns').value.trim()) || 0,
+        phase72DriveFolderId:
+          document.getElementById('phase72-drive-folder-id').value.trim(),
+        phase74ListingsTable:
+          document.getElementById('phase74-listings-table').value.trim() || DEFAULT_PHASE74_LISTINGS_TABLE,
+        phase74TestIpns:
+          document.getElementById('phase74-test-ipns').value.trim(),
+        phase74MaxListings:
+          Number(document.getElementById('phase74-max-listings').value.trim()) || 0,
         ebayMockCsvPath: document.getElementById('ebay-mock-csv-path').value.trim(),
         ebayMockTableName:
           document.getElementById('ebay-mock-table-name').value.trim() || DEFAULT_EBAY_MOCK_TABLE_NAME,
@@ -2435,6 +2665,40 @@
         });
       }
 
+      if (window.phase72API && typeof window.phase72API.onProgress === 'function') {
+        window.phase72API.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase72ProgressText(payload);
+          const statusText = document.getElementById('phase72-status-text');
+          if (statusText) {
+            statusText.textContent = `Phase 7.2 status: ${formatPhase72ProgressText(payload)}`;
+          }
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`Phase7.2 progress: ${formatPhase72ProgressText(payload)}`, level);
+          }
+        });
+      }
+
+      if (window.phase74API && typeof window.phase74API.onProgress === 'function') {
+        window.phase74API.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase74ProgressText(payload);
+          const statusText = document.getElementById('phase74-status-text');
+          if (statusText) {
+            statusText.textContent = `Phase 7.4 status: ${formatPhase74ProgressText(payload)}`;
+          }
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`Phase7.4 progress: ${formatPhase74ProgressText(payload)}`, level);
+          }
+        });
+      }
+
       if (window.phase4CombinedAPI && typeof window.phase4CombinedAPI.onProgress === 'function') {
         window.phase4CombinedAPI.onProgress((event, payload) => {
           if (!payload) return;
@@ -2645,7 +2909,7 @@
     }
 
     async function runPhase6() {
-      if (isPhase6Running || isPhase4PipelineRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isEbayMockImportRunning || isItemSpecificSyncRunning) return;
+      if (isPhase6Running || isPhase72Running || isPhase4PipelineRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isEbayMockImportRunning || isItemSpecificSyncRunning) return;
       if (!window.phase6API || typeof window.phase6API.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 6 API is unavailable.');
         return;
@@ -2713,8 +2977,136 @@
       }
     }
 
+    async function runPhase72() {
+      if (isPhase72Running || isPhase74Running || isPhase6Running || isPhase4PipelineRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isEbayMockImportRunning || isItemSpecificSyncRunning) return;
+      if (!window.phase72API || typeof window.phase72API.run !== 'function') {
+        showStatus('run-status', 'error', 'Phase 7.2 API is unavailable.');
+        return;
+      }
+      const driveFolder = document.getElementById('phase72-drive-folder-id').value.trim();
+      if (!driveFolder) {
+        setFieldError('phase72-drive-folder-id', 'Google Drive folder ID/URL is required.');
+        showStatus('run-status', 'error', 'Enter Google Drive folder ID/URL before running Phase 7.2.');
+        return;
+      }
+
+      isPhase72Running = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 7.2 fitment image generation is in progress...');
+      showStatus('run-status', 'info', 'Phase 7.2 started...');
+      document.getElementById('phase72-status-text').textContent = 'Phase 7.2 status: running...';
+      logLine('Starting Phase 7.2 fitment image generation run.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase72API.run(config);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Phase 7.2 failed.');
+        }
+        const summary = result.summary || {};
+        setRunState('Success', 'Phase 7.2 completed successfully.');
+        showStatus(
+          'run-status',
+          'success',
+          `Phase 7.2 completed. Generated=${summary.fitmentImagesGenerated || 0}, AlreadyPresent=${summary.fitmentImagesAlreadyPresent || 0}, Single=${summary.singleLayoutCount || 0}, Multi=${summary.multiLayoutCount || 0}.`
+        );
+        document.getElementById('phase72-status-text').textContent =
+          `Phase 7.2 status: completed. Generated ${summary.fitmentImagesGenerated || 0}, Already Present ${summary.fitmentImagesAlreadyPresent || 0}.`;
+        logLine(
+          `Phase 7.2 completed. MasterScanned=${summary.masterPartsScanned || 0}, WithFitment=${summary.masterPartsWithPartFitment || 0}, Generated=${summary.fitmentImagesGenerated || 0}, AlreadyPresent=${summary.fitmentImagesAlreadyPresent || 0}, SkippedBlank=${summary.fitmentImagesSkippedBlankFitment || 0}, Single=${summary.singleLayoutCount || 0}, Multi=${summary.multiLayoutCount || 0}, PositionNormalized=${summary.positionBlocksNormalized || 0}, TestIpnsCount=${summary.testIpnsCount || 0}, MaxIpns=${summary.maxIpns || 0}`
+        );
+        if (Array.isArray(summary.sampleSingleLayout) && summary.sampleSingleLayout.length > 0) {
+          summary.sampleSingleLayout.forEach(line => logLine(`Phase7.2: ${line}`));
+        }
+        if (Array.isArray(summary.sampleMultiLayout) && summary.sampleMultiLayout.length > 0) {
+          summary.sampleMultiLayout.forEach(line => logLine(`Phase7.2: ${line}`));
+        }
+        if (Array.isArray(summary.sampleNormalizedPosition) && summary.sampleNormalizedPosition.length > 0) {
+          summary.sampleNormalizedPosition.forEach(line => logLine(`Phase7.2: ${line}`));
+        }
+        if (Array.isArray(summary.warnings) && summary.warnings.length > 0) {
+          summary.warnings.forEach(line => logLine(`Phase7.2: ${line}`));
+        }
+        if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+          summary.errors.forEach(err => logLine(`Phase7.2: ${err}`, 'error'));
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 7.2 failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 7.2 failed: ${err.message}`);
+        document.getElementById('phase72-status-text').textContent = `Phase 7.2 status: failed (${err.message})`;
+        logLine(`Phase 7.2 failed: ${err.message}`, 'error');
+      } finally {
+        isPhase72Running = false;
+        updateRunButtonState();
+      }
+    }
+
+    async function runPhase74() {
+      if (isPhase74Running || isPhase72Running || isPhase6Running || isPhase4PipelineRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isEbayMockImportRunning || isItemSpecificSyncRunning) return;
+      if (!window.phase74API || typeof window.phase74API.run !== 'function') {
+        showStatus('run-status', 'error', 'Phase 7.4 API is unavailable.');
+        return;
+      }
+
+      const listingsTable = document.getElementById('phase74-listings-table').value.trim();
+      const openaiApiKey = document.getElementById('openai-api-key').value.trim();
+      if (!listingsTable) {
+        setFieldError('phase74-listings-table', 'Listings table name is required.');
+        showStatus('run-status', 'error', 'Enter listings table name before running Phase 7.4.');
+        return;
+      }
+      if (!openaiApiKey) {
+        setFieldError('openai-api-key', 'OpenAI API Key is required.');
+        showStatus('run-status', 'error', 'Enter OpenAI API Key before running Phase 7.4.');
+        return;
+      }
+
+      isPhase74Running = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 7.4 title/description generation is in progress...');
+      showStatus('run-status', 'info', 'Phase 7.4 started...');
+      document.getElementById('phase74-status-text').textContent = 'Phase 7.4 status: running...';
+      logLine('Starting Phase 7.4 title/description generation run.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase74API.run(config);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Phase 7.4 failed.');
+        }
+        const summary = result.summary || {};
+        setRunState('Success', 'Phase 7.4 completed successfully.');
+        showStatus(
+          'run-status',
+          'success',
+          `Phase 7.4 completed. Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, WritesFailed=${summary.writeFailures || 0}.`
+        );
+        document.getElementById('phase74-status-text').textContent =
+          `Phase 7.4 status: completed. Titles ${summary.titleGenerated || 0}, Descriptions ${summary.descriptionGenerated || 0}.`;
+        logLine(
+          `Phase 7.4 completed. ListingsScanned=${summary.listingsScanned || 0}, Eligible=${summary.listingsEligible || 0}, MasterMatched=${summary.masterMatched || 0}, MasterMissing=${summary.masterMissing || 0}, FieldsCreated=${summary.listingFieldsCreated || 0}, Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, ShortDesc=${summary.shortDescriptionWritten || 0}, SkippedNoChange=${summary.skippedNoChange || 0}, AIFailures=${summary.aiFailures || 0}, WriteFailures=${summary.writeFailures || 0}, TestIpnsCount=${summary.testIpnsCount || 0}, MaxListings=${summary.maxListings || 0}`
+        );
+        if (Array.isArray(summary.samples) && summary.samples.length > 0) {
+          summary.samples.forEach(line => logLine(`Phase7.4: ${line}`));
+        }
+        if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+          summary.errors.forEach(err => logLine(`Phase7.4: ${err}`, 'error'));
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 7.4 failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 7.4 failed: ${err.message}`);
+        document.getElementById('phase74-status-text').textContent = `Phase 7.4 status: failed (${err.message})`;
+        logLine(`Phase 7.4 failed: ${err.message}`, 'error');
+      } finally {
+        isPhase74Running = false;
+        updateRunButtonState();
+      }
+    }
+
     async function runPhase4() {
-      if (isPhase4PipelineRunning || isPhase4Running || isRunning || isPhase3Running || isItemSpecificSyncRunning || isPhase6Running) return;
+      if (isPhase4PipelineRunning || isPhase4Running || isRunning || isPhase3Running || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.phase4API || typeof window.phase4API.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4 API is unavailable.');
         return;
@@ -2780,7 +3172,7 @@
     }
 
     async function runPhase4Pipeline() {
-      if (isPhase4PipelineRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isItemSpecificSyncRunning || isPhase6Running) return;
+      if (isPhase4PipelineRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.phase4PipelineAPI || typeof window.phase4PipelineAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4 pipeline API is unavailable.');
         return;
@@ -2848,7 +3240,7 @@
     }
 
     async function runItemSpecificSync() {
-      if (isPhase4PipelineRunning || isRunning || isPhase3Running || isItemSpecificSyncRunning || isPhase6Running) return;
+      if (isPhase4PipelineRunning || isRunning || isPhase3Running || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.itemSpecificSyncAPI || typeof window.itemSpecificSyncAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Item Specific sync API is unavailable.');
         return;
@@ -2906,7 +3298,7 @@
     }
 
     async function runPhase4Rules() {
-      if (isPhase4PipelineRunning || isPhase4RulesRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isItemSpecificSyncRunning || isPhase6Running) return;
+      if (isPhase4PipelineRunning || isPhase4RulesRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.phase4RulesAPI || typeof window.phase4RulesAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4A API is unavailable.');
         return;
@@ -2978,7 +3370,7 @@
     }
 
     async function runPhase4BLite() {
-      if (isPhase4PipelineRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isItemSpecificSyncRunning || isPhase6Running) return;
+      if (isPhase4PipelineRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.phase4BLiteAPI || typeof window.phase4BLiteAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4B-lite API is unavailable.');
         return;
@@ -3033,10 +3425,16 @@
           document.getElementById('phase4blite-status-text').textContent =
             `Phase 4B-lite status: completed (${mode}). VF Updated ${summary.vfFieldsUpdated || 0}, VMF Updated ${summary.vmfFieldsUpdated || 0}.`;
           logLine(
-            `Phase 4B-lite completed. Mode=${mode}, Tables=${summary.tablesScanned || 0}, Rows=${summary.rowsScanned || 0}, RowsWithIPN=${summary.rowsWithIPN || 0}, MissingMaster=${summary.masterPartsMissing || 0}, VFEvaluated=${summary.vfFieldsEvaluated || 0}, VFUpdated=${summary.vfFieldsUpdated || 0}, VFSkippedLowConfidence=${summary.vfFieldsLowConfidenceSkipped || 0}, VFDotSkipped=${summary.vfDotNumberSkipped || 0}, VMFEvaluated=${summary.vmfFieldsEvaluated || 0}, VMFUpdated=${summary.vmfFieldsUpdated || 0}, VMFTasksCreated=${summary.vmfLowConfidenceTasksCreated || 0}, VMFTasksUpdated=${summary.vmfLowConfidenceTasksUpdated || 0}, VMFTasksSkippedExisting=${summary.vmfLowConfidenceTasksSkippedExisting || 0}, VMFDeterminedFound=${summary.vmfDeterminedTasksFound || 0}, VMFWritebackSucceeded=${summary.vmfDeterminedWritebackSucceeded || 0}, VMFWritebackFailed=${summary.vmfDeterminedWritebackFailed || 0}, VMFClosed=${summary.vmfDeterminedTasksClosed || 0}, VMFCloseFailed=${summary.vmfDeterminedTaskCloseFailed || 0}`
+            `Phase 4B-lite completed. Mode=${mode}, Tables=${summary.tablesScanned || 0}, Rows=${summary.rowsScanned || 0}, RowsWithIPN=${summary.rowsWithIPN || 0}, MissingMaster=${summary.masterPartsMissing || 0}, VFEvaluated=${summary.vfFieldsEvaluated || 0}, VFUpdated=${summary.vfFieldsUpdated || 0}, VFSkippedLowConfidence=${summary.vfFieldsLowConfidenceSkipped || 0}, VFDotSkipped=${summary.vfDotNumberSkipped || 0}, VMFEvaluated=${summary.vmfFieldsEvaluated || 0}, VMFUpdated=${summary.vmfFieldsUpdated || 0}, AIWebSearchUsed=${summary.aiWebSearchUsed || 0}, VMFTasksCreated=${summary.vmfLowConfidenceTasksCreated || 0}, VMFTasksUpdated=${summary.vmfLowConfidenceTasksUpdated || 0}, VMFTasksSkippedExisting=${summary.vmfLowConfidenceTasksSkippedExisting || 0}, VMFDeterminedFound=${summary.vmfDeterminedTasksFound || 0}, VMFWritebackSucceeded=${summary.vmfDeterminedWritebackSucceeded || 0}, VMFWritebackFailed=${summary.vmfDeterminedWritebackFailed || 0}, VMFClosed=${summary.vmfDeterminedTasksClosed || 0}, VMFCloseFailed=${summary.vmfDeterminedTaskCloseFailed || 0}`
           );
           if (Array.isArray(summary.writeSamples) && summary.writeSamples.length > 0) {
             summary.writeSamples.forEach(line => logLine(`Phase4B-lite: ${line}`));
+          }
+          if (Array.isArray(summary.aiWebSearchEvents) && summary.aiWebSearchEvents.length > 0) {
+            summary.aiWebSearchEvents.forEach(line => logLine(`Phase4B-lite: ${line}`));
+          }
+          if (Array.isArray(summary.aiWebSearchIpns) && summary.aiWebSearchIpns.length > 0) {
+            logLine(`Phase4B-lite: Web search used for IPNs: ${summary.aiWebSearchIpns.join(', ')}`);
           }
           if (Array.isArray(summary.vmfLowConfidenceTaskSamples) && summary.vmfLowConfidenceTaskSamples.length > 0) {
             summary.vmfLowConfidenceTaskSamples.forEach(line => logLine(`Phase4B-lite: ${line}`));
@@ -3059,7 +3457,7 @@
     }
 
     async function runPhase4CMF() {
-      if (isPhase4PipelineRunning || isPhase4CMFRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running) return;
+      if (isPhase4PipelineRunning || isPhase4CMFRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.phase4CMFAPI || typeof window.phase4CMFAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4C API is unavailable.');
         return;
@@ -3134,7 +3532,7 @@
     }
 
     async function runPhase4D() {
-      if (isPhase4PipelineRunning || isPhase4DRunning || isPhase4CMFRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running) return;
+      if (isPhase4PipelineRunning || isPhase4DRunning || isPhase4CMFRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.phase4DAPI || typeof window.phase4DAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4D API is unavailable.');
         return;
@@ -3186,10 +3584,19 @@
         document.getElementById('phase4d-status-text').textContent =
           `Phase 4D status: completed (${mode}). FsV ${summary.fsvFieldsUpdated || 0}, V1 ${summary.v1FieldsUpdated || 0}, V2 ${summary.v2FieldsUpdated || 0}, VB ${summary.vbFieldsUpdated || 0}.`;
         logLine(
-          `Phase 4D completed. Mode=${mode}, ListingsScanned=${summary.listingsScanned || 0}, ListingsEligible=${summary.listingsEligible || 0}, MasterPartsMissing=${summary.masterPartsMissing || 0}, ListingFieldsCreated=${summary.listingFieldsCreated || 0}, FsVEvaluated=${summary.fsvFieldsEvaluated || 0}, FsVUpdated=${summary.fsvFieldsUpdated || 0}, FsVDNA=${summary.fsvDNAWritten || 0}, V1Evaluated=${summary.v1FieldsEvaluated || 0}, V1Updated=${summary.v1FieldsUpdated || 0}, V1DNA=${summary.v1DNAWritten || 0}, V2Evaluated=${summary.v2FieldsEvaluated || 0}, V2Updated=${summary.v2FieldsUpdated || 0}, V2DNA=${summary.v2DNAWritten || 0}, V2DNASkippedOverwrite=${summary.v2DNASkippedOverwrite || 0}, VBEvaluated=${summary.vbFieldsEvaluated || 0}, VBUpdated=${summary.vbFieldsUpdated || 0}, VBLowConfidenceLeftBlank=${summary.vbLowConfidenceLeftBlank || 0}, ManualOverrideSkipped=${summary.manualOverrideSkipped || 0}`
+          `Phase 4D completed. Mode=${mode}, ListingsScanned=${summary.listingsScanned || 0}, ListingsEligible=${summary.listingsEligible || 0}, SkippedMissingIpn=${summary.skippedMissingIpn || 0}, SkippedOutOfScope=${summary.skippedOutOfScope || 0}, SkippedNoPrefixRules=${summary.skippedNoPrefixRules || 0}, MasterPartsMissing=${summary.masterPartsMissing || 0}, ListingFieldsCreated=${summary.listingFieldsCreated || 0}, FsVEvaluated=${summary.fsvFieldsEvaluated || 0}, FsVUpdated=${summary.fsvFieldsUpdated || 0}, FsVDNA=${summary.fsvDNAWritten || 0}, V1Evaluated=${summary.v1FieldsEvaluated || 0}, V1Updated=${summary.v1FieldsUpdated || 0}, V1DNA=${summary.v1DNAWritten || 0}, V2Evaluated=${summary.v2FieldsEvaluated || 0}, V2Updated=${summary.v2FieldsUpdated || 0}, V2DNA=${summary.v2DNAWritten || 0}, V2DNASkippedOverwrite=${summary.v2DNASkippedOverwrite || 0}, VBEvaluated=${summary.vbFieldsEvaluated || 0}, VBUpdated=${summary.vbFieldsUpdated || 0}, VBLowConfidenceLeftBlank=${summary.vbLowConfidenceLeftBlank || 0}, AIWebSearchUsed=${summary.aiWebSearchUsed || 0}, ManualOverrideSkipped=${summary.manualOverrideSkipped || 0}`
         );
+        if (Array.isArray(summary.sampleSkips) && summary.sampleSkips.length > 0) {
+          summary.sampleSkips.forEach(line => logLine(`Phase4D: ${line}`));
+        }
         if (Array.isArray(summary.sampleOutputs) && summary.sampleOutputs.length > 0) {
           summary.sampleOutputs.forEach(line => logLine(`Phase4D: ${line}`));
+        }
+        if (Array.isArray(summary.aiWebSearchEvents) && summary.aiWebSearchEvents.length > 0) {
+          summary.aiWebSearchEvents.forEach(line => logLine(`Phase4D: ${line}`));
+        }
+        if (Array.isArray(summary.aiWebSearchIpns) && summary.aiWebSearchIpns.length > 0) {
+          logLine(`Phase4D: Web search used for IPNs: ${summary.aiWebSearchIpns.join(', ')}`);
         }
         if (Array.isArray(summary.errors) && summary.errors.length > 0) {
           summary.errors.forEach(err => logLine(`Phase4D: ${err}`, 'error'));
@@ -3206,7 +3613,7 @@
     }
 
     async function runPhase4Combined() {
-      if (isPhase4PipelineRunning || isPhase4CombinedRunning || isPhase4CMFRunning || isPhase4DRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running) return;
+      if (isPhase4PipelineRunning || isPhase4CombinedRunning || isPhase4CMFRunning || isPhase4DRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.phase4CombinedAPI || typeof window.phase4CombinedAPI.run !== 'function') {
         showStatus('run-status', 'error', 'Phase 4 Combined API is unavailable.');
         return;
@@ -3285,7 +3692,7 @@
     }
 
     async function runEbayMockImport() {
-      if (isPhase4PipelineRunning || isEbayMockImportRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running) return;
+      if (isPhase4PipelineRunning || isEbayMockImportRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.ebayMockImportAPI || typeof window.ebayMockImportAPI.run !== 'function') {
         showStatus('run-status', 'error', 'eBay Mock Import API is unavailable.');
         return;
@@ -3385,3 +3792,5 @@
   </script>
 </body>
 </html>
+
+

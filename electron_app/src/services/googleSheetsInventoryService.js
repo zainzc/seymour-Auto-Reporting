@@ -1,4 +1,4 @@
-const { google } = require('googleapis');
+﻿const { google } = require('googleapis');
 const oauth2Service = require('./oauth2Service');
 
 /**
@@ -6,37 +6,31 @@ const oauth2Service = require('./oauth2Service');
  * Handles writing inventory data to Google Sheets following Phase 1 requirements
  */
 
-/**
- * Write inventory data to Google Sheets
- * Follows Phase 1 requirements: fully refresh dataset (overwrite)
- * @param {string} spreadsheetId - Google Sheets spreadsheet ID
- * @param {string} worksheetName - Name of the worksheet to write to
- * @param {Array} inventoryData - Array of inventory records
- * @returns {Promise<Object>} Write operation result
- */
-async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryData) {
+async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryData, progressCallback = () => {}) {
   try {
     const startTime = Date.now();
-    
-    // Get authenticated sheets client
     const sheets = await getAuthenticatedSheetsClient();
-    
+
     if (!inventoryData || inventoryData.length === 0) {
       throw new Error('No inventory data to write to Google Sheets');
     }
 
-    console.log(`📊 Writing ${inventoryData.length} inventory records to Google Sheets...`);
+    console.log(`Writing ${inventoryData.length} inventory records to Google Sheets...`);
+    progressCallback({
+      stage: 'sheet_prepare',
+      message: `Preparing ${inventoryData.length} rows for Google Sheets...`,
+      percent: 55
+    });
 
-    // Prepare headers (column definitions based on inventoryService.js query)
     const headers = [
       'RNumber',
-      'InventoryNumber', 
+      'InventoryNumber',
       'ModelYear',
       'ModelName',
       'CategoryCode',
       'StockTicketNumber',
       'PartType',
-      'LocationCode', 
+      'LocationCode',
       'PrimaryARADamageCode',
       'SecondaryARADamageCode',
       'ConditionsAndOptions',
@@ -67,83 +61,122 @@ async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryDat
       'ReferenceNumber'
     ];
 
-    // Convert inventory data to 2D array format expected by Sheets API
-    const values = [
-      headers, // Header row
-      ...inventoryData.map(record => headers.map(header => {
+    const dataRows = inventoryData.map(record =>
+      headers.map(header => {
         const value = record[header];
-        // Handle null/undefined values and dates
-        if (value === null || value === undefined) {
-          return '';
-        }
-        if (value instanceof Date) {
-          return value.toISOString().split('T')[0]; // Format as YYYY-MM-DD
-        }
+        if (value === null || value === undefined) return '';
+        if (value instanceof Date) return value.toISOString().split('T')[0];
         return String(value);
-      }))
-    ];
+      })
+    );
 
-    // Phase 1 Requirement: Fully refresh the dataset (overwrite)
-    // Clear existing data first
-    await clearWorksheet(sheets, spreadsheetId, worksheetName);
-    
-    // Write new data
-    const range = `${worksheetName}!A1`;
-    const response = await sheets.spreadsheets.values.update({
+    await ensureWorksheetCapacity(
+      sheets,
       spreadsheetId,
-      range,
-      valueInputOption: 'USER_ENTERED', // Allow auto-formatting of dates, numbers
-      resource: {
-        values: values
-      }
+      worksheetName,
+      dataRows.length + 1,
+      headers.length
+    );
+    progressCallback({
+      stage: 'sheet_resize',
+      message: 'Worksheet capacity verified.',
+      percent: 62
     });
 
+    await clearWorksheet(sheets, spreadsheetId, worksheetName);
+    progressCallback({
+      stage: 'sheet_clear',
+      message: 'Cleared existing worksheet data.',
+      percent: 66
+    });
+
+    await withSheetsRetry(
+      () =>
+        sheets.spreadsheets.values.update({
+          spreadsheetId,
+          range: `${worksheetName}!A1`,
+          valueInputOption: 'USER_ENTERED',
+          resource: { values: [headers] }
+        }),
+      'write header'
+    );
+    progressCallback({
+      stage: 'sheet_header',
+      message: 'Header row written.',
+      percent: 68
+    });
+
+    const chunkSize = 1000;
+    const lastCol = columnIndexToLetter(headers.length);
+    let writtenRows = 0;
+    let totalUpdatedCells = headers.length;
+
+    for (let i = 0; i < dataRows.length; i += chunkSize) {
+      const chunk = dataRows.slice(i, i + chunkSize);
+      const startRow = 2 + i;
+      const endRow = startRow + chunk.length - 1;
+      const range = `${worksheetName}!A${startRow}:${lastCol}${endRow}`;
+
+      const response = await withSheetsRetry(
+        () =>
+          sheets.spreadsheets.values.update({
+            spreadsheetId,
+            range,
+            valueInputOption: 'USER_ENTERED',
+            resource: { values: chunk }
+          }),
+        `write rows ${startRow}-${endRow}`
+      );
+
+      writtenRows += chunk.length;
+      totalUpdatedCells += Number(response?.data?.updatedCells || 0);
+      if (writtenRows % 5000 === 0 || writtenRows === dataRows.length) {
+        console.log(`Google Sheets progress: ${writtenRows}/${dataRows.length} rows written`);
+      }
+      const progress = 68 + Math.floor((writtenRows / Math.max(1, dataRows.length)) * 30);
+      progressCallback({
+        stage: 'sheet_write_rows',
+        message: `Wrote ${writtenRows}/${dataRows.length} rows to '${worksheetName}'.`,
+        percent: Math.min(98, progress)
+      });
+    }
+
     const duration = Date.now() - startTime;
-    
-    console.log(`✅ Google Sheets write successful: ${inventoryData.length} records in ${duration}ms`);
+    console.log(`Google Sheets write successful: ${inventoryData.length} records in ${duration}ms`);
 
     return {
       success: true,
       message: `Successfully wrote ${inventoryData.length} records to Google Sheets`,
       recordCount: inventoryData.length,
-      duration: duration,
-      updatedRows: response.data.updatedRows,
-      updatedColumns: response.data.updatedColumns,
-      updatedCells: response.data.updatedCells
+      duration,
+      updatedRows: inventoryData.length + 1,
+      updatedColumns: headers.length,
+      updatedCells: totalUpdatedCells
     };
-
   } catch (error) {
-    console.error('❌ Google Sheets write failed:', error.message);
-    
-    let errorMessage = error.message;
-    
-    // Provide more specific error messages
-    if (error.message.includes('not found')) {
+    const formatted = formatGoogleApiError(error);
+    console.error('Google Sheets write failed:', formatted);
+
+    let errorMessage = formatted;
+    const text = String(formatted || '').toLowerCase();
+    if (text.includes('not found')) {
       errorMessage = 'Spreadsheet or worksheet not found. Please check the spreadsheet ID and worksheet name.';
-    } else if (error.message.includes('permission')) {
+    } else if (text.includes('permission') || text.includes('forbidden')) {
       errorMessage = 'Permission denied. Please ensure you have edit access to the Google Sheet.';
-    } else if (error.message.includes('quota')) {
-      errorMessage = 'Google Sheets API quota exceeded. Please try again later.';
+    } else if (text.includes('quota') || text.includes('rate')) {
+      errorMessage = 'Google Sheets API quota/rate limit exceeded. Please try again later.';
     }
 
     return {
       success: false,
       message: `Failed to write to Google Sheets: ${errorMessage}`,
-      error: error.message
+      error: formatted
     };
   }
 }
 
-/**
- * Clear all data from a worksheet
- * Phase 1 requirement: fully refresh (overwrite) rather than append
- * @param {Object} sheets - Authenticated Google Sheets client
- * @param {string} spreadsheetId - Spreadsheet ID
- * @param {string} worksheetName - Worksheet name to clear
- */
 async function clearWorksheet(sheets, spreadsheetId, worksheetName) {
   try {
-    // Get worksheet properties to determine how much to clear
     const sheetInfo = await sheets.spreadsheets.get({
       spreadsheetId,
       ranges: [`${worksheetName}!A1:ZZ`],
@@ -154,26 +187,78 @@ async function clearWorksheet(sheets, spreadsheetId, worksheetName) {
       throw new Error(`Worksheet '${worksheetName}' not found`);
     }
 
-    // Clear all existing data
-    await sheets.spreadsheets.values.clear({
-      spreadsheetId,
-      range: `${worksheetName}!A:ZZ`
-    });
+    await withSheetsRetry(
+      () =>
+        sheets.spreadsheets.values.clear({
+          spreadsheetId,
+          range: `${worksheetName}!A:ZZ`
+        }),
+      'clear worksheet'
+    );
 
-    console.log(`🗑️ Cleared existing data from worksheet: ${worksheetName}`);
-    
+    console.log(`Cleared existing data from worksheet: ${worksheetName}`);
   } catch (error) {
-    console.error('❌ Failed to clear worksheet:', error.message);
+    console.error('Failed to clear worksheet:', formatGoogleApiError(error));
     throw error;
   }
 }
 
-/**
- * Test connection to Google Sheets
- * @param {string} spreadsheetId - Spreadsheet ID to test
- * @param {string} worksheetName - Worksheet name to test
- * @returns {Promise<Object>} Test result
- */
+async function ensureWorksheetCapacity(sheets, spreadsheetId, worksheetName, requiredRows, requiredCols) {
+  const meta = await withSheetsRetry(
+    () =>
+      sheets.spreadsheets.get({
+        spreadsheetId,
+        fields: 'sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))'
+      }),
+    'read worksheet metadata'
+  );
+
+  const sheet = (meta?.data?.sheets || []).find(
+    item => String(item?.properties?.title || '') === worksheetName
+  );
+  if (!sheet?.properties?.sheetId) {
+    throw new Error(`Worksheet '${worksheetName}' not found`);
+  }
+
+  const sheetId = Number(sheet.properties.sheetId);
+  const currentRows = Number(sheet?.properties?.gridProperties?.rowCount || 0);
+  const currentCols = Number(sheet?.properties?.gridProperties?.columnCount || 0);
+
+  const targetRows = Math.max(currentRows, Number(requiredRows || 0));
+  const targetCols = Math.max(currentCols, Number(requiredCols || 0));
+  if (targetRows <= currentRows && targetCols <= currentCols) {
+    return;
+  }
+
+  await withSheetsRetry(
+    () =>
+      sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        resource: {
+          requests: [
+            {
+              updateSheetProperties: {
+                properties: {
+                  sheetId,
+                  gridProperties: {
+                    rowCount: targetRows,
+                    columnCount: targetCols
+                  }
+                },
+                fields: 'gridProperties.rowCount,gridProperties.columnCount'
+              }
+            }
+          ]
+        }
+      }),
+    'expand worksheet grid'
+  );
+
+  console.log(
+    `Expanded worksheet '${worksheetName}' grid to rows=${targetRows}, cols=${targetCols}`
+  );
+}
+
 async function testSheetsConnection(spreadsheetId, worksheetName) {
   try {
     if (!spreadsheetId) {
@@ -184,21 +269,18 @@ async function testSheetsConnection(spreadsheetId, worksheetName) {
       throw new Error('Worksheet name is required');
     }
 
-    // Check if user is authenticated with Google
     if (!oauth2Service.isAuthenticated('inventory')) {
       throw new Error('Not authenticated with Google. Please connect to Google Sheets first.');
     }
 
     const sheets = await getAuthenticatedSheetsClient();
-    
-    // Test access to the spreadsheet
+
     const response = await sheets.spreadsheets.get({
       spreadsheetId,
       ranges: [`${worksheetName}!A1`],
       includeGridData: false
     });
 
-    // Check if worksheet exists
     const worksheet = response.data.sheets?.find(
       sheet => sheet.properties.title === worksheetName
     );
@@ -211,12 +293,10 @@ async function testSheetsConnection(spreadsheetId, worksheetName) {
       success: true,
       message: `Successfully connected to Google Sheet: "${response.data.properties.title}" - Worksheet: "${worksheetName}"`,
       spreadsheetTitle: response.data.properties.title,
-      worksheetName: worksheetName
+      worksheetName
     };
-
   } catch (error) {
     let errorMessage = error.message;
-    
     if (error.message.includes('not found')) {
       errorMessage = 'Spreadsheet not found. Please check the spreadsheet ID and ensure you have access.';
     } else if (error.message.includes('permission')) {
@@ -231,10 +311,6 @@ async function testSheetsConnection(spreadsheetId, worksheetName) {
   }
 }
 
-/**
- * Get authenticated Google Sheets client
- * @returns {Promise<Object>} Authenticated sheets client
- */
 async function getAuthenticatedSheetsClient() {
   try {
     const auth = oauth2Service.getAuthenticatedClient('inventory');
@@ -244,41 +320,82 @@ async function getAuthenticatedSheetsClient() {
   }
 }
 
-/**
- * Validate Google Sheets URL and extract spreadsheet ID
- * @param {string} sheetsUrl - Google Sheets URL
- * @returns {Object} Validation result with spreadsheet ID
- */
 function validateAndExtractSpreadsheetId(sheetsUrl) {
   try {
     if (!sheetsUrl) {
       throw new Error('Google Sheets URL is required');
     }
 
-    // Google Sheets URL patterns:
-    // https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit
-    // https://docs.google.com/spreadsheets/d/SPREADSHEET_ID/edit#gid=0
-    
     const regex = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/;
     const match = sheetsUrl.match(regex);
-    
+
     if (!match) {
       throw new Error('Invalid Google Sheets URL format. Please use a valid Google Sheets URL.');
     }
 
     const spreadsheetId = match[1];
-    
+
     return {
       success: true,
-      spreadsheetId: spreadsheetId
+      spreadsheetId
     };
-
   } catch (error) {
     return {
       success: false,
       message: error.message
     };
   }
+}
+
+function columnIndexToLetter(index) {
+  let n = Number(index || 0);
+  let result = '';
+  while (n > 0) {
+    const rem = (n - 1) % 26;
+    result = String.fromCharCode(65 + rem) + result;
+    n = Math.floor((n - 1) / 26);
+  }
+  return result || 'A';
+}
+
+function formatGoogleApiError(error) {
+  const primary =
+    String(error?.response?.data?.error?.message || '').trim() ||
+    String(error?.message || '').trim() ||
+    'Unknown Google Sheets API error';
+  const code = String(error?.response?.data?.error?.code || error?.code || '').trim();
+  const status = String(error?.response?.status || '').trim();
+  const details = [status ? `http=${status}` : '', code ? `code=${code}` : '']
+    .filter(Boolean)
+    .join(', ');
+  return details ? `${primary} (${details})` : primary;
+}
+
+function isRetryableGoogleError(error) {
+  const status = Number(error?.response?.status || 0);
+  const message = String(error?.response?.data?.error?.message || error?.message || '').toLowerCase();
+  if ([429, 500, 502, 503, 504].includes(status)) return true;
+  if (message.includes('internal error')) return true;
+  if (message.includes('backend error')) return true;
+  if (message.includes('timed out') || message.includes('timeout')) return true;
+  return false;
+}
+
+async function withSheetsRetry(fn, label = 'Google Sheets request') {
+  const maxAttempts = 4;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (attempt >= maxAttempts || !isRetryableGoogleError(error)) {
+        throw error;
+      }
+      const delayMs = 500 * Math.pow(2, attempt - 1);
+      console.warn(`${label} failed (attempt ${attempt}/${maxAttempts}): ${formatGoogleApiError(error)}. Retrying in ${delayMs}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  throw new Error(`${label} failed after retries`);
 }
 
 module.exports = {

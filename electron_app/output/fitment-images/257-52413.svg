@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+  <defs>
+    <filter id="grain" x="-20%" y="-20%" width="140%" height="140%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="3" stitchTiles="stitch" result="noise"/>
+      <feColorMatrix type="saturate" values="0"/>
+      <feComponentTransfer>
+        <feFuncA type="table" tableValues="0 0.08"/>
+      </feComponentTransfer>
+    </filter>
+    <filter id="distress" x="-10%" y="-10%" width="120%" height="120%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" result="f"/>
+      <feDisplacementMap in="SourceGraphic" in2="f" scale="1.2" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+  <rect x="0" y="0" width="1200" height="1200" fill="#E6C537"/>
+  <rect x="0" y="0" width="1200" height="1200" filter="url(#grain)"/>
+  <rect x="48" y="48" width="1104" height="1104" fill="none" stroke="#111111" stroke-width="24" rx="16" filter="url(#distress)"/>
+
+  <text x="600" y="170" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-size="142" font-weight="900" fill="#111111" letter-spacing="2">FITS</text>
+  <text x="600" y="245" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-size="40" font-weight="800" fill="#111111">THIS PART IS COMPATIBLE WITH:</text>
+
+  <text x="600" y="430" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-size="62" font-weight="900" fill="#111111">FITS 2008 MAZDA CX-9</text>
+<text x="600" y="502" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-size="62" font-weight="900" fill="#111111">WITH BLIND SPOT ALERT,</text>
+<text x="600" y="574" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-size="62" font-weight="900" fill="#111111">MPH, WITHOUT BLUE</text>
+<text x="600" y="646" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-size="62" font-weight="900" fill="#111111">BACKLIT GAUGES, AND</text>
+<text x="600" y="718" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-size="62" font-weight="900" fill="#111111">CONVENTIONAL IGNITION.</text>
+  
+  <text x="600" y="1160" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-size="22" font-weight="700" fill="#111111">IPN 257-52413</text>
+</svg>

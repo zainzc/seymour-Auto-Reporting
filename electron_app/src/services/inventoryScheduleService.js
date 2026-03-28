@@ -78,15 +78,30 @@ function stopInventorySchedule() {
  * @param {string} worksheetName - Target worksheet name
  * @returns {Promise<Object>} Execution result
  */
-async function executeInventoryPush(spreadsheetId, worksheetName) {
+async function executeInventoryPush(spreadsheetId, worksheetName, progressCallback = () => {}) {
   const startTime = new Date();
   
   try {
     console.log('📦 Fetching inventory data from Powerlink...');
+    progressCallback({
+      stage: 'fetch_inventory',
+      percent: 10,
+      message: 'Fetching inventory data from Powerlink...'
+    });
     const inventoryData = await getAllInventory();
+    progressCallback({
+      stage: 'fetched_inventory',
+      percent: 50,
+      message: `Fetched ${inventoryData.length} inventory rows from Powerlink.`
+    });
     
     console.log(`📊 Writing ${inventoryData.length} records to Google Sheets (full refresh)...`);
-    const result = await writeInventoryToSheets(spreadsheetId, worksheetName, inventoryData);
+    const result = await writeInventoryToSheets(
+      spreadsheetId,
+      worksheetName,
+      inventoryData,
+      progressCallback
+    );
     
     const endTime = new Date();
     const duration = endTime - startTime;

@@ -16,13 +16,21 @@ const LOW_CONFIDENCE_THRESHOLD = 0.75;
 const DEFAULT_PHASE4B_DETERMINED_STATUS = 'Value Determined';
 const DEFAULT_PHASE4B_COMPLETED_STATUS = 'Completed / Closed';
 const DEFAULT_EBAY_MOCK_TABLE = 'eBay Listings (API) (Mock)';
-const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
+const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
 const EBAY_MOCK_TITLE_FIELD = 'Product Title';
 const EBAY_MOCK_CONDITIONS_FIELD = 'Listing Conditions and Options';
 const EBAY_MOCK_DESCRIPTION_FIELD = 'Description';
 const EBAY_LISTING_TITLE_FIELD = 'Product Title';
 const EBAY_LISTING_CONDITIONS_FIELD = 'c: partshunter203 ebay MOTORS conditions & options';
 const EBAY_LISTING_IPN_FIELD = 'c: partshunter203 ebay MOTORS interchange part number';
+const EBAY_LISTING_IPN_FIELDS = [
+  EBAY_LISTING_IPN_FIELD,
+  'C: partshunter203 ebay MOTORS interchange part number',
+  'IPN',
+  'IP',
+  'InventoryNumber',
+  'Inventory Number'
+];
 const EBAY_LISTING_RECORD_KEY_FIELD = 'Record Key';
 const EBAY_LISTING_DESCRIPTION_FIELDS = [
   'Description',
@@ -32,6 +40,7 @@ const EBAY_LISTING_DESCRIPTION_FIELDS = [
   'c: partshunter203 ebay MOTORS description'
 ];
 const EBAY_MOCK_KEY_FIELDS = [
+  'c: partshunter203 ebay MOTORS interchange part number',
   'C: partshunter203 ebay MOTORS interchange part number',
   'IPN',
   'IP',
@@ -68,6 +77,79 @@ function firstNonEmptyField(fields = {}, names = []) {
   return '';
 }
 
+function enforceAllowedValue(candidateValue, allowedValues = []) {
+  const value = normalizeText(candidateValue);
+  if (!value) return '';
+  if (!Array.isArray(allowedValues) || allowedValues.length === 0) return value;
+  return allowedValues.includes(value) ? value : '';
+}
+
+function resolveListingIpn(fields = {}) {
+  return normalizeIpn(firstNonEmptyField(fields, EBAY_LISTING_IPN_FIELDS));
+}
+
+function decodeHtmlEntities(text) {
+  return String(text || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&#x2F;/gi, '/')
+    .replace(/&#(\d+);/g, (_, code) => {
+      const n = Number(code);
+      return Number.isFinite(n) ? String.fromCharCode(n) : '';
+    });
+}
+
+function htmlToText(html) {
+  const raw = String(html || '');
+  if (!raw) return '';
+  const text = raw
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ');
+  return decodeHtmlEntities(text)
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(line => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+function extractStrictFitmentBlock(descriptionHtml = '') {
+  const html = String(descriptionHtml || '');
+  if (!html.trim()) {
+    return { status: 'missing_structure', rawFitmentText: '' };
+  }
+
+  const headingRegex = /<([a-z0-9]+)\b[^>]*class=["'][^"']*\bd_heading1\b[^"']*["'][^>]*>([\s\S]*?)<\/\1>/gi;
+  const targetHeadingText = 'This Part Will Fit These Makes And Models With These Options';
+  let headingMatch;
+  while ((headingMatch = headingRegex.exec(html)) !== null) {
+    const headingText = htmlToText(headingMatch[2]);
+    if (headingText !== targetHeadingText) continue;
+
+    const restHtml = html.slice(headingRegex.lastIndex);
+    const siblingRegex =
+      /^\s*(?:<!--[\s\S]*?-->\s*)*<([a-z0-9]+)\b[^>]*class=["'][^"']*\bp1\b[^"']*["'][^>]*>([\s\S]*?)<\/\1>/i;
+    const sibling = restHtml.match(siblingRegex);
+    if (!sibling) {
+      return { status: 'missing_structure', rawFitmentText: '' };
+    }
+
+    const rawFitmentText = htmlToText(sibling[2]);
+    if (!rawFitmentText) {
+      return { status: 'empty_block', rawFitmentText: '' };
+    }
+    return { status: 'found', rawFitmentText };
+  }
+
+  return { status: 'missing_structure', rawFitmentText: '' };
+}
+
 function escapeAirtableFormulaValue(value) {
   return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
@@ -78,44 +160,81 @@ function buildEbayLookupFormula(ipn) {
   return `OR(${clauses.join(',')})`;
 }
 
+async function queryEbayRows(service, tableName, formula, selectFields = []) {
+  const params = {
+    filterByFormula: formula,
+    maxRecords: 10
+  };
+  if (Array.isArray(selectFields) && selectFields.length > 0) {
+    params.fields = selectFields;
+  }
+  try {
+    const data = await service.request('GET', `/${encodeURIComponent(tableName)}`, { params });
+    return Array.isArray(data?.records) ? data.records : [];
+  } catch (error) {
+    if (error?.response?.status === 422 && params.fields) {
+      const fallback = await service.request('GET', `/${encodeURIComponent(tableName)}`, {
+        params: { filterByFormula: formula, maxRecords: 10 }
+      });
+      return Array.isArray(fallback?.records) ? fallback.records : [];
+    }
+    throw error;
+  }
+}
+
 async function fetchEbayContextByIpn(service, tableName, ipn) {
   const key = normalizeIpn(ipn);
   if (!key) return null;
 
-  const params = {
-    filterByFormula: buildEbayLookupFormula(key),
-    maxRecords: 10,
-    fields: [
-      ...EBAY_MOCK_KEY_FIELDS,
-      EBAY_MOCK_TITLE_FIELD,
-      EBAY_MOCK_CONDITIONS_FIELD,
-      EBAY_MOCK_DESCRIPTION_FIELD
-    ]
-  };
-  const data = await service.request('GET', `/${encodeURIComponent(tableName)}`, { params });
-  const records = Array.isArray(data?.records) ? data.records : [];
-  if (records.length === 0) return null;
+  const selectFields = [
+    ...EBAY_MOCK_KEY_FIELDS,
+    EBAY_MOCK_TITLE_FIELD,
+    EBAY_MOCK_CONDITIONS_FIELD,
+    EBAY_MOCK_DESCRIPTION_FIELD,
+    EBAY_LISTING_TITLE_FIELD,
+    EBAY_LISTING_CONDITIONS_FIELD,
+    ...EBAY_LISTING_DESCRIPTION_FIELDS
+  ];
 
-  for (const row of records) {
-    const fields = row?.fields || {};
-    const productTitle = firstNonEmptyField(fields, [EBAY_MOCK_TITLE_FIELD, 'Title', 'Listing Title']);
-    const listingConditionsAndOptions = firstNonEmptyField(fields, [
-      EBAY_MOCK_CONDITIONS_FIELD,
-      'Listing Condition',
-      'Listing Conditions'
-    ]);
-    const listingDescription = firstNonEmptyField(fields, [
-      EBAY_MOCK_DESCRIPTION_FIELD,
-      'Listing Description',
-      'Item Description',
-      'Product Description'
-    ]);
-    if (!productTitle && !listingConditionsAndOptions && !listingDescription) continue;
-    return {
-      productTitle,
-      listingConditionsAndOptions,
-      listingDescription
-    };
+  const formulas = [];
+  const safe = escapeAirtableFormulaValue(key);
+  for (const fieldName of EBAY_MOCK_KEY_FIELDS) {
+    formulas.push(`{${fieldName}}="${safe}"`);
+  }
+  formulas.push(buildEbayLookupFormula(key));
+
+  for (const formula of formulas) {
+    let records = [];
+    try {
+      records = await queryEbayRows(service, tableName, formula, selectFields);
+    } catch (error) {
+      if (error?.response?.status === 422) continue;
+      throw error;
+    }
+    if (!records.length) continue;
+
+    for (const row of records) {
+      const fields = row?.fields || {};
+      const productTitle = firstNonEmptyField(fields, [EBAY_MOCK_TITLE_FIELD, 'Title', 'Listing Title', EBAY_LISTING_TITLE_FIELD]);
+      const listingConditionsAndOptions = firstNonEmptyField(fields, [
+        EBAY_LISTING_CONDITIONS_FIELD
+      ]);
+      const listingDescriptionRaw = firstNonEmptyField(fields, [
+        EBAY_MOCK_DESCRIPTION_FIELD,
+        'Listing Description',
+        'Item Description',
+        'Product Description',
+        ...EBAY_LISTING_DESCRIPTION_FIELDS
+      ]);
+      const extraction = extractStrictFitmentBlock(listingDescriptionRaw);
+      const listingDescription = extraction.status === 'found' ? `Fitment:\n${extraction.rawFitmentText}` : '';
+      if (!productTitle && !listingConditionsAndOptions && !listingDescription) continue;
+      return {
+        productTitle,
+        listingConditionsAndOptions,
+        listingDescription
+      };
+    }
   }
   return null;
 }
@@ -261,6 +380,12 @@ function parseArgs(argv = []) {
     testTableName: normalizeText(
       getArg('--test-table-name') || process.env.PHASE4B_TEST_TABLE_NAME || ''
     ),
+    phase4BTestIpn: normalizeText(
+      getArg('--test-ipn') || process.env.PHASE4B_TEST_IPN || ''
+    ),
+    phase4DTestIpn: normalizeText(
+      getArg('--phase4d-test-ipn') || process.env.PHASE4D_TEST_IPN || ''
+    ),
     testMaxTables: Math.max(
       0,
       Number(getArg('--test-max-tables') || process.env.PHASE4B_TEST_MAX_TABLES || 0) || 0
@@ -275,7 +400,7 @@ function parseArgs(argv = []) {
         'phase4blite_v1'
     ),
     openaiApiKey: normalizeText(getArg('--openai-api-key') || process.env.OPENAI_API_KEY || ''),
-    openaiModel: normalizeText(getArg('--openai-model') || process.env.OPENAI_MODEL || 'gpt-4o-mini'),
+    openaiModel: normalizeText(getArg('--openai-model') || process.env.OPENAI_MODEL || 'gpt-5.4-mini'),
     openaiBaseUrl: normalizeText(getArg('--openai-base-url') || process.env.OPENAI_BASE_URL || ''),
     phase4BClickupListId: normalizeText(
       getArg('--phase4b-clickup-list-id') || process.env.PHASE4B_CLICKUP_LIST_ID || ''
@@ -337,6 +462,43 @@ async function fetchAllRecordsWithFallback(service, tableNameOrId, selectFields 
   } catch (error) {
     if (error?.response?.status !== 422) throw error;
     return service.fetchAllRecords(tableNameOrId, []);
+  }
+}
+
+async function fetchAllRecordsWithFallbackAndProgress(
+  service,
+  tableNameOrId,
+  selectFields = [],
+  onProgress = () => {}
+) {
+  async function fetchPaged(fields = []) {
+    const records = [];
+    let offset = null;
+    let page = 0;
+    do {
+      const params = {};
+      if (offset) params.offset = offset;
+      if (fields.length > 0) params.fields = fields;
+      const data = await service.request('GET', `/${encodeURIComponent(tableNameOrId)}`, { params });
+      const batch = Array.isArray(data?.records) ? data.records : [];
+      records.push(...batch);
+      page += 1;
+      onProgress({
+        page,
+        loaded: records.length,
+        batchSize: batch.length,
+        hasMore: Boolean(data?.offset)
+      });
+      offset = data?.offset || null;
+    } while (offset);
+    return records;
+  }
+
+  try {
+    return await fetchPaged(selectFields);
+  } catch (error) {
+    if (error?.response?.status !== 422) throw error;
+    return fetchPaged([]);
   }
 }
 
@@ -554,10 +716,12 @@ function buildFixedLockFields(tableFieldNames = new Set(), targetFieldName = '')
 }
 
 async function runVmfDeterminedWriteback(itemService, clickupService, summary, options = {}) {
+  if (!clickupService) return;
   const dryRun = Boolean(options.dryRun);
   const sampleLimit = Number(options.sampleLimit || 20);
   const determinedStatus = normalizeText(options.determinedStatus || DEFAULT_PHASE4B_DETERMINED_STATUS);
   const preferredCompletedStatus = normalizeText(options.completedStatus || DEFAULT_PHASE4B_COMPLETED_STATUS);
+  const targetIpn = normalizeIpn(options.targetIpn || '');
   const tablesByName = options.tablesByName || new Map();
   const tableFieldsByName = options.tableFieldsByName || new Map();
 
@@ -565,15 +729,18 @@ async function runVmfDeterminedWriteback(itemService, clickupService, summary, o
     includeClosed: false,
     subtasks: false
   });
-  summary.vmfDeterminedTasksFound = determinedTasks.length;
-  if (determinedTasks.length === 0) return;
+  const scopedTasks = targetIpn
+    ? determinedTasks.filter(task => normalizeIpn(parsePhase4BTaskMetadata(task)?.ipn) === targetIpn)
+    : determinedTasks;
+  summary.vmfDeterminedTasksFound = scopedTasks.length;
+  if (scopedTasks.length === 0) return;
 
   const closeStatus = dryRun ? '' : resolvePreferredClosedStatus(await clickupService.getList(), preferredCompletedStatus);
   if (!dryRun && !closeStatus) {
     summary.errors.push('Phase4B writeback: unable to resolve a closed/completed status in ClickUp list.');
   }
 
-  for (const task of determinedTasks) {
+  for (const task of scopedTasks) {
     summary.vmfDeterminedTasksProcessed += 1;
     const meta = parsePhase4BTaskMetadata(task);
     const finalValue = extractFinalValueFromTask(task);
@@ -1124,7 +1291,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       stored.phase4BClickupListId
   );
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
-  const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-4o-mini');
+  const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
@@ -1132,8 +1299,9 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   if (!itemSpecificsBaseId) throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID).');
   if (!args.rulesDriveFile) throw new Error('Missing rules drive file. Provide --rules-drive-file=<FILE_ID_OR_URL>.');
   if (!openaiApiKey) throw new Error('Missing OpenAI API key for Phase 4B-lite.');
-  if (!clickupToken) throw new Error('Missing ClickUp token for VMF low-confidence tasks.');
-  if (!clickupListId) {
+  const hasClickupConfig = Boolean(clickupToken && clickupListId);
+  if (!args.dryRun && !clickupToken) throw new Error('Missing ClickUp token for VMF low-confidence tasks.');
+  if (!args.dryRun && !clickupListId) {
     throw new Error('Missing Phase 4B ClickUp List ID for VMF low-confidence tasks.');
   }
 
@@ -1161,7 +1329,8 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     maxAttempts: args.aiMaxAttempts,
     baseDelayMs: 500,
     promptCacheEnabled: args.promptCacheEnabled,
-    promptCacheKey: args.promptCacheKey
+    promptCacheKey: args.promptCacheKey,
+    debugPromptIpn: args.phase4BTestIpn || args.phase4BDebugPromptIpn || process.env.PHASE4B_DEBUG_PROMPT_IPN || ''
   });
 
   const schemaService = new AirtableSchemaService({
@@ -1177,17 +1346,37 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     baseId: masterBaseId,
     masterTable
   });
-  const clickupService = new ClickUpService({
-    token: clickupToken,
-    listId: clickupListId
-  });
+  const clickupService = hasClickupConfig
+    ? new ClickUpService({
+        token: clickupToken,
+        listId: clickupListId
+      })
+    : null;
 
   emitProgress(progressCallback, {
     stage: 'phase4blite_load_master',
     percent: 18,
     message: 'Loading Master Parts records for AI context...'
   });
-  const masterRows = await fetchAllRecordsWithFallback(masterService, masterTable, []);
+  let lastMasterLoadProgressAt = Date.now();
+  const masterRows = await fetchAllRecordsWithFallbackAndProgress(
+    masterService,
+    masterTable,
+    [],
+    state => {
+      const now = Date.now();
+      if (!state?.hasMore || now - lastMasterLoadProgressAt >= 800) {
+        lastMasterLoadProgressAt = now;
+        emitProgress(progressCallback, {
+          stage: 'phase4blite_load_master',
+          percent: 18,
+          message:
+            `Loading Master Parts records for AI context... ` +
+            `Loaded ${Number(state?.loaded || 0)} rows (page ${Number(state?.page || 1)}).`
+        });
+      }
+    }
+  );
   const masterMap = new Map();
   for (const row of masterRows) {
     const ipn = normalizeIpn(row?.fields?.IPN);
@@ -1208,6 +1397,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     lookupErrors: 0,
     cacheHits: 0
   };
+  const ebayLookupServices = [masterService, itemService];
 
   async function getEbayContextForIpn(ipn) {
     const key = normalizeIpn(ipn);
@@ -1219,7 +1409,15 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
 
     ebayContextStats.lookups += 1;
     try {
-      const context = await fetchEbayContextByIpn(masterService, ebayMockTableName, key);
+      let context = null;
+      for (const service of ebayLookupServices) {
+        try {
+          context = await fetchEbayContextByIpn(service, ebayMockTableName, key);
+        } catch (innerError) {
+          continue;
+        }
+        if (context) break;
+      }
       if (context) {
         ebayContextStats.lookupHits += 1;
         ebayContextCache.set(key, context);
@@ -1238,6 +1436,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   const tables = await schemaService.listTables();
   const allRoutableTables = tables.filter(table => Boolean(parsePrefixFromTableName(table?.name)));
   const requestedTableName = normalizeText(args.testTableName);
+  const requestedIpn = normalizeIpn(args.phase4BTestIpn);
   const routableTables = requestedTableName
     ? allRoutableTables.filter(
         table => normalizeText(table?.name).toLowerCase() === requestedTableName.toLowerCase()
@@ -1262,6 +1461,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     promptCacheKey: normalizeText(args.promptCacheKey),
     phase4BClickupListId: clickupListId,
     testTableName: requestedTableName,
+    testIpn: requestedIpn,
     testMaxTables: Number(args.testMaxTables || 0),
     aiConcurrency: args.aiConcurrency,
     aiTimeoutMs: args.aiTimeoutMs,
@@ -1269,6 +1469,9 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     aiCallsPlanned: 0,
     aiCallsCompleted: 0,
     aiCallsFailed: 0,
+    aiWebSearchUsed: 0,
+    aiWebSearchIpns: [],
+    aiWebSearchEvents: [],
     aiFailureTypes: {},
     aiFailureSamples: [],
     ebayContextRowsScanned: 0,
@@ -1315,6 +1518,8 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
 
   const missingFieldSet = new Set();
   const vmfLowConfidenceTasks = [];
+  const aiWebSearchIpnSet = new Set();
+  const aiWebSearchEvents = [];
   const tablesByName = new Map(
     (tables || [])
       .map(table => [normalizeText(table?.name).toLowerCase(), normalizeText(table?.id)])
@@ -1336,6 +1541,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     message:
       `Rules parsed: prefixes=${rulesByPrefix.size}, rows=${logicRowsScanned}, aiConcurrency=${args.aiConcurrency}, aiTimeoutMs=${args.aiTimeoutMs}, aiMaxAttempts=${args.aiMaxAttempts}` +
       `${summary.testTableName ? `, testTableName='${summary.testTableName}'` : ''}` +
+      `${summary.testIpn ? `, testIpn='${summary.testIpn}'` : ''}` +
       `${summary.testMaxTables > 0 ? `, testMaxTables=${summary.testMaxTables}` : ''}`
   });
 
@@ -1419,6 +1625,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       const rowFields = row?.fields || {};
       const ipn = normalizeIpn(rowFields.IPN);
       if (!ipn) continue;
+      if (requestedIpn && ipn !== requestedIpn) continue;
       summary.rowsWithIPN += 1;
 
       const master = masterMap.get(ipn);
@@ -1494,6 +1701,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     let tableAiFailed = 0;
     const tableAiFailureTypes = {};
     let lastAiProgressAt = Date.now();
+    const pendingWebByIpn = new Map();
     await processWithConcurrency(
       evaluationCandidates,
       args.aiConcurrency,
@@ -1510,7 +1718,8 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
             allowedValues: candidate.allowedValues,
             listingTitle: candidate.listingTitle,
             listingDescription: candidate.listingDescription,
-            listingConditionsAndOptions: candidate.listingConditionsAndOptions
+            listingConditionsAndOptions: candidate.listingConditionsAndOptions,
+            skipWebSearch: true
           });
           summary.aiCallsCompleted += 1;
           tableAiCompleted += 1;
@@ -1549,7 +1758,10 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
           return;
         }
 
-        const candidateValue = normalizeText(aiResult?.value);
+        const candidateValue = enforceAllowedValue(
+          normalizeText(aiResult?.value),
+          candidate.allowedValues
+        );
         const confidence = Number(aiResult?.confidence || 0);
         const isHighConfidence = candidateValue && confidence >= LOW_CONFIDENCE_THRESHOLD;
 
@@ -1569,25 +1781,25 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         }
 
         if (candidate.ruleType === 'VF') {
-          summary.vfFieldsLowConfidenceSkipped += 1;
+          if (!pendingWebByIpn.has(candidate.ipn)) pendingWebByIpn.set(candidate.ipn, []);
+          pendingWebByIpn.get(candidate.ipn).push({
+            ...candidate,
+            firstPass: {
+              value: candidateValue,
+              confidence,
+              reason: normalizeText(aiResult?.reason) || 'low confidence'
+            }
+          });
           return;
         }
-
-        vmfLowConfidenceTasks.push({
-          taskKey: buildVmfTaskKey({
-            ipn: candidate.ipn,
-            prefix: candidate.prefix,
-            fieldName: candidate.fieldName
-          }),
-          ipn: candidate.ipn,
-          prefix: candidate.prefix,
-          tableName: candidate.tableName,
-          recordId: candidate.rowId,
-          fieldName: candidate.fieldName,
-          confidence,
-          candidateValue,
-          reason: normalizeText(aiResult?.reason) || 'low confidence',
-          contextSummary: summarizeContext(candidate.context)
+        if (!pendingWebByIpn.has(candidate.ipn)) pendingWebByIpn.set(candidate.ipn, []);
+        pendingWebByIpn.get(candidate.ipn).push({
+          ...candidate,
+          firstPass: {
+            value: candidateValue,
+            confidence,
+            reason: normalizeText(aiResult?.reason) || 'low confidence'
+          }
         });
       },
       completed => {
@@ -1612,6 +1824,88 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         }
       }
     );
+
+    for (const [ipn, pendingCandidates] of pendingWebByIpn.entries()) {
+      let batchResults = new Map();
+      let batchFailed = false;
+      try {
+        const batch = await aiService.evaluateFieldsWithSharedWebSearch(
+          pendingCandidates.map(candidate => ({
+            ipn: candidate.ipn,
+            prefix: candidate.prefix,
+            tableName: candidate.tableName,
+            fieldName: candidate.fieldName,
+            ruleType: candidate.ruleType,
+            masterPartsData: candidate.context,
+            allowedValues: candidate.allowedValues,
+            listingTitle: candidate.listingTitle,
+            listingDescription: candidate.listingDescription,
+            listingConditionsAndOptions: candidate.listingConditionsAndOptions
+          }))
+        );
+        batchResults = batch?.resultsByField instanceof Map ? batch.resultsByField : new Map();
+      } catch (error) {
+        batchFailed = true;
+        summary.errors.push(`Shared web search failed for IPN ${ipn}: ${error.message}`);
+      }
+
+      for (const candidate of pendingCandidates) {
+        const webResult = batchFailed ? null : batchResults.get(candidate.fieldName);
+        const webValue = enforceAllowedValue(
+          normalizeText(webResult?.value),
+          candidate.allowedValues
+        );
+        const webConfidence = Number(webResult?.confidence || 0);
+        const useWebValue = webValue && webConfidence >= LOW_CONFIDENCE_THRESHOLD;
+
+        if (webResult) {
+          summary.aiWebSearchUsed += 1;
+          aiWebSearchIpnSet.add(candidate.ipn);
+          if (aiWebSearchEvents.length < args.sampleLimit) {
+            aiWebSearchEvents.push(
+              `web_search_used ipn='${candidate.ipn}' table='${candidate.tableName}' field='${candidate.fieldName}' rule='${candidate.ruleType}'`
+            );
+          }
+        }
+
+        if (useWebValue) {
+          if (!updatesByRecord.has(candidate.rowId)) updatesByRecord.set(candidate.rowId, {});
+          updatesByRecord.get(candidate.rowId)[candidate.fieldName] = webValue;
+          const existing = updateRuleCountByRecord.get(candidate.rowId) || { vf: 0, vmf: 0 };
+          if (candidate.ruleType === 'VF') existing.vf += 1;
+          if (candidate.ruleType === 'VMF') existing.vmf += 1;
+          updateRuleCountByRecord.set(candidate.rowId, existing);
+          if (summary.writeSamples.length < args.sampleLimit) {
+            summary.writeSamples.push(
+              `[write_candidate_web] table='${candidate.tableName}' ipn='${candidate.ipn}' field='${candidate.fieldName}' rule='${candidate.ruleType}' confidence='${webConfidence.toFixed(2)}' value='${webValue}'`
+            );
+          }
+          continue;
+        }
+
+        if (candidate.ruleType === 'VF') {
+          summary.vfFieldsLowConfidenceSkipped += 1;
+          continue;
+        }
+
+        vmfLowConfidenceTasks.push({
+          taskKey: buildVmfTaskKey({
+            ipn: candidate.ipn,
+            prefix: candidate.prefix,
+            fieldName: candidate.fieldName
+          }),
+          ipn: candidate.ipn,
+          prefix: candidate.prefix,
+          tableName: candidate.tableName,
+          recordId: candidate.rowId,
+          fieldName: candidate.fieldName,
+          confidence: useWebValue ? webConfidence : Number(candidate?.firstPass?.confidence || 0),
+          candidateValue: useWebValue ? webValue : normalizeText(candidate?.firstPass?.value),
+          reason: normalizeText(webResult?.reason || candidate?.firstPass?.reason) || 'low confidence',
+          contextSummary: summarizeContext(candidate.context)
+        });
+      }
+    }
 
     const updates = Array.from(updatesByRecord.entries()).map(([id, fields]) => ({ id, fields }));
     if (updates.length > 0 && !args.dryRun) {
@@ -1664,6 +1958,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     sampleLimit: args.sampleLimit,
     determinedStatus: DEFAULT_PHASE4B_DETERMINED_STATUS,
     completedStatus: DEFAULT_PHASE4B_COMPLETED_STATUS,
+    targetIpn: requestedIpn,
     tablesByName,
     tableFieldsByName
   });
@@ -1672,6 +1967,8 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   if (missingFieldSet.size > 0) {
     summary.fieldsMissingInSchemaSamples = Array.from(missingFieldSet).slice(0, args.sampleLimit);
   }
+  summary.aiWebSearchIpns = Array.from(aiWebSearchIpnSet);
+  summary.aiWebSearchEvents = aiWebSearchEvents;
   if (summary.errors.length > args.sampleLimit) {
     summary.errors = summary.errors.slice(0, args.sampleLimit);
   }
@@ -2275,7 +2572,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       DEFAULT_EBAY_LISTINGS_TABLE
   );
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
-  const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-4o-mini');
+  const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
@@ -2310,17 +2607,31 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     maxAttempts: args.aiMaxAttempts,
     baseDelayMs: 500,
     promptCacheEnabled: args.promptCacheEnabled,
-    promptCacheKey: args.promptCacheKey
+    promptCacheKey: args.promptCacheKey,
+    debugPromptIpn:
+      args.phase4DTestIpn ||
+      args.phase4BTestIpn ||
+      args.phase4BDebugPromptIpn ||
+      process.env.PHASE4D_DEBUG_PROMPT_IPN ||
+      process.env.PHASE4B_DEBUG_PROMPT_IPN ||
+      ''
   });
 
   const tables = await schemaService.listTables();
-  const listingsTableObj = (tables || []).find(
+  const configuredListingsTableObj = (tables || []).find(
     table => normalizeText(table?.name).toLowerCase() === listingsTable.toLowerCase()
   );
-  if (!listingsTableObj?.id) {
-    throw new Error(`Listing table not found: '${listingsTable}'.`);
+  const mockListingsTableObj = (tables || []).find(
+    table => normalizeText(table?.name).toLowerCase() === DEFAULT_EBAY_MOCK_TABLE.toLowerCase()
+  );
+  const prioritizedListingsTableObj = mockListingsTableObj || configuredListingsTableObj;
+  if (!prioritizedListingsTableObj?.id) {
+    throw new Error(
+      `Listing table not found. Checked '${DEFAULT_EBAY_MOCK_TABLE}' and '${listingsTable}'.`
+    );
   }
-  const listingsTableId = normalizeText(listingsTableObj.id);
+  const listingsTableId = normalizeText(prioritizedListingsTableObj.id);
+  const selectedListingsTableName = normalizeText(prioritizedListingsTableObj.name || listingsTable);
   const tableFieldsByName = new Map(
     (tables || [])
       .map(table => [
@@ -2330,7 +2641,30 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       .filter(([name]) => Boolean(name))
   );
 
-  const masterRows = await fetchAllRecordsWithFallback(airtableService, masterTable, []);
+  emitProgress(progressCallback, {
+    stage: 'phase4d_scan_listings',
+    percent: 16,
+    message: 'Loading Master Parts records for Phase 4D context...'
+  });
+  let lastMasterLoadProgressAt = Date.now();
+  const masterRows = await fetchAllRecordsWithFallbackAndProgress(
+    airtableService,
+    masterTable,
+    [],
+    state => {
+      const now = Date.now();
+      if (!state?.hasMore || now - lastMasterLoadProgressAt >= 800) {
+        lastMasterLoadProgressAt = now;
+        emitProgress(progressCallback, {
+          stage: 'phase4d_scan_listings',
+          percent: 16,
+          message:
+            `Loading Master Parts records for Phase 4D context... ` +
+            `Loaded ${Number(state?.loaded || 0)} rows (page ${Number(state?.page || 1)}).`
+        });
+      }
+    }
+  );
   const masterByIpn = new Map();
   for (const row of masterRows) {
     const ipn = normalizeIpn(row?.fields?.IPN);
@@ -2341,28 +2675,52 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   emitProgress(progressCallback, {
     stage: 'phase4d_scan_listings',
     percent: 20,
-    message: `Loading listings from '${listingsTable}'...`
+    message:
+      configuredListingsTableObj &&
+      selectedListingsTableName.toLowerCase() !== listingsTable.toLowerCase()
+        ? `Loading listings from '${selectedListingsTableName}' (prioritized over configured '${listingsTable}')...`
+        : `Loading listings from '${selectedListingsTableName}'...`
   });
 
-  const listingsRows = await fetchAllRecordsWithFallback(
+  const listingSelectFields = [
+    EBAY_LISTING_RECORD_KEY_FIELD,
+    ...EBAY_LISTING_IPN_FIELDS,
+    EBAY_LISTING_TITLE_FIELD,
+    EBAY_LISTING_CONDITIONS_FIELD,
+    ...EBAY_LISTING_DESCRIPTION_FIELDS
+  ];
+  const effectiveListingsTableName = selectedListingsTableName;
+  const effectiveListingsTableId = listingsTableId;
+  let lastListingsLoadProgressAt = Date.now();
+  const listingsRows = await fetchAllRecordsWithFallbackAndProgress(
     airtableService,
-    listingsTableId,
-    [
-      EBAY_LISTING_RECORD_KEY_FIELD,
-      EBAY_LISTING_IPN_FIELD,
-      EBAY_LISTING_TITLE_FIELD,
-      EBAY_LISTING_CONDITIONS_FIELD,
-      ...EBAY_LISTING_DESCRIPTION_FIELDS
-    ]
+    effectiveListingsTableId,
+    listingSelectFields,
+    state => {
+      const now = Date.now();
+      if (!state?.hasMore || now - lastListingsLoadProgressAt >= 800) {
+        lastListingsLoadProgressAt = now;
+        emitProgress(progressCallback, {
+          stage: 'phase4d_scan_listings',
+          percent: 20,
+          message:
+            `Loading listings from '${effectiveListingsTableName}'... ` +
+            `Loaded ${Number(state?.loaded || 0)} rows (page ${Number(state?.page || 1)}).`
+        });
+      }
+    }
   );
 
   const summary = {
     dryRun: Boolean(args.dryRun),
     rulesSource: `google_drive:${fileId}`,
     rulesDriveFile: args.rulesDriveFile || '',
-    listingsTable,
+    listingsTable: effectiveListingsTableName,
     listingsScanned: listingsRows.length,
     listingsEligible: 0,
+    skippedMissingIpn: 0,
+    skippedOutOfScope: 0,
+    skippedNoPrefixRules: 0,
     masterPartsMissing: 0,
     listingFieldsCreated: 0,
     fsvFieldsEvaluated: 0,
@@ -2380,38 +2738,78 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     vbFieldsEvaluated: 0,
     vbFieldsUpdated: 0,
     vbLowConfidenceLeftBlank: 0,
+    aiWebSearchUsed: 0,
+    aiWebSearchIpns: [],
+    aiWebSearchEvents: [],
     manualOverrideSkipped: 0,
+    sampleSkips: [],
     sampleOutputs: [],
     errors: []
   };
   let aiCalls = 0;
   let writesDone = 0;
   let lastProgressAt = Date.now();
+  const pendingWebByIpn = new Map();
+  const aiWebSearchIpnSet = new Set();
+  const aiWebSearchEvents = [];
+  const pushSkipSample = message => {
+    if (!message) return;
+    if (summary.sampleSkips.length < args.sampleLimit) {
+      summary.sampleSkips.push(message);
+    }
+  };
 
   for (let i = 0; i < listingsRows.length; i += 1) {
     const row = listingsRows[i];
     const listingFields = row?.fields || {};
     const recordId = normalizeText(row?.id);
     const recordKey = normalizeText(listingFields[EBAY_LISTING_RECORD_KEY_FIELD] || recordId);
-    const ipn = normalizeIpn(listingFields[EBAY_LISTING_IPN_FIELD]);
-    if (!ipn) continue;
-    if (!isListingRowInScope(listingFields)) continue;
+    const ipn = resolveListingIpn(listingFields);
+    if (!ipn) {
+      summary.skippedMissingIpn += 1;
+      const availableFields = Object.keys(listingFields || {})
+        .map(name => normalizeText(name))
+        .filter(Boolean)
+        .slice(0, 12)
+        .join(', ');
+      pushSkipSample(
+        `skip=missing_ipn record='${recordKey || recordId}' fields='${availableFields || 'none'}'`
+      );
+      continue;
+    }
+    if (!isListingRowInScope(listingFields)) {
+      summary.skippedOutOfScope += 1;
+      const listingStatus = normalizeText(
+        listingFields['c: Listing Status'] ||
+          listingFields['C: Listing Status'] ||
+          listingFields['Listing Status']
+      );
+      pushSkipSample(
+        `skip=out_of_scope record='${recordKey || recordId}' ipn='${ipn}' status='${listingStatus || 'blank'}'`
+      );
+      continue;
+    }
 
     const master = masterByIpn.get(ipn);
     if (!master) {
       summary.masterPartsMissing += 1;
+      pushSkipSample(`skip=missing_master record='${recordKey || recordId}' ipn='${ipn}'`);
       continue;
     }
     const prefix = normalizeText(master?.fields?.['IPN Prefix'] || parsePrefixFromTableName(ipn));
     const prefixRules = rulesByPrefix.get(prefix);
-    if (!prefixRules || prefixRules.size === 0) continue;
+    if (!prefixRules || prefixRules.size === 0) {
+      summary.skippedNoPrefixRules += 1;
+      pushSkipSample(`skip=no_prefix_rules record='${recordKey || recordId}' ipn='${ipn}' prefix='${prefix}'`);
+      continue;
+    }
     summary.listingsEligible += 1;
 
     const ruleFieldNames = Array.from(prefixRules.keys());
     const createdFields = await ensureListingCFields(
       schemaService,
-      listingsTableId,
-      listingsTable,
+      effectiveListingsTableId,
+      effectiveListingsTableName,
       tableFieldsByName,
       ruleFieldNames,
       Boolean(args.dryRun)
@@ -2439,7 +2837,11 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         if (!canWrite || currentValue === nextValue) continue;
         if (args.dryRun) continue;
         if (!args.dryRun) {
-          const writeResult = await patchTableRecords(airtableService, listingsTableId, [{ id: recordId, fields: { [fieldName]: nextValue } }]);
+          const writeResult = await patchTableRecords(
+            airtableService,
+            effectiveListingsTableId,
+            [{ id: recordId, fields: { [fieldName]: nextValue } }]
+          );
           if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
             if (summary.errors.length < args.sampleLimit) {
               summary.errors.push(`FsV write failed record='${recordKey}' field='${fieldName}'`);
@@ -2481,14 +2883,15 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
           recordKey,
           ipn,
           prefix,
-          tableName: listingsTable,
+          tableName: effectiveListingsTableName,
           fieldName,
           ruleType,
           masterPartsData: buildAiMasterContext(master?.fields || {}),
           allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
           listingTitle: compactText(listingFields[EBAY_LISTING_TITLE_FIELD], 1000),
           listingDescription: compactText(firstNonEmptyField(listingFields, EBAY_LISTING_DESCRIPTION_FIELDS), 4000),
-          listingConditionsAndOptions: compactText(listingFields[EBAY_LISTING_CONDITIONS_FIELD], 2000)
+          listingConditionsAndOptions: compactText(listingFields[EBAY_LISTING_CONDITIONS_FIELD], 2000),
+          skipWebSearch: true
         });
       } catch (error) {
         if (summary.errors.length < args.sampleLimit) {
@@ -2498,25 +2901,45 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       }
 
       const confidence = Number(aiResult?.confidence || 0);
-      const candidateValue = normalizeText(aiResult?.value);
+      const candidateValue = enforceAllowedValue(
+        normalizeText(aiResult?.value),
+        Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : []
+      );
       let nextValue = '';
       if (confidence >= LOW_CONFIDENCE_THRESHOLD && candidateValue) {
         nextValue = candidateValue;
       } else {
-        if (ruleType === 'VB') {
-          summary.vbLowConfidenceLeftBlank += 1;
-        } else if (ruleType === 'V1') {
-          summary.v1LowConfidenceLeftBlank = Number(summary.v1LowConfidenceLeftBlank || 0) + 1;
-        } else if (ruleType === 'V2') {
-          summary.v2LowConfidenceLeftBlank = Number(summary.v2LowConfidenceLeftBlank || 0) + 1;
-        }
+        if (!pendingWebByIpn.has(ipn)) pendingWebByIpn.set(ipn, []);
+        pendingWebByIpn.get(ipn).push({
+          recordId,
+          recordKey,
+          ipn,
+          prefix,
+          fieldName,
+          ruleType,
+          currentValue,
+          masterPartsData: buildAiMasterContext(master?.fields || {}),
+          allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
+          listingTitle: compactText(listingFields[EBAY_LISTING_TITLE_FIELD], 1000),
+          listingDescription: compactText(firstNonEmptyField(listingFields, EBAY_LISTING_DESCRIPTION_FIELDS), 4000),
+          listingConditionsAndOptions: compactText(listingFields[EBAY_LISTING_CONDITIONS_FIELD], 2000),
+          firstPass: {
+            value: candidateValue,
+            confidence,
+            reason: normalizeText(aiResult?.reason) || 'low confidence'
+          }
+        });
         continue;
       }
       if (currentValue === nextValue) continue;
       if (args.dryRun) continue;
 
       if (!args.dryRun) {
-        const writeResult = await patchTableRecords(airtableService, listingsTableId, [{ id: recordId, fields: { [fieldName]: nextValue } }]);
+        const writeResult = await patchTableRecords(
+          airtableService,
+          effectiveListingsTableId,
+          [{ id: recordId, fields: { [fieldName]: nextValue } }]
+        );
         if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
           if (summary.errors.length < args.sampleLimit) {
             summary.errors.push(`${ruleType} write failed record='${recordKey}' field='${fieldName}'`);
@@ -2555,14 +2978,116 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
           `Processing listing ${i + 1}/${listingsRows.length} ` +
           `(recordKey='${recordKey || recordId}', eligible=${summary.listingsEligible}, aiCalls=${aiCalls}, writes=${writesDone}, ` +
           `FsV=${summary.fsvFieldsUpdated}, V1=${summary.v1FieldsUpdated}, V2=${summary.v2FieldsUpdated}, VB=${summary.vbFieldsUpdated}, ` +
-          `manualSkipped=${summary.manualOverrideSkipped}, masterMissing=${summary.masterPartsMissing})`
+          `manualSkipped=${summary.manualOverrideSkipped}, missingIpn=${summary.skippedMissingIpn}, ` +
+          `outOfScope=${summary.skippedOutOfScope}, noPrefixRules=${summary.skippedNoPrefixRules}, masterMissing=${summary.masterPartsMissing})`
       });
+    }
+  }
+
+  for (const [ipn, pendingCandidates] of pendingWebByIpn.entries()) {
+    let batchResults = new Map();
+    let batchFailed = false;
+    try {
+      const batch = await aiService.evaluateFieldsWithSharedWebSearch(
+        pendingCandidates.map(candidate => ({
+          ipn: candidate.ipn,
+          prefix: candidate.prefix,
+          tableName: effectiveListingsTableName,
+          fieldName: candidate.fieldName,
+          ruleType: candidate.ruleType,
+          masterPartsData: candidate.masterPartsData,
+          allowedValues: candidate.allowedValues,
+          listingTitle: candidate.listingTitle,
+          listingDescription: candidate.listingDescription,
+          listingConditionsAndOptions: candidate.listingConditionsAndOptions
+        }))
+      );
+      batchResults = batch?.resultsByField instanceof Map ? batch.resultsByField : new Map();
+    } catch (error) {
+      batchFailed = true;
+      if (summary.errors.length < args.sampleLimit) {
+        summary.errors.push(`Shared web search failed for IPN ${ipn}: ${error.message}`);
+      }
+    }
+
+    for (const candidate of pendingCandidates) {
+      const webResult = batchFailed ? null : batchResults.get(candidate.fieldName);
+      const webValue = enforceAllowedValue(
+        normalizeText(webResult?.value),
+        candidate.allowedValues
+      );
+      const webConfidence = Number(webResult?.confidence || 0);
+      const nextValue = webConfidence >= LOW_CONFIDENCE_THRESHOLD && webValue ? webValue : '';
+
+      if (webResult) {
+        summary.aiWebSearchUsed += 1;
+        aiWebSearchIpnSet.add(candidate.ipn);
+        if (aiWebSearchEvents.length < args.sampleLimit) {
+          aiWebSearchEvents.push(
+            `web_search_used ipn='${candidate.ipn}' record='${candidate.recordKey || candidate.recordId}' field='${candidate.fieldName}' rule='${candidate.ruleType}'`
+          );
+        }
+      }
+
+      if (nextValue && candidate.currentValue === nextValue) {
+        continue;
+      }
+
+      if (nextValue && candidate.currentValue !== nextValue) {
+        if (args.dryRun) {
+          continue;
+        }
+        if (!args.dryRun) {
+          const writeResult = await patchTableRecords(
+            airtableService,
+            effectiveListingsTableId,
+            [{ id: candidate.recordId, fields: { [candidate.fieldName]: nextValue } }]
+          );
+          if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
+            if (summary.errors.length < args.sampleLimit) {
+              summary.errors.push(`${candidate.ruleType} write failed record='${candidate.recordKey}' field='${candidate.fieldName}'`);
+            }
+            if (candidate.ruleType === 'VB') {
+              summary.vbLowConfidenceLeftBlank += 1;
+            } else if (candidate.ruleType === 'V1') {
+              summary.v1LowConfidenceLeftBlank = Number(summary.v1LowConfidenceLeftBlank || 0) + 1;
+            } else if (candidate.ruleType === 'V2') {
+              summary.v2LowConfidenceLeftBlank = Number(summary.v2LowConfidenceLeftBlank || 0) + 1;
+            }
+            continue;
+          }
+        }
+        if (candidate.ruleType === 'V1') {
+          summary.v1FieldsUpdated += 1;
+        } else if (candidate.ruleType === 'V2') {
+          summary.v2FieldsUpdated += 1;
+        } else if (candidate.ruleType === 'VB') {
+          summary.vbFieldsUpdated += 1;
+        }
+        writesDone += 1;
+        if (summary.sampleOutputs.length < args.sampleLimit) {
+          summary.sampleOutputs.push(
+            `[${candidate.ruleType}][web] record='${candidate.recordKey || candidate.recordId}' ipn='${candidate.ipn}' field='${candidate.fieldName}' value='${nextValue}' confidence='${webConfidence.toFixed(2)}'`
+          );
+        }
+        continue;
+      }
+
+      if (candidate.ruleType === 'VB') {
+        summary.vbLowConfidenceLeftBlank += 1;
+      } else if (candidate.ruleType === 'V1') {
+        summary.v1LowConfidenceLeftBlank = Number(summary.v1LowConfidenceLeftBlank || 0) + 1;
+      } else if (candidate.ruleType === 'V2') {
+        summary.v2LowConfidenceLeftBlank = Number(summary.v2LowConfidenceLeftBlank || 0) + 1;
+      }
     }
   }
 
   if (summary.errors.length > args.sampleLimit) {
     summary.errors = summary.errors.slice(0, args.sampleLimit);
   }
+  summary.aiWebSearchIpns = Array.from(aiWebSearchIpnSet);
+  summary.aiWebSearchEvents = aiWebSearchEvents;
   emitProgress(progressCallback, {
     stage: 'completed',
     percent: 100,
