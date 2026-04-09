@@ -9,6 +9,8 @@ const { google } = require('googleapis');
 const ElectronStore = require('electron-store').default;
 const ExcelJS = require('exceljs');
 const path = require('path');
+const { asIdentitySet, isPublishedIdentity } = require('../services/phase5IdentityService');
+const { isManualOverrideForField: isManualOverrideFromGovernance } = require('../services/phase5GovernanceService');
 
 loadEnv();
 
@@ -57,6 +59,17 @@ function normalizeText(value) {
 
 function normalizeIpn(value) {
   return normalizeText(value).toUpperCase();
+}
+
+function parseIpnSet(value) {
+  const text = String(value || '');
+  if (!text.trim()) return new Set();
+  return new Set(
+    text
+      .split(/[\n,;|]+/)
+      .map(item => normalizeIpn(item))
+      .filter(Boolean)
+  );
 }
 
 function getFieldValueByName(fields = {}, name = '') {
@@ -368,6 +381,13 @@ function parseArgs(argv = []) {
     aiConcurrency: Math.max(
       1,
       Number(getArg('--ai-concurrency') || process.env.PHASE4B_AI_CONCURRENCY || 4) || 4
+    ),
+    aiIpnBatchSize: Math.max(
+      1,
+      Math.min(
+        300,
+        Number(getArg('--ai-ipn-batch-size') || process.env.PHASE4_AI_IPN_BATCH_SIZE || 250) || 250
+      )
     ),
     aiTimeoutMs: Math.max(
       5000,
@@ -1436,7 +1456,9 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   const tables = await schemaService.listTables();
   const allRoutableTables = tables.filter(table => Boolean(parsePrefixFromTableName(table?.name)));
   const requestedTableName = normalizeText(args.testTableName);
-  const requestedIpn = normalizeIpn(args.phase4BTestIpn);
+  const requestedIpnSet = parseIpnSet(args.phase4BTestIpn);
+  const requestedIpnSingle = requestedIpnSet.size === 1 ? Array.from(requestedIpnSet)[0] : '';
+  const requestedIpnLabel = requestedIpnSet.size > 0 ? Array.from(requestedIpnSet).join(', ') : '';
   const routableTables = requestedTableName
     ? allRoutableTables.filter(
         table => normalizeText(table?.name).toLowerCase() === requestedTableName.toLowerCase()
@@ -1461,7 +1483,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     promptCacheKey: normalizeText(args.promptCacheKey),
     phase4BClickupListId: clickupListId,
     testTableName: requestedTableName,
-    testIpn: requestedIpn,
+    testIpn: requestedIpnLabel,
     testMaxTables: Number(args.testMaxTables || 0),
     aiConcurrency: args.aiConcurrency,
     aiTimeoutMs: args.aiTimeoutMs,
@@ -1625,7 +1647,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       const rowFields = row?.fields || {};
       const ipn = normalizeIpn(rowFields.IPN);
       if (!ipn) continue;
-      if (requestedIpn && ipn !== requestedIpn) continue;
+      if (requestedIpnSet.size > 0 && !requestedIpnSet.has(ipn)) continue;
       summary.rowsWithIPN += 1;
 
       const master = masterMap.get(ipn);
@@ -1694,163 +1716,135 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       stage: 'phase4blite_scan_tables',
       percent: Math.min(95, 20 + Math.floor(((i + 1) / Math.max(1, routableTables.length)) * 70)),
       counts: summary,
-      message: `AI evaluating table ${i + 1}/${routableTables.length}: ${tableName} -> candidates=${evaluationCandidates.length}, concurrency=${args.aiConcurrency}`
+      message: `AI evaluating table ${i + 1}/${routableTables.length}: ${tableName} -> candidates=${evaluationCandidates.length}, ipnBatchSize=${args.aiIpnBatchSize}`
     });
 
     let tableAiCompleted = 0;
     let tableAiFailed = 0;
-    const tableAiFailureTypes = {};
     let lastAiProgressAt = Date.now();
     const pendingWebByIpn = new Map();
-    await processWithConcurrency(
-      evaluationCandidates,
-      args.aiConcurrency,
-      async candidate => {
-        let aiResult = null;
-        try {
-          aiResult = await aiService.evaluateField({
-            ipn: candidate.ipn,
-            prefix: candidate.prefix,
-            tableName: candidate.tableName,
-            fieldName: candidate.fieldName,
-            ruleType: candidate.ruleType,
-            masterPartsData: candidate.context,
-            allowedValues: candidate.allowedValues,
-            listingTitle: candidate.listingTitle,
-            listingDescription: candidate.listingDescription,
-            listingConditionsAndOptions: candidate.listingConditionsAndOptions,
-            skipWebSearch: true
-          });
-          summary.aiCallsCompleted += 1;
-          tableAiCompleted += 1;
-        } catch (error) {
-          summary.aiCallsFailed += 1;
-          tableAiFailed += 1;
-          const failureType = classifyAiError(error);
-          incrementCounter(summary.aiFailureTypes, failureType);
-          incrementCounter(tableAiFailureTypes, failureType);
-          if (summary.aiFailureSamples.length < args.sampleLimit) {
-            summary.aiFailureSamples.push(
-              `${candidate.tableName} | ${candidate.ipn} | ${candidate.fieldName} | ${candidate.ruleType} | ${failureType} | ${formatAiErrorShort(error)}`
-            );
-          }
-          summary.errors.push(
-            `AI evaluation failed for ${candidate.ipn}/${candidate.fieldName} (${candidate.ruleType}): ${error.message}`
-          );
-          if (candidate.ruleType === 'VMF') {
-            vmfLowConfidenceTasks.push({
-              taskKey: buildVmfTaskKey({
-                ipn: candidate.ipn,
-                prefix: candidate.prefix,
-                fieldName: candidate.fieldName
-              }),
-              ipn: candidate.ipn,
-              prefix: candidate.prefix,
-              tableName: candidate.tableName,
-              recordId: candidate.rowId,
-              fieldName: candidate.fieldName,
-              confidence: 0,
-              candidateValue: '',
-              reason: `AI error: ${error.message}`,
-              contextSummary: summarizeContext(candidate.context)
-            });
-          }
-          return;
-        }
+    const evaluationPayloads = evaluationCandidates.map((candidate, index) => ({
+      requestId: `${i + 1}:${index + 1}:${candidate.rowId}:${candidate.fieldName}`,
+      ipn: candidate.ipn,
+      prefix: candidate.prefix,
+      tableName: candidate.tableName,
+      fieldName: candidate.fieldName,
+      ruleType: candidate.ruleType,
+      masterPartsData: candidate.context,
+      allowedValues: candidate.allowedValues,
+      listingTitle: candidate.listingTitle,
+      listingDescription: candidate.listingDescription,
+      listingConditionsAndOptions: candidate.listingConditionsAndOptions
+    }));
 
-        const candidateValue = enforceAllowedValue(
-          normalizeText(aiResult?.value),
-          candidate.allowedValues
-        );
-        const confidence = Number(aiResult?.confidence || 0);
-        const isHighConfidence = candidateValue && confidence >= LOW_CONFIDENCE_THRESHOLD;
-
-        if (isHighConfidence) {
-          if (!updatesByRecord.has(candidate.rowId)) updatesByRecord.set(candidate.rowId, {});
-          updatesByRecord.get(candidate.rowId)[candidate.fieldName] = candidateValue;
-          const existing = updateRuleCountByRecord.get(candidate.rowId) || { vf: 0, vmf: 0 };
-          if (candidate.ruleType === 'VF') existing.vf += 1;
-          if (candidate.ruleType === 'VMF') existing.vmf += 1;
-          updateRuleCountByRecord.set(candidate.rowId, existing);
-          if (summary.writeSamples.length < args.sampleLimit) {
-            summary.writeSamples.push(
-              `[write_candidate] table='${candidate.tableName}' ipn='${candidate.ipn}' field='${candidate.fieldName}' rule='${candidate.ruleType}' confidence='${confidence.toFixed(2)}' value='${candidateValue}'`
-            );
-          }
-          return;
-        }
-
-        if (candidate.ruleType === 'VF') {
-          if (!pendingWebByIpn.has(candidate.ipn)) pendingWebByIpn.set(candidate.ipn, []);
-          pendingWebByIpn.get(candidate.ipn).push({
-            ...candidate,
-            firstPass: {
-              value: candidateValue,
-              confidence,
-              reason: normalizeText(aiResult?.reason) || 'low confidence'
-            }
-          });
-          return;
-        }
-        if (!pendingWebByIpn.has(candidate.ipn)) pendingWebByIpn.set(candidate.ipn, []);
-        pendingWebByIpn.get(candidate.ipn).push({
-          ...candidate,
-          firstPass: {
-            value: candidateValue,
-            confidence,
-            reason: normalizeText(aiResult?.reason) || 'low confidence'
-          }
-        });
-      },
-      completed => {
+    const batchFirstPass = await aiService.evaluateFieldChatBatch(evaluationPayloads, {
+      ipnBatchSize: Math.max(1, Math.min(300, Number(args.aiIpnBatchSize || 250) || 250)),
+      onBatchComplete: state => {
         const now = Date.now();
-        if (
-          completed === 1 ||
-          completed % 25 === 0 ||
-          completed === evaluationCandidates.length ||
-          now - lastAiProgressAt >= 10000
-        ) {
-          lastAiProgressAt = now;
-          const ratio = routableTables.length > 0 ? (i + 1) / routableTables.length : 1;
-          emitProgress(progressCallback, {
-            stage: 'phase4blite_scan_tables',
-            percent: Math.min(95, 20 + Math.floor(ratio * 70)),
-            counts: summary,
-            message:
-              `AI progress table ${i + 1}/${routableTables.length}: ${tableName} ` +
-              `(${completed}/${evaluationCandidates.length}, done=${tableAiCompleted}, failed=${tableAiFailed}` +
-              `${tableAiFailed > 0 ? `, failTypes=${formatTopErrorStats(tableAiFailureTypes)}` : ''})`
-          });
-        }
+        if (now - lastAiProgressAt < 1000 && state?.index !== state?.total) return;
+        lastAiProgressAt = now;
+        const ratio = routableTables.length > 0 ? (i + 1) / routableTables.length : 1;
+        emitProgress(progressCallback, {
+          stage: 'phase4blite_scan_tables',
+          percent: Math.min(95, 20 + Math.floor(ratio * 70)),
+          counts: summary,
+          message:
+            `AI first-pass batches table ${i + 1}/${routableTables.length}: ${tableName} ` +
+            `(batch ${state?.index || 0}/${state?.total || 0}, size=${state?.size || 0})`
+        });
       }
-    );
+    });
 
-    for (const [ipn, pendingCandidates] of pendingWebByIpn.entries()) {
-      let batchResults = new Map();
-      let batchFailed = false;
-      try {
-        const batch = await aiService.evaluateFieldsWithSharedWebSearch(
-          pendingCandidates.map(candidate => ({
-            ipn: candidate.ipn,
-            prefix: candidate.prefix,
-            tableName: candidate.tableName,
-            fieldName: candidate.fieldName,
-            ruleType: candidate.ruleType,
-            masterPartsData: candidate.context,
-            allowedValues: candidate.allowedValues,
-            listingTitle: candidate.listingTitle,
-            listingDescription: candidate.listingDescription,
-            listingConditionsAndOptions: candidate.listingConditionsAndOptions
-          }))
+    const firstPassResults = batchFirstPass?.resultsByRequestId instanceof Map
+      ? batchFirstPass.resultsByRequestId
+      : new Map();
+    const failedCount = Number(batchFirstPass?.failedCount || 0);
+    summary.aiCallsCompleted += Math.max(0, evaluationCandidates.length - failedCount);
+    summary.aiCallsFailed += failedCount;
+    tableAiCompleted += Math.max(0, evaluationCandidates.length - failedCount);
+    tableAiFailed += failedCount;
+    if (failedCount > 0) {
+      incrementCounter(summary.aiFailureTypes, 'batch_first_pass_failed');
+      if (summary.aiFailureSamples.length < args.sampleLimit) {
+        summary.aiFailureSamples.push(
+          `${tableName} | first-pass batch failed items=${failedCount}`
         );
-        batchResults = batch?.resultsByField instanceof Map ? batch.resultsByField : new Map();
-      } catch (error) {
-        batchFailed = true;
-        summary.errors.push(`Shared web search failed for IPN ${ipn}: ${error.message}`);
+      }
+    }
+
+    for (let c = 0; c < evaluationCandidates.length; c += 1) {
+      const candidate = evaluationCandidates[c];
+      const requestId = evaluationPayloads[c].requestId;
+      const aiResult = firstPassResults.get(requestId) || {
+        value: '',
+        confidence: 0,
+        reason: 'first-pass missing result',
+        webSearchUsed: false,
+        webSources: []
+      };
+      const candidateValue = enforceAllowedValue(
+        normalizeText(aiResult?.value),
+        candidate.allowedValues
+      );
+      const confidence = Number(aiResult?.confidence || 0);
+      const isHighConfidence = candidateValue && confidence >= LOW_CONFIDENCE_THRESHOLD;
+
+      if (isHighConfidence) {
+        if (!updatesByRecord.has(candidate.rowId)) updatesByRecord.set(candidate.rowId, {});
+        updatesByRecord.get(candidate.rowId)[candidate.fieldName] = candidateValue;
+        const existing = updateRuleCountByRecord.get(candidate.rowId) || { vf: 0, vmf: 0 };
+        if (candidate.ruleType === 'VF') existing.vf += 1;
+        if (candidate.ruleType === 'VMF') existing.vmf += 1;
+        updateRuleCountByRecord.set(candidate.rowId, existing);
+        if (summary.writeSamples.length < args.sampleLimit) {
+          summary.writeSamples.push(
+            `[write_candidate] table='${candidate.tableName}' ipn='${candidate.ipn}' field='${candidate.fieldName}' rule='${candidate.ruleType}' confidence='${confidence.toFixed(2)}' value='${candidateValue}'`
+          );
+        }
+        continue;
       }
 
-      for (const candidate of pendingCandidates) {
-        const webResult = batchFailed ? null : batchResults.get(candidate.fieldName);
+      if (!pendingWebByIpn.has(candidate.ipn)) pendingWebByIpn.set(candidate.ipn, []);
+      pendingWebByIpn.get(candidate.ipn).push({
+        ...candidate,
+        firstPass: {
+          value: candidateValue,
+          confidence,
+          reason: normalizeText(aiResult?.reason) || 'low confidence'
+        }
+      });
+    }
+
+    const pendingWebCandidates = Array.from(pendingWebByIpn.values()).flat();
+    if (pendingWebCandidates.length > 0) {
+      const webPayloads = pendingWebCandidates.map((candidate, index) => ({
+        requestId: `4b:web:${i + 1}:${index + 1}:${candidate.rowId}:${candidate.fieldName}`,
+        ipn: candidate.ipn,
+        prefix: candidate.prefix,
+        tableName: candidate.tableName,
+        fieldName: candidate.fieldName,
+        ruleType: candidate.ruleType,
+        masterPartsData: candidate.context,
+        allowedValues: candidate.allowedValues,
+        listingTitle: candidate.listingTitle,
+        listingDescription: candidate.listingDescription,
+        listingConditionsAndOptions: candidate.listingConditionsAndOptions
+      }));
+      let webResultsByRequestId = new Map();
+      try {
+        const webBatch = await aiService.evaluateFieldsWithSharedWebSearchBatch(webPayloads, {
+          ipnBatchSize: Math.max(1, Math.min(300, Number(args.aiIpnBatchSize || 250) || 250))
+        });
+        webResultsByRequestId =
+          webBatch?.resultsByRequestId instanceof Map ? webBatch.resultsByRequestId : new Map();
+      } catch (error) {
+        summary.errors.push(`Shared web search batch failed: ${error.message}`);
+      }
+
+      for (let p = 0; p < pendingWebCandidates.length; p += 1) {
+        const candidate = pendingWebCandidates[p];
+        const requestId = webPayloads[p].requestId;
+        const webResult = webResultsByRequestId.get(requestId) || null;
         const webValue = enforceAllowedValue(
           normalizeText(webResult?.value),
           candidate.allowedValues
@@ -1858,7 +1852,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         const webConfidence = Number(webResult?.confidence || 0);
         const useWebValue = webValue && webConfidence >= LOW_CONFIDENCE_THRESHOLD;
 
-        if (webResult) {
+        if (webResult?.webSearchUsed) {
           summary.aiWebSearchUsed += 1;
           aiWebSearchIpnSet.add(candidate.ipn);
           if (aiWebSearchEvents.length < args.sampleLimit) {
@@ -1958,7 +1952,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     sampleLimit: args.sampleLimit,
     determinedStatus: DEFAULT_PHASE4B_DETERMINED_STATUS,
     completedStatus: DEFAULT_PHASE4B_COMPLETED_STATUS,
-    targetIpn: requestedIpn,
+    targetIpn: requestedIpnSingle,
     tablesByName,
     tableFieldsByName
   });
@@ -2489,24 +2483,7 @@ function resolveFsVMasterValue(fieldName, masterFields = {}) {
 }
 
 function isManualOverrideForField(listingFields = {}, fieldName = '') {
-  const globalCandidates = ['Manual Override', 'Manual Edit', 'Manual Edited'];
-  for (const name of globalCandidates) {
-    const value = getFieldValueByName(listingFields, name);
-    if (parseBoolean(value, false)) return true;
-  }
-
-  const specificCandidates = [
-    `${fieldName} Manual Override`,
-    `${fieldName} Override`,
-    `${fieldName} Locked`,
-    `${fieldName} Manual`
-  ];
-  for (const name of specificCandidates) {
-    const value = getFieldValueByName(listingFields, name);
-    if (parseBoolean(value, false)) return true;
-  }
-
-  return false;
+  return isManualOverrideFromGovernance(listingFields, fieldName);
 }
 
 function isListingRowInScope(listingFields = {}) {
@@ -2574,6 +2551,8 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
   const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
+  const requestedIpnSet = parseIpnSet(args.phase4DTestIpn || args.phase4BTestIpn);
+  const requestedIpnLabel = requestedIpnSet.size > 0 ? Array.from(requestedIpnSet).join(', ') : '';
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!masterBaseId) throw new Error('Missing AIRTABLE_BASE_ID.');
@@ -2716,8 +2695,11 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     rulesSource: `google_drive:${fileId}`,
     rulesDriveFile: args.rulesDriveFile || '',
     listingsTable: effectiveListingsTableName,
+    testIpn: requestedIpnLabel,
     listingsScanned: listingsRows.length,
     listingsEligible: 0,
+    skippedAlreadyPublished: 0,
+    skippedByTestIpn: 0,
     skippedMissingIpn: 0,
     skippedOutOfScope: 0,
     skippedNoPrefixRules: 0,
@@ -2749,6 +2731,8 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   let aiCalls = 0;
   let writesDone = 0;
   let lastProgressAt = Date.now();
+  const publishedIdentitySet = asIdentitySet(args.phase5PublishedIdentities || []);
+  const firstPassCandidates = [];
   const pendingWebByIpn = new Map();
   const aiWebSearchIpnSet = new Set();
   const aiWebSearchEvents = [];
@@ -2775,6 +2759,15 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       pushSkipSample(
         `skip=missing_ipn record='${recordKey || recordId}' fields='${availableFields || 'none'}'`
       );
+      continue;
+    }
+    if (requestedIpnSet.size > 0 && !requestedIpnSet.has(ipn)) {
+      summary.skippedByTestIpn += 1;
+      continue;
+    }
+    if (isPublishedIdentity(listingFields, publishedIdentitySet)) {
+      summary.skippedAlreadyPublished += 1;
+      pushSkipSample(`skip=already_published record='${recordKey || recordId}' ipn='${ipn}'`);
       continue;
     }
     if (!isListingRowInScope(listingFields)) {
@@ -2876,90 +2869,20 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         continue;
       }
 
-      let aiResult;
-      try {
-        aiCalls += 1;
-        aiResult = await aiService.evaluateField({
-          recordKey,
-          ipn,
-          prefix,
-          tableName: effectiveListingsTableName,
-          fieldName,
-          ruleType,
-          masterPartsData: buildAiMasterContext(master?.fields || {}),
-          allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
-          listingTitle: compactText(listingFields[EBAY_LISTING_TITLE_FIELD], 1000),
-          listingDescription: compactText(firstNonEmptyField(listingFields, EBAY_LISTING_DESCRIPTION_FIELDS), 4000),
-          listingConditionsAndOptions: compactText(listingFields[EBAY_LISTING_CONDITIONS_FIELD], 2000),
-          skipWebSearch: true
-        });
-      } catch (error) {
-        if (summary.errors.length < args.sampleLimit) {
-          summary.errors.push(`${ruleType} AI failed record='${recordKey}' field='${fieldName}': ${error.message}`);
-        }
-        continue;
-      }
-
-      const confidence = Number(aiResult?.confidence || 0);
-      const candidateValue = enforceAllowedValue(
-        normalizeText(aiResult?.value),
-        Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : []
-      );
-      let nextValue = '';
-      if (confidence >= LOW_CONFIDENCE_THRESHOLD && candidateValue) {
-        nextValue = candidateValue;
-      } else {
-        if (!pendingWebByIpn.has(ipn)) pendingWebByIpn.set(ipn, []);
-        pendingWebByIpn.get(ipn).push({
-          recordId,
-          recordKey,
-          ipn,
-          prefix,
-          fieldName,
-          ruleType,
-          currentValue,
-          masterPartsData: buildAiMasterContext(master?.fields || {}),
-          allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
-          listingTitle: compactText(listingFields[EBAY_LISTING_TITLE_FIELD], 1000),
-          listingDescription: compactText(firstNonEmptyField(listingFields, EBAY_LISTING_DESCRIPTION_FIELDS), 4000),
-          listingConditionsAndOptions: compactText(listingFields[EBAY_LISTING_CONDITIONS_FIELD], 2000),
-          firstPass: {
-            value: candidateValue,
-            confidence,
-            reason: normalizeText(aiResult?.reason) || 'low confidence'
-          }
-        });
-        continue;
-      }
-      if (currentValue === nextValue) continue;
-      if (args.dryRun) continue;
-
-      if (!args.dryRun) {
-        const writeResult = await patchTableRecords(
-          airtableService,
-          effectiveListingsTableId,
-          [{ id: recordId, fields: { [fieldName]: nextValue } }]
-        );
-        if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
-          if (summary.errors.length < args.sampleLimit) {
-            summary.errors.push(`${ruleType} write failed record='${recordKey}' field='${fieldName}'`);
-          }
-          continue;
-        }
-      }
-
-      if (ruleType === 'V1') {
-        summary.v1FieldsUpdated += 1;
-      } else if (ruleType === 'V2') {
-        summary.v2FieldsUpdated += 1;
-      } else if (ruleType === 'VB') {
-        summary.vbFieldsUpdated += 1;
-      }
-      writesDone += 1;
-      listingFields[fieldName] = nextValue;
-      if (summary.sampleOutputs.length < args.sampleLimit) {
-        summary.sampleOutputs.push(`[${ruleType}] record='${recordKey}' ipn='${ipn}' field='${fieldName}' value='${nextValue}' confidence='${confidence.toFixed(2)}'`);
-      }
+      firstPassCandidates.push({
+        recordId,
+        recordKey,
+        ipn,
+        prefix,
+        fieldName,
+        ruleType,
+        currentValue,
+        masterPartsData: buildAiMasterContext(master?.fields || {}),
+        allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
+        listingTitle: compactText(listingFields[EBAY_LISTING_TITLE_FIELD], 1000),
+        listingDescription: compactText(firstNonEmptyField(listingFields, EBAY_LISTING_DESCRIPTION_FIELDS), 4000),
+        listingConditionsAndOptions: compactText(listingFields[EBAY_LISTING_CONDITIONS_FIELD], 2000)
+      });
     }
 
     const now = Date.now();
@@ -2978,40 +2901,137 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
           `Processing listing ${i + 1}/${listingsRows.length} ` +
           `(recordKey='${recordKey || recordId}', eligible=${summary.listingsEligible}, aiCalls=${aiCalls}, writes=${writesDone}, ` +
           `FsV=${summary.fsvFieldsUpdated}, V1=${summary.v1FieldsUpdated}, V2=${summary.v2FieldsUpdated}, VB=${summary.vbFieldsUpdated}, ` +
-          `manualSkipped=${summary.manualOverrideSkipped}, missingIpn=${summary.skippedMissingIpn}, ` +
+          `manualSkipped=${summary.manualOverrideSkipped}, publishedSkipped=${summary.skippedAlreadyPublished}, missingIpn=${summary.skippedMissingIpn}, ` +
           `outOfScope=${summary.skippedOutOfScope}, noPrefixRules=${summary.skippedNoPrefixRules}, masterMissing=${summary.masterPartsMissing})`
       });
     }
   }
 
-  for (const [ipn, pendingCandidates] of pendingWebByIpn.entries()) {
-    let batchResults = new Map();
-    let batchFailed = false;
-    try {
-      const batch = await aiService.evaluateFieldsWithSharedWebSearch(
-        pendingCandidates.map(candidate => ({
-          ipn: candidate.ipn,
-          prefix: candidate.prefix,
-          tableName: effectiveListingsTableName,
-          fieldName: candidate.fieldName,
-          ruleType: candidate.ruleType,
-          masterPartsData: candidate.masterPartsData,
-          allowedValues: candidate.allowedValues,
-          listingTitle: candidate.listingTitle,
-          listingDescription: candidate.listingDescription,
-          listingConditionsAndOptions: candidate.listingConditionsAndOptions
-        }))
+  if (firstPassCandidates.length > 0) {
+    emitProgress(progressCallback, {
+      stage: 'phase4d_scan_listings',
+      percent: 95,
+      counts: summary,
+      message:
+        `Running AI first-pass in IPN batches (size=${args.aiIpnBatchSize}) ` +
+        `for ${firstPassCandidates.length} candidates...`
+    });
+    const firstPassPayloads = firstPassCandidates.map((candidate, index) => ({
+      requestId: `4d:${index + 1}:${candidate.recordId}:${candidate.fieldName}`,
+      recordKey: candidate.recordKey,
+      ipn: candidate.ipn,
+      prefix: candidate.prefix,
+      tableName: effectiveListingsTableName,
+      fieldName: candidate.fieldName,
+      ruleType: candidate.ruleType,
+      masterPartsData: candidate.masterPartsData,
+      allowedValues: candidate.allowedValues,
+      listingTitle: candidate.listingTitle,
+      listingDescription: candidate.listingDescription,
+      listingConditionsAndOptions: candidate.listingConditionsAndOptions
+    }));
+    const firstPassBatch = await aiService.evaluateFieldChatBatch(firstPassPayloads, {
+      ipnBatchSize: Math.max(1, Math.min(300, Number(args.aiIpnBatchSize || 250) || 250))
+    });
+    aiCalls += firstPassCandidates.length;
+    const firstPassResults = firstPassBatch?.resultsByRequestId instanceof Map
+      ? firstPassBatch.resultsByRequestId
+      : new Map();
+
+    for (let idx = 0; idx < firstPassCandidates.length; idx += 1) {
+      const candidate = firstPassCandidates[idx];
+      const requestId = firstPassPayloads[idx].requestId;
+      const aiResult = firstPassResults.get(requestId) || {
+        value: '',
+        confidence: 0,
+        reason: 'first-pass missing result',
+        webSearchUsed: false,
+        webSources: []
+      };
+      const confidence = Number(aiResult?.confidence || 0);
+      const candidateValue = enforceAllowedValue(
+        normalizeText(aiResult?.value),
+        candidate.allowedValues
       );
-      batchResults = batch?.resultsByField instanceof Map ? batch.resultsByField : new Map();
+      const nextValue = confidence >= LOW_CONFIDENCE_THRESHOLD && candidateValue ? candidateValue : '';
+
+      if (!nextValue) {
+        if (!pendingWebByIpn.has(candidate.ipn)) pendingWebByIpn.set(candidate.ipn, []);
+        pendingWebByIpn.get(candidate.ipn).push({
+          ...candidate,
+          firstPass: {
+            value: candidateValue,
+            confidence,
+            reason: normalizeText(aiResult?.reason) || 'low confidence'
+          }
+        });
+        continue;
+      }
+      if (candidate.currentValue === nextValue) continue;
+      if (args.dryRun) continue;
+
+      const writeResult = await patchTableRecords(
+        airtableService,
+        effectiveListingsTableId,
+        [{ id: candidate.recordId, fields: { [candidate.fieldName]: nextValue } }]
+      );
+      if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
+        if (summary.errors.length < args.sampleLimit) {
+          summary.errors.push(
+            `${candidate.ruleType} write failed record='${candidate.recordKey}' field='${candidate.fieldName}'`
+          );
+        }
+        continue;
+      }
+
+      if (candidate.ruleType === 'V1') {
+        summary.v1FieldsUpdated += 1;
+      } else if (candidate.ruleType === 'V2') {
+        summary.v2FieldsUpdated += 1;
+      } else if (candidate.ruleType === 'VB') {
+        summary.vbFieldsUpdated += 1;
+      }
+      writesDone += 1;
+      if (summary.sampleOutputs.length < args.sampleLimit) {
+        summary.sampleOutputs.push(
+          `[${candidate.ruleType}] record='${candidate.recordKey}' ipn='${candidate.ipn}' field='${candidate.fieldName}' value='${nextValue}' confidence='${confidence.toFixed(2)}'`
+        );
+      }
+    }
+  }
+
+  const pendingWebCandidates = Array.from(pendingWebByIpn.values()).flat();
+  if (pendingWebCandidates.length > 0) {
+    const webPayloads = pendingWebCandidates.map((candidate, index) => ({
+      requestId: `4d:web:${index + 1}:${candidate.recordId}:${candidate.fieldName}`,
+      ipn: candidate.ipn,
+      prefix: candidate.prefix,
+      tableName: effectiveListingsTableName,
+      fieldName: candidate.fieldName,
+      ruleType: candidate.ruleType,
+      masterPartsData: candidate.masterPartsData,
+      allowedValues: candidate.allowedValues,
+      listingTitle: candidate.listingTitle,
+      listingDescription: candidate.listingDescription,
+      listingConditionsAndOptions: candidate.listingConditionsAndOptions
+    }));
+    let webResultsByRequestId = new Map();
+    try {
+      const webBatch = await aiService.evaluateFieldsWithSharedWebSearchBatch(webPayloads, {
+        ipnBatchSize: Math.max(1, Math.min(300, Number(args.aiIpnBatchSize || 250) || 250))
+      });
+      webResultsByRequestId =
+        webBatch?.resultsByRequestId instanceof Map ? webBatch.resultsByRequestId : new Map();
     } catch (error) {
-      batchFailed = true;
       if (summary.errors.length < args.sampleLimit) {
-        summary.errors.push(`Shared web search failed for IPN ${ipn}: ${error.message}`);
+        summary.errors.push(`Shared web search batch failed: ${error.message}`);
       }
     }
 
-    for (const candidate of pendingCandidates) {
-      const webResult = batchFailed ? null : batchResults.get(candidate.fieldName);
+    for (let p = 0; p < pendingWebCandidates.length; p += 1) {
+      const candidate = pendingWebCandidates[p];
+      const requestId = webPayloads[p].requestId;
+      const webResult = webResultsByRequestId.get(requestId) || null;
       const webValue = enforceAllowedValue(
         normalizeText(webResult?.value),
         candidate.allowedValues
@@ -3019,7 +3039,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       const webConfidence = Number(webResult?.confidence || 0);
       const nextValue = webConfidence >= LOW_CONFIDENCE_THRESHOLD && webValue ? webValue : '';
 
-      if (webResult) {
+      if (webResult?.webSearchUsed) {
         summary.aiWebSearchUsed += 1;
         aiWebSearchIpnSet.add(candidate.ipn);
         if (aiWebSearchEvents.length < args.sampleLimit) {
@@ -3037,25 +3057,23 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         if (args.dryRun) {
           continue;
         }
-        if (!args.dryRun) {
-          const writeResult = await patchTableRecords(
-            airtableService,
-            effectiveListingsTableId,
-            [{ id: candidate.recordId, fields: { [candidate.fieldName]: nextValue } }]
-          );
-          if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
-            if (summary.errors.length < args.sampleLimit) {
-              summary.errors.push(`${candidate.ruleType} write failed record='${candidate.recordKey}' field='${candidate.fieldName}'`);
-            }
-            if (candidate.ruleType === 'VB') {
-              summary.vbLowConfidenceLeftBlank += 1;
-            } else if (candidate.ruleType === 'V1') {
-              summary.v1LowConfidenceLeftBlank = Number(summary.v1LowConfidenceLeftBlank || 0) + 1;
-            } else if (candidate.ruleType === 'V2') {
-              summary.v2LowConfidenceLeftBlank = Number(summary.v2LowConfidenceLeftBlank || 0) + 1;
-            }
-            continue;
+        const writeResult = await patchTableRecords(
+          airtableService,
+          effectiveListingsTableId,
+          [{ id: candidate.recordId, fields: { [candidate.fieldName]: nextValue } }]
+        );
+        if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
+          if (summary.errors.length < args.sampleLimit) {
+            summary.errors.push(`${candidate.ruleType} write failed record='${candidate.recordKey}' field='${candidate.fieldName}'`);
           }
+          if (candidate.ruleType === 'VB') {
+            summary.vbLowConfidenceLeftBlank += 1;
+          } else if (candidate.ruleType === 'V1') {
+            summary.v1LowConfidenceLeftBlank = Number(summary.v1LowConfidenceLeftBlank || 0) + 1;
+          } else if (candidate.ruleType === 'V2') {
+            summary.v2LowConfidenceLeftBlank = Number(summary.v2LowConfidenceLeftBlank || 0) + 1;
+          }
+          continue;
         }
         if (candidate.ruleType === 'V1') {
           summary.v1FieldsUpdated += 1;
@@ -3126,3 +3144,4 @@ module.exports = {
   runPhase4CMF,
   runPhase4DListing
 };
+

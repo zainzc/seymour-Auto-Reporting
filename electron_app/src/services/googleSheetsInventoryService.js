@@ -70,12 +70,17 @@ async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryDat
       })
     );
 
+    const limiter = createRequestLimiter(
+      Number(process.env.INVENTORY_SHEETS_MIN_REQUEST_INTERVAL_MS || 1100)
+    );
+    const chunkSize = Math.max(200, Number(process.env.INVENTORY_SHEETS_CHUNK_SIZE || 2000));
     await ensureWorksheetCapacity(
       sheets,
       spreadsheetId,
       worksheetName,
       dataRows.length + 1,
-      headers.length
+      headers.length,
+      limiter
     );
     progressCallback({
       stage: 'sheet_resize',
@@ -83,7 +88,7 @@ async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryDat
       percent: 62
     });
 
-    await clearWorksheet(sheets, spreadsheetId, worksheetName);
+    await clearWorksheet(sheets, spreadsheetId, worksheetName, limiter);
     progressCallback({
       stage: 'sheet_clear',
       message: 'Cleared existing worksheet data.',
@@ -92,12 +97,14 @@ async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryDat
 
     await withSheetsRetry(
       () =>
-        sheets.spreadsheets.values.update({
-          spreadsheetId,
-          range: `${worksheetName}!A1`,
-          valueInputOption: 'USER_ENTERED',
-          resource: { values: [headers] }
-        }),
+        limiter.call(() =>
+          sheets.spreadsheets.values.update({
+            spreadsheetId,
+            range: `${worksheetName}!A1`,
+            valueInputOption: 'USER_ENTERED',
+            resource: { values: [headers] }
+          })
+        ),
       'write header'
     );
     progressCallback({
@@ -106,7 +113,6 @@ async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryDat
       percent: 68
     });
 
-    const chunkSize = 1000;
     const lastCol = columnIndexToLetter(headers.length);
     let writtenRows = 0;
     let totalUpdatedCells = headers.length;
@@ -119,12 +125,14 @@ async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryDat
 
       const response = await withSheetsRetry(
         () =>
-          sheets.spreadsheets.values.update({
-            spreadsheetId,
-            range,
-            valueInputOption: 'USER_ENTERED',
-            resource: { values: chunk }
-          }),
+          limiter.call(() =>
+            sheets.spreadsheets.values.update({
+              spreadsheetId,
+              range,
+              valueInputOption: 'USER_ENTERED',
+              resource: { values: chunk }
+            })
+          ),
         `write rows ${startRow}-${endRow}`
       );
 
@@ -175,13 +183,21 @@ async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryDat
   }
 }
 
-async function clearWorksheet(sheets, spreadsheetId, worksheetName) {
+async function clearWorksheet(sheets, spreadsheetId, worksheetName, limiter = null) {
   try {
-    const sheetInfo = await sheets.spreadsheets.get({
-      spreadsheetId,
-      ranges: [`${worksheetName}!A1:ZZ`],
-      includeGridData: false
-    });
+    const sheetInfo = await (limiter
+      ? limiter.call(() =>
+          sheets.spreadsheets.get({
+            spreadsheetId,
+            ranges: [`${worksheetName}!A1:ZZ`],
+            includeGridData: false
+          })
+        )
+      : sheets.spreadsheets.get({
+          spreadsheetId,
+          ranges: [`${worksheetName}!A1:ZZ`],
+          includeGridData: false
+        }));
 
     if (!sheetInfo.data.sheets || sheetInfo.data.sheets.length === 0) {
       throw new Error(`Worksheet '${worksheetName}' not found`);
@@ -189,10 +205,17 @@ async function clearWorksheet(sheets, spreadsheetId, worksheetName) {
 
     await withSheetsRetry(
       () =>
-        sheets.spreadsheets.values.clear({
-          spreadsheetId,
-          range: `${worksheetName}!A:ZZ`
-        }),
+        (limiter
+          ? limiter.call(() =>
+              sheets.spreadsheets.values.clear({
+                spreadsheetId,
+                range: `${worksheetName}!A:ZZ`
+              })
+            )
+          : sheets.spreadsheets.values.clear({
+              spreadsheetId,
+              range: `${worksheetName}!A:ZZ`
+            })),
       'clear worksheet'
     );
 
@@ -203,13 +226,20 @@ async function clearWorksheet(sheets, spreadsheetId, worksheetName) {
   }
 }
 
-async function ensureWorksheetCapacity(sheets, spreadsheetId, worksheetName, requiredRows, requiredCols) {
+async function ensureWorksheetCapacity(sheets, spreadsheetId, worksheetName, requiredRows, requiredCols, limiter = null) {
   const meta = await withSheetsRetry(
     () =>
-      sheets.spreadsheets.get({
-        spreadsheetId,
-        fields: 'sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))'
-      }),
+      (limiter
+        ? limiter.call(() =>
+            sheets.spreadsheets.get({
+              spreadsheetId,
+              fields: 'sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))'
+            })
+          )
+        : sheets.spreadsheets.get({
+            spreadsheetId,
+            fields: 'sheets(properties(sheetId,title,gridProperties(rowCount,columnCount)))'
+          })),
     'read worksheet metadata'
   );
 
@@ -232,25 +262,47 @@ async function ensureWorksheetCapacity(sheets, spreadsheetId, worksheetName, req
 
   await withSheetsRetry(
     () =>
-      sheets.spreadsheets.batchUpdate({
-        spreadsheetId,
-        resource: {
-          requests: [
-            {
-              updateSheetProperties: {
-                properties: {
-                  sheetId,
-                  gridProperties: {
-                    rowCount: targetRows,
-                    columnCount: targetCols
+      (limiter
+        ? limiter.call(() =>
+            sheets.spreadsheets.batchUpdate({
+              spreadsheetId,
+              resource: {
+                requests: [
+                  {
+                    updateSheetProperties: {
+                      properties: {
+                        sheetId,
+                        gridProperties: {
+                          rowCount: targetRows,
+                          columnCount: targetCols
+                        }
+                      },
+                      fields: 'gridProperties.rowCount,gridProperties.columnCount'
+                    }
                   }
-                },
-                fields: 'gridProperties.rowCount,gridProperties.columnCount'
+                ]
               }
+            })
+          )
+        : sheets.spreadsheets.batchUpdate({
+            spreadsheetId,
+            resource: {
+              requests: [
+                {
+                  updateSheetProperties: {
+                    properties: {
+                      sheetId,
+                      gridProperties: {
+                        rowCount: targetRows,
+                        columnCount: targetCols
+                      }
+                    },
+                    fields: 'gridProperties.rowCount,gridProperties.columnCount'
+                  }
+                }
+              ]
             }
-          ]
-        }
-      }),
+          })),
     'expand worksheet grid'
   );
 
@@ -364,8 +416,9 @@ function formatGoogleApiError(error) {
     String(error?.message || '').trim() ||
     'Unknown Google Sheets API error';
   const code = String(error?.response?.data?.error?.code || error?.code || '').trim();
+  const reason = String(error?.response?.data?.error?.status || '').trim();
   const status = String(error?.response?.status || '').trim();
-  const details = [status ? `http=${status}` : '', code ? `code=${code}` : '']
+  const details = [status ? `http=${status}` : '', code ? `code=${code}` : '', reason ? `status=${reason}` : '']
     .filter(Boolean)
     .join(', ');
   return details ? `${primary} (${details})` : primary;
@@ -374,7 +427,8 @@ function formatGoogleApiError(error) {
 function isRetryableGoogleError(error) {
   const status = Number(error?.response?.status || 0);
   const message = String(error?.response?.data?.error?.message || error?.message || '').toLowerCase();
-  if ([429, 500, 502, 503, 504].includes(status)) return true;
+  if ([403, 429, 500, 502, 503, 504].includes(status)) return true;
+  if (message.includes('quota') || message.includes('rate limit') || message.includes('user rate limit')) return true;
   if (message.includes('internal error')) return true;
   if (message.includes('backend error')) return true;
   if (message.includes('timed out') || message.includes('timeout')) return true;
@@ -382,7 +436,7 @@ function isRetryableGoogleError(error) {
 }
 
 async function withSheetsRetry(fn, label = 'Google Sheets request') {
-  const maxAttempts = 4;
+  const maxAttempts = 8;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       return await fn();
@@ -390,12 +444,30 @@ async function withSheetsRetry(fn, label = 'Google Sheets request') {
       if (attempt >= maxAttempts || !isRetryableGoogleError(error)) {
         throw error;
       }
-      const delayMs = 500 * Math.pow(2, attempt - 1);
+      const delayMs = Math.min(15000, 1000 * Math.pow(2, attempt - 1));
       console.warn(`${label} failed (attempt ${attempt}/${maxAttempts}): ${formatGoogleApiError(error)}. Retrying in ${delayMs}ms...`);
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
   throw new Error(`${label} failed after retries`);
+}
+
+function createRequestLimiter(minIntervalMs = 1100) {
+  let lastAt = 0;
+  const wait = async () => {
+    const now = Date.now();
+    const delay = Number(minIntervalMs || 0) - (now - lastAt);
+    if (delay > 0) {
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+    lastAt = Date.now();
+  };
+  return {
+    async call(fn) {
+      await wait();
+      return fn();
+    }
+  };
 }
 
 module.exports = {

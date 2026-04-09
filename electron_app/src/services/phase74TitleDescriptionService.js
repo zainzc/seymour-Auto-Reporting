@@ -1,6 +1,8 @@
-﻿const AirtableService = require('./airtableService');
+const AirtableService = require('./airtableService');
 const AirtableSchemaService = require('./airtableSchemaService');
 const Phase4AiEvaluatorService = require('./phase4AiEvaluatorService');
+const { asIdentitySet, isPublishedIdentity } = require('./phase5IdentityService');
+const { isManualOverrideForField: isManualOverrideFromGovernance } = require('./phase5GovernanceService');
 
 const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
 const DEFAULT_MASTER_TABLE = 'Master Parts Table';
@@ -76,6 +78,20 @@ function normalizeText(value) {
 
 function normalizeIpn(value) {
   return normalizeText(value).toUpperCase();
+}
+
+function normalizeKey(value) {
+  return normalizeText(value).toLowerCase();
+}
+
+function getFieldValueByName(fields = {}, name = '') {
+  if (!fields || typeof fields !== 'object') return '';
+  if (Object.prototype.hasOwnProperty.call(fields, name)) return fields[name];
+  const target = normalizeKey(name);
+  if (!target) return '';
+  const key = Object.keys(fields).find(item => normalizeKey(item) === target);
+  if (!key) return '';
+  return fields[key];
 }
 
 function parseIpnList(value) {
@@ -171,6 +187,20 @@ function compactText(value, maxLength = 220) {
   return `${text.slice(0, maxLength)}...`;
 }
 
+function parseBoolean(value, defaultValue = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const text = normalizeText(value).toLowerCase();
+  if (!text) return defaultValue;
+  if (['true', '1', 'yes', 'y', 'on', 'locked'].includes(text)) return true;
+  if (['false', '0', 'no', 'n', 'off'].includes(text)) return false;
+  return defaultValue;
+}
+
+function isManualOverrideForField(listingFields = {}, fieldName = '') {
+  return isManualOverrideFromGovernance(listingFields, fieldName);
+}
+
 async function ensureFields(schemaService, listingsTable, requiredFieldNames = []) {
   const tableNameNorm = normalizeText(listingsTable).toLowerCase();
   const tables = await schemaService.listTables();
@@ -253,6 +283,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     maxListings,
     listingsScanned: 0,
     listingsEligible: 0,
+    skippedAlreadyPublished: 0,
     masterMatched: 0,
     masterMissing: 0,
     listingFieldsCreated: 0,
@@ -287,6 +318,17 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     LISTING_TITLE_FIELD,
     LISTING_NEW_TITLE_FIELD,
     LISTING_DESCRIPTION_OUTPUT_FIELD,
+    `${LISTING_NEW_TITLE_FIELD} Manual Override`,
+    `${LISTING_NEW_TITLE_FIELD} Override`,
+    `${LISTING_NEW_TITLE_FIELD} Locked`,
+    `${LISTING_NEW_TITLE_FIELD} Manual`,
+    `${LISTING_DESCRIPTION_OUTPUT_FIELD} Manual Override`,
+    `${LISTING_DESCRIPTION_OUTPUT_FIELD} Override`,
+    `${LISTING_DESCRIPTION_OUTPUT_FIELD} Locked`,
+    `${LISTING_DESCRIPTION_OUTPUT_FIELD} Manual`,
+    'Manual Override',
+    'Manual Edit',
+    'Manual Edited',
     LISTING_CONDITIONS_FIELD,
     LISTING_CONDITIONS_FALLBACK_FIELD,
     'Condition',
@@ -296,6 +338,10 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   ];
   if (hasShortDescriptionField) {
     selectFields.push(LISTING_SHORT_DESCRIPTION_FIELD);
+    selectFields.push(`${LISTING_SHORT_DESCRIPTION_FIELD} Manual Override`);
+    selectFields.push(`${LISTING_SHORT_DESCRIPTION_FIELD} Override`);
+    selectFields.push(`${LISTING_SHORT_DESCRIPTION_FIELD} Locked`);
+    selectFields.push(`${LISTING_SHORT_DESCRIPTION_FIELD} Manual`);
   }
 
   emitProgress(progressCallback, {
@@ -307,6 +353,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
 
   const listingRows = await fetchAllRecordsWithFallback(airtableService, listingsTable, Array.from(new Set(selectFields)));
   summary.listingsScanned = listingRows.length;
+  const publishedIdentitySet = asIdentitySet(options.phase5PublishedIdentities || []);
 
   const neededIpns = [];
   for (const row of listingRows) {
@@ -340,6 +387,10 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     const ipn = normalizeIpn(fields[LISTING_IPN_FIELD]);
     if (!ipn) continue;
     if (testIpnSet.size > 0 && !testIpnSet.has(ipn)) continue;
+    if (isPublishedIdentity(fields, publishedIdentitySet)) {
+      summary.skippedAlreadyPublished += 1;
+      continue;
+    }
 
     summary.listingsEligible += 1;
     processedEligible += 1;
@@ -399,22 +450,32 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     const existingTitleNew = normalizeText(fields[LISTING_NEW_TITLE_FIELD]);
     const existingDescriptionOut = normalizeText(fields[LISTING_DESCRIPTION_OUTPUT_FIELD]);
     const existingShort = hasShortDescriptionField ? normalizeText(fields[LISTING_SHORT_DESCRIPTION_FIELD]) : '';
+    const titleManualOverride = isManualOverrideForField(fields, LISTING_NEW_TITLE_FIELD);
+    const descriptionManualOverride = isManualOverrideForField(fields, LISTING_DESCRIPTION_OUTPUT_FIELD);
+    const shortDescriptionManualOverride =
+      hasShortDescriptionField && isManualOverrideForField(fields, LISTING_SHORT_DESCRIPTION_FIELD);
 
     const writeFields = {};
 
-    if (nextTitle && nextTitle !== existingTitleNew) {
+    if (!titleManualOverride && nextTitle && nextTitle !== existingTitleNew) {
       writeFields[LISTING_NEW_TITLE_FIELD] = nextTitle;
       summary.titleGenerated += 1;
+    } else if (titleManualOverride) {
+      summary.skippedManualOverride += 1;
     }
 
-    if (nextDescription && nextDescription !== existingDescriptionOut) {
+    if (!descriptionManualOverride && nextDescription && nextDescription !== existingDescriptionOut) {
       writeFields[LISTING_DESCRIPTION_OUTPUT_FIELD] = nextDescription;
       summary.descriptionGenerated += 1;
+    } else if (descriptionManualOverride) {
+      summary.skippedManualOverride += 1;
     }
 
-    if (hasShortDescriptionField && nextShortDescription && nextShortDescription !== existingShort) {
+    if (!shortDescriptionManualOverride && hasShortDescriptionField && nextShortDescription && nextShortDescription !== existingShort) {
       writeFields[LISTING_SHORT_DESCRIPTION_FIELD] = nextShortDescription;
       summary.shortDescriptionWritten += 1;
+    } else if (shortDescriptionManualOverride) {
+      summary.skippedManualOverride += 1;
     }
 
     if (Object.keys(writeFields).length === 0) {
@@ -443,7 +504,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         counts: summary,
         message:
           `Phase 7.4 progress ${i + 1}/${listingRows.length}: eligible=${summary.listingsEligible}, ` +
-          `matched=${summary.masterMatched}, titles=${summary.titleGenerated}, descriptions=${summary.descriptionGenerated}, pendingWrites=${updates.length}`
+          `matched=${summary.masterMatched}, titles=${summary.titleGenerated}, descriptions=${summary.descriptionGenerated}, ` +
+          `manualSkipped=${summary.skippedManualOverride}, publishedSkipped=${summary.skippedAlreadyPublished}, pendingWrites=${updates.length}`
       });
     }
   }
@@ -475,7 +537,9 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     stage: 'completed',
     percent: 100,
     counts: summary,
-    message: `Phase 7.4 completed. Titles=${summary.titleGenerated}, Descriptions=${summary.descriptionGenerated}, WritesFailed=${summary.writeFailures}.`
+    message:
+      `Phase 7.4 completed. Titles=${summary.titleGenerated}, Descriptions=${summary.descriptionGenerated}, ` +
+      `ManualSkipped=${summary.skippedManualOverride}, PublishedSkipped=${summary.skippedAlreadyPublished}, WritesFailed=${summary.writeFailures}.`
   });
 
   return summary;
@@ -484,3 +548,4 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
 module.exports = {
   runPhase74TitleDescription
 };
+

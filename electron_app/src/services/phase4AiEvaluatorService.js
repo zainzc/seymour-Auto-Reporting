@@ -40,7 +40,20 @@ function isPromptCacheUnsupported(error) {
   return text.includes('prompt_cache_key') || text.includes('unknown parameter');
 }
 
+function parseIpnSet(value) {
+  const text = String(value || '');
+  if (!text.trim()) return new Set();
+  return new Set(
+    text
+      .split(/[\n,;|]+/)
+      .map(item => normalizeText(item).toUpperCase())
+      .filter(Boolean)
+  );
+}
+
 class Phase4AiEvaluatorService {
+  static sharedFieldResolutionCache = new Map();
+
   constructor(config = {}) {
     this.apiKey = normalizeText(config.apiKey);
     this.model = normalizeText(config.model || 'gpt-5.4-nano');
@@ -71,6 +84,7 @@ class Phase4AiEvaluatorService {
     this.debugPromptIpn = normalizeText(
       config.debugPromptIpn || process.env.PHASE4B_DEBUG_PROMPT_IPN || process.env.PHASE4_DEBUG_PROMPT_IPN || ''
     ).toUpperCase();
+    this.debugPromptIpnSet = parseIpnSet(this.debugPromptIpn);
     this.loggedDebugPromptKeys = new Set();
 
     if (!this.apiKey) {
@@ -84,6 +98,60 @@ class Phase4AiEvaluatorService {
         Authorization: `Bearer ${this.apiKey}`,
         'Content-Type': 'application/json'
       }
+    });
+  }
+
+  shouldDebugIpn(ipn = '') {
+    const value = normalizeText(ipn).toUpperCase();
+    if (!value) return false;
+    return this.debugPromptIpnSet.size > 0 && this.debugPromptIpnSet.has(value);
+  }
+
+  buildFieldPromptInput(payload = {}) {
+    return {
+      recordKey: normalizeText(payload.recordKey),
+      ipn: normalizeText(payload.ipn),
+      prefix: normalizeText(payload.prefix),
+      tableName: normalizeText(payload.tableName),
+      fieldName: normalizeText(payload.fieldName),
+      ruleType: normalizeText(payload.ruleType).toUpperCase(),
+      masterPartsData: payload.masterPartsData || {},
+      allowedValues: Array.isArray(payload.allowedValues) ? payload.allowedValues : [],
+      listingTitle: normalizeText(payload.listingTitle),
+      listingDescription: normalizeText(payload.listingDescription),
+      listingConditionsAndOptions: normalizeText(payload.listingConditionsAndOptions)
+    };
+  }
+
+  buildFieldCacheKey(promptInput = {}) {
+    return JSON.stringify({
+      ipn: normalizeText(promptInput.ipn).toUpperCase(),
+      prefix: normalizeText(promptInput.prefix),
+      tableName: normalizeText(promptInput.tableName),
+      fieldName: normalizeText(promptInput.fieldName),
+      ruleType: normalizeText(promptInput.ruleType).toUpperCase(),
+      masterPartsData: promptInput.masterPartsData || {},
+      allowedValues: Array.isArray(promptInput.allowedValues) ? promptInput.allowedValues : [],
+      listingTitle: normalizeText(promptInput.listingTitle),
+      listingDescription: normalizeText(promptInput.listingDescription),
+      listingConditionsAndOptions: normalizeText(promptInput.listingConditionsAndOptions)
+    });
+  }
+
+  getCachedFieldResult(promptInput = {}) {
+    const key = this.buildFieldCacheKey(promptInput);
+    return Phase4AiEvaluatorService.sharedFieldResolutionCache.get(key) || null;
+  }
+
+  setCachedFieldResult(promptInput = {}, result = null) {
+    if (!result) return;
+    const key = this.buildFieldCacheKey(promptInput);
+    Phase4AiEvaluatorService.sharedFieldResolutionCache.set(key, {
+      value: normalizeText(result.value),
+      confidence: clampConfidence(result.confidence),
+      reason: normalizeText(result.reason),
+      webSearchUsed: Boolean(result.webSearchUsed),
+      webSources: Array.isArray(result.webSources) ? result.webSources : []
     });
   }
 
@@ -238,22 +306,254 @@ class Phase4AiEvaluatorService {
     const text = this.extractResponsesText(response?.data || {});
     const parsed = extractJsonObject(text) || {};
     const list = Array.isArray(parsed?.results) ? parsed.results : [];
+    const sources = this.extractWebSources(response?.data || {});
     const resultsByField = new Map();
     for (const row of list) {
       const fieldName = normalizeText(row?.fieldName);
       if (!fieldName) continue;
-      resultsByField.set(fieldName, {
+      const result = {
         value: normalizeText(row?.value),
         confidence: clampConfidence(row?.confidence),
         reason: normalizeText(row?.reason),
         webSearchUsed: true,
-        webSources: this.extractWebSources(response?.data || {})
-      });
+        webSources: sources
+      };
+      resultsByField.set(fieldName, result);
+    }
+    for (const item of items) {
+      const fieldName = normalizeText(item?.fieldName);
+      if (!fieldName) continue;
+      const result = resultsByField.get(fieldName);
+      if (!result) continue;
+      this.setCachedFieldResult(this.buildFieldPromptInput(item), result);
     }
     return {
       resultsByField,
-      webSources: this.extractWebSources(response?.data || {})
+      webSources: sources
     };
+  }
+
+  async evaluateFieldsWithSharedWebSearchBatch(payloads = [], options = {}) {
+    const items = Array.isArray(payloads) ? payloads : [];
+    const ipnBatchSize = Math.max(
+      1,
+      Math.min(300, Number(options?.ipnBatchSize || process.env.PHASE4_AI_IPN_BATCH_SIZE || 250) || 250)
+    );
+    const maxItemsPerCall = Math.max(
+      1,
+      Math.min(800, Number(options?.maxItemsPerCall || process.env.PHASE4_WEB_MAX_ITEMS_PER_CALL || 400) || 400)
+    );
+    const resultsByRequestId = new Map();
+
+    const unresolved = [];
+    for (let i = 0; i < items.length; i += 1) {
+      const raw = items[i] || {};
+      const requestId = normalizeText(raw.requestId || `${i + 1}`);
+      const promptInput = this.buildFieldPromptInput(raw);
+      const cached = this.getCachedFieldResult(promptInput);
+      const canUseCachedForWebSearch =
+        Boolean(cached) &&
+        (Boolean(cached?.webSearchUsed) ||
+          (Boolean(cached?.value) && Number(cached?.confidence || 0) >= this.lowConfidenceThreshold));
+      if (canUseCachedForWebSearch) {
+        resultsByRequestId.set(requestId, { ...cached });
+      } else {
+        unresolved.push({ requestId, promptInput });
+      }
+    }
+    if (unresolved.length === 0) {
+      return { resultsByRequestId, failedCount: 0 };
+    }
+
+    const byPrefix = new Map();
+    for (const item of unresolved) {
+      const prefix = normalizeText(item?.promptInput?.prefix).toUpperCase() || '__NO_PREFIX__';
+      if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+      byPrefix.get(prefix).push(item);
+    }
+
+    const requestBatches = [];
+    for (const prefixItems of byPrefix.values()) {
+      const byIpn = new Map();
+      for (const item of prefixItems) {
+        const ipn = normalizeText(item?.promptInput?.ipn).toUpperCase() || '__NO_IPN__';
+        if (!byIpn.has(ipn)) byIpn.set(ipn, []);
+        byIpn.get(ipn).push(item);
+      }
+      const ipnGroups = Array.from(byIpn.values());
+      let cursor = [];
+      let cursorIpns = 0;
+      for (const group of ipnGroups) {
+        const nextIpns = cursorIpns + 1;
+        const nextItems = cursor.length + group.length;
+        if (cursor.length > 0 && (nextIpns > ipnBatchSize || nextItems > maxItemsPerCall)) {
+          requestBatches.push(cursor);
+          cursor = [];
+          cursorIpns = 0;
+        }
+        cursor.push(...group);
+        cursorIpns += 1;
+      }
+      if (cursor.length > 0) requestBatches.push(cursor);
+    }
+
+    let failedCount = 0;
+    for (let b = 0; b < requestBatches.length; b += 1) {
+      const batch = requestBatches[b];
+      const debugBatchItems = batch.filter(item => this.shouldDebugIpn(item?.promptInput?.ipn));
+      const requestBody = {
+        model: this.webSearchModel,
+        reasoning: { effort: 'low' },
+        tool_choice: 'auto',
+        include: ['web_search_call.action.sources'],
+        tools: [
+          {
+            type: 'web_search',
+            filters: {
+              allowed_domains: this.webSearchAllowedDomains
+            }
+          }
+        ],
+        input: [
+          {
+            role: 'system',
+            content: [
+              {
+                type: 'input_text',
+                text: [
+                  'Return only valid JSON.',
+                  'Resolve multiple item-specific fields for multiple automotive IPNs.',
+                  `Allowed domains: ${this.webSearchAllowedDomains.join(', ')}.`,
+                  'Do not guess.',
+                  'Each result must be evidence-based for that exact item.',
+                  'If evidence is weak/missing/conflicting, return empty value and low confidence.',
+                  'If allowedValues is non-empty, value must exactly match one allowed value.',
+                  'Output exact JSON shape: {"results":[{"requestId":"string","value":"string_or_empty","confidence":0,"reason":"short_reason"}]}'
+                ].join(' ')
+              }
+            ]
+          },
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'input_text',
+                text: JSON.stringify({
+                  task: 'phase4_field_resolution_web_search_batch_multi_ipn',
+                  items: batch.map(item => ({
+                    requestId: item.requestId,
+                    input: item.promptInput
+                  }))
+                })
+              }
+            ]
+          }
+        ]
+      };
+      if (debugBatchItems.length > 0) {
+        const debugIpns = Array.from(
+          new Set(debugBatchItems.map(item => normalizeText(item?.promptInput?.ipn).toUpperCase()).filter(Boolean))
+        );
+        console.log(
+          '[Phase4AiEvaluatorService][DEBUG_PROMPT] Web-search batch requestBody:',
+          JSON.stringify(
+            {
+              debugIpns,
+              batchSize: batch.length,
+              requestBody
+            },
+            null,
+            2
+          )
+        );
+      }
+
+      let response;
+      let batchFailed = false;
+      try {
+        response = await retryWithBackoff(
+          async () =>
+            this.client.post('/responses', requestBody, {
+              timeout: this.webSearchTimeoutMs
+            }),
+          {
+            maxAttempts: this.maxAttempts,
+            baseDelayMs: this.baseDelayMs
+          }
+        );
+      } catch (error) {
+        batchFailed = true;
+      }
+      if (debugBatchItems.length > 0) {
+        const debugIpns = Array.from(
+          new Set(debugBatchItems.map(item => normalizeText(item?.promptInput?.ipn).toUpperCase()).filter(Boolean))
+        );
+        console.log(
+          '[Phase4AiEvaluatorService][DEBUG_PROMPT] Web-search batch raw response:',
+          JSON.stringify(
+            {
+              debugIpns,
+              batchSize: batch.length,
+              response: response?.data || {}
+            },
+            null,
+            2
+          )
+        );
+      }
+
+      if (batchFailed || !response) {
+        failedCount += batch.length;
+        for (const item of batch) {
+          resultsByRequestId.set(item.requestId, {
+            value: '',
+            confidence: 0,
+            reason: 'web-search batch failed',
+            webSearchUsed: false,
+            webSources: []
+          });
+        }
+        continue;
+      }
+
+      const text = this.extractResponsesText(response?.data || {});
+      const parsed = extractJsonObject(text) || {};
+      const rows = Array.isArray(parsed?.results) ? parsed.results : [];
+      const sources = this.extractWebSources(response?.data || {});
+      const parsedById = new Map();
+      for (const row of rows) {
+        const requestId = normalizeText(row?.requestId);
+        if (!requestId) continue;
+        parsedById.set(requestId, {
+          value: normalizeText(row?.value),
+          confidence: clampConfidence(row?.confidence),
+          reason: normalizeText(row?.reason),
+          webSearchUsed: true,
+          webSources: sources
+        });
+      }
+      for (const item of batch) {
+        const result = parsedById.get(item.requestId) || {
+          value: '',
+          confidence: 0,
+          reason: 'no web-search result returned',
+          webSearchUsed: true,
+          webSources: sources
+        };
+        resultsByRequestId.set(item.requestId, result);
+        this.setCachedFieldResult(item.promptInput, result);
+      }
+
+      if (typeof options?.onBatchComplete === 'function') {
+        options.onBatchComplete({
+          index: b + 1,
+          total: requestBatches.length,
+          size: batch.length
+        });
+      }
+    }
+
+    return { resultsByRequestId, failedCount };
   }
 
   async evaluateFieldChat(promptInput = {}) {
@@ -310,6 +610,221 @@ class Phase4AiEvaluatorService {
       webSearchUsed: false,
       webSources: []
     };
+  }
+
+  async evaluateFieldChatBatch(payloads = [], options = {}) {
+    const items = Array.isArray(payloads) ? payloads : [];
+    const ipnBatchSize = Math.max(
+      1,
+      Math.min(300, Number(options?.ipnBatchSize || process.env.PHASE4_AI_IPN_BATCH_SIZE || 250) || 250)
+    );
+    const maxItemsPerCall = Math.max(
+      1,
+      Math.min(1200, Number(options?.maxItemsPerCall || process.env.PHASE4_AI_MAX_ITEMS_PER_CALL || 600) || 600)
+    );
+
+    const resultsByRequestId = new Map();
+    const unresolved = [];
+    for (let i = 0; i < items.length; i += 1) {
+      const raw = items[i] || {};
+      const requestId = normalizeText(raw.requestId || `${i + 1}`);
+      const promptInput = this.buildFieldPromptInput(raw);
+      const cached = this.getCachedFieldResult(promptInput);
+      if (cached) {
+        resultsByRequestId.set(requestId, { ...cached });
+      } else {
+        unresolved.push({ requestId, promptInput });
+      }
+    }
+    if (unresolved.length === 0) {
+      return { resultsByRequestId, failedCount: 0 };
+    }
+
+    const byPrefix = new Map();
+    for (const item of unresolved) {
+      const prefix = normalizeText(item?.promptInput?.prefix).toUpperCase() || '__NO_PREFIX__';
+      if (!byPrefix.has(prefix)) byPrefix.set(prefix, []);
+      byPrefix.get(prefix).push(item);
+    }
+
+    const requestBatches = [];
+    for (const prefixItems of byPrefix.values()) {
+      const byIpn = new Map();
+      for (const item of prefixItems) {
+        const ipn = normalizeText(item?.promptInput?.ipn).toUpperCase() || '__NO_IPN__';
+        if (!byIpn.has(ipn)) byIpn.set(ipn, []);
+        byIpn.get(ipn).push(item);
+      }
+      const ipnGroups = Array.from(byIpn.values());
+      let cursor = [];
+      let cursorIpns = 0;
+      for (const group of ipnGroups) {
+        const nextIpns = cursorIpns + 1;
+        const nextItems = cursor.length + group.length;
+        if (cursor.length > 0 && (nextIpns > ipnBatchSize || nextItems > maxItemsPerCall)) {
+          requestBatches.push(cursor);
+          cursor = [];
+          cursorIpns = 0;
+        }
+        cursor.push(...group);
+        cursorIpns += 1;
+      }
+      if (cursor.length > 0) requestBatches.push(cursor);
+    }
+
+    let failedCount = 0;
+    for (let b = 0; b < requestBatches.length; b += 1) {
+      const batch = requestBatches[b];
+      const requestBody = {
+        model: this.model,
+        temperature: 0,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'Return only valid JSON.',
+              'Resolve multiple item-specific fields for multiple IPNs.',
+              'Never guess.',
+              'Use only each item input evidence (masterPartsData, listingTitle, listingDescription, listingConditionsAndOptions, allowedValues).',
+              'If evidence is weak or missing, return empty value and low confidence.',
+              'If allowedValues is non-empty, value must exactly match one allowed value.',
+              'Output exact JSON shape: {"results":[{"requestId":"string","value":"string_or_empty","confidence":0,"reason":"short_reason"}]}'
+            ].join(' ')
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              task: 'phase4_field_resolution_first_pass_batch',
+              items: batch.map(item => ({
+                requestId: item.requestId,
+                input: item.promptInput
+              }))
+            })
+          }
+        ]
+      };
+      const shouldUsePromptCache = this.promptCacheEnabled && this.promptCacheKey;
+      if (shouldUsePromptCache) {
+        requestBody.prompt_cache_key = `${this.promptCacheKey}_batch`;
+      }
+      const debugBatchItems = batch.filter(item => this.shouldDebugIpn(item?.promptInput?.ipn));
+      if (debugBatchItems.length > 0) {
+        const debugIpns = Array.from(
+          new Set(debugBatchItems.map(item => normalizeText(item?.promptInput?.ipn).toUpperCase()).filter(Boolean))
+        );
+        console.log(
+          '[Phase4AiEvaluatorService][DEBUG_PROMPT] First-pass batch requestBody:',
+          JSON.stringify(
+            {
+              debugIpns,
+              batchSize: batch.length,
+              requestBody
+            },
+            null,
+            2
+          )
+        );
+      }
+
+      let response;
+      let batchFailed = false;
+      try {
+        response = await retryWithBackoff(
+          async () => this.client.post('/chat/completions', requestBody),
+          {
+            maxAttempts: this.maxAttempts,
+            baseDelayMs: this.baseDelayMs
+          }
+        );
+      } catch (error) {
+        if (shouldUsePromptCache && isPromptCacheUnsupported(error)) {
+          this.promptCacheEnabled = false;
+          delete requestBody.prompt_cache_key;
+          try {
+            response = await retryWithBackoff(
+              async () => this.client.post('/chat/completions', requestBody),
+              {
+                maxAttempts: this.maxAttempts,
+                baseDelayMs: this.baseDelayMs
+              }
+            );
+          } catch (retryError) {
+            batchFailed = true;
+          }
+        } else {
+          batchFailed = true;
+        }
+      }
+      if (debugBatchItems.length > 0) {
+        const debugIpns = Array.from(
+          new Set(debugBatchItems.map(item => normalizeText(item?.promptInput?.ipn).toUpperCase()).filter(Boolean))
+        );
+        console.log(
+          '[Phase4AiEvaluatorService][DEBUG_PROMPT] First-pass batch raw response:',
+          JSON.stringify(
+            {
+              debugIpns,
+              batchSize: batch.length,
+              response: response?.data || {}
+            },
+            null,
+            2
+          )
+        );
+      }
+
+      if (batchFailed || !response) {
+        failedCount += batch.length;
+        for (const item of batch) {
+          resultsByRequestId.set(item.requestId, {
+            value: '',
+            confidence: 0,
+            reason: 'batch first-pass failed',
+            webSearchUsed: false,
+            webSources: []
+          });
+        }
+        continue;
+      }
+
+      const parsed = this.parseChatCompletionJson(response);
+      const rows = Array.isArray(parsed?.results) ? parsed.results : [];
+      const parsedById = new Map();
+      for (const row of rows) {
+        const requestId = normalizeText(row?.requestId);
+        if (!requestId) continue;
+        parsedById.set(requestId, {
+          value: normalizeText(row?.value),
+          confidence: clampConfidence(row?.confidence),
+          reason: normalizeText(row?.reason),
+          webSearchUsed: false,
+          webSources: []
+        });
+      }
+
+      for (const item of batch) {
+        const result = parsedById.get(item.requestId) || {
+          value: '',
+          confidence: 0,
+          reason: 'no result returned',
+          webSearchUsed: false,
+          webSources: []
+        };
+        resultsByRequestId.set(item.requestId, result);
+        this.setCachedFieldResult(item.promptInput, result);
+      }
+
+      if (typeof options?.onBatchComplete === 'function') {
+        options.onBatchComplete({
+          index: b + 1,
+          total: requestBatches.length,
+          size: batch.length
+        });
+      }
+    }
+
+    return { resultsByRequestId, failedCount };
   }
 
   async evaluateFieldWithWebSearch(promptInput = {}) {
@@ -377,24 +892,14 @@ class Phase4AiEvaluatorService {
   }
 
   async evaluateField(payload = {}) {
-    const promptInput = {
-      recordKey: normalizeText(payload.recordKey),
-      ipn: normalizeText(payload.ipn),
-      prefix: normalizeText(payload.prefix),
-      tableName: normalizeText(payload.tableName),
-      fieldName: normalizeText(payload.fieldName),
-      ruleType: normalizeText(payload.ruleType).toUpperCase(),
-      masterPartsData: payload.masterPartsData || {},
-      allowedValues: Array.isArray(payload.allowedValues) ? payload.allowedValues : [],
-      listingTitle: normalizeText(payload.listingTitle),
-      listingDescription: normalizeText(payload.listingDescription),
-      listingConditionsAndOptions: normalizeText(payload.listingConditionsAndOptions)
-    };
+    const promptInput = this.buildFieldPromptInput(payload);
+    const cached = this.getCachedFieldResult(promptInput);
+    if (cached) return { ...cached };
 
     const currentIpn = normalizeText(promptInput.ipn).toUpperCase();
     const currentField = normalizeText(promptInput.fieldName);
     const debugKey = `${currentIpn}::${currentField}`.toUpperCase();
-    const shouldDebug = this.debugPromptIpn && currentIpn === this.debugPromptIpn;
+    const shouldDebug = this.shouldDebugIpn(currentIpn);
     if (shouldDebug && !this.loggedDebugPromptKeys.has(debugKey)) {
       console.log(
         '[Phase4AiEvaluatorService][DEBUG_PROMPT] Input payload for IPN:',
@@ -420,6 +925,7 @@ class Phase4AiEvaluatorService {
       if (shouldDebug && !this.loggedDebugPromptKeys.has(debugKey)) {
         this.loggedDebugPromptKeys.add(debugKey);
       }
+      this.setCachedFieldResult(promptInput, firstPass);
       return firstPass;
     }
 
@@ -443,6 +949,7 @@ class Phase4AiEvaluatorService {
         );
         this.loggedDebugPromptKeys.add(debugKey);
       }
+      this.setCachedFieldResult(promptInput, firstPass);
       return firstPass;
     }
     if (shouldDebug && !this.loggedDebugPromptKeys.has(debugKey)) {
@@ -455,14 +962,19 @@ class Phase4AiEvaluatorService {
     }
     const secondPassHigh =
       Boolean(secondPass?.value) && Number(secondPass?.confidence || 0) >= this.lowConfidenceThreshold;
-    if (secondPassHigh) return secondPass;
+    if (secondPassHigh) {
+      this.setCachedFieldResult(promptInput, secondPass);
+      return secondPass;
+    }
 
     const fallback = secondPass.confidence >= firstPass.confidence ? secondPass : firstPass;
-    return {
+    const finalResult = {
       ...fallback,
       webSearchUsed: true,
       webSources: secondPass.webSources || []
     };
+    this.setCachedFieldResult(promptInput, finalResult);
+    return finalResult;
   }
 
   async rewriteFitment(payload = {}) {

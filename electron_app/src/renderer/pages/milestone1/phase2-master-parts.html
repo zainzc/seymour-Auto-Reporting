@@ -669,14 +669,14 @@
                 <input id="phase4-unified-listings-table" type="text" value="eBay Listings (API) (Mock)">
               </div>
               <div class="form-group">
-                <label for="phase4-unified-test-ipn">Phase 4B Test IPN (optional)</label>
-                <input id="phase4-unified-test-ipn" type="text" placeholder="e.g., 604-59029">
-                <div class="hint">Run/debug Phase 4B-lite for a single IPN and log its prompt payload once.</div>
+                <label for="phase4-unified-test-ipn">Phase 4B Test IPN(s) (optional)</label>
+                <input id="phase4-unified-test-ipn" type="text" placeholder="e.g., 604-59029, 114-00780L">
+                <div class="hint">Comma/newline separated IPNs supported. Runs only those IPNs.</div>
               </div>
               <div class="form-group">
-                <label for="phase4-unified-test-ipn-4d">Phase 4D Test IPN (optional)</label>
-                <input id="phase4-unified-test-ipn-4d" type="text" placeholder="e.g., 114-58944L">
-                <div class="hint">Logs Phase 4D AI prompt payload for this IPN.</div>
+                <label for="phase4-unified-test-ipn-4d">Phase 4D Test IPN(s) (optional)</label>
+                <input id="phase4-unified-test-ipn-4d" type="text" placeholder="e.g., 114-58944L, 128-53150BR">
+                <div class="hint">Comma/newline separated IPNs supported for Phase 4D filtering and logs.</div>
               </div>
               <div class="btn-group">
                 <button id="run-item-specific-sync-phase4-btn" class="btn btn-secondary" onclick="runItemSpecificSync()">Sync Item Specific Tables</button>
@@ -797,8 +797,8 @@
                   <div class="hint">Debug only. If set, only this exact table name is processed in Phase 4B.</div>
                 </div>
                 <div class="form-group">
-                  <label for="phase4b-test-ipn">Phase 4B Test IPN (optional)</label>
-                  <input id="phase4b-test-ipn" type="text" placeholder="e.g., 604-59029">
+                <label for="phase4b-test-ipn">Phase 4B Test IPN(s) (optional)</label>
+                <input id="phase4b-test-ipn" type="text" placeholder="e.g., 604-59029, 114-00780L">
                   <div class="hint">If set, only this IPN is processed and its prompt payload is logged once.</div>
                 </div>
                 <div class="btn-group">
@@ -854,8 +854,8 @@
                   <input id="phase4d-listings-table" type="text" value="eBay Listings (API) (Mock)">
                 </div>
                 <div class="form-group">
-                  <label for="phase4d-test-ipn">Phase 4D Test IPN (optional)</label>
-                  <input id="phase4d-test-ipn" type="text" placeholder="e.g., 114-58944L">
+                <label for="phase4d-test-ipn">Phase 4D Test IPN(s) (optional)</label>
+                <input id="phase4d-test-ipn" type="text" placeholder="e.g., 114-58944L, 128-53150BR">
                   <div class="hint">Debug only. Logs AI prompt for this IPN during Phase 4D.</div>
                 </div>
               </div>
@@ -906,6 +906,141 @@
           </div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card-title">Phase 5 (Approval Gate Publishing)</h2>
+      <div class="grid-2">
+        <div>
+          <div class="form-group">
+            <label for="phase5-mode">Publishing Mode</label>
+            <select id="phase5-mode">
+              <option value="A" selected>Option A - Approval Gate (explicit approval required)</option>
+              <option value="B">Option B - Scheduled Auto-Push</option>
+            </select>
+            <div class="hint">Use Option A for manual approval runs. Use Option B for scheduled runs.</div>
+          </div>
+          <div class="form-group">
+            <label for="phase5-listings-table">Listings Queue Table</label>
+            <input id="phase5-listings-table" type="text" value="eBay Listings (API) (Mock)">
+          </div>
+          <div class="form-group">
+            <label for="phase5-batches-table">Batches Table</label>
+            <input id="phase5-batches-table" type="text" placeholder="Listing Batches">
+          </div>
+          <div class="form-group">
+            <label for="phase5-batch-status-field-name">Batch Status Field</label>
+            <input id="phase5-batch-status-field-name" type="text" placeholder="Batch Status">
+          </div>
+          <div class="form-group">
+            <label for="phase5-batch-link-field-name">Listing Batch Link Field</label>
+            <input id="phase5-batch-link-field-name" type="text" placeholder="Listing Batches">
+          </div>
+          <div class="form-group">
+            <label for="phase5-ebay-environment">eBay Environment</label>
+            <select id="phase5-ebay-environment">
+              <option value="sandbox" selected>Sandbox</option>
+              <option value="production">Production</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="phase5-ebay-client-id">eBay App ID (Client ID)</label>
+            <input id="phase5-ebay-client-id" type="text" placeholder="Client ID / App ID">
+          </div>
+          <div class="form-group">
+            <label for="phase5-ebay-dev-id">eBay Dev ID</label>
+            <input id="phase5-ebay-dev-id" type="text" placeholder="Dev ID">
+          </div>
+          <div class="form-group">
+            <label for="phase5-ebay-client-secret">eBay Cert ID (Client Secret)</label>
+            <input id="phase5-ebay-client-secret" type="password" placeholder="Client Secret / Cert ID">
+          </div>
+          <div class="form-group">
+            <label for="phase5-ebay-runame">eBay RuName</label>
+            <input id="phase5-ebay-runame" type="text" placeholder="RuName">
+          </div>
+          <div class="btn-group" style="margin-top: 8px;">
+            <button id="phase5-test-ebay-creds-btn" class="btn btn-secondary" onclick="testPhase5EbayCredentials()">Test eBay Credentials</button>
+          </div>
+        </div>
+        <div>
+          <div class="form-group">
+            <label for="phase5-sheets-log-enabled">Sheets Publish Log Enabled</label>
+            <select id="phase5-sheets-log-enabled">
+              <option value="false" selected>False</option>
+              <option value="true">True</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="phase5-sheets-log-spreadsheet-id">Sheets Publish Log Spreadsheet ID</label>
+            <input id="phase5-sheets-log-spreadsheet-id" type="text" placeholder="Google Spreadsheet ID">
+          </div>
+          <div class="form-group">
+            <label for="phase5-sheets-log-tab-name">Sheets Publish Log Tab</label>
+            <input id="phase5-sheets-log-tab-name" type="text" value="Log">
+          </div>
+          <div class="form-group">
+            <label for="phase5-autopush-enabled">Option B Auto-Push Enabled</label>
+            <select id="phase5-autopush-enabled">
+              <option value="false" selected>False</option>
+              <option value="true">True</option>
+            </select>
+          </div>
+          <div class="btn-group">
+            <button id="run-phase5-dry-run-btn" class="btn btn-secondary" onclick="runPhase5DryRun()">Dry Run Publish Approved</button>
+            <button id="run-phase5-btn" class="btn btn-primary" onclick="runPhase5()">Publish Approved</button>
+          </div>
+          <div class="btn-group" style="margin-top: 8px;">
+            <button id="phase5-start-autopush-btn" class="btn btn-secondary" onclick="startPhase5AutoPush()">Start Auto-Push</button>
+            <button id="phase5-stop-autopush-btn" class="btn btn-secondary" onclick="stopPhase5AutoPush()">Stop Auto-Push</button>
+            <button id="phase5-run-autopush-now-btn" class="btn btn-secondary" onclick="runPhase5AutoPushNow()">Run Auto-Push Now</button>
+          </div>
+          <div class="hint" id="phase5-autopush-status-text">Option B schedule: idle</div>
+          <div class="hint" id="phase5-status-text">Phase 5 status: idle</div>
+          <div class="hint" id="phase5-batch-metrics-text" style="display:none;">Batch metrics: not loaded</div>
+        </div>
+      </div>
+
+      <div style="display:none;">
+        <input id="phase5-approval-field-name" type="text" value="Approval Status">
+        <input id="phase5-schema-csv-path" type="text" value="">
+        <input id="phase5-group-field-name" type="text" value="">
+        <input id="phase5-group-value" type="text" value="">
+        <select id="phase5-enforce-batch-approval"><option value="true" selected>True</option><option value="false">False</option></select>
+        <input id="phase5-batch-approved-value" type="text" value="Approved">
+        <input id="phase5-required-category-id-field" type="text" value="eBay Category ID">
+        <input id="phase5-required-title-field" type="text" value="Product Title(New)">
+        <input id="phase5-required-description-field" type="text" value="">
+        <input id="phase5-required-item-specifics-field" type="text" value="Item Specifics">
+        <input id="phase5-required-item-specific-fields" type="text" value="Brand,Manufacturer,Model Number">
+        <input id="phase5-blocked-field-name" type="text" value="Blocked">
+        <input id="phase5-clickup-exception-field-name" type="text" value="ClickUp Exception Status">
+        <input id="phase5-clickup-resolved-values" type="text" value="resolved,done,closed,complete">
+        <input id="phase5-publish-status-field-name" type="text" value="Publish Status">
+        <input id="phase5-published-at-field-name" type="text" value="Published At">
+        <input id="phase5-publish-run-id-field-name" type="text" value="Publish Run ID">
+        <input id="phase5-payload-hash-field-name" type="text" value="Payload Hash">
+        <input id="phase5-payload-hash-fields" type="text" value="eBay Category ID,Product Title(New),Price,Quantity">
+        <input id="phase5-published-log-pending-value" type="text" value="Published (Log Pending)">
+        <input id="phase5-sheets-log-auth-context" type="text" value="inventory">
+        <select id="phase5-live-compare-enabled"><option value="false" selected>False</option><option value="true">True</option></select>
+        <input id="phase5-live-compare-api-url" type="text" value="">
+        <input id="phase5-live-compare-api-key" type="text" value="">
+        <input id="phase5-test-batch-record-ids" type="text" value="">
+        <input id="phase5-autopush-cron" type="text" value="0 * * * *">
+        <input id="phase5-autopush-timezone" type="text" value="">
+        <input id="phase5-autopush-eligibility-field" type="text" value="">
+        <input id="phase5-autopush-eligibility-values" type="text" value="">
+        <input id="phase5-batch-record-id" type="text" value="">
+        <select id="phase5-batch-status-value">
+          <option value="Approved">Approved</option>
+          <option value="Hold">Hold</option>
+          <option value="Ready">Ready</option>
+          <option value="Building">Building</option>
+        </select>
+        <button id="phase5-refresh-batch-metrics-btn" type="button" onclick="refreshPhase5BatchMetrics()">Refresh Batch Metrics</button>
+        <button id="phase5-set-batch-status-btn" type="button" onclick="setPhase5BatchStatus()">Set Batch Status</button>
       </div>
     </section>
 
@@ -1078,6 +1213,7 @@
     let isPhase4BLiteRunning = false;
     let isPhase4CMFRunning = false;
     let isPhase4DRunning = false;
+    let isPhase5Running = false;
     let isPhase6Running = false;
     let isPhase4PipelineRunning = false;
     let isPhase4CombinedRunning = false;
@@ -1106,6 +1242,7 @@
     const DEFAULT_PHASE4CMF_DRY_RUN = false;
     const DEFAULT_PHASE4D_DRY_RUN = false;
     const DEFAULT_PHASE4D_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+    const DEFAULT_PHASE5_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
     const DEFAULT_OPENAI_MODEL = 'gpt-5.4-mini';
     const DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS = 'To Do';
     const DEFAULT_PHASE4B_CLICKUP_LIST_ID = '';
@@ -1118,6 +1255,12 @@
     const DEFAULT_PHASE72_MAX_IPNS = 5;
     const DEFAULT_PHASE74_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
     const DEFAULT_PHASE74_MAX_LISTINGS = 5;
+    const DEFAULT_PHASE5_MODE = 'A';
+    const DEFAULT_PHASE5_AUTOPUSH_ENABLED = false;
+    const DEFAULT_PHASE5_AUTOPUSH_CRON = '0 * * * *';
+    const DEFAULT_PHASE5_BATCHES_TABLE = 'Listing Batches';
+    const DEFAULT_PHASE5_BATCH_STATUS_FIELD = 'Batch Status';
+    const DEFAULT_PHASE5_BATCH_APPROVED_VALUE = 'Approved';
     const REQUIRED_FIELDS = [
       ['sheet-id', 'Google Sheet ID'],
       ['tab-name', 'Google Tab Name'],
@@ -1187,6 +1330,13 @@
       phase4d_scan_listings: 'Phase 4D: Processing listings',
       completed: 'Phase 4D completed',
       error: 'Phase 4D failed'
+    };
+    const PHASE5_STAGE_LABELS = {
+      phase5_load_schema: 'Phase 5: Resolving queue schema',
+      phase5_load_queue: 'Phase 5: Loading queue records',
+      phase5_publish: 'Phase 5: Publishing records',
+      completed: 'Phase 5 completed',
+      error: 'Phase 5 failed'
     };
     const PHASE6_STAGE_LABELS = {
       phase6_load_master: 'Phase 6: Loading Master Parts',
@@ -1458,6 +1608,14 @@
       const runPhase4PipelineBtn = document.getElementById('run-phase4-pipeline-btn');
       const runPhase4CombinedBtn = document.getElementById('run-phase4-combined-btn');
       const runItemSpecificSyncPhase4Btn = document.getElementById('run-item-specific-sync-phase4-btn');
+      const runPhase5DryRunBtn = document.getElementById('run-phase5-dry-run-btn');
+      const runPhase5Btn = document.getElementById('run-phase5-btn');
+      const phase5TestEbayCredsBtn = document.getElementById('phase5-test-ebay-creds-btn');
+      const phase5StartAutoPushBtn = document.getElementById('phase5-start-autopush-btn');
+      const phase5StopAutoPushBtn = document.getElementById('phase5-stop-autopush-btn');
+      const phase5RunAutoPushNowBtn = document.getElementById('phase5-run-autopush-now-btn');
+      const phase5RefreshBatchMetricsBtn = document.getElementById('phase5-refresh-batch-metrics-btn');
+      const phase5SetBatchStatusBtn = document.getElementById('phase5-set-batch-status-btn');
       const runPhase6Btn = document.getElementById('run-phase6-btn');
       const runPhase72Btn = document.getElementById('run-phase72-btn');
       const runPhase74Btn = document.getElementById('run-phase74-btn');
@@ -1471,6 +1629,7 @@
         isPhase4BLiteRunning ||
         isPhase4CMFRunning ||
         isPhase4DRunning ||
+        isPhase5Running ||
         isPhase6Running ||
         isPhase4PipelineRunning ||
         isPhase4CombinedRunning ||
@@ -1484,6 +1643,7 @@
       const hasAirtableCore =
         Boolean(document.getElementById('airtable-token').value.trim()) &&
         Boolean(document.getElementById('airtable-base-id').value.trim());
+      const isPhase5OptionB = (document.getElementById('phase5-mode')?.value || 'A').toUpperCase() === 'B';
       const hasPhase72DriveFolder = Boolean(document.getElementById('phase72-drive-folder-id').value.trim());
       runBtn.disabled = busy || !validateForm(false);
       runPhase3Btn.disabled = busy || !validatePhase3Form(false);
@@ -1515,6 +1675,30 @@
       }
       if (runPhase6Btn) {
         runPhase6Btn.disabled = busy || !hasAirtableCore || !hasOpenAiKey;
+      }
+      if (runPhase5DryRunBtn) {
+        runPhase5DryRunBtn.disabled = busy || !hasAirtableCore || isPhase5OptionB;
+      }
+      if (runPhase5Btn) {
+        runPhase5Btn.disabled = busy || !hasAirtableCore || isPhase5OptionB;
+      }
+      if (phase5TestEbayCredsBtn) {
+        phase5TestEbayCredsBtn.disabled = busy;
+      }
+      if (phase5StartAutoPushBtn) {
+        phase5StartAutoPushBtn.disabled = busy || !hasAirtableCore || !isPhase5OptionB;
+      }
+      if (phase5StopAutoPushBtn) {
+        phase5StopAutoPushBtn.disabled = busy || !hasAirtableCore || !isPhase5OptionB;
+      }
+      if (phase5RunAutoPushNowBtn) {
+        phase5RunAutoPushNowBtn.disabled = busy || !hasAirtableCore || !isPhase5OptionB;
+      }
+      if (phase5RefreshBatchMetricsBtn) {
+        phase5RefreshBatchMetricsBtn.disabled = busy || !hasAirtableCore;
+      }
+      if (phase5SetBatchStatusBtn) {
+        phase5SetBatchStatusBtn.disabled = busy || !hasAirtableCore;
       }
       if (runPhase72Btn) {
         runPhase72Btn.disabled = busy || !hasAirtableCore || !hasPhase72DriveFolder;
@@ -1570,6 +1754,51 @@
         'phase4c-clickup-list-name',
         'phase4c-clickup-list-id',
         'phase4c-clickup-open-status',
+        'phase5-listings-table',
+        'phase5-mode',
+        'phase5-approval-field-name',
+        'phase5-group-field-name',
+        'phase5-group-value',
+        'phase5-schema-csv-path',
+        'phase5-enforce-batch-approval',
+        'phase5-batches-table',
+        'phase5-batch-status-field-name',
+        'phase5-batch-approved-value',
+        'phase5-batch-link-field-name',
+        'phase5-required-category-id-field',
+        'phase5-required-title-field',
+        'phase5-required-description-field',
+        'phase5-required-item-specifics-field',
+        'phase5-required-item-specific-fields',
+        'phase5-blocked-field-name',
+        'phase5-clickup-exception-field-name',
+        'phase5-clickup-resolved-values',
+        'phase5-publish-status-field-name',
+        'phase5-published-at-field-name',
+        'phase5-publish-run-id-field-name',
+        'phase5-payload-hash-field-name',
+        'phase5-payload-hash-fields',
+        'phase5-published-log-pending-value',
+        'phase5-sheets-log-enabled',
+        'phase5-sheets-log-spreadsheet-id',
+        'phase5-sheets-log-tab-name',
+        'phase5-sheets-log-auth-context',
+        'phase5-live-compare-enabled',
+        'phase5-live-compare-api-url',
+        'phase5-live-compare-api-key',
+        'phase5-test-batch-record-ids',
+        'phase5-batch-record-id',
+        'phase5-batch-status-value',
+        'phase5-ebay-environment',
+        'phase5-ebay-client-id',
+        'phase5-ebay-dev-id',
+        'phase5-ebay-client-secret',
+        'phase5-ebay-runame',
+        'phase5-autopush-enabled',
+        'phase5-autopush-cron',
+        'phase5-autopush-timezone',
+        'phase5-autopush-eligibility-field',
+        'phase5-autopush-eligibility-values',
         'phase6-listings-table',
         'phase6-test-ipns',
         'phase6-max-ipns',
@@ -1655,6 +1884,15 @@
       const stage = String(payload.stage || '').trim();
       const percent = Number(payload.percent || 0);
       const label = PHASE4D_STAGE_LABELS[stage] || 'Phase 4D running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
+    function formatPhase5ProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = PHASE5_STAGE_LABELS[stage] || 'Phase 5 running';
       const message = String(payload.message || '').trim();
       if (message) return `${label} (${percent}%): ${message}`;
       return `${label} (${percent}%)`;
@@ -1834,6 +2072,58 @@
         document.getElementById('phase4cmf-dry-run').value = DEFAULT_PHASE4CMF_DRY_RUN ? 'true' : 'false';
         document.getElementById('phase4d-dry-run').value = DEFAULT_PHASE4D_DRY_RUN ? 'true' : 'false';
         document.getElementById('phase4d-listings-table').value = config.phase4DListingsTable || DEFAULT_PHASE4D_LISTINGS_TABLE;
+        document.getElementById('phase5-listings-table').value = config.phase5ListingsTable || DEFAULT_PHASE5_LISTINGS_TABLE;
+        document.getElementById('phase5-mode').value = (config.phase5Mode || DEFAULT_PHASE5_MODE).toUpperCase() === 'B' ? 'B' : 'A';
+        document.getElementById('phase5-approval-field-name').value = config.phase5ApprovalFieldName || '';
+        document.getElementById('phase5-group-field-name').value = config.phase5GroupFieldName || '';
+        document.getElementById('phase5-group-value').value = config.phase5GroupValue || '';
+        document.getElementById('phase5-schema-csv-path').value = config.phase5SchemaCsvPath || '';
+        document.getElementById('phase5-enforce-batch-approval').value =
+          String(config.phase5EnforceBatchApproval ?? true).toLowerCase() === 'false' ? 'false' : 'true';
+        document.getElementById('phase5-batches-table').value = config.phase5BatchesTable || DEFAULT_PHASE5_BATCHES_TABLE;
+        document.getElementById('phase5-batch-status-field-name').value =
+          config.phase5BatchStatusFieldName || DEFAULT_PHASE5_BATCH_STATUS_FIELD;
+        document.getElementById('phase5-batch-approved-value').value =
+          config.phase5BatchApprovedValue || DEFAULT_PHASE5_BATCH_APPROVED_VALUE;
+        document.getElementById('phase5-batch-link-field-name').value = config.phase5BatchLinkFieldName || '';
+        document.getElementById('phase5-required-category-id-field').value = config.phase5RequiredCategoryIdFieldName || '';
+        document.getElementById('phase5-required-title-field').value = config.phase5RequiredTitleFieldName || '';
+        document.getElementById('phase5-required-description-field').value = config.phase5RequiredDescriptionFieldName || '';
+        document.getElementById('phase5-required-item-specifics-field').value = config.phase5RequiredItemSpecificsFieldName || '';
+        document.getElementById('phase5-required-item-specific-fields').value = config.phase5RequiredItemSpecificFieldNames || '';
+        document.getElementById('phase5-blocked-field-name').value = config.phase5BlockedFieldName || '';
+        document.getElementById('phase5-clickup-exception-field-name').value = config.phase5ClickupExceptionFieldName || '';
+        document.getElementById('phase5-clickup-resolved-values').value =
+          config.phase5ClickupResolvedValues || 'resolved,done,closed,complete';
+        document.getElementById('phase5-publish-status-field-name').value = config.phase5PublishStatusFieldName || '';
+        document.getElementById('phase5-published-at-field-name').value = config.phase5PublishedAtFieldName || '';
+        document.getElementById('phase5-publish-run-id-field-name').value = config.phase5PublishRunIdFieldName || '';
+        document.getElementById('phase5-payload-hash-field-name').value = config.phase5PayloadHashFieldName || '';
+        document.getElementById('phase5-payload-hash-fields').value = config.phase5PayloadHashFields || '';
+        document.getElementById('phase5-published-log-pending-value').value =
+          config.phase5PublishedLogPendingValue || 'Published (Log Pending)';
+        document.getElementById('phase5-sheets-log-enabled').value =
+          String(config.phase5SheetsLogEnabled ?? false).toLowerCase() === 'true' ? 'true' : 'false';
+        document.getElementById('phase5-sheets-log-spreadsheet-id').value = config.phase5SheetsLogSpreadsheetId || '';
+        document.getElementById('phase5-sheets-log-tab-name').value = config.phase5SheetsLogTabName || 'Log';
+        document.getElementById('phase5-sheets-log-auth-context').value = config.phase5SheetsLogAuthContext || 'inventory';
+        document.getElementById('phase5-live-compare-enabled').value =
+          String(config.phase5LiveCompareEnabled ?? false).toLowerCase() === 'true' ? 'true' : 'false';
+        document.getElementById('phase5-live-compare-api-url').value = config.phase5LiveCompareApiUrl || '';
+        document.getElementById('phase5-live-compare-api-key').value = config.phase5LiveCompareApiKey || '';
+        document.getElementById('phase5-test-batch-record-ids').value = config.phase5TestBatchRecordIds || '';
+        document.getElementById('phase5-ebay-environment').value =
+          (config.phase5EbayEnvironment || 'sandbox').toLowerCase() === 'production' ? 'production' : 'sandbox';
+        document.getElementById('phase5-ebay-client-id').value = config.phase5EbayClientId || '';
+        document.getElementById('phase5-ebay-dev-id').value = config.phase5EbayDevId || '';
+        document.getElementById('phase5-ebay-client-secret').value = config.phase5EbayClientSecret || '';
+        document.getElementById('phase5-ebay-runame').value = config.phase5EbayRuName || '';
+        document.getElementById('phase5-autopush-enabled').value =
+          String(config.phase5AutoPushEnabled ?? DEFAULT_PHASE5_AUTOPUSH_ENABLED).toLowerCase() === 'true' ? 'true' : 'false';
+        document.getElementById('phase5-autopush-cron').value = config.phase5AutoPushCron || DEFAULT_PHASE5_AUTOPUSH_CRON;
+        document.getElementById('phase5-autopush-timezone').value = config.phase5AutoPushTimezone || '';
+        document.getElementById('phase5-autopush-eligibility-field').value = config.phase5AutoPushEligibilityFieldName || '';
+        document.getElementById('phase5-autopush-eligibility-values').value = config.phase5AutoPushEligibilityValues || '';
         syncPhase4LegacyInputsToUnified();
         const phase4bTestTableInput = document.getElementById('phase4b-test-table-name');
         if (phase4bTestTableInput) {
@@ -1975,6 +2265,117 @@
             const phase4dUnifiedTestIpnInput = document.getElementById('phase4-unified-test-ipn-4d');
             if (phase4dUnifiedTestIpnInput) {
               phase4dUnifiedTestIpnInput.value = phase4DConfig.testIpn || config.phase4DTestIpn || '';
+            }
+          }
+        }
+        if (window.phase5API && typeof window.phase5API.getConfig === 'function') {
+          const phase5Config = await window.phase5API.getConfig();
+          if (phase5Config && typeof phase5Config === 'object') {
+            document.getElementById('phase5-listings-table').value =
+              phase5Config.listingsTableName || document.getElementById('phase5-listings-table').value || DEFAULT_PHASE5_LISTINGS_TABLE;
+            document.getElementById('phase5-mode').value =
+              (phase5Config.phase5Mode || document.getElementById('phase5-mode').value || 'A').toUpperCase() === 'B' ? 'B' : 'A';
+            document.getElementById('phase5-approval-field-name').value =
+              phase5Config.approvalFieldName || document.getElementById('phase5-approval-field-name').value;
+            document.getElementById('phase5-group-field-name').value =
+              phase5Config.groupFieldName || document.getElementById('phase5-group-field-name').value;
+            document.getElementById('phase5-group-value').value =
+              phase5Config.groupValue || document.getElementById('phase5-group-value').value;
+            document.getElementById('phase5-schema-csv-path').value =
+              phase5Config.schemaCsvPath || document.getElementById('phase5-schema-csv-path').value;
+            document.getElementById('phase5-enforce-batch-approval').value =
+              String(phase5Config.phase5EnforceBatchApproval ?? document.getElementById('phase5-enforce-batch-approval').value ?? 'true')
+                .toLowerCase() === 'false'
+                ? 'false'
+                : 'true';
+            document.getElementById('phase5-batches-table').value =
+              phase5Config.phase5BatchesTable || document.getElementById('phase5-batches-table').value || DEFAULT_PHASE5_BATCHES_TABLE;
+            document.getElementById('phase5-batch-status-field-name').value =
+              phase5Config.phase5BatchStatusFieldName || document.getElementById('phase5-batch-status-field-name').value || DEFAULT_PHASE5_BATCH_STATUS_FIELD;
+            document.getElementById('phase5-batch-approved-value').value =
+              phase5Config.phase5BatchApprovedValue || document.getElementById('phase5-batch-approved-value').value || DEFAULT_PHASE5_BATCH_APPROVED_VALUE;
+            document.getElementById('phase5-batch-link-field-name').value =
+              phase5Config.phase5BatchLinkFieldName || document.getElementById('phase5-batch-link-field-name').value || '';
+            document.getElementById('phase5-required-category-id-field').value =
+              phase5Config.phase5RequiredCategoryIdFieldName || document.getElementById('phase5-required-category-id-field').value || '';
+            document.getElementById('phase5-required-title-field').value =
+              phase5Config.phase5RequiredTitleFieldName || document.getElementById('phase5-required-title-field').value || '';
+            document.getElementById('phase5-required-description-field').value =
+              phase5Config.phase5RequiredDescriptionFieldName || document.getElementById('phase5-required-description-field').value || '';
+            document.getElementById('phase5-required-item-specifics-field').value =
+              phase5Config.phase5RequiredItemSpecificsFieldName || document.getElementById('phase5-required-item-specifics-field').value || '';
+            document.getElementById('phase5-required-item-specific-fields').value =
+              phase5Config.phase5RequiredItemSpecificFieldNames || document.getElementById('phase5-required-item-specific-fields').value || '';
+            document.getElementById('phase5-blocked-field-name').value =
+              phase5Config.phase5BlockedFieldName || document.getElementById('phase5-blocked-field-name').value || '';
+            document.getElementById('phase5-clickup-exception-field-name').value =
+              phase5Config.phase5ClickupExceptionFieldName || document.getElementById('phase5-clickup-exception-field-name').value || '';
+            document.getElementById('phase5-clickup-resolved-values').value =
+              phase5Config.phase5ClickupResolvedValues || document.getElementById('phase5-clickup-resolved-values').value || 'resolved,done,closed,complete';
+            document.getElementById('phase5-publish-status-field-name').value =
+              phase5Config.phase5PublishStatusFieldName || document.getElementById('phase5-publish-status-field-name').value || '';
+            document.getElementById('phase5-published-at-field-name').value =
+              phase5Config.phase5PublishedAtFieldName || document.getElementById('phase5-published-at-field-name').value || '';
+            document.getElementById('phase5-publish-run-id-field-name').value =
+              phase5Config.phase5PublishRunIdFieldName || document.getElementById('phase5-publish-run-id-field-name').value || '';
+            document.getElementById('phase5-payload-hash-field-name').value =
+              phase5Config.phase5PayloadHashFieldName || document.getElementById('phase5-payload-hash-field-name').value || '';
+            document.getElementById('phase5-payload-hash-fields').value =
+              phase5Config.phase5PayloadHashFields || document.getElementById('phase5-payload-hash-fields').value || '';
+            document.getElementById('phase5-published-log-pending-value').value =
+              phase5Config.phase5PublishedLogPendingValue || document.getElementById('phase5-published-log-pending-value').value || 'Published (Log Pending)';
+            document.getElementById('phase5-sheets-log-enabled').value =
+              String(phase5Config.phase5SheetsLogEnabled ?? document.getElementById('phase5-sheets-log-enabled').value ?? 'false')
+                .toLowerCase() === 'true'
+                ? 'true'
+                : 'false';
+            document.getElementById('phase5-sheets-log-spreadsheet-id').value =
+              phase5Config.phase5SheetsLogSpreadsheetId || document.getElementById('phase5-sheets-log-spreadsheet-id').value || '';
+            document.getElementById('phase5-sheets-log-tab-name').value =
+              phase5Config.phase5SheetsLogTabName || document.getElementById('phase5-sheets-log-tab-name').value || 'Log';
+            document.getElementById('phase5-sheets-log-auth-context').value =
+              phase5Config.phase5SheetsLogAuthContext || document.getElementById('phase5-sheets-log-auth-context').value || 'inventory';
+            document.getElementById('phase5-live-compare-enabled').value =
+              String(phase5Config.phase5LiveCompareEnabled ?? document.getElementById('phase5-live-compare-enabled').value ?? 'false')
+                .toLowerCase() === 'true'
+                ? 'true'
+                : 'false';
+            document.getElementById('phase5-live-compare-api-url').value =
+              phase5Config.phase5LiveCompareApiUrl || document.getElementById('phase5-live-compare-api-url').value || '';
+            document.getElementById('phase5-live-compare-api-key').value =
+              phase5Config.phase5LiveCompareApiKey || document.getElementById('phase5-live-compare-api-key').value || '';
+            document.getElementById('phase5-test-batch-record-ids').value =
+              phase5Config.phase5TestBatchRecordIds || document.getElementById('phase5-test-batch-record-ids').value || '';
+            document.getElementById('phase5-ebay-environment').value =
+              (phase5Config.phase5EbayEnvironment || document.getElementById('phase5-ebay-environment').value || 'sandbox')
+                .toLowerCase() === 'production'
+                ? 'production'
+                : 'sandbox';
+            document.getElementById('phase5-ebay-client-id').value =
+              phase5Config.phase5EbayClientId || document.getElementById('phase5-ebay-client-id').value || '';
+            document.getElementById('phase5-ebay-dev-id').value =
+              phase5Config.phase5EbayDevId || document.getElementById('phase5-ebay-dev-id').value || '';
+            document.getElementById('phase5-ebay-client-secret').value =
+              phase5Config.phase5EbayClientSecret || document.getElementById('phase5-ebay-client-secret').value || '';
+            document.getElementById('phase5-ebay-runame').value =
+              phase5Config.phase5EbayRuName || document.getElementById('phase5-ebay-runame').value || '';
+            document.getElementById('phase5-autopush-enabled').value =
+              String(phase5Config.phase5AutoPushEnabled ?? document.getElementById('phase5-autopush-enabled').value ?? 'false')
+                .toLowerCase() === 'true'
+                ? 'true'
+                : 'false';
+            document.getElementById('phase5-autopush-cron').value =
+              phase5Config.phase5AutoPushCron || document.getElementById('phase5-autopush-cron').value || DEFAULT_PHASE5_AUTOPUSH_CRON;
+            document.getElementById('phase5-autopush-timezone').value =
+              phase5Config.phase5AutoPushTimezone || document.getElementById('phase5-autopush-timezone').value || '';
+            document.getElementById('phase5-autopush-eligibility-field').value =
+              phase5Config.phase5AutoPushEligibilityFieldName || document.getElementById('phase5-autopush-eligibility-field').value || '';
+            document.getElementById('phase5-autopush-eligibility-values').value =
+              phase5Config.phase5AutoPushEligibilityValues || document.getElementById('phase5-autopush-eligibility-values').value || '';
+            if (phase5Config.phase5AutoPushStatus && typeof phase5Config.phase5AutoPushStatus === 'object') {
+              const st = phase5Config.phase5AutoPushStatus;
+              document.getElementById('phase5-autopush-status-text').textContent =
+                `Option B schedule: ${st.active ? 'active' : 'inactive'}${st.running ? ' (running)' : ''}, cron='${st.cronExpression || DEFAULT_PHASE5_AUTOPUSH_CRON}'`;
             }
           }
         }
@@ -2356,6 +2757,92 @@
         phase4CClickupOpenStatus:
           document.getElementById('phase4c-clickup-open-status').value.trim() ||
           DEFAULT_PHASE4C_CLICKUP_OPEN_STATUS,
+        phase5ListingsTable:
+          document.getElementById('phase5-listings-table').value.trim() || DEFAULT_PHASE5_LISTINGS_TABLE,
+        phase5Mode:
+          document.getElementById('phase5-mode').value.trim().toUpperCase() === 'B' ? 'B' : 'A',
+        phase5AutoPushEnabled:
+          document.getElementById('phase5-autopush-enabled').value === 'true',
+        phase5AutoPushCron:
+          document.getElementById('phase5-autopush-cron').value.trim() || DEFAULT_PHASE5_AUTOPUSH_CRON,
+        phase5AutoPushTimezone:
+          document.getElementById('phase5-autopush-timezone').value.trim(),
+        phase5AutoPushEligibilityFieldName:
+          document.getElementById('phase5-autopush-eligibility-field').value.trim(),
+        phase5AutoPushEligibilityValues:
+          document.getElementById('phase5-autopush-eligibility-values').value.trim(),
+        phase5ApprovalFieldName:
+          document.getElementById('phase5-approval-field-name').value.trim(),
+        phase5GroupFieldName:
+          document.getElementById('phase5-group-field-name').value.trim(),
+        phase5GroupValue:
+          document.getElementById('phase5-group-value').value.trim(),
+        phase5SchemaCsvPath:
+          document.getElementById('phase5-schema-csv-path').value.trim(),
+        phase5EnforceBatchApproval:
+          document.getElementById('phase5-enforce-batch-approval').value === 'true',
+        phase5BatchesTable:
+          document.getElementById('phase5-batches-table').value.trim() || DEFAULT_PHASE5_BATCHES_TABLE,
+        phase5BatchStatusFieldName:
+          document.getElementById('phase5-batch-status-field-name').value.trim() || DEFAULT_PHASE5_BATCH_STATUS_FIELD,
+        phase5BatchApprovedValue:
+          document.getElementById('phase5-batch-approved-value').value.trim() || DEFAULT_PHASE5_BATCH_APPROVED_VALUE,
+        phase5BatchLinkFieldName:
+          document.getElementById('phase5-batch-link-field-name').value.trim(),
+        phase5RequiredCategoryIdFieldName:
+          document.getElementById('phase5-required-category-id-field').value.trim(),
+        phase5RequiredTitleFieldName:
+          document.getElementById('phase5-required-title-field').value.trim(),
+        phase5RequiredDescriptionFieldName:
+          document.getElementById('phase5-required-description-field').value.trim(),
+        phase5RequiredItemSpecificsFieldName:
+          document.getElementById('phase5-required-item-specifics-field').value.trim(),
+        phase5RequiredItemSpecificFieldNames:
+          document.getElementById('phase5-required-item-specific-fields').value.trim(),
+        phase5BlockedFieldName:
+          document.getElementById('phase5-blocked-field-name').value.trim(),
+        phase5ClickupExceptionFieldName:
+          document.getElementById('phase5-clickup-exception-field-name').value.trim(),
+        phase5ClickupResolvedValues:
+          document.getElementById('phase5-clickup-resolved-values').value.trim(),
+        phase5PublishStatusFieldName:
+          document.getElementById('phase5-publish-status-field-name').value.trim(),
+        phase5PublishedAtFieldName:
+          document.getElementById('phase5-published-at-field-name').value.trim(),
+        phase5PublishRunIdFieldName:
+          document.getElementById('phase5-publish-run-id-field-name').value.trim(),
+        phase5PayloadHashFieldName:
+          document.getElementById('phase5-payload-hash-field-name').value.trim(),
+        phase5PayloadHashFields:
+          document.getElementById('phase5-payload-hash-fields').value.trim(),
+        phase5PublishedLogPendingValue:
+          document.getElementById('phase5-published-log-pending-value').value.trim() || 'Published (Log Pending)',
+        phase5SheetsLogEnabled:
+          document.getElementById('phase5-sheets-log-enabled').value === 'true',
+        phase5SheetsLogSpreadsheetId:
+          document.getElementById('phase5-sheets-log-spreadsheet-id').value.trim(),
+        phase5SheetsLogTabName:
+          document.getElementById('phase5-sheets-log-tab-name').value.trim() || 'Log',
+        phase5SheetsLogAuthContext:
+          document.getElementById('phase5-sheets-log-auth-context').value.trim() || 'inventory',
+        phase5LiveCompareEnabled:
+          document.getElementById('phase5-live-compare-enabled').value === 'true',
+        phase5LiveCompareApiUrl:
+          document.getElementById('phase5-live-compare-api-url').value.trim(),
+        phase5LiveCompareApiKey:
+          document.getElementById('phase5-live-compare-api-key').value.trim(),
+        phase5TestBatchRecordIds:
+          document.getElementById('phase5-test-batch-record-ids').value.trim(),
+        phase5EbayEnvironment:
+          document.getElementById('phase5-ebay-environment').value.trim().toLowerCase() === 'production' ? 'production' : 'sandbox',
+        phase5EbayClientId:
+          document.getElementById('phase5-ebay-client-id').value.trim(),
+        phase5EbayDevId:
+          document.getElementById('phase5-ebay-dev-id').value.trim(),
+        phase5EbayClientSecret:
+          document.getElementById('phase5-ebay-client-secret').value.trim(),
+        phase5EbayRuName:
+          document.getElementById('phase5-ebay-runame').value.trim(),
         phase6ListingsTable:
           document.getElementById('phase6-listings-table').value.trim() || DEFAULT_PHASE6_LISTINGS_TABLE,
         phase6TestIpns:
@@ -2644,6 +3131,23 @@
           if (payload.stage) {
             const level = payload.stage === 'error' ? 'error' : 'info';
             logLine(`Phase4D progress: ${formatPhase4DProgressText(payload)}`, level);
+          }
+        });
+      }
+
+      if (window.phase5API && typeof window.phase5API.onProgress === 'function') {
+        window.phase5API.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatPhase5ProgressText(payload);
+          const statusText = document.getElementById('phase5-status-text');
+          if (statusText) {
+            statusText.textContent = `Phase 5 status: ${formatPhase5ProgressText(payload)}`;
+          }
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`Phase5 progress: ${formatPhase5ProgressText(payload)}`, level);
           }
         });
       }
@@ -3081,12 +3585,12 @@
         showStatus(
           'run-status',
           'success',
-          `Phase 7.4 completed. Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, WritesFailed=${summary.writeFailures || 0}.`
+          `Phase 7.4 completed. Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, ManualSkipped=${summary.skippedManualOverride || 0}, PublishedSkipped=${summary.skippedAlreadyPublished || 0}, WritesFailed=${summary.writeFailures || 0}.`
         );
         document.getElementById('phase74-status-text').textContent =
           `Phase 7.4 status: completed. Titles ${summary.titleGenerated || 0}, Descriptions ${summary.descriptionGenerated || 0}.`;
         logLine(
-          `Phase 7.4 completed. ListingsScanned=${summary.listingsScanned || 0}, Eligible=${summary.listingsEligible || 0}, MasterMatched=${summary.masterMatched || 0}, MasterMissing=${summary.masterMissing || 0}, FieldsCreated=${summary.listingFieldsCreated || 0}, Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, ShortDesc=${summary.shortDescriptionWritten || 0}, SkippedNoChange=${summary.skippedNoChange || 0}, AIFailures=${summary.aiFailures || 0}, WriteFailures=${summary.writeFailures || 0}, TestIpnsCount=${summary.testIpnsCount || 0}, MaxListings=${summary.maxListings || 0}`
+          `Phase 7.4 completed. ListingsScanned=${summary.listingsScanned || 0}, Eligible=${summary.listingsEligible || 0}, PublishedSkipped=${summary.skippedAlreadyPublished || 0}, MasterMatched=${summary.masterMatched || 0}, MasterMissing=${summary.masterMissing || 0}, FieldsCreated=${summary.listingFieldsCreated || 0}, Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, ShortDesc=${summary.shortDescriptionWritten || 0}, ManualSkipped=${summary.skippedManualOverride || 0}, SkippedNoChange=${summary.skippedNoChange || 0}, AIFailures=${summary.aiFailures || 0}, WriteFailures=${summary.writeFailures || 0}, TestIpnsCount=${summary.testIpnsCount || 0}, MaxListings=${summary.maxListings || 0}`
         );
         if (Array.isArray(summary.samples) && summary.samples.length > 0) {
           summary.samples.forEach(line => logLine(`Phase7.4: ${line}`));
@@ -3584,7 +4088,7 @@
         document.getElementById('phase4d-status-text').textContent =
           `Phase 4D status: completed (${mode}). FsV ${summary.fsvFieldsUpdated || 0}, V1 ${summary.v1FieldsUpdated || 0}, V2 ${summary.v2FieldsUpdated || 0}, VB ${summary.vbFieldsUpdated || 0}.`;
         logLine(
-          `Phase 4D completed. Mode=${mode}, ListingsScanned=${summary.listingsScanned || 0}, ListingsEligible=${summary.listingsEligible || 0}, SkippedMissingIpn=${summary.skippedMissingIpn || 0}, SkippedOutOfScope=${summary.skippedOutOfScope || 0}, SkippedNoPrefixRules=${summary.skippedNoPrefixRules || 0}, MasterPartsMissing=${summary.masterPartsMissing || 0}, ListingFieldsCreated=${summary.listingFieldsCreated || 0}, FsVEvaluated=${summary.fsvFieldsEvaluated || 0}, FsVUpdated=${summary.fsvFieldsUpdated || 0}, FsVDNA=${summary.fsvDNAWritten || 0}, V1Evaluated=${summary.v1FieldsEvaluated || 0}, V1Updated=${summary.v1FieldsUpdated || 0}, V1DNA=${summary.v1DNAWritten || 0}, V2Evaluated=${summary.v2FieldsEvaluated || 0}, V2Updated=${summary.v2FieldsUpdated || 0}, V2DNA=${summary.v2DNAWritten || 0}, V2DNASkippedOverwrite=${summary.v2DNASkippedOverwrite || 0}, VBEvaluated=${summary.vbFieldsEvaluated || 0}, VBUpdated=${summary.vbFieldsUpdated || 0}, VBLowConfidenceLeftBlank=${summary.vbLowConfidenceLeftBlank || 0}, AIWebSearchUsed=${summary.aiWebSearchUsed || 0}, ManualOverrideSkipped=${summary.manualOverrideSkipped || 0}`
+          `Phase 4D completed. Mode=${mode}, ListingsScanned=${summary.listingsScanned || 0}, ListingsEligible=${summary.listingsEligible || 0}, SkippedAlreadyPublished=${summary.skippedAlreadyPublished || 0}, SkippedByTestIpn=${summary.skippedByTestIpn || 0}, SkippedMissingIpn=${summary.skippedMissingIpn || 0}, SkippedOutOfScope=${summary.skippedOutOfScope || 0}, SkippedNoPrefixRules=${summary.skippedNoPrefixRules || 0}, MasterPartsMissing=${summary.masterPartsMissing || 0}, ListingFieldsCreated=${summary.listingFieldsCreated || 0}, FsVEvaluated=${summary.fsvFieldsEvaluated || 0}, FsVUpdated=${summary.fsvFieldsUpdated || 0}, FsVDNA=${summary.fsvDNAWritten || 0}, V1Evaluated=${summary.v1FieldsEvaluated || 0}, V1Updated=${summary.v1FieldsUpdated || 0}, V1DNA=${summary.v1DNAWritten || 0}, V2Evaluated=${summary.v2FieldsEvaluated || 0}, V2Updated=${summary.v2FieldsUpdated || 0}, V2DNA=${summary.v2DNAWritten || 0}, V2DNASkippedOverwrite=${summary.v2DNASkippedOverwrite || 0}, VBEvaluated=${summary.vbFieldsEvaluated || 0}, VBUpdated=${summary.vbFieldsUpdated || 0}, VBLowConfidenceLeftBlank=${summary.vbLowConfidenceLeftBlank || 0}, AIWebSearchUsed=${summary.aiWebSearchUsed || 0}, ManualOverrideSkipped=${summary.manualOverrideSkipped || 0}`
         );
         if (Array.isArray(summary.sampleSkips) && summary.sampleSkips.length > 0) {
           summary.sampleSkips.forEach(line => logLine(`Phase4D: ${line}`));
@@ -3691,6 +4195,287 @@
       }
     }
 
+    async function runPhase5PublishApproved(dryRun = false) {
+      if (isPhase5Running || isPhase4PipelineRunning || isEbayMockImportRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
+      if (!window.phase5API) {
+        showStatus('run-status', 'error', 'Phase 5 API is unavailable.');
+        return;
+      }
+      const hasPublishFn =
+        dryRun
+          ? typeof window.phase5API.dryRunPublishApproved === 'function'
+          : typeof window.phase5API.publishApproved === 'function';
+      if (!hasPublishFn) {
+        showStatus('run-status', 'error', `Phase 5 ${dryRun ? 'dry run' : 'publish'} function is unavailable.`);
+        return;
+      }
+      if (!validateForm(true)) {
+        setRunState('Error', 'Airtable settings are required for Phase 5.');
+        showStatus('run-status', 'error', 'Please complete Airtable token/base fields first.');
+        return;
+      }
+      const selectedMode = (document.getElementById('phase5-mode')?.value || 'A').toUpperCase();
+      if (selectedMode === 'B') {
+        setRunState('Error', 'Option B uses scheduled auto-push.');
+        showStatus('run-status', 'error', 'Option B is scheduled. Use Start Auto-Push or Run Auto-Push Now.');
+        return;
+      }
+
+      isPhase5Running = true;
+      updateRunButtonState();
+      const modeLabel = dryRun ? 'dry run' : 'write run';
+      const publishMode = (document.getElementById('phase5-mode')?.value || 'A').toUpperCase() === 'B' ? 'Option B' : 'Option A';
+      setRunState('Running', `Phase 5 (${modeLabel}) is in progress...`);
+      showStatus('run-status', 'info', `Phase 5 ${modeLabel} started (${publishMode})...`);
+      document.getElementById('phase5-status-text').textContent = `Phase 5 status: running (${modeLabel}, ${publishMode})...`;
+      logLine(`Starting Phase 5 ${modeLabel}. Mode=${publishMode}.`);
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = dryRun
+          ? await window.phase5API.dryRunPublishApproved(config)
+          : await window.phase5API.publishApproved(config);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Phase 5 failed.');
+        }
+        const summary = result.summary || {};
+        setRunState('Success', `Phase 5 completed (${modeLabel}).`);
+        showStatus(
+          'run-status',
+          'success',
+          `Phase 5 completed (${modeLabel}, ${summary.modeLabel || publishMode}). Eligible=${summary.approvedFound || 0}, Published=${summary.publishedSuccess || 0}, Failed=${summary.publishedFailed || 0}, Removed=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedMissingItemId=${summary.skippedMissingItemId || 0}.`
+        );
+        document.getElementById('phase5-status-text').textContent =
+          `Phase 5 status: completed (${modeLabel}, ${summary.modeLabel || publishMode}). Eligible ${summary.approvedFound || 0}, Published ${summary.publishedSuccess || 0}, Failed ${summary.publishedFailed || 0}, Removed ${summary.removedFromQueue || 0}.`;
+        logLine(
+          `Phase 5 completed. RunMode=${modeLabel}, PublishMode=${summary.modeLabel || publishMode}, Table=${summary.listingsTable || ''}, ApprovalField=${summary.approvalField || ''}, GroupField=${summary.groupField || ''}, GroupValue=${summary.groupValue || ''}, EligibleFound=${summary.approvedFound || 0}, PublishedSuccess=${summary.publishedSuccess || 0}, PublishedFailed=${summary.publishedFailed || 0}, RemovedFromQueue=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedMissingItemId=${summary.skippedMissingItemId || 0}, SkippedAlreadyPublished=${summary.skippedAlreadyPublished || 0}`
+        );
+        if (Array.isArray(summary.sampleSkips) && summary.sampleSkips.length > 0) {
+          summary.sampleSkips.forEach(line => logLine(`Phase5: ${line}`));
+        }
+        if (Array.isArray(summary.samplePublished) && summary.samplePublished.length > 0) {
+          summary.samplePublished.forEach(line => logLine(`Phase5: ${line}`));
+        }
+        if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+          summary.errors.forEach(err => logLine(`Phase5: ${err}`, 'error'));
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 5 failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 5 failed: ${err.message}`);
+        document.getElementById('phase5-status-text').textContent = `Phase 5 status: failed (${err.message})`;
+        logLine(`Phase 5 failed: ${err.message}`, 'error');
+      } finally {
+        isPhase5Running = false;
+        updateRunButtonState();
+      }
+    }
+
+    async function runPhase5() {
+      return runPhase5PublishApproved(false);
+    }
+
+    async function runPhase5DryRun() {
+      return runPhase5PublishApproved(true);
+    }
+
+    async function refreshPhase5BatchMetrics() {
+      if (!window.phase5API || typeof window.phase5API.getBatchSummaries !== 'function') {
+        showStatus('run-status', 'error', 'Phase 5 batch metrics API is unavailable.');
+        return;
+      }
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        if (typeof window.phase5API.validateBatchSchema === 'function') {
+          const validation = await window.phase5API.validateBatchSchema(config);
+          if (!validation?.success) {
+            throw new Error(validation?.message || 'Batch schema validation failed.');
+          }
+          const schemaStatus = validation?.result || {};
+          if (schemaStatus && schemaStatus.ok === false) {
+            throw new Error(schemaStatus.message || 'Batch schema is incomplete.');
+          }
+        }
+        const result = await window.phase5API.getBatchSummaries(config);
+        if (!result?.success) throw new Error(result?.message || 'Failed to load batch metrics.');
+        const batches = Array.isArray(result.batches) ? result.batches : [];
+        const eligible = batches.reduce((sum, b) => sum + (Number(b.eligibleItemsCount || 0) || 0), 0);
+        const blocked = batches.reduce((sum, b) => sum + (Number(b.blockedItemsCount || 0) || 0), 0);
+        const exceptions = batches.reduce((sum, b) => sum + (Number(b.exceptionItemsCount || 0) || 0), 0);
+        const approved = batches.filter(b => b.isApproved).length;
+        const text = `Batch metrics: batches=${batches.length}, approved=${approved}, eligible=${eligible}, blocked=${blocked}, exceptions=${exceptions}`;
+        document.getElementById('phase5-batch-metrics-text').textContent = text;
+        showStatus('run-status', 'success', text);
+        logLine(`Phase5 batch metrics loaded. table='${result.batchTableName || ''}', statusField='${result.batchStatusField || ''}', ${text}`);
+      } catch (err) {
+        showStatus('run-status', 'error', `Phase 5 batch metrics failed: ${err.message}`);
+        logLine(`Phase 5 batch metrics failed: ${err.message}`, 'error');
+      }
+    }
+
+    async function setPhase5BatchStatus() {
+      if (!window.phase5API || typeof window.phase5API.setBatchStatus !== 'function') {
+        showStatus('run-status', 'error', 'Phase 5 set batch status API is unavailable.');
+        return;
+      }
+      const batchRecordId = document.getElementById('phase5-batch-record-id').value.trim();
+      const batchStatusValue = document.getElementById('phase5-batch-status-value').value.trim();
+      if (!batchRecordId) {
+        showStatus('run-status', 'error', 'Enter Batch Record ID first.');
+        return;
+      }
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase5API.setBatchStatus({
+          ...config,
+          batchRecordId,
+          batchStatusValue
+        });
+        if (!result?.success) throw new Error(result?.message || 'Failed to set batch status.');
+        showStatus('run-status', 'success', `Batch '${batchRecordId}' status set to '${batchStatusValue}'.`);
+        logLine(`Phase5 batch status updated. record='${batchRecordId}' status='${batchStatusValue}'`);
+        await refreshPhase5BatchMetrics();
+      } catch (err) {
+        showStatus('run-status', 'error', `Set batch status failed: ${err.message}`);
+        logLine(`Set batch status failed: ${err.message}`, 'error');
+      }
+    }
+
+    async function startPhase5AutoPush() {
+      if (isPhase5Running || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4PipelineRunning || isPhase4CombinedRunning || isPhase6Running || isPhase72Running || isPhase74Running || isEbayMockImportRunning || isItemSpecificSyncRunning) return;
+      if (!window.phase5API || typeof window.phase5API.startAutoPush !== 'function') {
+        showStatus('run-status', 'error', 'Phase 5 auto-push API is unavailable.');
+        return;
+      }
+      const mode = (document.getElementById('phase5-mode')?.value || 'A').toUpperCase();
+      if (mode !== 'B') {
+        showStatus('run-status', 'error', 'Set Publishing Mode to Option B first.');
+        return;
+      }
+      const config = collectConfigFromForm();
+      if (!config.phase5AutoPushEligibilityFieldName || !config.phase5AutoPushEligibilityValues) {
+        showStatus('run-status', 'error', 'Option B requires Eligibility Field and Eligibility Values.');
+        return;
+      }
+      try {
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase5API.startAutoPush(config);
+        if (!result?.success) throw new Error(result?.message || 'Failed to start Option B auto-push schedule.');
+        const st = result.status || {};
+        document.getElementById('phase5-autopush-status-text').textContent =
+          `Option B schedule: active${st.running ? ' (running)' : ''}, cron='${st.cronExpression || DEFAULT_PHASE5_AUTOPUSH_CRON}'`;
+        showStatus('run-status', 'success', 'Phase 5 Option B auto-push schedule started.');
+        logLine(`Phase5 OptionB schedule started. cron='${st.cronExpression || DEFAULT_PHASE5_AUTOPUSH_CRON}' timezone='${st.timezone || ''}'`);
+      } catch (err) {
+        showStatus('run-status', 'error', `Phase 5 Option B start failed: ${err.message}`);
+        logLine(`Phase 5 Option B start failed: ${err.message}`, 'error');
+      } finally {
+        updateRunButtonState();
+      }
+    }
+
+    async function stopPhase5AutoPush() {
+      if (!window.phase5API || typeof window.phase5API.stopAutoPush !== 'function') {
+        showStatus('run-status', 'error', 'Phase 5 auto-push API is unavailable.');
+        return;
+      }
+      try {
+        const result = await window.phase5API.stopAutoPush();
+        if (!result?.success) throw new Error(result?.message || 'Failed to stop Option B auto-push schedule.');
+        const st = result.status || {};
+        document.getElementById('phase5-autopush-status-text').textContent =
+          `Option B schedule: ${st.active ? 'active' : 'inactive'}${st.running ? ' (running)' : ''}`;
+        showStatus('run-status', 'success', 'Phase 5 Option B auto-push schedule stopped.');
+        logLine('Phase5 OptionB schedule stopped.');
+      } catch (err) {
+        showStatus('run-status', 'error', `Phase 5 Option B stop failed: ${err.message}`);
+        logLine(`Phase 5 Option B stop failed: ${err.message}`, 'error');
+      } finally {
+        updateRunButtonState();
+      }
+    }
+
+    async function runPhase5AutoPushNow() {
+      if (!window.phase5API || typeof window.phase5API.runAutoPushNow !== 'function') {
+        showStatus('run-status', 'error', 'Phase 5 auto-push API is unavailable.');
+        return;
+      }
+      const mode = (document.getElementById('phase5-mode')?.value || 'A').toUpperCase();
+      if (mode !== 'B') {
+        showStatus('run-status', 'error', 'Set Publishing Mode to Option B first.');
+        return;
+      }
+      const config = collectConfigFromForm();
+      if (!config.phase5AutoPushEligibilityFieldName || !config.phase5AutoPushEligibilityValues) {
+        showStatus('run-status', 'error', 'Option B requires Eligibility Field and Eligibility Values.');
+        return;
+      }
+      isPhase5Running = true;
+      updateRunButtonState();
+      try {
+        await window.phase2API.saveConfig(config);
+        showStatus('run-status', 'info', 'Phase 5 Option B run-now started...');
+        logLine('Starting Phase 5 Option B run-now.');
+        const result = await window.phase5API.runAutoPushNow(config);
+        if (!result?.success) throw new Error(result?.message || 'Phase 5 Option B run-now failed.');
+        const summary = result.summary || {};
+        showStatus(
+          'run-status',
+          'success',
+          `Phase 5 Option B run-now completed. Eligible=${summary.approvedFound || 0}, Published=${summary.publishedSuccess || 0}, Failed=${summary.publishedFailed || 0}, Removed=${summary.removedFromQueue || 0}, SkippedMissingItemId=${summary.skippedMissingItemId || 0}.`
+        );
+        logLine(
+          `Phase 5 Option B run-now completed. Table=${summary.listingsTable || ''}, EligibilityField=${summary.eligibilityField || ''}, EligibilityValues=${(summary.eligibilityValues || []).join(',')}, EligibleFound=${summary.approvedFound || 0}, PublishedSuccess=${summary.publishedSuccess || 0}, PublishedFailed=${summary.publishedFailed || 0}, RemovedFromQueue=${summary.removedFromQueue || 0}`
+        );
+      } catch (err) {
+        showStatus('run-status', 'error', `Phase 5 Option B run-now failed: ${err.message}`);
+        logLine(`Phase 5 Option B run-now failed: ${err.message}`, 'error');
+      } finally {
+        isPhase5Running = false;
+        updateRunButtonState();
+      }
+    }
+
+    async function testPhase5EbayCredentials() {
+      if (!window.phase5API || typeof window.phase5API.testEbayCredentials !== 'function') {
+        showStatus('run-status', 'error', 'Phase 5 eBay credential test API is unavailable.');
+        return;
+      }
+      const env = (document.getElementById('phase5-ebay-environment')?.value || 'sandbox').toLowerCase();
+      const clientId = document.getElementById('phase5-ebay-client-id')?.value.trim() || '';
+      const devId = document.getElementById('phase5-ebay-dev-id')?.value.trim() || '';
+      const clientSecret = document.getElementById('phase5-ebay-client-secret')?.value.trim() || '';
+      const ruName = document.getElementById('phase5-ebay-runame')?.value.trim() || '';
+      if (!clientId || !devId || !clientSecret || !ruName) {
+        showStatus('run-status', 'error', 'Fill all eBay credentials first (App ID, Dev ID, Cert ID, RuName).');
+        return;
+      }
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        showStatus('run-status', 'info', `Testing eBay credentials in ${env}...`);
+        logLine(`Testing eBay credentials (${env})...`);
+        const result = await window.phase5API.testEbayCredentials(config);
+        if (!result?.success) {
+          throw new Error(result?.message || 'Credential test failed.');
+        }
+        const details = result.result || {};
+        showStatus(
+          'run-status',
+          'success',
+          `eBay credential test passed (${details.environment || env}). Token endpoint reachable.`
+        );
+        logLine(
+          `Phase5 eBay credential test passed. env='${details.environment || env}', tokenUrl='${details.tokenUrl || ''}', tokenType='${details.tokenType || ''}', expiresIn='${details.expiresIn || 0}'`
+        );
+      } catch (err) {
+        showStatus('run-status', 'error', `eBay credential test failed: ${err.message}`);
+        logLine(`Phase5 eBay credential test failed: ${err.message}`, 'error');
+      }
+    }
+
     async function runEbayMockImport() {
       if (isPhase4PipelineRunning || isEbayMockImportRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.ebayMockImportAPI || typeof window.ebayMockImportAPI.run !== 'function') {
@@ -3736,12 +4521,12 @@
         showStatus(
           'run-status',
           'success',
-          `eBay Mock import completed (${mode}). Columns=${summary.columnsDetected || 0}, Rows=${summary.rowsScanned || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}.`
+          `eBay Mock import completed (${mode}). Columns=${summary.columnsDetected || 0}, Rows=${summary.rowsScanned || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}, SkippedPublished=${summary.skippedAlreadyPublished || 0}.`
         );
         document.getElementById('ebay-mock-status-text').textContent =
-          `eBay Mock Import status: completed (${mode}). Rows ${summary.rowsScanned || 0}, Written ${summary.recordsWritten || 0}.`;
+          `eBay Mock Import status: completed (${mode}). Rows ${summary.rowsScanned || 0}, Written ${summary.recordsWritten || 0}, SkippedPublished ${summary.skippedAlreadyPublished || 0}.`;
         logLine(
-          `eBay Mock import completed. Mode=${mode}, Table=${summary.tableName || ''}, Columns=${summary.columnsDetected || 0}, Rows=${summary.rowsScanned || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}, FieldsCreated=${summary.fieldsCreated || 0}`
+          `eBay Mock import completed. Mode=${mode}, Table=${summary.tableName || ''}, Columns=${summary.columnsDetected || 0}, Rows=${summary.rowsScanned || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}, SkippedPublished=${summary.skippedAlreadyPublished || 0}, FieldsCreated=${summary.fieldsCreated || 0}`
         );
         if (Array.isArray(summary.errors) && summary.errors.length > 0) {
           summary.errors.forEach(err => logLine(`eBayMock: ${err}`, 'error'));

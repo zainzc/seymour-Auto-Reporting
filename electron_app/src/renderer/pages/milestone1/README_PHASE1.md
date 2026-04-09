@@ -107,3 +107,8 @@ Phase 1 establishes the foundation for subsequent phases:
 - **Phase 7**: Listing automation with title/description generation
 
 This Phase 1 implementation provides the stable, externally-governed raw inventory dataset required as input for all downstream enrichment and automation workflows.
+
+## Phase 5 Reference
+
+For Approval Gate publishing setup and runtime behavior, see:
+- `electron_app/src/renderer/pages/milestone1/README_PHASE5.md`

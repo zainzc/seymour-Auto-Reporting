@@ -84,6 +84,79 @@ class AirtableService {
     return records;
   }
 
+  async fetchRecordsByFormula(tableName, formula = '', selectFields = [], maxRecords = 0) {
+    const records = [];
+    let offset = null;
+    const normalizedFormula = String(formula || '').trim();
+    const normalizedMax = Number(maxRecords || 0);
+
+    do {
+      const params = {};
+      if (offset) params.offset = offset;
+      if (normalizedFormula) params.filterByFormula = normalizedFormula;
+      if (Array.isArray(selectFields) && selectFields.length > 0) params.fields = selectFields;
+      if (normalizedMax > 0) {
+        const remaining = normalizedMax - records.length;
+        params.maxRecords = Math.min(100, remaining);
+      }
+
+      const data = await this.request('GET', `/${encodeURIComponent(tableName)}`, { params });
+      const batch = Array.isArray(data?.records) ? data.records : [];
+      records.push(...batch);
+      offset = data?.offset || null;
+      if (normalizedMax > 0 && records.length >= normalizedMax) {
+        return records.slice(0, normalizedMax);
+      }
+    } while (offset);
+
+    return records;
+  }
+
+  async deleteRecord(tableName, recordId) {
+    const table = String(tableName || '').trim();
+    const id = String(recordId || '').trim();
+    if (!table || !id) {
+      throw new Error('deleteRecord requires tableName and recordId.');
+    }
+    return this.request('DELETE', `/${encodeURIComponent(table)}/${encodeURIComponent(id)}`);
+  }
+
+  async deleteRecords(tableName, recordIds = []) {
+    const table = String(tableName || '').trim();
+    const ids = Array.from(
+      new Set((Array.isArray(recordIds) ? recordIds : []).map(id => String(id || '').trim()).filter(Boolean))
+    );
+    const summary = {
+      requested: ids.length,
+      deleted: 0,
+      failed: 0,
+      errors: []
+    };
+    for (const batch of chunkArray(ids, 10)) {
+      try {
+        const params = {};
+        batch.forEach((id, index) => {
+          params[`records[${index}]`] = id;
+        });
+        const result = await this.request('DELETE', `/${encodeURIComponent(table)}`, { params });
+        const deleted = Array.isArray(result?.records) ? result.records.length : 0;
+        summary.deleted += deleted;
+        if (deleted < batch.length) {
+          summary.failed += batch.length - deleted;
+        }
+      } catch (error) {
+        summary.failed += batch.length;
+        const detail =
+          error?.response?.data?.error?.message ||
+          error?.response?.data?.error ||
+          error?.message ||
+          String(error);
+        summary.errors.push(`deleteRecords batch failed (${batch.length}): ${detail}`);
+      }
+    }
+    return summary;
+  }
+
   async validateConfig() {
     const checks = [];
     if (this.masterTable) {

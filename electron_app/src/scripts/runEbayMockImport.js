@@ -1,9 +1,13 @@
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
 const { loadEnv } = require('../config/loadEnv');
 const AirtableService = require('../services/airtableService');
 const AirtableSchemaService = require('../services/airtableSchemaService');
 const { getInventoryConfig } = require('../config/configStore');
+const { asIdentitySet, isPublishedIdentity } = require('../services/phase5IdentityService');
+const { buildListingPayloadHash, parseCsvList } = require('../services/phase5GovernanceService');
+const { Phase5PublishLogService } = require('../services/phase5PublishLogService');
 
 loadEnv();
 
@@ -75,6 +79,42 @@ function hasFieldName(fieldNames = [], target = '') {
 
 function getMockListingConditionsAndOptions(rowIndex = 0) {
   return MOCK_LISTING_CONDITIONS_OPTIONS[rowIndex % MOCK_LISTING_CONDITIONS_OPTIONS.length];
+}
+
+async function fetchLiveListingPayloadHash(compareContext = {}, itemId = '', fields = {}) {
+  const targetItemId = normalizeText(itemId);
+  if (!targetItemId) return '';
+  if (!compareContext.enabled || !compareContext.apiUrl) return '';
+
+  if (compareContext.cache.has(targetItemId)) {
+    return compareContext.cache.get(targetItemId);
+  }
+
+  const body = {
+    itemId: targetItemId,
+    fields
+  };
+  const headers = {
+    'Content-Type': 'application/json'
+  };
+  if (compareContext.apiKey) {
+    headers.Authorization = `Bearer ${compareContext.apiKey}`;
+  }
+
+  try {
+    const response = await compareContext.client.post(compareContext.apiUrl, body, { headers });
+    const hash = normalizeText(
+      response?.data?.payloadHash ||
+      response?.data?.data?.payloadHash ||
+      response?.data?.result?.payloadHash ||
+      ''
+    );
+    compareContext.cache.set(targetItemId, hash);
+    return hash;
+  } catch (_) {
+    compareContext.cache.set(targetItemId, '');
+    return '';
+  }
 }
 
 function findHeaderIndex(headers = [], target = '') {
@@ -317,6 +357,8 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
     rowsScanned: 0,
     recordsPlanned: 0,
     recordsWritten: 0,
+    skippedAlreadyPublished: 0,
+    skippedAlreadyUpToDate: 0,
     tableCreated: false,
     fieldsCreated: 0,
     errors: []
@@ -371,6 +413,37 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
   let rowNumber = 1;
   const batch = [];
   const batchRowKeys = new Set();
+  const publishedIdentitySet = asIdentitySet(stored.phase5PublishedIdentities || []);
+  const publishedPayloadHashSet = new Set(
+    (Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : [])
+      .map(value => normalizeText(value))
+      .filter(Boolean)
+  );
+  const payloadHashFields = parseCsvList(stored.phase5PayloadHashFields || '');
+  const liveCompareContext = {
+    enabled:
+      String(stored.phase5LiveCompareEnabled ?? process.env.PHASE5_LIVE_COMPARE_ENABLED ?? 'false')
+        .trim()
+        .toLowerCase() === 'true',
+    apiUrl: normalizeText(stored.phase5LiveCompareApiUrl || process.env.PHASE5_LIVE_COMPARE_API_URL || ''),
+    apiKey: normalizeText(stored.phase5LiveCompareApiKey || process.env.PHASE5_LIVE_COMPARE_API_KEY || ''),
+    cache: new Map(),
+    client: axios.create({ timeout: 20000 })
+  };
+  let latestLoggedHashByItemId = new Map();
+  try {
+    const logService = new Phase5PublishLogService({
+      enabled: stored.phase5SheetsLogEnabled ?? 'false',
+      spreadsheetId: stored.phase5SheetsLogSpreadsheetId || '',
+      tabName: stored.phase5SheetsLogTabName || 'Log',
+      authContext: stored.phase5SheetsLogAuthContext || 'inventory'
+    });
+    if (logService.isConfigured()) {
+      latestLoggedHashByItemId = await logService.fetchLatestHashesByItemId();
+    }
+  } catch (_) {
+    latestLoggedHashByItemId = new Map();
+  }
 
   async function processRow(values = []) {
     rowNumber += 1;
@@ -397,6 +470,28 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
       fields[fieldName] = String(rawValue || '');
     }
     fields[LISTING_CONDITIONS_OPTIONS_FIELD] = getMockListingConditionsAndOptions(summary.rowsScanned - 1);
+    if (isPublishedIdentity(fields, publishedIdentitySet)) {
+      summary.skippedAlreadyPublished += 1;
+      return;
+    }
+    const payloadHash = buildListingPayloadHash(fields, {
+      includeFieldNames: payloadHashFields
+    });
+    const itemId = normalizeText(fields['Item ID'] || fields['ItemID'] || fields['eBay Item ID'] || fields['Ebay Item ID']);
+    const latestLoggedHash = itemId ? normalizeText(latestLoggedHashByItemId.get(itemId)) : '';
+    const liveListingHash = await fetchLiveListingPayloadHash(liveCompareContext, itemId, fields);
+    if (payloadHash && publishedPayloadHashSet.has(payloadHash)) {
+      summary.skippedAlreadyUpToDate += 1;
+      return;
+    }
+    if (payloadHash && latestLoggedHash && latestLoggedHash === payloadHash) {
+      summary.skippedAlreadyUpToDate += 1;
+      return;
+    }
+    if (payloadHash && liveListingHash && liveListingHash === payloadHash) {
+      summary.skippedAlreadyUpToDate += 1;
+      return;
+    }
 
     if (batchRowKeys.has(rowKey) && batch.length > 0) {
       await flushBatch(itemService, tableName, batch.splice(0, batch.length), summary, dryRun);
@@ -417,7 +512,10 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
         stage: 'ebaymock_import_rows',
         percent: Math.min(95, 20 + Math.floor(summary.rowsScanned / 1000)),
         counts: summary,
-        message: `Importing rows... scanned=${summary.rowsScanned}, written=${summary.recordsWritten}, planned=${summary.recordsPlanned}`
+        message:
+          `Importing rows... scanned=${summary.rowsScanned}, written=${summary.recordsWritten}, ` +
+          `planned=${summary.recordsPlanned}, skippedPublished=${summary.skippedAlreadyPublished}, ` +
+          `skippedUpToDate=${summary.skippedAlreadyUpToDate}`
       });
     }
   }

@@ -9,7 +9,7 @@ const MASTER_IPN_FIELD = 'IPN';
 const MASTER_FITMENT_FIELD = 'Part Fitment';
 const MASTER_FITMENT_IMAGE_FIELD = 'Fitment Image';
 const SVG_WIDTH = 1200;
-const CONTENT_SIDE_PADDING = 96;
+const CONTENT_SIDE_PADDING = 120;
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -251,8 +251,7 @@ function extractPositionCandidates(fitmentText = '') {
   const matches = [];
   const tokenRegexes = [
     /\b(RH|LH|R|L)\b/gi,
-    /\b(PASSENGER\s*\(RIGHT\)|DRIVER\s*\(LEFT\)|PASSENGER|DRIVER|RIGHT|LEFT)\b/gi,
-    /\b([A-Z]+(?:\s+[A-Z]+){0,3}\s+MOUNTED)\b/gi
+    /\b(RIGHT|LEFT)\b/gi
   ];
   for (const regex of tokenRegexes) {
     let match;
@@ -268,11 +267,246 @@ function stripPositionTokens(line = '') {
   return normalizeText(
     String(line || '')
       .replace(/\b(RH|LH|R|L)\b/gi, '')
-      .replace(/\b(PASSENGER\s*\(RIGHT\)|DRIVER\s*\(LEFT\)|PASSENGER|DRIVER|RIGHT|LEFT)\b/gi, '')
-      .replace(/\b([A-Z]+(?:\s+[A-Z]+){0,3}\s+MOUNTED)\b/gi, '')
+      .replace(/\b(RIGHT|LEFT)\b/gi, '')
       .replace(/\s{2,}/g, ' ')
       .replace(/\s*[-,;:]\s*$/, '')
   );
+}
+
+function normalizeYearValue(rawYear) {
+  const text = normalizeText(rawYear);
+  if (!/^(?:\d{2}|\d{4})$/.test(text)) return '';
+  if (text.length === 4) return Number(text);
+  const yy = Number(text);
+  if (!Number.isFinite(yy)) return '';
+  return yy <= 30 ? 2000 + yy : 1900 + yy;
+}
+
+function normalizeYearRange(raw = '') {
+  const cleaned = normalizeText(raw).replace(/\s+/g, '');
+  if (!cleaned) return '';
+  const rangeMatch = cleaned.match(/^(\d{2,4})-(\d{2,4})$/);
+  if (rangeMatch) {
+    const start = normalizeYearValue(rangeMatch[1]);
+    let end = normalizeYearValue(rangeMatch[2]);
+    if (!start || !end) return cleaned;
+    if (end < start && rangeMatch[2].length === 2) {
+      const baseCentury = Math.floor(start / 100) * 100;
+      const yy = Number(rangeMatch[2]);
+      end = baseCentury + yy;
+      if (end < start) end += 100;
+    }
+    return `${start}-${end}`;
+  }
+  const single = normalizeYearValue(cleaned);
+  return single ? String(single) : cleaned;
+}
+
+function normalizeApplicationLine(line = '') {
+  let text = normalizeText(line).toUpperCase();
+  if (!text) return '';
+
+  text = text
+    .replace(/^\s*[-*]\s*/g, '')
+    .replace(/\bALSO\s+FITS\b/gi, '')
+    .replace(/\bTHIS\s+PART\s+WILL\s+FIT\b/gi, '')
+    .replace(/\bTHIS\s+VEHICLE\s+IS\s+COMPAT(?:I|A)BLE\s+WITH\b/gi, '')
+    .replace(/\bCOMPAT(?:I|A)BLE\s+WITH\b/gi, '')
+    .replace(/\bFITS\b/gi, '')
+    .replace(/^\s*AND\s+/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  // Only normalize true year tokens (2-digit or 4-digit), never 3-digit model codes like 318/325.
+  text = text.replace(
+    /\b(\d{2}|\d{4})(?:\s*-\s*(\d{2}|\d{4}))?\b/g,
+    (m, a, b) => {
+      if (!b) return normalizeYearRange(a) || m;
+      return normalizeYearRange(`${a}-${b}`) || m;
+    }
+  );
+
+  // Reorder "MAKE MODEL YEAR ..." -> "YEAR MAKE MODEL ..."
+  // Example: "BMW 318I 1992 COUPE..." -> "1992 BMW 318I COUPE..."
+  const makeModelYearMatch = text.match(
+    /^([A-Z][A-Z0-9.&/-]{1,})\s+([A-Z0-9][A-Z0-9.&/-]{0,14})\s+(\d{4}(?:\s*-\s*\d{4})?)(.*)$/
+  );
+  if (makeModelYearMatch) {
+    const make = normalizeText(makeModelYearMatch[1]);
+    const model = normalizeText(makeModelYearMatch[2]);
+    const year = normalizeYearRange(makeModelYearMatch[3]);
+    const rest = normalizeText(makeModelYearMatch[4]);
+    text = normalizeText(`${year} ${make} ${model} ${rest}`).replace(/\s{2,}/g, ' ');
+  }
+
+  text = text
+    .replace(/\bRH\b/g, 'PASSENGER (RIGHT)')
+    .replace(/\bLH\b/g, 'DRIVER (LEFT)')
+    .replace(/(^|[\s,(])R(?=[\s,.)]|$)/g, '$1PASSENGER (RIGHT)')
+    .replace(/(^|[\s,(])L(?=[\s,.)]|$)/g, '$1DRIVER (LEFT)');
+
+  text = text
+    .replace(/\s+,/g, ',')
+    .replace(/,\s*\)/g, ')')
+    .replace(/,\s*\./g, '.')
+    .replace(/\(\s*,\s*\)/g, '')
+    .replace(/,\s*,+/g, ', ')
+    .replace(/\(\s*\)/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s*;\s*$/g, '')
+    .replace(/,\s*$/g, '')
+    .trim();
+
+  return text;
+}
+
+function expandYearEntriesForVehicle(line = '') {
+  const text = normalizeText(line).toUpperCase();
+  if (!text) return [];
+
+  let make = '';
+  let model = '';
+  let tail = '';
+
+  // Format A: "BMW 318I 1992 ... , 1993-1996 ..."
+  const startMatchA = text.match(/^([A-Z][A-Z0-9.&/-]{1,})\s+([A-Z0-9][A-Z0-9.&/-]{0,14})\s+(.+)$/);
+  if (startMatchA) {
+    make = normalizeText(startMatchA[1]);
+    model = normalizeText(startMatchA[2]);
+    tail = normalizeText(startMatchA[3]);
+  } else {
+    // Format B: "1992 BMW 318I ... , 1993-1996 ..."
+    const startMatchB = text.match(
+      /^(\d{4}(?:-\d{4})?)\s+([A-Z][A-Z0-9.&/-]{1,})\s+([A-Z0-9][A-Z0-9.&/-]{0,14})\s*(.*)$/
+    );
+    if (!startMatchB) return [text];
+    make = normalizeText(startMatchB[2]);
+    model = normalizeText(startMatchB[3]);
+    const firstYear = normalizeYearRange(startMatchB[1]);
+    const firstRest = normalizeText(startMatchB[4] || '');
+    tail = normalizeText(`${firstYear} ${firstRest}`);
+  }
+
+  if (!make || !model || !/\b\d{4}(?:-\d{4})?\b/.test(tail)) return [text];
+
+  const entries = [];
+  const re =
+    /(?:^|,\s*|\s+AND\s+)(\d{4}(?:-\d{4})?)([\s\S]*?)(?=(?:,\s*\d{4}(?:-\d{4})?)|(?:\s+AND\s+\d{4}(?:-\d{4})?)|$)/gi;
+  let match;
+  while ((match = re.exec(tail)) !== null) {
+    const year = normalizeYearRange(match[1]);
+    let rest = normalizeText(match[2] || '');
+    rest = rest.replace(/^\s*,\s*/, '').replace(/^\s*AND\s+/i, '');
+    const built = normalizeText(`${year} ${make} ${model} ${rest}`.replace(/\s{2,}/g, ' '));
+    if (built) entries.push(built);
+  }
+
+  return entries.length > 0 ? entries : [text];
+}
+
+function splitApplicationByYearStart(line = '') {
+  const text = normalizeText(line);
+  if (!text) return [];
+  const parts = text
+    .split(/,\s*(?=(?:\d{2,4}(?:\s*-\s*\d{2,4})?)\s+[A-Z])/g)
+    .map(item => normalizeText(item))
+    .filter(Boolean);
+  return parts.length > 0 ? parts : [text];
+}
+
+function startsWithYearRange(text = '') {
+  return /^\d{4}(?:-\d{4})?\b/.test(normalizeText(text));
+}
+
+function extractVehicleContext(line = '') {
+  const text = normalizeText(line).toUpperCase();
+  if (!text) return '';
+  const withYear = text.match(/^\d{4}(?:-\d{4})?\s+([A-Z][A-Z0-9.&/-]{1,})(?:\s+([A-Z0-9][A-Z0-9.&/-]{0,14}))?/);
+  if (!withYear) return '';
+  const first = normalizeText(withYear[1]);
+  const second = normalizeText(withYear[2] || '');
+  if (!first || !second) return '';
+  const blocked = new Set(['US', 'WITH', 'AND', 'COUPE', 'SEDAN', 'CONVERTIBLE', 'MODELS']);
+  if (blocked.has(first) || blocked.has(second)) return '';
+  return `${first} ${second}`;
+}
+
+function yearLineNeedsVehicleContext(line = '') {
+  const text = normalizeText(line).toUpperCase();
+  const m = text.match(/^(\d{4}(?:-\d{4})?)(?:\s+|,\s*)(.+)$/);
+  if (!m) return false;
+  const rest = normalizeText(m[2]);
+  if (!rest) return true;
+  if (/^(US|WITH|AND|COUPE|SEDAN|CONVERTIBLE|MODELS)\b/.test(rest)) return true;
+  // Has an explicit make+model token already (e.g., BMW 318I)
+  if (/^[A-Z][A-Z0-9.&/-]{1,}\s+[A-Z0-9][A-Z0-9.&/-]{0,14}\b/.test(rest)) return false;
+  return true;
+}
+
+function applyVehicleContextToYearLines(lines = []) {
+  const out = [];
+  let activeContext = '';
+  for (const raw of lines) {
+    let line = normalizeText(raw).toUpperCase();
+    if (!line) continue;
+    const explicitContext = extractVehicleContext(line);
+    if (explicitContext) {
+      activeContext = explicitContext;
+      out.push(line);
+      continue;
+    }
+    if (startsWithYearRange(line) && activeContext && yearLineNeedsVehicleContext(line)) {
+      line = line.replace(/^(\d{4}(?:-\d{4})?)(?:\s+|,\s*)/, `$1 ${activeContext} `);
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+function splitYearChainWithContext(line = '') {
+  const text = normalizeText(line).toUpperCase();
+  if (!text) return [];
+  const m = text.match(
+    /^(\d{4}(?:-\d{4})?)\s+([A-Z][A-Z0-9.&/-]{1,}\s+[A-Z0-9][A-Z0-9.&/-]{0,14})\s*,?\s*AND\s+(\d{4}(?:-\d{4})?)\s+(.+)$/
+  );
+  if (!m) return [text];
+  const y1 = normalizeYearRange(m[1]);
+  const ctx = normalizeText(m[2]);
+  const y2 = normalizeYearRange(m[3]);
+  const rest = normalizeText(m[4]);
+  const first = normalizeText(`${y1} ${ctx}`);
+  const second = normalizeText(`${y2} ${ctx} ${rest}`);
+  return [first, second].filter(Boolean);
+}
+
+function splitGenericYearAndChains(line = '') {
+  const text = normalizeText(line).toUpperCase();
+  if (!text || !startsWithYearRange(text)) return [text];
+  const parts = text
+    .split(/\s*,\s*AND\s+(?=\d{4}(?:-\d{4})?\b)/gi)
+    .map(item => normalizeText(item))
+    .filter(Boolean);
+  return parts.length > 0 ? parts : [text];
+}
+
+function combineApplicationsByYearStart(lines = []) {
+  const out = [];
+  for (const rawLine of lines) {
+    const line = normalizeText(rawLine);
+    if (!line) continue;
+    if (startsWithYearRange(line) || out.length === 0) {
+      out.push(line);
+      continue;
+    }
+    const prev = out[out.length - 1];
+    const joiner = /[,:;]\s*$/.test(prev) ? ' ' : ', ';
+    out[out.length - 1] = `${prev}${joiner}${line}`
+      .replace(/\s+,/g, ',')
+      .replace(/,\s*,+/g, ', ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }
+  return out;
 }
 
 function parseFitmentApplications(fitmentText = '') {
@@ -325,9 +559,18 @@ function parseFitmentApplications(fitmentText = '') {
     return result.normalized;
   });
 
-  const applications = lines
+  const normalizedLines = lines
     .map(line => stripPositionTokens(line))
-    .filter(Boolean)
+    .flatMap(line => splitApplicationByYearStart(line))
+    .map(line => normalizeApplicationLine(line))
+    .flatMap(line => expandYearEntriesForVehicle(line))
+    .filter(Boolean);
+
+  const contextAppliedLines = applyVehicleContextToYearLines(normalizedLines);
+  const yearSplitLines = contextAppliedLines
+    .flatMap(line => splitYearChainWithContext(line))
+    .flatMap(line => splitGenericYearAndChains(line));
+  const applications = combineApplicationsByYearStart(yearSplitLines)
     .map(line => line.toUpperCase());
 
   const dedupedApplications = Array.from(new Set(applications));
@@ -386,11 +629,12 @@ function buildSvgTextElements(
 ) {
   const x = Number(options.x || 600);
   const anchor = options.anchor || 'middle';
+  const fontFamily = options.fontFamily || 'Arial Black, Arial, sans-serif';
   const elements = [];
   let y = startY;
   for (const line of lines) {
     elements.push(
-      `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="Arial Narrow, Arial, sans-serif" font-size="${fontSize}" font-weight="${fontWeight}" fill="#111111">${escapeXml(line)}</text>`
+      `<text x="${x}" y="${y}" text-anchor="${anchor}" font-family="${fontFamily}" font-size="${fontSize}" font-weight="${fontWeight}" fill="#111111">${escapeXml(line)}</text>`
     );
     y += lineHeight;
   }
@@ -402,86 +646,74 @@ function createStandardizedFitmentSvg(fitmentText, parsed) {
   const applications = Array.isArray(parsed?.applications) ? parsed.applications : [];
   const fallbackRaw = splitLines(fitmentText).map(line => line.toUpperCase());
   const baseApplications = applications.length > 0 ? applications : fallbackRaw;
-  const isSingle = baseApplications.length <= 1;
-  const positionBlock = normalizeText(parsed?.positionBlock).toUpperCase();
+  const positionBlock = normalizeText(parsed?.positionBlock || '');
 
-  const appStartY = isSingle ? 365 : 330;
-  const appBottomY = 1120;
+  const SVG_BASE_HEIGHT = 1200;
+  const applicationCount = baseApplications.length;
+  let BODY_FONT_SIZE = 34;
+  let bodyLineFactor = 1.18;
+  if (applicationCount <= 4) {
+    BODY_FONT_SIZE = 42;
+    bodyLineFactor = 1.32;
+  } else if (applicationCount <= 7) {
+    BODY_FONT_SIZE = 38;
+    bodyLineFactor = 1.26;
+  } else if (applicationCount <= 12) {
+    BODY_FONT_SIZE = 35;
+    bodyLineFactor = 1.2;
+  } else if (applicationCount >= 22) {
+    BODY_FONT_SIZE = 30;
+    bodyLineFactor = 1.1;
+  } else if (applicationCount >= 16) {
+    BODY_FONT_SIZE = 32;
+    bodyLineFactor = 1.14;
+  }
+  const BODY_LINE_HEIGHT = Math.max(16, Math.floor(BODY_FONT_SIZE * bodyLineFactor));
+  const POSITION_FONT_SIZE = Math.max(18, BODY_FONT_SIZE - 2);
+  const POSITION_LINE_HEIGHT = Math.max(16, Math.floor(POSITION_FONT_SIZE * (bodyLineFactor - 0.06)));
+  const appStartY = 334;
   const usableWidth = SVG_WIDTH - CONTENT_SIDE_PADDING * 2;
-
   const buildLinesForFont = fontSize => {
-    const avgCharWidth = Math.max(6, fontSize * 0.56);
+    const avgCharWidth = Math.max(6, fontSize * 0.55);
     const maxChars = Math.max(12, Math.floor(usableWidth / avgCharWidth));
-    const appLines = isSingle
-      ? wrapTextByChars(baseApplications[0] || '', Math.max(12, maxChars - 2))
-      : baseApplications.flatMap(item => {
-          const wrapped = wrapTextByChars(item, Math.max(12, maxChars - 4));
-          if (wrapped.length === 0) return [];
-          const [first, ...rest] = wrapped;
-          return [`- ${first}`, ...rest.map(line => `  ${line}`)];
-        });
+    const appLines = baseApplications.flatMap(item => {
+      const wrapped = wrapTextByChars(item, Math.max(12, maxChars - 4));
+      if (wrapped.length === 0) return [];
+      const [first, ...rest] = wrapped;
+      if (startsWithYearRange(item)) {
+        return [`- ${first}`, ...rest.map(line => `  ${line}`)];
+      }
+      return [first, ...rest];
+    });
     const posChars = Math.max(10, Math.floor(maxChars * 0.9));
     const positionLines = positionBlock ? wrapTextByChars(positionBlock, posChars) : [];
     return { appLines, positionLines };
   };
-
-  const fontCandidates = isSingle
-    ? [62, 58, 54, 50, 46, 42, 38, 34, 30, 28, 26, 24, 22, 20, 18, 16, 14, 12]
-    : [34, 32, 30, 28, 26, 24, 22, 20, 18, 16, 14, 12];
-
-  let appFont = fontCandidates[fontCandidates.length - 1];
-  let appLineHeight = Math.max(14, Math.floor(appFont * (isSingle ? 1.14 : 1.16)));
-  let positionFont = Math.max(12, appFont - 2);
-  let positionLineHeight = Math.max(14, Math.floor(positionFont * 1.12));
-  let appLines = [];
-  let positionLines = [];
-  let positionGap = 24;
-
-  for (const candidateFont of fontCandidates) {
-    const candidateAppLineHeight = Math.max(14, Math.floor(candidateFont * (isSingle ? 1.14 : 1.16)));
-    const candidatePositionFont = Math.max(12, candidateFont - 2);
-    const candidatePositionLineHeight = Math.max(14, Math.floor(candidatePositionFont * 1.12));
-    const candidateGap = positionBlock ? Math.max(12, Math.floor(candidateFont * 0.45)) : 0;
-    const candidate = buildLinesForFont(candidateFont);
-    const totalHeight =
-      candidate.appLines.length * candidateAppLineHeight +
-      (candidate.positionLines.length > 0
-        ? candidateGap + candidate.positionLines.length * candidatePositionLineHeight
-        : 0);
-    if (appStartY + totalHeight <= appBottomY) {
-      appFont = candidateFont;
-      appLineHeight = candidateAppLineHeight;
-      positionFont = candidatePositionFont;
-      positionLineHeight = candidatePositionLineHeight;
-      appLines = candidate.appLines;
-      positionLines = candidate.positionLines;
-      positionGap = candidateGap;
-      break;
-    }
-    appFont = candidateFont;
-    appLineHeight = candidateAppLineHeight;
-    positionFont = candidatePositionFont;
-    positionLineHeight = candidatePositionLineHeight;
-    appLines = candidate.appLines;
-    positionLines = candidate.positionLines;
-    positionGap = candidateGap;
-  }
+  const { appLines, positionLines } = buildLinesForFont(BODY_FONT_SIZE);
+  const positionGap = positionLines.length > 0 ? Math.max(12, Math.floor(BODY_FONT_SIZE * 0.45)) : 0;
 
   const applicationSection = buildSvgTextElements(
     appLines,
     appStartY,
-    appLineHeight,
-    appFont,
+    BODY_LINE_HEIGHT,
+    BODY_FONT_SIZE,
     900,
-    isSingle
-      ? { x: SVG_WIDTH / 2, anchor: 'middle' }
-      : { x: CONTENT_SIDE_PADDING, anchor: 'start' }
+    { x: CONTENT_SIDE_PADDING, anchor: 'start', fontFamily: 'Arial Black, Arial, sans-serif' }
   );
   const positionY = applicationSection.endY + positionGap;
-  const positionSection = buildSvgTextElements(positionLines, positionY, positionLineHeight, positionFont, 900);
+  const positionSection = buildSvgTextElements(
+    positionLines,
+    positionY,
+    POSITION_LINE_HEIGHT,
+    POSITION_FONT_SIZE,
+    900
+  );
+  const contentBottom = Math.max(applicationSection.endY, positionSection.endY);
+  const svgHeight = Math.max(SVG_BASE_HEIGHT, Math.ceil(contentBottom + 72));
+  const borderHeight = svgHeight - 76;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="${svgHeight}" viewBox="0 0 1200 ${svgHeight}">
   <defs>
     <filter id="grain" x="-20%" y="-20%" width="140%" height="140%">
       <feTurbulence type="fractalNoise" baseFrequency="0.95" numOctaves="2" stitchTiles="stitch" result="noise"/>
@@ -491,9 +723,9 @@ function createStandardizedFitmentSvg(fitmentText, parsed) {
       </feComponentTransfer>
     </filter>
   </defs>
-  <rect x="0" y="0" width="1200" height="1200" fill="#E3C028"/>
-  <rect x="0" y="0" width="1200" height="1200" filter="url(#grain)"/>
-  <rect x="38" y="38" width="1124" height="1124" fill="none" stroke="#111111" stroke-width="22" rx="30"/>
+  <rect x="0" y="0" width="1200" height="${svgHeight}" fill="#E3C028"/>
+  <rect x="0" y="0" width="1200" height="${svgHeight}" filter="url(#grain)"/>
+  <rect x="38" y="38" width="1124" height="${borderHeight}" fill="none" stroke="#111111" stroke-width="22" rx="30"/>
 
   <text x="600" y="182" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-size="156" font-weight="900" fill="#111111" letter-spacing="2">FITS</text>
   <text x="600" y="260" text-anchor="middle" font-family="Arial Narrow, Arial, sans-serif" font-size="44" font-weight="800" fill="#111111">${escapeXml(subheader)}</text>

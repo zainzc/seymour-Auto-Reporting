@@ -39,6 +39,14 @@ const { runPhase6Fitment } = require('../scripts/runPhase6Fitment');
 const { runPhase72FitmentImage } = require('../scripts/runPhase72FitmentImage');
 const { runPhase74TitleDescription } = require('../scripts/runPhase74TitleDescription');
 const { runEbayMockImport } = require('../scripts/runEbayMockImport');
+const { runPhase5PublishApproved } = require('../services/phase5Service');
+const { validateBatchGovernanceSchema, getBatchSummaries, setBatchStatus } = require('../services/phase5BatchGovernanceService');
+const {
+  startPhase5AutoPushSchedule,
+  stopPhase5AutoPushSchedule,
+  runPhase5AutoPushNow,
+  getPhase5AutoPushScheduleStatus
+} = require('../services/phase5AutoPushScheduleService');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
 const phase2WritebackPoller = require('../services/phase2WritebackPollerService');
@@ -1229,7 +1237,7 @@ ipcMain.handle('phase2-get-config', async () => {
     testTableName: '',
     testMaxTables: 0,
     openaiApiKey: stored.openaiApiKey || '',
-    openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini',
+    openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano',
     openaiBaseUrl: stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '',
     phase4BClickupOpenStatus:
       stored.phase4BClickupOpenStatus || process.env.PHASE4B_CLICKUP_OPEN_STATUS || 'To Do',
@@ -2491,6 +2499,509 @@ ipcMain.handle('phase74:run', async (event, options = {}) => {
   }
 });
 
+ipcMain.handle('phase5:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    phase5Mode: String(stored.phase5Mode || 'A').trim().toUpperCase() === 'B' ? 'B' : 'A',
+    phase5AutoPushEnabled:
+      String(stored.phase5AutoPushEnabled ?? 'false').trim().toLowerCase() === 'true',
+    phase5AutoPushCron: String(stored.phase5AutoPushCron || '0 * * * *').trim(),
+    phase5AutoPushTimezone: String(stored.phase5AutoPushTimezone || '').trim(),
+    phase5AutoPushEligibilityFieldName: String(stored.phase5AutoPushEligibilityFieldName || '').trim(),
+    phase5AutoPushEligibilityValues: String(stored.phase5AutoPushEligibilityValues || '').trim(),
+    phase5EbayEnvironment: String(stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox').trim().toLowerCase(),
+    phase5EbayClientId: String(stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
+    phase5EbayDevId: String(stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
+    phase5EbayClientSecret: String(stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '').trim(),
+    phase5EbayRuName: String(stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
+    phase5AutoPushStatus: getPhase5AutoPushScheduleStatus(),
+    phase5EnforceBatchApproval:
+      String(stored.phase5EnforceBatchApproval ?? 'true').trim().toLowerCase() !== 'false',
+    phase5BatchesTable: String(stored.phase5BatchesTable || 'Listing Batches').trim(),
+    phase5BatchStatusFieldName: String(stored.phase5BatchStatusFieldName || 'Batch Status').trim(),
+    phase5BatchApprovedValue: String(stored.phase5BatchApprovedValue || 'Approved').trim(),
+    phase5BatchLinkFieldName: String(stored.phase5BatchLinkFieldName || '').trim(),
+    phase5RequiredCategoryIdFieldName: String(stored.phase5RequiredCategoryIdFieldName || '').trim(),
+    phase5RequiredTitleFieldName: String(stored.phase5RequiredTitleFieldName || '').trim(),
+    phase5RequiredDescriptionFieldName: String(stored.phase5RequiredDescriptionFieldName || '').trim(),
+    phase5RequiredItemSpecificsFieldName: String(stored.phase5RequiredItemSpecificsFieldName || '').trim(),
+    phase5RequiredItemSpecificFieldNames: String(stored.phase5RequiredItemSpecificFieldNames || '').trim(),
+    phase5BlockedFieldName: String(stored.phase5BlockedFieldName || '').trim(),
+    phase5ClickupExceptionFieldName: String(stored.phase5ClickupExceptionFieldName || '').trim(),
+    phase5ClickupResolvedValues: String(stored.phase5ClickupResolvedValues || 'resolved,done,closed,complete').trim(),
+    phase5PublishStatusFieldName: String(stored.phase5PublishStatusFieldName || '').trim(),
+    phase5PublishedAtFieldName: String(stored.phase5PublishedAtFieldName || '').trim(),
+    phase5PublishRunIdFieldName: String(stored.phase5PublishRunIdFieldName || '').trim(),
+    phase5PayloadHashFieldName: String(stored.phase5PayloadHashFieldName || '').trim(),
+    phase5PayloadHashFields: String(stored.phase5PayloadHashFields || '').trim(),
+    phase5PublishedLogPendingValue: String(stored.phase5PublishedLogPendingValue || 'Published (Log Pending)').trim(),
+    phase5SheetsLogEnabled:
+      String(stored.phase5SheetsLogEnabled ?? 'false').trim().toLowerCase() === 'true',
+    phase5SheetsLogSpreadsheetId: String(stored.phase5SheetsLogSpreadsheetId || '').trim(),
+    phase5SheetsLogTabName: String(stored.phase5SheetsLogTabName || 'Log').trim(),
+    phase5SheetsLogAuthContext: String(stored.phase5SheetsLogAuthContext || 'inventory').trim(),
+    phase5LiveCompareEnabled:
+      String(stored.phase5LiveCompareEnabled ?? 'false').trim().toLowerCase() === 'true',
+    phase5LiveCompareApiUrl: String(stored.phase5LiveCompareApiUrl || '').trim(),
+    phase5LiveCompareApiKey: String(stored.phase5LiveCompareApiKey || '').trim(),
+    phase5TestBatchRecordIds: String(stored.phase5TestBatchRecordIds || '').trim(),
+    listingsTableName: String(
+      stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+    ).trim(),
+    approvalFieldName: String(stored.phase5ApprovalFieldName || '').trim(),
+    groupFieldName: String(stored.phase5GroupFieldName || '').trim(),
+    groupValue: String(stored.phase5GroupValue || '').trim(),
+    schemaCsvPath: String(stored.phase5SchemaCsvPath || '').trim()
+  };
+});
+
+ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const phase5Mode = String(options.phase5Mode || stored.phase5Mode || 'A').trim().toUpperCase() === 'B' ? 'B' : 'A';
+    if (phase5Mode === 'B') {
+      throw new Error('Phase 5 Option B is scheduled auto-push. Use Start Auto-Push or Run Auto-Push Now.');
+    }
+    stopPhase5AutoPushSchedule();
+    const runOptions = {
+      ...stored,
+      ...options,
+      dryRun: false,
+      phase5Mode,
+      phase5ListingsTable: String(
+        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+      ).trim(),
+      phase5ApprovalFieldName: String(options.phase5ApprovalFieldName || stored.phase5ApprovalFieldName || '').trim(),
+      phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
+      phase5GroupValue: String(options.phase5GroupValue || stored.phase5GroupValue || '').trim(),
+      phase5SchemaCsvPath: String(options.phase5SchemaCsvPath || stored.phase5SchemaCsvPath || '').trim(),
+      phase5EbayEnvironment: String(options.phase5EbayEnvironment || stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox')
+        .trim()
+        .toLowerCase() === 'production' ? 'production' : 'sandbox',
+      phase5EbayClientId: String(options.phase5EbayClientId || stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
+      phase5EbayDevId: String(options.phase5EbayDevId || stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
+      phase5EbayClientSecret: String(
+        options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
+      ).trim(),
+      phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
+      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : []
+    };
+
+    event.sender.send('phase5:progress', {
+      stage: 'phase5_load_schema',
+      percent: 1,
+      counts: null,
+      message: `Starting Phase 5 ${runOptions.phase5Mode === 'B' ? 'Option B' : 'Option A'} run...`
+    });
+
+    const summary = await runPhase5PublishApproved(runOptions, progress => {
+      event.sender.send('phase5:progress', progress);
+    });
+
+    const merged = {
+      ...stored,
+      ...options,
+      phase5Mode: 'A',
+      phase5AutoPushActive: false,
+      phase5ListingsTable: runOptions.phase5ListingsTable,
+      phase5ApprovalFieldName: runOptions.phase5ApprovalFieldName,
+      phase5GroupFieldName: runOptions.phase5GroupFieldName,
+      phase5GroupValue: runOptions.phase5GroupValue,
+      phase5SchemaCsvPath: runOptions.phase5SchemaCsvPath,
+      phase5EbayEnvironment: runOptions.phase5EbayEnvironment,
+      phase5EbayClientId: runOptions.phase5EbayClientId,
+      phase5EbayDevId: runOptions.phase5EbayDevId,
+      phase5EbayClientSecret: runOptions.phase5EbayClientSecret,
+      phase5EbayRuName: runOptions.phase5EbayRuName,
+      phase5PublishedIdentities: Array.isArray(summary?.phase5PublishedIdentities)
+        ? summary.phase5PublishedIdentities
+        : Array.isArray(stored.phase5PublishedIdentities)
+          ? stored.phase5PublishedIdentities
+          : [],
+      phase5PublishedPayloadHashes: Array.isArray(summary?.phase5PublishedPayloadHashes)
+        ? summary.phase5PublishedPayloadHashes
+        : Array.isArray(stored.phase5PublishedPayloadHashes)
+          ? stored.phase5PublishedPayloadHashes
+          : []
+    };
+    saveInventoryConfig('phase2Config', merged);
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase5:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase5:dryRunPublishApproved', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const phase5Mode = String(options.phase5Mode || stored.phase5Mode || 'A').trim().toUpperCase() === 'B' ? 'B' : 'A';
+    if (phase5Mode === 'B') {
+      throw new Error('Phase 5 Option B is scheduled auto-push. Use Run Auto-Push Now for deterministic eligibility checks.');
+    }
+    stopPhase5AutoPushSchedule();
+    const runOptions = {
+      ...stored,
+      ...options,
+      dryRun: true,
+      phase5Mode,
+      phase5ListingsTable: String(
+        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+      ).trim(),
+      phase5ApprovalFieldName: String(options.phase5ApprovalFieldName || stored.phase5ApprovalFieldName || '').trim(),
+      phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
+      phase5GroupValue: String(options.phase5GroupValue || stored.phase5GroupValue || '').trim(),
+      phase5SchemaCsvPath: String(options.phase5SchemaCsvPath || stored.phase5SchemaCsvPath || '').trim(),
+      phase5EbayEnvironment: String(options.phase5EbayEnvironment || stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox')
+        .trim()
+        .toLowerCase() === 'production' ? 'production' : 'sandbox',
+      phase5EbayClientId: String(options.phase5EbayClientId || stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
+      phase5EbayDevId: String(options.phase5EbayDevId || stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
+      phase5EbayClientSecret: String(
+        options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
+      ).trim(),
+      phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
+      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : []
+    };
+
+    event.sender.send('phase5:progress', {
+      stage: 'phase5_load_schema',
+      percent: 1,
+      counts: null,
+      message: `Starting Phase 5 dry run (${runOptions.phase5Mode === 'B' ? 'Option B' : 'Option A'})...`
+    });
+
+    const summary = await runPhase5PublishApproved(runOptions, progress => {
+      event.sender.send('phase5:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('phase5:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('phase5:startAutoPush', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options,
+      dryRun: false,
+      phase5Mode: 'B',
+      phase5AutoPushEnabled: true,
+      phase5AutoPushCron: String(options.phase5AutoPushCron || stored.phase5AutoPushCron || '0 * * * *').trim(),
+      phase5AutoPushTimezone: String(options.phase5AutoPushTimezone || stored.phase5AutoPushTimezone || '').trim(),
+      phase5AutoPushEligibilityFieldName: String(
+        options.phase5AutoPushEligibilityFieldName || stored.phase5AutoPushEligibilityFieldName || ''
+      ).trim(),
+      phase5AutoPushEligibilityValues: String(
+        options.phase5AutoPushEligibilityValues || stored.phase5AutoPushEligibilityValues || ''
+      ).trim(),
+      phase5EbayEnvironment: String(options.phase5EbayEnvironment || stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox')
+        .trim()
+        .toLowerCase() === 'production' ? 'production' : 'sandbox',
+      phase5EbayClientId: String(options.phase5EbayClientId || stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
+      phase5EbayDevId: String(options.phase5EbayDevId || stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
+      phase5EbayClientSecret: String(
+        options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
+      ).trim(),
+      phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
+      phase5ListingsTable: String(
+        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+      ).trim(),
+      phase5ApprovalFieldName: String(options.phase5ApprovalFieldName || stored.phase5ApprovalFieldName || '').trim(),
+      phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
+      phase5GroupValue: String(options.phase5GroupValue || stored.phase5GroupValue || '').trim(),
+      phase5SchemaCsvPath: String(options.phase5SchemaCsvPath || stored.phase5SchemaCsvPath || '').trim(),
+      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : []
+    };
+
+    const execute = async ({ trigger }) => {
+      try {
+        if (event?.sender && !event.sender.isDestroyed()) {
+          event.sender.send('phase5:progress', {
+            stage: 'phase5_publish',
+            percent: 1,
+            counts: null,
+            message: `Phase 5 Option B tick started (${trigger}).`
+          });
+        }
+      } catch (_) {}
+      const summary = await runPhase5PublishApproved(runOptions, progress => {
+        try {
+          if (event?.sender && !event.sender.isDestroyed()) {
+            event.sender.send('phase5:progress', progress);
+          }
+        } catch (_) {}
+      });
+      const merged = {
+        ...stored,
+        ...options,
+        phase5Mode: 'B',
+        phase5AutoPushEnabled: true,
+        phase5AutoPushCron: runOptions.phase5AutoPushCron,
+        phase5AutoPushTimezone: runOptions.phase5AutoPushTimezone,
+        phase5AutoPushEligibilityFieldName: runOptions.phase5AutoPushEligibilityFieldName,
+        phase5AutoPushEligibilityValues: runOptions.phase5AutoPushEligibilityValues,
+        phase5EbayEnvironment: runOptions.phase5EbayEnvironment,
+        phase5EbayClientId: runOptions.phase5EbayClientId,
+        phase5EbayDevId: runOptions.phase5EbayDevId,
+        phase5EbayClientSecret: runOptions.phase5EbayClientSecret,
+        phase5EbayRuName: runOptions.phase5EbayRuName,
+        phase5ListingsTable: runOptions.phase5ListingsTable,
+        phase5ApprovalFieldName: runOptions.phase5ApprovalFieldName,
+        phase5GroupFieldName: runOptions.phase5GroupFieldName,
+        phase5GroupValue: runOptions.phase5GroupValue,
+        phase5SchemaCsvPath: runOptions.phase5SchemaCsvPath,
+        phase5AutoPushActive: true,
+        phase5PublishedIdentities: Array.isArray(summary?.phase5PublishedIdentities)
+          ? summary.phase5PublishedIdentities
+          : Array.isArray(stored.phase5PublishedIdentities)
+            ? stored.phase5PublishedIdentities
+            : [],
+        phase5PublishedPayloadHashes: Array.isArray(summary?.phase5PublishedPayloadHashes)
+          ? summary.phase5PublishedPayloadHashes
+          : Array.isArray(stored.phase5PublishedPayloadHashes)
+            ? stored.phase5PublishedPayloadHashes
+            : []
+      };
+      saveInventoryConfig('phase2Config', merged);
+      return { success: true, summary };
+    };
+
+    const status = startPhase5AutoPushSchedule(
+      {
+        cronExpression: runOptions.phase5AutoPushCron,
+        timezone: runOptions.phase5AutoPushTimezone
+      },
+      execute
+    );
+
+    saveInventoryConfig('phase2Config', {
+      ...stored,
+      ...options,
+      phase5Mode: 'B',
+      phase5AutoPushEnabled: true,
+      phase5AutoPushActive: true,
+      phase5AutoPushCron: runOptions.phase5AutoPushCron,
+      phase5AutoPushTimezone: runOptions.phase5AutoPushTimezone,
+      phase5AutoPushEligibilityFieldName: runOptions.phase5AutoPushEligibilityFieldName,
+      phase5AutoPushEligibilityValues: runOptions.phase5AutoPushEligibilityValues,
+      phase5EbayEnvironment: runOptions.phase5EbayEnvironment,
+      phase5EbayClientId: runOptions.phase5EbayClientId,
+      phase5EbayDevId: runOptions.phase5EbayDevId,
+      phase5EbayClientSecret: runOptions.phase5EbayClientSecret,
+      phase5EbayRuName: runOptions.phase5EbayRuName
+    });
+
+    return { success: true, status };
+  } catch (error) {
+    return { success: false, message: formatDetailedErrorMessage(error) };
+  }
+});
+
+ipcMain.handle('phase5:stopAutoPush', async () => {
+  try {
+    stopPhase5AutoPushSchedule();
+    const stored = getInventoryConfig('phase2Config') || {};
+    saveInventoryConfig('phase2Config', {
+      ...stored,
+      phase5AutoPushActive: false
+    });
+    return { success: true, status: getPhase5AutoPushScheduleStatus() };
+  } catch (error) {
+    return { success: false, message: formatDetailedErrorMessage(error) };
+  }
+});
+
+ipcMain.handle('phase5:getAutoPushStatus', async () => {
+  return getPhase5AutoPushScheduleStatus();
+});
+
+ipcMain.handle('phase5:testEbayCredentials', async (_, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const publishService = new (require('../services/phase5EbayPublishService').Phase5EbayPublishService)({
+      ebayEnvironment: String(options.phase5EbayEnvironment || stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox')
+        .trim()
+        .toLowerCase() === 'production' ? 'production' : 'sandbox',
+      ebayClientId: String(options.phase5EbayClientId || stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
+      ebayDevId: String(options.phase5EbayDevId || stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
+      ebayClientSecret: String(
+        options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
+      ).trim(),
+      ebayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim()
+    });
+
+    const result = await publishService.testCredentials();
+    return {
+      success: true,
+      result
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: formatDetailedErrorMessage(error)
+    };
+  }
+});
+
+ipcMain.handle('phase5:getBatchSummaries', async (_, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const result = await getBatchSummaries({
+      ...stored,
+      ...options
+    });
+    return {
+      success: true,
+      ...result
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: formatDetailedErrorMessage(error)
+    };
+  }
+});
+
+ipcMain.handle('phase5:validateBatchSchema', async (_, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const result = await validateBatchGovernanceSchema({
+      ...stored,
+      ...options
+    });
+    return {
+      success: true,
+      result
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: formatDetailedErrorMessage(error)
+    };
+  }
+});
+
+ipcMain.handle('phase5:setBatchStatus', async (_, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const result = await setBatchStatus({
+      ...stored,
+      ...options
+    });
+    return {
+      success: true,
+      result
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: formatDetailedErrorMessage(error)
+    };
+  }
+});
+
+ipcMain.handle('phase5:runAutoPushNow', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options,
+      dryRun: false,
+      phase5Mode: 'B',
+      phase5AutoPushEnabled: true,
+      phase5AutoPushEligibilityFieldName: String(
+        options.phase5AutoPushEligibilityFieldName || stored.phase5AutoPushEligibilityFieldName || ''
+      ).trim(),
+      phase5AutoPushEligibilityValues: String(
+        options.phase5AutoPushEligibilityValues || stored.phase5AutoPushEligibilityValues || ''
+      ).trim(),
+      phase5EbayEnvironment: String(options.phase5EbayEnvironment || stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox')
+        .trim()
+        .toLowerCase() === 'production' ? 'production' : 'sandbox',
+      phase5EbayClientId: String(options.phase5EbayClientId || stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
+      phase5EbayDevId: String(options.phase5EbayDevId || stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
+      phase5EbayClientSecret: String(
+        options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
+      ).trim(),
+      phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
+      phase5ListingsTable: String(
+        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+      ).trim(),
+      phase5ApprovalFieldName: String(options.phase5ApprovalFieldName || stored.phase5ApprovalFieldName || '').trim(),
+      phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
+      phase5GroupValue: String(options.phase5GroupValue || stored.phase5GroupValue || '').trim(),
+      phase5SchemaCsvPath: String(options.phase5SchemaCsvPath || stored.phase5SchemaCsvPath || '').trim(),
+      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : []
+    };
+
+    const result = await runPhase5AutoPushNow(async () => {
+      const summary = await runPhase5PublishApproved(runOptions, progress => {
+        event.sender.send('phase5:progress', progress);
+      });
+      saveInventoryConfig('phase2Config', {
+        ...stored,
+        ...options,
+        phase5Mode: 'B',
+        phase5AutoPushEnabled: true,
+        phase5EbayEnvironment: runOptions.phase5EbayEnvironment,
+        phase5EbayClientId: runOptions.phase5EbayClientId,
+        phase5EbayDevId: runOptions.phase5EbayDevId,
+        phase5EbayClientSecret: runOptions.phase5EbayClientSecret,
+        phase5EbayRuName: runOptions.phase5EbayRuName,
+        phase5PublishedIdentities: Array.isArray(summary?.phase5PublishedIdentities)
+          ? summary.phase5PublishedIdentities
+          : Array.isArray(stored.phase5PublishedIdentities)
+            ? stored.phase5PublishedIdentities
+            : [],
+        phase5PublishedPayloadHashes: Array.isArray(summary?.phase5PublishedPayloadHashes)
+          ? summary.phase5PublishedPayloadHashes
+          : Array.isArray(stored.phase5PublishedPayloadHashes)
+            ? stored.phase5PublishedPayloadHashes
+            : []
+      });
+      return { success: true, summary };
+    });
+
+    return {
+      success: !!result?.success,
+      summary: result?.summary || null,
+      message: result?.message || ''
+    };
+  } catch (error) {
+    return { success: false, message: formatDetailedErrorMessage(error) };
+  }
+});
+
 ipcMain.handle('phase4combined:run', async (event, options = {}) => {
   try {
     const stored = getInventoryConfig('phase2Config') || {};
@@ -2755,6 +3266,79 @@ function createWindow() {
       
       // Initialize inventory webhook schedule if it was previously active
       initInventorySchedule();
+
+      // Resume Phase 5 Option B scheduled auto-push if it was active
+      try {
+        const storedPhase2 = getInventoryConfig('phase2Config') || {};
+        const shouldResumePhase5AutoPush =
+          String(storedPhase2.phase5Mode || 'A').trim().toUpperCase() === 'B' &&
+          String(storedPhase2.phase5AutoPushEnabled ?? 'false').trim().toLowerCase() === 'true' &&
+          String(storedPhase2.phase5AutoPushActive ?? 'false').trim().toLowerCase() === 'true';
+        if (shouldResumePhase5AutoPush) {
+          const runOptions = {
+            ...storedPhase2,
+            dryRun: false,
+            phase5Mode: 'B',
+            phase5AutoPushEnabled: true,
+            phase5ListingsTable: String(
+              storedPhase2.phase5ListingsTable || storedPhase2.ebayMockTableName || 'eBay Listings (API) (Mock)'
+            ).trim(),
+            phase5ApprovalFieldName: String(storedPhase2.phase5ApprovalFieldName || '').trim(),
+            phase5GroupFieldName: String(storedPhase2.phase5GroupFieldName || '').trim(),
+            phase5GroupValue: String(storedPhase2.phase5GroupValue || '').trim(),
+            phase5SchemaCsvPath: String(storedPhase2.phase5SchemaCsvPath || '').trim(),
+            phase5AutoPushEligibilityFieldName: String(storedPhase2.phase5AutoPushEligibilityFieldName || '').trim(),
+            phase5AutoPushEligibilityValues: String(storedPhase2.phase5AutoPushEligibilityValues || '').trim(),
+            phase5EbayEnvironment: String(storedPhase2.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox')
+              .trim()
+              .toLowerCase() === 'production' ? 'production' : 'sandbox',
+            phase5EbayClientId: String(storedPhase2.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
+            phase5EbayDevId: String(storedPhase2.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
+            phase5EbayClientSecret: String(storedPhase2.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '').trim(),
+            phase5EbayRuName: String(storedPhase2.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
+            phase5PublishedIdentities: Array.isArray(storedPhase2.phase5PublishedIdentities)
+              ? storedPhase2.phase5PublishedIdentities
+              : [],
+            phase5PublishedPayloadHashes: Array.isArray(storedPhase2.phase5PublishedPayloadHashes)
+              ? storedPhase2.phase5PublishedPayloadHashes
+              : []
+          };
+          startPhase5AutoPushSchedule(
+            {
+              cronExpression: String(storedPhase2.phase5AutoPushCron || '0 * * * *').trim(),
+              timezone: String(storedPhase2.phase5AutoPushTimezone || '').trim()
+            },
+            async () => {
+              const summary = await runPhase5PublishApproved(runOptions, progress => {
+                if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+                  mainWindow.webContents.send('phase5:progress', progress);
+                }
+              });
+              const fresh = getInventoryConfig('phase2Config') || {};
+              saveInventoryConfig('phase2Config', {
+                ...fresh,
+                phase5Mode: 'B',
+                phase5AutoPushEnabled: true,
+                phase5AutoPushActive: true,
+                phase5PublishedIdentities: Array.isArray(summary?.phase5PublishedIdentities)
+                  ? summary.phase5PublishedIdentities
+                  : Array.isArray(fresh.phase5PublishedIdentities)
+                    ? fresh.phase5PublishedIdentities
+                    : [],
+                phase5PublishedPayloadHashes: Array.isArray(summary?.phase5PublishedPayloadHashes)
+                  ? summary.phase5PublishedPayloadHashes
+                  : Array.isArray(fresh.phase5PublishedPayloadHashes)
+                    ? fresh.phase5PublishedPayloadHashes
+                    : []
+              });
+              return { success: true, summary };
+            }
+          );
+          console.log('Phase5 Option B auto-push schedule resumed.');
+        }
+      } catch (phase5ResumeError) {
+        console.error('Phase5 auto-push resume failed:', phase5ResumeError.message);
+      }
 
       const writebackConfig = buildPhase2WritebackConfig();
       if (parseBoolean(writebackConfig.enabled, false)) {

@@ -156,6 +156,21 @@ contextBridge.exposeInMainWorld('phase74API', {
   onProgress: (callback) => ipcRenderer.on('phase74:progress', callback)
 });
 
+contextBridge.exposeInMainWorld('phase5API', {
+  getConfig: () => ipcRenderer.invoke('phase5:get-config'),
+  validateBatchSchema: (options) => ipcRenderer.invoke('phase5:validateBatchSchema', options),
+  getBatchSummaries: (options) => ipcRenderer.invoke('phase5:getBatchSummaries', options),
+  setBatchStatus: (options) => ipcRenderer.invoke('phase5:setBatchStatus', options),
+  publishApproved: (options) => ipcRenderer.invoke('phase5:publishApproved', options),
+  dryRunPublishApproved: (options) => ipcRenderer.invoke('phase5:dryRunPublishApproved', options),
+  testEbayCredentials: (options) => ipcRenderer.invoke('phase5:testEbayCredentials', options),
+  startAutoPush: (options) => ipcRenderer.invoke('phase5:startAutoPush', options),
+  stopAutoPush: () => ipcRenderer.invoke('phase5:stopAutoPush'),
+  getAutoPushStatus: () => ipcRenderer.invoke('phase5:getAutoPushStatus'),
+  runAutoPushNow: (options) => ipcRenderer.invoke('phase5:runAutoPushNow', options),
+  onProgress: (callback) => ipcRenderer.on('phase5:progress', callback)
+});
+
 // eBay Listing Mock Import API
 contextBridge.exposeInMainWorld('ebayMockImportAPI', {
   getConfig: () => ipcRenderer.invoke('ebaymock:get-config'),
