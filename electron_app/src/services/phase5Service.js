@@ -241,7 +241,11 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
   );
   const dryRun = options?.dryRun === true;
   const phase5Mode = normalizePhase5Mode(options.phase5Mode || process.env.PHASE5_MODE || 'A');
-  const requireApprovalField = phase5Mode === 'A';
+  const enforceListingApproval = parseBoolean(
+    options.phase5EnforceListingApproval ?? process.env.PHASE5_ENFORCE_LISTING_APPROVAL ?? 'false',
+    false
+  );
+  const requireApprovalField = phase5Mode === 'A' && enforceListingApproval;
   const requireEligibilityField = phase5Mode === 'B';
   const autoPushEnabled =
     String(options.phase5AutoPushEnabled ?? process.env.PHASE5_AUTOPUSH_ENABLED ?? 'false').trim().toLowerCase() === 'true';
@@ -257,6 +261,7 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     phase5Mode,
     modeLabel: getModeLabel(phase5Mode),
     autoPushEnabled,
+    listingApprovalEnforced: enforceListingApproval,
     ebayEnvironment: normalizeText(options.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox')
       .toLowerCase() === 'production' ? 'production' : 'sandbox',
     listingsTable: listingsTableName,
@@ -401,7 +406,9 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
   const eligible =
     phase5Mode === 'B'
       ? approvalService.filterAutoPushEligibleRecords(queueRows, schema)
-      : approvalService.filterApprovedRecords(queueRows, schema);
+      : enforceListingApproval
+        ? approvalService.filterApprovedRecords(queueRows, schema)
+        : approvalService.filterQueueRecords(queueRows, schema);
 
   const approvedRecords = eligible.approved || [];
   const governanceEligible = [];

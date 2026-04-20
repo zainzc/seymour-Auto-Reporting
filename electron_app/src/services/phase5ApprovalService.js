@@ -45,9 +45,19 @@ function readCsvHeadersIfPresent(csvPath = '') {
   if (!file) return [];
   try {
     if (!fs.existsSync(file)) return [];
-    const content = fs.readFileSync(file, 'utf8');
-    const firstLine = String(content || '').split(/\r?\n/)[0] || '';
-    return parseCsvHeaderLine(firstLine);
+    const fd = fs.openSync(file, 'r');
+    try {
+      const chunkSize = 64 * 1024;
+      const buffer = Buffer.alloc(chunkSize);
+      const bytesRead = fs.readSync(fd, buffer, 0, chunkSize, 0);
+      if (!bytesRead) return [];
+      const text = buffer.toString('utf8', 0, bytesRead);
+      const nlIndex = text.search(/\r?\n/);
+      const firstLine = nlIndex >= 0 ? text.slice(0, nlIndex) : text;
+      return parseCsvHeaderLine(firstLine || '');
+    } finally {
+      fs.closeSync(fd);
+    }
   } catch (_) {
     return [];
   }
@@ -62,7 +72,16 @@ function resolveSchemaCsvPath(explicitPath = '') {
     path.resolve(process.cwd(), 'Ebay Listing Example.csv'),
     path.resolve(process.cwd(), '..', 'Ebay Listing Example.csv')
   ];
-  return candidates.find(file => fs.existsSync(file)) || '';
+  const maxImplicitBytes = 10 * 1024 * 1024;
+  for (const file of candidates) {
+    try {
+      if (!fs.existsSync(file)) continue;
+      const stat = fs.statSync(file);
+      if (Number(stat?.size || 0) > maxImplicitBytes) continue;
+      return file;
+    } catch (_) {}
+  }
+  return '';
 }
 
 function buildFieldLookup(fieldNames = []) {

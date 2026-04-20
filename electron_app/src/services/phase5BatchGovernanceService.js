@@ -176,34 +176,55 @@ async function getBatchSummaries(options = {}) {
     throw new Error(`Batch table '${batchTableName}' not found.`);
   }
 
-  const batchRows = await airtableService.fetchAllRecords(batchTable.id, [batchStatusField]);
-  const listingRows = await airtableService.fetchAllRecords(schema.tableId, []);
+  const batchSchemaFields = resolveBatchSchemaFieldNames(options);
+  const batchRows = await airtableService.fetchAllRecords(batchTable.id, [
+    batchStatusField,
+    batchSchemaFields.batchIdField,
+    batchSchemaFields.totalItemsField,
+    batchSchemaFields.eligibleItemsField,
+    batchSchemaFields.blockedItemsField,
+    batchSchemaFields.exceptionItemsField
+  ]);
 
   const byBatch = new Map();
   for (const batch of batchRows) {
+    const fields = batch?.fields || {};
     byBatch.set(normalizeText(batch.id), {
       batchRecordId: normalizeText(batch.id),
-      batchStatus: normalizeTextOrComparable(batch?.fields?.[batchStatusField]) || '',
-      isApproved: normalizeTextOrComparable(batch?.fields?.[batchStatusField]).toLowerCase() === batchApprovedValue.toLowerCase(),
-      totalItems: 0,
-      eligibleItemsCount: 0,
-      blockedItemsCount: 0,
-      exceptionItemsCount: 0
+      batchId: normalizeTextOrComparable(fields[batchSchemaFields.batchIdField]) || normalizeText(batch.id),
+      batchStatus: normalizeTextOrComparable(fields[batchStatusField]) || '',
+      isApproved: normalizeTextOrComparable(fields[batchStatusField]).toLowerCase() === batchApprovedValue.toLowerCase(),
+      totalItems: Number(fields[batchSchemaFields.totalItemsField] || 0) || 0,
+      eligibleItemsCount: Number(fields[batchSchemaFields.eligibleItemsField] || 0) || 0,
+      blockedItemsCount: Number(fields[batchSchemaFields.blockedItemsField] || 0) || 0,
+      exceptionItemsCount: Number(fields[batchSchemaFields.exceptionItemsField] || 0) || 0,
+      createdTime: normalizeText(batch?.createdTime || '')
     });
   }
 
-  for (const row of listingRows) {
-    const fields = row?.fields || {};
-    const links = extractLinkedRecordIds(fields[batchLinkField]);
-    if (links.length === 0) continue;
-    const gate = passCoreGate(fields, schema, options);
-    for (const batchId of links) {
-      const target = byBatch.get(batchId);
-      if (!target) continue;
-      target.totalItems += 1;
-      if (gate.eligible) target.eligibleItemsCount += 1;
-      if (gate.isBlocked) target.blockedItemsCount += 1;
-      if (gate.hasException) target.exceptionItemsCount += 1;
+  // Fallback only when rollup metrics are unavailable, to preserve backward compatibility.
+  const shouldFallbackRecompute = Array.from(byBatch.values()).some(
+    b =>
+      !Number.isFinite(Number(b.totalItems)) ||
+      !Number.isFinite(Number(b.eligibleItemsCount)) ||
+      !Number.isFinite(Number(b.blockedItemsCount)) ||
+      !Number.isFinite(Number(b.exceptionItemsCount))
+  );
+  if (shouldFallbackRecompute) {
+    const listingRows = await airtableService.fetchAllRecords(schema.tableId, []);
+    for (const row of listingRows) {
+      const fields = row?.fields || {};
+      const links = extractLinkedRecordIds(fields[batchLinkField]);
+      if (links.length === 0) continue;
+      const gate = passCoreGate(fields, schema, options);
+      for (const batchId of links) {
+        const target = byBatch.get(batchId);
+        if (!target) continue;
+        target.totalItems += 1;
+        if (gate.eligible) target.eligibleItemsCount += 1;
+        if (gate.isBlocked) target.blockedItemsCount += 1;
+        if (gate.hasException) target.exceptionItemsCount += 1;
+      }
     }
   }
 
@@ -255,8 +276,93 @@ async function setBatchStatus(options = {}) {
   };
 }
 
+async function getBatchListings(options = {}) {
+  const { schema, airtableToken, airtableBaseId } = await resolvePhase5Schema(options);
+  const airtableService = new AirtableService({ token: airtableToken, baseId: airtableBaseId });
+  const schemaService = new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId });
+  const batchRecordId = normalizeText(options.batchRecordId || '');
+  if (!batchRecordId) throw new Error('batchRecordId is required.');
+  const batchTableName = normalizeText(options.phase5BatchesTable || schema.batchTableName || 'Listing Batches');
+  const batchSchemaFields = resolveBatchSchemaFieldNames(options);
+  const itemsField = normalizeText(batchSchemaFields.itemsField || 'Items');
+
+  const tables = await schemaService.listTables();
+  const batchTable = (tables || []).find(t => normalizeText(t?.name).toLowerCase() === batchTableName.toLowerCase());
+  if (!batchTable?.id) {
+    throw new Error(`Batch table '${batchTableName}' not found.`);
+  }
+
+  const batchRow = await airtableService.request(
+    'GET',
+    `/${encodeURIComponent(batchTable.id)}/${encodeURIComponent(batchRecordId)}`
+  );
+  const linkedListingIds = extractLinkedRecordIds(batchRow?.fields?.[itemsField]);
+  if (linkedListingIds.length === 0) {
+    return {
+      batchRecordId,
+      batchLinkField: itemsField,
+      total: 0,
+      listings: []
+    };
+  }
+
+  const rows = [];
+  const uniqueIds = Array.from(new Set(linkedListingIds.map(id => normalizeText(id)).filter(Boolean)));
+  for (let i = 0; i < uniqueIds.length; i += 80) {
+    const group = uniqueIds.slice(i, i + 80);
+    const clauses = group.map(id => `RECORD_ID()='${id}'`);
+    const formula = clauses.length === 1 ? clauses[0] : `OR(${clauses.join(',')})`;
+    try {
+      const subset = await airtableService.fetchRecordsByFormula(schema.tableId, formula, []);
+      rows.push(...subset);
+    } catch (_) {
+      // Fallback to single-record requests for this chunk if formula is rejected.
+      for (const id of group) {
+        try {
+          const one = await airtableService.request('GET', `/${encodeURIComponent(schema.tableId)}/${encodeURIComponent(id)}`);
+          if (one?.id) rows.push(one);
+        } catch (_) {}
+      }
+    }
+  }
+
+  const rowById = new Map(rows.map(r => [normalizeText(r?.id), r]));
+  const orderedRows = uniqueIds.map(id => rowById.get(id)).filter(Boolean);
+
+  const listingRows = orderedRows.map(row => {
+    const fields = row?.fields || {};
+    const gate = passCoreGate(fields, schema, options);
+    return {
+      recordId: normalizeText(row?.id),
+      createdTime: normalizeText(row?.createdTime || ''),
+      recordKey: normalizeTextOrComparable(fields['Record Key']),
+      ipn: normalizeTextOrComparable(fields['c: partshunter203 ebay MOTORS interchange part number']),
+      productTitle: normalizeTextOrComparable(fields['Product Title(New)']),
+      description: normalizeTextOrComparable(fields['Description']),
+      ebayCategoryId:
+        normalizeTextOrComparable(fields['eBay Category ID (from Category Definitions) (from Master Part Record)']) ||
+        normalizeTextOrComparable(fields[schema.categoryIdField || '']),
+      eligibilityComputed:
+        normalizeTextOrComparable(fields['Eligibility Computed']) ||
+        (gate.eligible ? 'Eligible' : 'Not Eligible'),
+      hasException:
+        normalizeTextOrComparable(fields['Has Exception']) ||
+        (gate.hasException ? 'Yes' : 'No'),
+      masterPartRecord: normalizeTextOrComparable(fields['Master Part Record'])
+    };
+  });
+
+  return {
+    batchRecordId,
+    batchLinkField: itemsField,
+    total: listingRows.length,
+    listings: listingRows
+  };
+}
+
 module.exports = {
   validateBatchGovernanceSchema,
   getBatchSummaries,
-  setBatchStatus
+  setBatchStatus,
+  getBatchListings
 };

@@ -169,6 +169,7 @@
       <button class="btn btn-back" onclick="goBack()">Back</button>
       <button class="btn btn-primary" onclick="goToPowerlinkSheets()">Open Inventory Sync Workspace</button>
       <button class="btn btn-primary" onclick="goToPhase2()">Open Master Parts Sync Workspace</button>
+      <button class="btn btn-primary" onclick="goToPhase5BatchApproval()">Open Phase 5 Batch Approval</button>
     </div>
 
     <section class="panel">
@@ -196,6 +197,19 @@
         Run and monitor master parts processing from the same milestone flow. This workspace reads inventory sheet data, upserts Airtable Master Parts, and creates ClickUp tasks for unresolved categories.
       </p>
     </section>
+
+    <section class="panel">
+      <h3>Phase 5 Batch Approval</h3>
+      <div class="pill-row">
+        <span class="pill">Batch-Level Governance</span>
+        <span class="pill">Eligible/Blocked/Exception Metrics</span>
+        <span class="pill">Explicit Approved/Hold Actions</span>
+        <span class="pill">External Control Surface</span>
+      </div>
+      <p class="description">
+        Review pending listing batches, inspect linked listings, and set batch status to Approved or Hold from an external UI layer before any live update execution.
+      </p>
+    </section>
   </div>
 
   <script>
@@ -209,6 +223,10 @@
 
     function goToPhase2() {
       window.location.href = 'phase2-master-parts.html';
+    }
+
+    function goToPhase5BatchApproval() {
+      window.location.href = 'phase5-batch-approval.html';
     }
   </script>
 </body>

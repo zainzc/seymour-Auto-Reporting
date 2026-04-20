@@ -158,9 +158,12 @@ contextBridge.exposeInMainWorld('phase74API', {
 
 contextBridge.exposeInMainWorld('phase5API', {
   getConfig: () => ipcRenderer.invoke('phase5:get-config'),
+  testPublishLogConfig: (options) => ipcRenderer.invoke('phase5:testPublishLogConfig', options),
   validateBatchSchema: (options) => ipcRenderer.invoke('phase5:validateBatchSchema', options),
   getBatchSummaries: (options) => ipcRenderer.invoke('phase5:getBatchSummaries', options),
+  getBatchListings: (options) => ipcRenderer.invoke('phase5:getBatchListings', options),
   setBatchStatus: (options) => ipcRenderer.invoke('phase5:setBatchStatus', options),
+  createBatchFromListings: (options) => ipcRenderer.invoke('phase5:createBatchFromListings', options),
   publishApproved: (options) => ipcRenderer.invoke('phase5:publishApproved', options),
   dryRunPublishApproved: (options) => ipcRenderer.invoke('phase5:dryRunPublishApproved', options),
   testEbayCredentials: (options) => ipcRenderer.invoke('phase5:testEbayCredentials', options),
@@ -176,6 +179,13 @@ contextBridge.exposeInMainWorld('ebayMockImportAPI', {
   getConfig: () => ipcRenderer.invoke('ebaymock:get-config'),
   run: (options) => ipcRenderer.invoke('ebaymock:run', options),
   onProgress: (callback) => ipcRenderer.on('ebaymock:progress', callback)
+});
+
+// eBay Sandbox Inventory Import API
+contextBridge.exposeInMainWorld('ebaySandboxImportAPI', {
+  getConfig: () => ipcRenderer.invoke('ebaysandbox:get-config'),
+  run: (options) => ipcRenderer.invoke('ebaysandbox:run', options),
+  onProgress: (callback) => ipcRenderer.on('ebaysandbox:progress', callback)
 });
 
 // Item Specific table automation API

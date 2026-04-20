@@ -34,7 +34,8 @@
     }
 
     .container {
-      max-width: 1080px;
+      width: min(1080px, calc(100vw - 32px));
+      max-width: none;
       margin: 0 auto;
       display: grid;
       gap: 16px;
@@ -46,6 +47,17 @@
       align-items: center;
       flex-wrap: wrap;
       gap: 10px;
+    }
+
+    .workspace-nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn-nav-active {
+      background: var(--brand-strong) !important;
+      color: #ffffff !important;
     }
 
     .back-link {
@@ -492,6 +504,11 @@
   <div class="container">
     <div class="topbar">
       <a href="index.html" class="back-link">Back to Milestone 1</a>
+      <div class="workspace-nav">
+        <button class="btn btn-secondary" type="button" onclick="navigateWorkspace('powerlink-sheets.html')">Inventory Sync Workspace</button>
+        <button class="btn btn-primary btn-nav-active" type="button">Master Parts Sync Workspace</button>
+        <button class="btn btn-secondary" type="button" onclick="navigateWorkspace('phase5-batch-approval.html')">Phase 5 Batch Approval</button>
+      </div>
     </div>
 
     <header class="header-card">
@@ -888,6 +905,10 @@
                   <label for="ebay-mock-table-name">Airtable Table Name</label>
                   <input id="ebay-mock-table-name" type="text" value="eBay Listings (API) (Mock)">
                 </div>
+                <div class="form-group">
+                  <label for="ebay-sandbox-table-name">Sandbox Import Table Name</label>
+                  <input id="ebay-sandbox-table-name" type="text" value="eBay Listings (API) (Mock)">
+                </div>
               </div>
               <div>
                 <div class="form-group">
@@ -897,10 +918,24 @@
                     <option value="false">False (Create Table/Fields + Import Rows)</option>
                   </select>
                 </div>
+                <div class="form-group">
+                  <label for="ebay-sandbox-fetch-limit">Sandbox Fetch Limit</label>
+                  <input id="ebay-sandbox-fetch-limit" type="number" min="1" step="1" value="200">
+                </div>
+                <div class="form-group">
+                  <label for="ebay-sandbox-dry-run">Sandbox Import Dry Run</label>
+                  <select id="ebay-sandbox-dry-run">
+                    <option value="true" selected>True (No Airtable Writes)</option>
+                    <option value="false">False (Upsert fetched inventory rows)</option>
+                  </select>
+                  <div class="hint">Uses your Phase 5 eBay credentials and selected environment (Sandbox/Production).</div>
+                </div>
                 <div class="btn-group">
                   <button id="run-ebay-mock-import-btn" class="btn btn-secondary" onclick="runEbayMockImport()">Run eBay Mock Import</button>
+                  <button id="run-ebay-sandbox-import-btn" class="btn btn-secondary" onclick="runEbaySandboxImport()">Fetch eBay Inventory</button>
                 </div>
                 <div class="hint" id="ebay-mock-status-text">eBay Mock Import status: idle</div>
+                <div class="hint" id="ebay-sandbox-status-text">eBay Sandbox Import status: idle</div>
               </div>
             </div>
           </div>
@@ -960,9 +995,26 @@
             <label for="phase5-ebay-runame">eBay RuName</label>
             <input id="phase5-ebay-runame" type="text" placeholder="RuName">
           </div>
+          <div class="form-group">
+            <label for="phase5-ebay-sandbox-table-name">Sandbox Import Table Name</label>
+            <input id="phase5-ebay-sandbox-table-name" type="text" value="eBay Listings (API) (Mock)">
+          </div>
+          <div class="form-group">
+            <label for="phase5-ebay-sandbox-fetch-limit">Sandbox Fetch Limit</label>
+            <input id="phase5-ebay-sandbox-fetch-limit" type="number" min="1" step="1" value="200">
+          </div>
+          <div class="form-group">
+            <label for="phase5-ebay-sandbox-dry-run">Sandbox Import Dry Run</label>
+            <select id="phase5-ebay-sandbox-dry-run">
+              <option value="true" selected>True (No Airtable Writes)</option>
+              <option value="false">False (Upsert fetched inventory rows)</option>
+            </select>
+          </div>
           <div class="btn-group" style="margin-top: 8px;">
             <button id="phase5-test-ebay-creds-btn" class="btn btn-secondary" onclick="testPhase5EbayCredentials()">Test eBay Credentials</button>
+            <button id="run-ebay-sandbox-import-phase5-btn" class="btn btn-secondary" onclick="runEbaySandboxImport()">Fetch eBay Inventory</button>
           </div>
+          <div class="hint" id="phase5-ebay-sandbox-status-text">eBay Sandbox Import status: idle</div>
         </div>
         <div>
           <div class="form-group">
@@ -990,6 +1042,7 @@
           <div class="btn-group">
             <button id="run-phase5-dry-run-btn" class="btn btn-secondary" onclick="runPhase5DryRun()">Dry Run Publish Approved</button>
             <button id="run-phase5-btn" class="btn btn-primary" onclick="runPhase5()">Publish Approved</button>
+            <button id="phase5-create-batch-btn" class="btn btn-secondary" onclick="runPhase5CreateBatch()">Create Batch From Listings</button>
           </div>
           <div class="btn-group" style="margin-top: 8px;">
             <button id="phase5-start-autopush-btn" class="btn btn-secondary" onclick="startPhase5AutoPush()">Start Auto-Push</button>
@@ -1008,6 +1061,7 @@
         <input id="phase5-group-field-name" type="text" value="">
         <input id="phase5-group-value" type="text" value="">
         <select id="phase5-enforce-batch-approval"><option value="true" selected>True</option><option value="false">False</option></select>
+        <select id="phase5-enforce-listing-approval"><option value="false" selected>False</option><option value="true">True</option></select>
         <input id="phase5-batch-approved-value" type="text" value="Approved">
         <input id="phase5-required-category-id-field" type="text" value="eBay Category ID">
         <input id="phase5-required-title-field" type="text" value="Product Title(New)">
@@ -1206,6 +1260,19 @@
   </div>
 
   <script>
+    let isWorkspaceNavigating = false;
+    function navigateWorkspace(target) {
+      const next = String(target || '').trim();
+      if (!next || isWorkspaceNavigating) return;
+      isWorkspaceNavigating = true;
+      try {
+        document.querySelectorAll('.workspace-nav .btn').forEach(btn => {
+          btn.disabled = true;
+        });
+      } catch (_) {}
+      window.location.assign(next);
+    }
+
     let isRunning = false;
     let isPhase3Running = false;
     let isPhase4Running = false;
@@ -1261,6 +1328,7 @@
     const DEFAULT_PHASE5_BATCHES_TABLE = 'Listing Batches';
     const DEFAULT_PHASE5_BATCH_STATUS_FIELD = 'Batch Status';
     const DEFAULT_PHASE5_BATCH_APPROVED_VALUE = 'Approved';
+    const DEFAULT_EBAY_SANDBOX_FETCH_LIMIT = 200;
     const REQUIRED_FIELDS = [
       ['sheet-id', 'Google Sheet ID'],
       ['tab-name', 'Google Tab Name'],
@@ -1379,6 +1447,15 @@
       ebaymock_import_rows: 'eBay Mock: Importing rows',
       completed: 'eBay Mock: Completed',
       error: 'eBay Mock: Failed'
+    };
+    const EBAY_SANDBOX_STAGE_LABELS = {
+      ebaysandbox_auth: 'eBay Sandbox: Authenticating',
+      ebaysandbox_fetch_items: 'eBay Sandbox: Fetching inventory items',
+      ebaysandbox_fetch_offers: 'eBay Sandbox: Fetching offers',
+      ebaysandbox_prepare_table: 'eBay Sandbox: Preparing Airtable table',
+      ebaysandbox_import_rows: 'eBay Sandbox: Importing rows',
+      completed: 'eBay Sandbox: Completed',
+      error: 'eBay Sandbox: Failed'
     };
 
     window.addEventListener('load', async () => {
@@ -1610,16 +1687,19 @@
       const runItemSpecificSyncPhase4Btn = document.getElementById('run-item-specific-sync-phase4-btn');
       const runPhase5DryRunBtn = document.getElementById('run-phase5-dry-run-btn');
       const runPhase5Btn = document.getElementById('run-phase5-btn');
+      const phase5CreateBatchBtn = document.getElementById('phase5-create-batch-btn');
       const phase5TestEbayCredsBtn = document.getElementById('phase5-test-ebay-creds-btn');
       const phase5StartAutoPushBtn = document.getElementById('phase5-start-autopush-btn');
       const phase5StopAutoPushBtn = document.getElementById('phase5-stop-autopush-btn');
       const phase5RunAutoPushNowBtn = document.getElementById('phase5-run-autopush-now-btn');
+      const runPhase5EbaySandboxImportBtn = document.getElementById('run-ebay-sandbox-import-phase5-btn');
       const phase5RefreshBatchMetricsBtn = document.getElementById('phase5-refresh-batch-metrics-btn');
       const phase5SetBatchStatusBtn = document.getElementById('phase5-set-batch-status-btn');
       const runPhase6Btn = document.getElementById('run-phase6-btn');
       const runPhase72Btn = document.getElementById('run-phase72-btn');
       const runPhase74Btn = document.getElementById('run-phase74-btn');
       const runEbayMockImportBtn = document.getElementById('run-ebay-mock-import-btn');
+      const runEbaySandboxImportBtn = document.getElementById('run-ebay-sandbox-import-btn');
       const runItemSpecificSyncBtn = document.getElementById('run-item-specific-sync-btn');
       const busy =
         isRunning ||
@@ -1643,6 +1723,11 @@
       const hasAirtableCore =
         Boolean(document.getElementById('airtable-token').value.trim()) &&
         Boolean(document.getElementById('airtable-base-id').value.trim());
+      const hasPhase5EbayCreds =
+        Boolean(document.getElementById('phase5-ebay-client-id').value.trim()) &&
+        Boolean(document.getElementById('phase5-ebay-dev-id').value.trim()) &&
+        Boolean(document.getElementById('phase5-ebay-client-secret').value.trim()) &&
+        Boolean(document.getElementById('phase5-ebay-runame').value.trim());
       const isPhase5OptionB = (document.getElementById('phase5-mode')?.value || 'A').toUpperCase() === 'B';
       const hasPhase72DriveFolder = Boolean(document.getElementById('phase72-drive-folder-id').value.trim());
       runBtn.disabled = busy || !validateForm(false);
@@ -1682,6 +1767,9 @@
       if (runPhase5Btn) {
         runPhase5Btn.disabled = busy || !hasAirtableCore || isPhase5OptionB;
       }
+      if (phase5CreateBatchBtn) {
+        phase5CreateBatchBtn.disabled = busy || !hasAirtableCore;
+      }
       if (phase5TestEbayCredsBtn) {
         phase5TestEbayCredsBtn.disabled = busy;
       }
@@ -1693,6 +1781,9 @@
       }
       if (phase5RunAutoPushNowBtn) {
         phase5RunAutoPushNowBtn.disabled = busy || !hasAirtableCore || !isPhase5OptionB;
+      }
+      if (runPhase5EbaySandboxImportBtn) {
+        runPhase5EbaySandboxImportBtn.disabled = busy || !hasAirtableCore || !hasPhase5EbayCreds;
       }
       if (phase5RefreshBatchMetricsBtn) {
         phase5RefreshBatchMetricsBtn.disabled = busy || !hasAirtableCore;
@@ -1710,6 +1801,10 @@
         const hasCsvPath = Boolean(document.getElementById('ebay-mock-csv-path').value.trim());
         const hasTableName = Boolean(document.getElementById('ebay-mock-table-name').value.trim());
         runEbayMockImportBtn.disabled = busy || !hasCsvPath || !hasTableName || !validateForm(false);
+      }
+      if (runEbaySandboxImportBtn) {
+        const hasTableName = Boolean(document.getElementById('ebay-sandbox-table-name').value.trim());
+        runEbaySandboxImportBtn.disabled = busy || !hasTableName || !hasAirtableCore || !hasPhase5EbayCreds;
       }
       runItemSpecificSyncBtn.disabled = busy || !hasItemSpecificBaseId;
     }
@@ -1794,6 +1889,9 @@
         'phase5-ebay-dev-id',
         'phase5-ebay-client-secret',
         'phase5-ebay-runame',
+        'phase5-ebay-sandbox-table-name',
+        'phase5-ebay-sandbox-fetch-limit',
+        'phase5-ebay-sandbox-dry-run',
         'phase5-autopush-enabled',
         'phase5-autopush-cron',
         'phase5-autopush-timezone',
@@ -1810,7 +1908,10 @@
         'phase74-max-listings',
         'ebay-mock-csv-path',
         'ebay-mock-table-name',
-        'ebay-mock-dry-run'
+        'ebay-mock-dry-run',
+        'ebay-sandbox-table-name',
+        'ebay-sandbox-fetch-limit',
+        'ebay-sandbox-dry-run'
       ]);
       allFieldIds.forEach(id => {
         const el = document.getElementById(id);
@@ -1952,6 +2053,15 @@
       return `${label} (${percent}%)`;
     }
 
+    function formatEbaySandboxProgressText(payload = {}) {
+      const stage = String(payload.stage || '').trim();
+      const percent = Number(payload.percent || 0);
+      const label = EBAY_SANDBOX_STAGE_LABELS[stage] || 'eBay Sandbox import running';
+      const message = String(payload.message || '').trim();
+      if (message) return `${label} (${percent}%): ${message}`;
+      return `${label} (${percent}%)`;
+    }
+
     function formatSetupValidationError(serviceName, error) {
       const message = String(error?.message || error || 'Unknown error');
       const lower = message.toLowerCase();
@@ -2080,6 +2190,8 @@
         document.getElementById('phase5-schema-csv-path').value = config.phase5SchemaCsvPath || '';
         document.getElementById('phase5-enforce-batch-approval').value =
           String(config.phase5EnforceBatchApproval ?? true).toLowerCase() === 'false' ? 'false' : 'true';
+        document.getElementById('phase5-enforce-listing-approval').value =
+          String(config.phase5EnforceListingApproval ?? false).toLowerCase() === 'true' ? 'true' : 'false';
         document.getElementById('phase5-batches-table').value = config.phase5BatchesTable || DEFAULT_PHASE5_BATCHES_TABLE;
         document.getElementById('phase5-batch-status-field-name').value =
           config.phase5BatchStatusFieldName || DEFAULT_PHASE5_BATCH_STATUS_FIELD;
@@ -2118,6 +2230,13 @@
         document.getElementById('phase5-ebay-dev-id').value = config.phase5EbayDevId || '';
         document.getElementById('phase5-ebay-client-secret').value = config.phase5EbayClientSecret || '';
         document.getElementById('phase5-ebay-runame').value = config.phase5EbayRuName || '';
+        document.getElementById('phase5-ebay-sandbox-table-name').value =
+          config.ebaySandboxTableName || config.phase5ListingsTable || config.ebayMockTableName || DEFAULT_EBAY_MOCK_TABLE_NAME;
+        document.getElementById('phase5-ebay-sandbox-fetch-limit').value = String(
+          Number(config.ebaySandboxFetchLimit || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT) || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT
+        );
+        document.getElementById('phase5-ebay-sandbox-dry-run').value =
+          config.ebaySandboxDryRun === false ? 'false' : 'true';
         document.getElementById('phase5-autopush-enabled').value =
           String(config.phase5AutoPushEnabled ?? DEFAULT_PHASE5_AUTOPUSH_ENABLED).toLowerCase() === 'true' ? 'true' : 'false';
         document.getElementById('phase5-autopush-cron').value = config.phase5AutoPushCron || DEFAULT_PHASE5_AUTOPUSH_CRON;
@@ -2179,6 +2298,13 @@
           config.ebayMockTableName || DEFAULT_EBAY_MOCK_TABLE_NAME;
         document.getElementById('ebay-mock-dry-run').value =
           config.ebayMockDryRun === false ? 'false' : 'true';
+        document.getElementById('ebay-sandbox-table-name').value =
+          config.ebaySandboxTableName || config.phase5ListingsTable || config.ebayMockTableName || DEFAULT_EBAY_MOCK_TABLE_NAME;
+        document.getElementById('ebay-sandbox-fetch-limit').value = String(
+          Number(config.ebaySandboxFetchLimit || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT) || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT
+        );
+        document.getElementById('ebay-sandbox-dry-run').value =
+          config.ebaySandboxDryRun === false ? 'false' : 'true';
 
         if (window.phase4API && typeof window.phase4API.getConfig === 'function') {
           const phase4Config = await window.phase4API.getConfig();
@@ -2288,6 +2414,11 @@
                 .toLowerCase() === 'false'
                 ? 'false'
                 : 'true';
+            document.getElementById('phase5-enforce-listing-approval').value =
+              String(phase5Config.phase5EnforceListingApproval ?? document.getElementById('phase5-enforce-listing-approval').value ?? 'false')
+                .toLowerCase() === 'true'
+                ? 'true'
+                : 'false';
             document.getElementById('phase5-batches-table').value =
               phase5Config.phase5BatchesTable || document.getElementById('phase5-batches-table').value || DEFAULT_PHASE5_BATCHES_TABLE;
             document.getElementById('phase5-batch-status-field-name').value =
@@ -2359,6 +2490,14 @@
               phase5Config.phase5EbayClientSecret || document.getElementById('phase5-ebay-client-secret').value || '';
             document.getElementById('phase5-ebay-runame').value =
               phase5Config.phase5EbayRuName || document.getElementById('phase5-ebay-runame').value || '';
+            document.getElementById('phase5-ebay-sandbox-table-name').value =
+              phase5Config.ebaySandboxTableName || document.getElementById('phase5-ebay-sandbox-table-name').value || document.getElementById('phase5-listings-table').value || DEFAULT_EBAY_MOCK_TABLE_NAME;
+            document.getElementById('phase5-ebay-sandbox-fetch-limit').value = String(
+              Number(phase5Config.ebaySandboxFetchLimit || document.getElementById('phase5-ebay-sandbox-fetch-limit').value || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT) ||
+                DEFAULT_EBAY_SANDBOX_FETCH_LIMIT
+            );
+            document.getElementById('phase5-ebay-sandbox-dry-run').value =
+              phase5Config.ebaySandboxDryRun === false ? 'false' : 'true';
             document.getElementById('phase5-autopush-enabled').value =
               String(phase5Config.phase5AutoPushEnabled ?? document.getElementById('phase5-autopush-enabled').value ?? 'false')
                 .toLowerCase() === 'true'
@@ -2427,6 +2566,19 @@
               mockConfig.tableName || DEFAULT_EBAY_MOCK_TABLE_NAME;
             document.getElementById('ebay-mock-dry-run').value =
               mockConfig.dryRun === false ? 'false' : 'true';
+          }
+        }
+        if (window.ebaySandboxImportAPI && typeof window.ebaySandboxImportAPI.getConfig === 'function') {
+          const sandboxConfig = await window.ebaySandboxImportAPI.getConfig();
+          if (sandboxConfig && typeof sandboxConfig === 'object') {
+            document.getElementById('ebay-sandbox-table-name').value =
+              sandboxConfig.tableName || document.getElementById('ebay-sandbox-table-name').value || DEFAULT_EBAY_MOCK_TABLE_NAME;
+            document.getElementById('ebay-sandbox-fetch-limit').value = String(
+              Number(sandboxConfig.fetchLimit || document.getElementById('ebay-sandbox-fetch-limit').value || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT) ||
+                DEFAULT_EBAY_SANDBOX_FETCH_LIMIT
+            );
+            document.getElementById('ebay-sandbox-dry-run').value =
+              sandboxConfig.dryRun === false ? 'false' : 'true';
           }
         }
 
@@ -2781,6 +2933,8 @@
           document.getElementById('phase5-schema-csv-path').value.trim(),
         phase5EnforceBatchApproval:
           document.getElementById('phase5-enforce-batch-approval').value === 'true',
+        phase5EnforceListingApproval:
+          document.getElementById('phase5-enforce-listing-approval').value === 'true',
         phase5BatchesTable:
           document.getElementById('phase5-batches-table').value.trim() || DEFAULT_PHASE5_BATCHES_TABLE,
         phase5BatchStatusFieldName:
@@ -2864,7 +3018,17 @@
         ebayMockCsvPath: document.getElementById('ebay-mock-csv-path').value.trim(),
         ebayMockTableName:
           document.getElementById('ebay-mock-table-name').value.trim() || DEFAULT_EBAY_MOCK_TABLE_NAME,
-        ebayMockDryRun: document.getElementById('ebay-mock-dry-run').value === 'true'
+        ebayMockDryRun: document.getElementById('ebay-mock-dry-run').value === 'true',
+        ebaySandboxTableName:
+          document.getElementById('phase5-ebay-sandbox-table-name').value.trim() ||
+          document.getElementById('ebay-sandbox-table-name').value.trim() ||
+          DEFAULT_EBAY_MOCK_TABLE_NAME,
+        ebaySandboxFetchLimit:
+          Number(document.getElementById('phase5-ebay-sandbox-fetch-limit').value.trim()) ||
+          Number(document.getElementById('ebay-sandbox-fetch-limit').value.trim()) ||
+          DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
+        ebaySandboxDryRun:
+          document.getElementById('phase5-ebay-sandbox-dry-run').value === 'true'
       };
     }
 
@@ -3270,6 +3434,23 @@
           if (payload.stage) {
             const level = payload.stage === 'error' ? 'error' : 'info';
             logLine(`eBayMock progress: ${formatEbayMockProgressText(payload)}`, level);
+          }
+        });
+      }
+
+      if (window.ebaySandboxImportAPI && typeof window.ebaySandboxImportAPI.onProgress === 'function') {
+        window.ebaySandboxImportAPI.onProgress((event, payload) => {
+          if (!payload) return;
+          const percent = Number(payload.percent || 0);
+          document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
+          document.getElementById('progress-text').textContent = formatEbaySandboxProgressText(payload);
+          const statusText = document.getElementById('ebay-sandbox-status-text');
+          if (statusText) {
+            statusText.textContent = `eBay Sandbox Import status: ${formatEbaySandboxProgressText(payload)}`;
+          }
+          if (payload.stage) {
+            const level = payload.stage === 'error' ? 'error' : 'info';
+            logLine(`eBaySandbox progress: ${formatEbaySandboxProgressText(payload)}`, level);
           }
         });
       }
@@ -4232,6 +4413,15 @@
 
       try {
         const config = collectConfigFromForm();
+        if (!dryRun && typeof window.phase5API.testPublishLogConfig === 'function') {
+          const logCheck = await window.phase5API.testPublishLogConfig(config);
+          if (!logCheck?.success) {
+            throw new Error(logCheck?.message || 'Phase 5 Sheets publish log configuration is invalid.');
+          }
+          if (!logCheck?.result?.enabled) {
+            throw new Error('Phase 5 Sheets publish log is disabled. Enable it before Phase 5 write run.');
+          }
+        }
         await window.phase2API.saveConfig(config);
         const result = dryRun
           ? await window.phase5API.dryRunPublishApproved(config)
@@ -4277,6 +4467,79 @@
 
     async function runPhase5DryRun() {
       return runPhase5PublishApproved(true);
+    }
+
+    async function runPhase5CreateBatch() {
+      if (isPhase5Running || isPhase4PipelineRunning || isEbayMockImportRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
+      if (!window.phase5API || typeof window.phase5API.createBatchFromListings !== 'function') {
+        showStatus('run-status', 'error', 'Phase 5 create batch API is unavailable.');
+        return;
+      }
+      if (!validateForm(true)) {
+        setRunState('Error', 'Airtable settings are required for Phase 5.');
+        showStatus('run-status', 'error', 'Please complete Airtable token/base fields first.');
+        return;
+      }
+
+      isPhase5Running = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 5 batch creation is in progress...');
+      showStatus('run-status', 'info', 'Phase 5 batch creation started...');
+      document.getElementById('progress-bar').style.width = '8%';
+      document.getElementById('progress-text').textContent = 'Phase 5: Creating batches from pending listings...';
+      document.getElementById('phase5-status-text').textContent = 'Phase 5 status: creating batch from pending listings...';
+      logLine('Starting Phase 5 batch creation from pending listings.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const response = await window.phase5API.createBatchFromListings(config);
+        if (!response?.success) throw new Error(response?.message || response?.result?.message || 'Batch creation failed.');
+
+        const result = response?.result || response;
+        const created = result.batchId || '';
+        const linked = Number(result.linkedRecords || 0) || 0;
+        const status = result.status || 'Ready';
+        const batchesCreated = Number(result.batchesCreated || (Array.isArray(result.createdBatches) ? result.createdBatches.length : 0)) || 0;
+        const attempted = Number(result.attempted || 0) || 0;
+        const failed = Number(result.failedRecords || 0) || 0;
+
+        if (status === 'NoCandidates' || batchesCreated === 0) {
+          setRunState('Success', 'No listings available for batch creation.');
+          showStatus('run-status', 'success', result.message || 'No listings available for batch creation.');
+          document.getElementById('progress-bar').style.width = '100%';
+          document.getElementById('progress-text').textContent = 'Phase 5: No batch created (no eligible unbatched listings).';
+          document.getElementById('phase5-status-text').textContent = 'Phase 5 status: no listings available for batch creation.';
+          logLine(`Phase 5 batch creation skipped: ${result.message || 'No candidates'}.`);
+          return;
+        }
+
+        setRunState('Success', `Batch created: ${created || '(id unavailable)'}`);
+        showStatus('run-status', 'success', `Batch creation completed. Batches=${batchesCreated}, FirstBatch=${created || 'n/a'}, Linked=${linked}, Status=${status}.`);
+        document.getElementById('progress-bar').style.width = '100%';
+        document.getElementById('progress-text').textContent = `Phase 5: Batch creation completed. Batches=${batchesCreated}, Linked=${linked}, Failed=${failed}.`;
+        document.getElementById('phase5-status-text').textContent = `Phase 5 status: created ${batchesCreated} batch(es), linked ${linked} listing(s), status ${status}.`;
+        logLine(`Phase 5 batch creation completed. BatchesCreated=${batchesCreated}, FirstBatchId=${created || ''}, Attempted=${attempted}, LinkedRecords=${linked}, FailedRecords=${failed}, Status=${status}.`);
+        if (Array.isArray(result.createdBatches) && result.createdBatches.length > 0) {
+          const preview = result.createdBatches.slice(0, 10);
+          preview.forEach((b, idx) => {
+            logLine(`Phase 5 batch ${idx + 1}: id=${b.batchId || ''}, linked=${Number(b.linkedRecords || 0)}, failed=${Number(b.failedRecords || 0)}, status=${b.status || ''}`);
+          });
+          if (result.createdBatches.length > preview.length) {
+            logLine(`Phase 5 batch creation: ${result.createdBatches.length - preview.length} more batch(es) not shown in log preview.`);
+          }
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 5 batch creation failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 5 batch creation failed: ${err.message}`);
+        document.getElementById('progress-bar').style.width = '100%';
+        document.getElementById('progress-text').textContent = `Phase 5: Batch creation failed (${err.message})`;
+        document.getElementById('phase5-status-text').textContent = `Phase 5 status: batch creation failed (${err.message})`;
+        logLine(`Phase 5 batch creation failed: ${err.message}`, 'error');
+      } finally {
+        isPhase5Running = false;
+        updateRunButtonState();
+      }
     }
 
     async function refreshPhase5BatchMetrics() {
@@ -4536,6 +4799,75 @@
         showStatus('run-status', 'error', `eBay Mock import failed: ${err.message}`);
         document.getElementById('ebay-mock-status-text').textContent = `eBay Mock Import status: failed (${err.message})`;
         logLine(`eBay Mock import failed: ${err.message}`, 'error');
+      } finally {
+        isEbayMockImportRunning = false;
+        updateRunButtonState();
+      }
+    }
+
+    async function runEbaySandboxImport() {
+      if (isPhase4PipelineRunning || isEbayMockImportRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
+      if (!window.ebaySandboxImportAPI || typeof window.ebaySandboxImportAPI.run !== 'function') {
+        showStatus('run-status', 'error', 'eBay Sandbox Import API is unavailable.');
+        return;
+      }
+
+      const tableName = document.getElementById('ebay-sandbox-table-name').value.trim();
+      const fetchLimit = Number(document.getElementById('ebay-sandbox-fetch-limit').value.trim()) || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT;
+      const clientId = document.getElementById('phase5-ebay-client-id')?.value.trim() || '';
+      const devId = document.getElementById('phase5-ebay-dev-id')?.value.trim() || '';
+      const clientSecret = document.getElementById('phase5-ebay-client-secret')?.value.trim() || '';
+      const ruName = document.getElementById('phase5-ebay-runame')?.value.trim() || '';
+      if (!tableName) {
+        setFieldError('ebay-sandbox-table-name', 'Airtable table name is required.');
+        showStatus('run-status', 'error', 'Enter table name before running eBay Sandbox import.');
+        return;
+      }
+      if (!clientId || !devId || !clientSecret || !ruName) {
+        showStatus('run-status', 'error', 'Fill all Phase 5 eBay credentials first (App ID, Dev ID, Cert ID, RuName).');
+        return;
+      }
+      if (!document.getElementById('airtable-token').value.trim() || !document.getElementById('airtable-base-id').value.trim()) {
+        setRunState('Error', 'Airtable settings are required for eBay Sandbox import.');
+        showStatus('run-status', 'error', 'Please complete Airtable token/base fields first.');
+        return;
+      }
+
+      isEbayMockImportRunning = true;
+      updateRunButtonState();
+      setRunState('Running', 'eBay Sandbox inventory import is in progress...');
+      showStatus('run-status', 'info', 'eBay Sandbox inventory import started...');
+      document.getElementById('ebay-sandbox-status-text').textContent = 'eBay Sandbox Import status: running...';
+      logLine(`Starting eBay Sandbox inventory import (limit=${fetchLimit}).`);
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.ebaySandboxImportAPI.run(config);
+        if (!result?.success) {
+          throw new Error(result?.message || 'eBay Sandbox inventory import failed.');
+        }
+        const summary = result.summary || {};
+        const mode = summary.dryRun ? 'dry run' : 'write run';
+        setRunState('Success', 'eBay Sandbox inventory import completed.');
+        showStatus(
+          'run-status',
+          'success',
+          `eBay Sandbox inventory import completed (${mode}). Items=${summary.inventoryItemsFetched || 0}, Offers=${summary.offersFetched || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}.`
+        );
+        document.getElementById('ebay-sandbox-status-text').textContent =
+          `eBay Sandbox Import status: completed (${mode}). Items ${summary.inventoryItemsFetched || 0}, Written ${summary.recordsWritten || 0}, Planned ${summary.recordsPlanned || 0}.`;
+        logLine(
+          `eBay Sandbox import completed. Mode=${mode}, Env=${summary.environment || ''}, Table=${summary.tableName || ''}, Items=${summary.inventoryItemsFetched || 0}, Offers=${summary.offersFetched || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}, Skipped=${summary.skippedInvalidRows || 0}`
+        );
+        if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+          summary.errors.forEach(err => logLine(`eBaySandbox: ${err}`, 'error'));
+        }
+      } catch (err) {
+        setRunState('Error', `eBay Sandbox inventory import failed: ${err.message}`);
+        showStatus('run-status', 'error', `eBay Sandbox inventory import failed: ${err.message}`);
+        document.getElementById('ebay-sandbox-status-text').textContent = `eBay Sandbox Import status: failed (${err.message})`;
+        logLine(`eBay Sandbox inventory import failed: ${err.message}`, 'error');
       } finally {
         isEbayMockImportRunning = false;
         updateRunButtonState();

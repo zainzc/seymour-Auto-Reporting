@@ -39,8 +39,16 @@ const { runPhase6Fitment } = require('../scripts/runPhase6Fitment');
 const { runPhase72FitmentImage } = require('../scripts/runPhase72FitmentImage');
 const { runPhase74TitleDescription } = require('../scripts/runPhase74TitleDescription');
 const { runEbayMockImport } = require('../scripts/runEbayMockImport');
+const { runEbaySandboxInventoryImport } = require('../scripts/runEbaySandboxInventoryImport');
 const { runPhase5PublishApproved } = require('../services/phase5Service');
-const { validateBatchGovernanceSchema, getBatchSummaries, setBatchStatus } = require('../services/phase5BatchGovernanceService');
+const { Phase5PublishLogService } = require('../services/phase5PublishLogService');
+const {
+  validateBatchGovernanceSchema,
+  getBatchSummaries,
+  setBatchStatus: setPhase5BatchStatus,
+  getBatchListings
+} = require('../services/phase5BatchGovernanceService');
+const { createBatchFromListings } = require('../services/batchCreationService');
 const {
   startPhase5AutoPushSchedule,
   stopPhase5AutoPushSchedule,
@@ -901,7 +909,7 @@ setPostPushHook(async payload => {
       rulesDriveFile: phase4RulesDriveFile,
       logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
       openaiApiKey: phase4OpenAiKey,
-      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
       openaiBaseUrl: String(phase4Stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase4BClickupListName: String(phase4Stored.phase4BClickupListName || '').trim(),
       phase4BClickupListId: phase4BListId,
@@ -957,7 +965,7 @@ setPostPushHook(async payload => {
       logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
       phase4DListingsTable: String(phase4Stored.phase4DListingsTable || 'eBay Listings (API) (Mock)').trim(),
       openaiApiKey: phase4OpenAiKey,
-      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
       openaiBaseUrl: String(phase4Stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
     }, () => {});
     emitInventoryAutoChainLog(
@@ -1251,6 +1259,64 @@ ipcMain.handle('phase2-get-config', async () => {
       typeof stored.ebayMockDryRun === 'boolean'
         ? stored.ebayMockDryRun
         : true,
+    ebaySandboxTableName: String(
+      stored.ebaySandboxTableName || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+    ).trim(),
+    ebaySandboxFetchLimit: Number(stored.ebaySandboxFetchLimit || 200) || 200,
+    ebaySandboxDryRun:
+      typeof stored.ebaySandboxDryRun === 'boolean'
+        ? stored.ebaySandboxDryRun
+        : true,
+    phase5ListingsTable: String(stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)').trim(),
+    phase5Mode: String(stored.phase5Mode || 'A').trim().toUpperCase() === 'B' ? 'B' : 'A',
+    phase5ApprovalFieldName: String(stored.phase5ApprovalFieldName || '').trim(),
+    phase5GroupFieldName: String(stored.phase5GroupFieldName || '').trim(),
+    phase5GroupValue: String(stored.phase5GroupValue || '').trim(),
+    phase5SchemaCsvPath: String(stored.phase5SchemaCsvPath || '').trim(),
+    phase5EnforceBatchApproval:
+      String(stored.phase5EnforceBatchApproval ?? 'true').trim().toLowerCase() !== 'false',
+    phase5EnforceListingApproval:
+      String(stored.phase5EnforceListingApproval ?? 'false').trim().toLowerCase() === 'true',
+    phase5BatchesTable: String(stored.phase5BatchesTable || 'Listing Batches').trim(),
+    phase5BatchStatusFieldName: String(stored.phase5BatchStatusFieldName || 'Batch Status').trim(),
+    phase5BatchApprovedValue: String(stored.phase5BatchApprovedValue || 'Approved').trim(),
+    phase5BatchLinkFieldName: String(stored.phase5BatchLinkFieldName || '').trim(),
+    phase5RequiredCategoryIdFieldName: String(stored.phase5RequiredCategoryIdFieldName || '').trim(),
+    phase5RequiredTitleFieldName: String(stored.phase5RequiredTitleFieldName || '').trim(),
+    phase5RequiredDescriptionFieldName: String(stored.phase5RequiredDescriptionFieldName || '').trim(),
+    phase5RequiredItemSpecificsFieldName: String(stored.phase5RequiredItemSpecificsFieldName || '').trim(),
+    phase5RequiredItemSpecificFieldNames: String(stored.phase5RequiredItemSpecificFieldNames || '').trim(),
+    phase5BlockedFieldName: String(stored.phase5BlockedFieldName || '').trim(),
+    phase5ClickupExceptionFieldName: String(stored.phase5ClickupExceptionFieldName || '').trim(),
+    phase5ClickupResolvedValues: String(stored.phase5ClickupResolvedValues || 'resolved,done,closed,complete').trim(),
+    phase5PublishStatusFieldName: String(stored.phase5PublishStatusFieldName || '').trim(),
+    phase5PublishedAtFieldName: String(stored.phase5PublishedAtFieldName || '').trim(),
+    phase5PublishRunIdFieldName: String(stored.phase5PublishRunIdFieldName || '').trim(),
+    phase5PayloadHashFieldName: String(stored.phase5PayloadHashFieldName || '').trim(),
+    phase5PayloadHashFields: String(stored.phase5PayloadHashFields || '').trim(),
+    phase5PublishedLogPendingValue: String(stored.phase5PublishedLogPendingValue || 'Published (Log Pending)').trim(),
+    phase5SheetsLogEnabled:
+      String(stored.phase5SheetsLogEnabled ?? 'false').trim().toLowerCase() === 'true',
+    phase5SheetsLogSpreadsheetId: String(stored.phase5SheetsLogSpreadsheetId || '').trim(),
+    phase5SheetsLogTabName: String(stored.phase5SheetsLogTabName || 'Log').trim(),
+    phase5SheetsLogAuthContext: String(stored.phase5SheetsLogAuthContext || 'inventory').trim(),
+    phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : [],
+    phase5LiveCompareEnabled:
+      String(stored.phase5LiveCompareEnabled ?? 'false').trim().toLowerCase() === 'true',
+    phase5LiveCompareApiUrl: String(stored.phase5LiveCompareApiUrl || '').trim(),
+    phase5LiveCompareApiKey: String(stored.phase5LiveCompareApiKey || '').trim(),
+    phase5TestBatchRecordIds: String(stored.phase5TestBatchRecordIds || '').trim(),
+    phase5AutoPushEnabled:
+      String(stored.phase5AutoPushEnabled ?? 'false').trim().toLowerCase() === 'true',
+    phase5AutoPushCron: String(stored.phase5AutoPushCron || '0 * * * *').trim(),
+    phase5AutoPushTimezone: String(stored.phase5AutoPushTimezone || '').trim(),
+    phase5AutoPushEligibilityFieldName: String(stored.phase5AutoPushEligibilityFieldName || '').trim(),
+    phase5AutoPushEligibilityValues: String(stored.phase5AutoPushEligibilityValues || '').trim(),
+    phase5EbayEnvironment: String(stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox').trim().toLowerCase(),
+    phase5EbayClientId: String(stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
+    phase5EbayDevId: String(stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
+    phase5EbayClientSecret: String(stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '').trim(),
+    phase5EbayRuName: String(stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
     airtableToken: stored.airtableToken || '',
     clickupToken: stored.clickupToken || ''
   };
@@ -1693,11 +1759,12 @@ ipcMain.handle('phase4blite:get-config', async () => {
       typeof stored.phase4BLiteDryRun === 'boolean'
         ? stored.phase4BLiteDryRun
         : true,
+
     testTableName: String(stored.testTableName || process.env.PHASE4B_TEST_TABLE_NAME || '').trim(),
     testIpn: String(stored.phase4BTestIpn || process.env.PHASE4B_TEST_IPN || '').trim(),
     testMaxTables: 0,
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
     clickupListName: String(stored.phase4BClickupListName || '').trim(),
     clickupListId: String(
@@ -1740,7 +1807,7 @@ ipcMain.handle('phase4blite:run', async (event, options = {}) => {
       phase4BTestIpn: String(options.phase4BTestIpn || stored.phase4BTestIpn || process.env.PHASE4B_TEST_IPN || '').trim(),
       testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase4BClickupListName: String(
         options.phase4BClickupListName || stored.phase4BClickupListName || ''
@@ -1908,7 +1975,7 @@ ipcMain.handle('phase4d:get-config', async () => {
         : true,
     listingsTableName: String(stored.phase4DListingsTable || process.env.PHASE4D_LISTINGS_TABLE || 'eBay Listings (API) (Mock)').trim(),
     testIpn: String(stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
     authContext: 'inventory'
   };
 });
@@ -1947,7 +2014,7 @@ ipcMain.handle('phase4d:run', async (event, options = {}) => {
       testTableName: '',
       testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
     };
 
@@ -2113,7 +2180,7 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
         testTableName: '',
         testMaxTables: 0,
         openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
         openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
         phase4BClickupListName: String(
           options.phase4BClickupListName || stored.phase4BClickupListName || ''
@@ -2218,7 +2285,7 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
         phase4DListingsTable: String(options.phase4DListingsTable || stored.phase4DListingsTable || 'eBay Listings (API) (Mock)').trim(),
         phase4DTestIpn: String(options.phase4DTestIpn || stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
         openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
         openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
       };
       const phase4DSummary = await runPhase4DListing(dOptions, progress => {
@@ -2263,7 +2330,7 @@ ipcMain.handle('phase6:get-config', async () => {
   return {
     listingsTableName: String(stored.phase6ListingsTable || process.env.PHASE6_LISTINGS_TABLE || 'eBay Listings (API) (Mock)').trim(),
     masterTableName: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
     promptCacheEnabled:
       String(stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
       'false',
@@ -2289,7 +2356,7 @@ ipcMain.handle('phase6:run', async (event, options = {}) => {
         options.airtableMasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
       ).trim(),
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase6PromptCacheEnabled:
         String(options.phase6PromptCacheEnabled ?? stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true')
@@ -2416,7 +2483,7 @@ ipcMain.handle('phase74:get-config', async () => {
       stored.phase6ListingsTable || stored.ebayMockTableName || stored.phase74ListingsTable || process.env.PHASE74_LISTINGS_TABLE || 'eBay Listings (API) (Mock)'
     ).trim(),
     masterTableName: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
     promptCacheEnabled:
       String(stored.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
       'false',
@@ -2447,7 +2514,7 @@ ipcMain.handle('phase74:run', async (event, options = {}) => {
         options.airtableMasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
       ).trim(),
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase74PromptCacheEnabled:
         String(options.phase74PromptCacheEnabled ?? stored.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true')
@@ -2517,6 +2584,8 @@ ipcMain.handle('phase5:get-config', async () => {
     phase5AutoPushStatus: getPhase5AutoPushScheduleStatus(),
     phase5EnforceBatchApproval:
       String(stored.phase5EnforceBatchApproval ?? 'true').trim().toLowerCase() !== 'false',
+    phase5EnforceListingApproval:
+      String(stored.phase5EnforceListingApproval ?? 'false').trim().toLowerCase() === 'true',
     phase5BatchesTable: String(stored.phase5BatchesTable || 'Listing Batches').trim(),
     phase5BatchStatusFieldName: String(stored.phase5BatchStatusFieldName || 'Batch Status').trim(),
     phase5BatchApprovedValue: String(stored.phase5BatchApprovedValue || 'Approved').trim(),
@@ -2545,6 +2614,7 @@ ipcMain.handle('phase5:get-config', async () => {
     phase5LiveCompareApiUrl: String(stored.phase5LiveCompareApiUrl || '').trim(),
     phase5LiveCompareApiKey: String(stored.phase5LiveCompareApiKey || '').trim(),
     phase5TestBatchRecordIds: String(stored.phase5TestBatchRecordIds || '').trim(),
+    phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : [],
     listingsTableName: String(
       stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
     ).trim(),
@@ -2553,6 +2623,208 @@ ipcMain.handle('phase5:get-config', async () => {
     groupValue: String(stored.phase5GroupValue || '').trim(),
     schemaCsvPath: String(stored.phase5SchemaCsvPath || '').trim()
   };
+});
+
+ipcMain.handle('phase5:testPublishLogConfig', async (_, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options
+    };
+    const publishLogService = new Phase5PublishLogService({
+      enabled: runOptions.phase5SheetsLogEnabled ?? process.env.PHASE5_SHEETS_LOG_ENABLED ?? 'false',
+      spreadsheetId: runOptions.phase5SheetsLogSpreadsheetId || process.env.PHASE5_SHEETS_LOG_SPREADSHEET_ID || '',
+      tabName: runOptions.phase5SheetsLogTabName || process.env.PHASE5_SHEETS_LOG_TAB || 'Log',
+      authContext: runOptions.phase5SheetsLogAuthContext || process.env.PHASE5_SHEETS_LOG_AUTH_CONTEXT || 'inventory'
+    });
+    const enabled = String(runOptions.phase5SheetsLogEnabled ?? 'false').trim().toLowerCase() === 'true';
+    const oauthConnected = oauth2Service.isAuthenticated(publishLogService.authContext);
+    if (!enabled) {
+      return {
+        success: true,
+        result: {
+          enabled: false,
+          configured: false,
+          oauthConnected,
+          spreadsheetId: publishLogService.spreadsheetId,
+          tabName: publishLogService.tabName,
+          authContext: publishLogService.authContext
+        },
+        message: 'Phase 5 Sheets publish log is disabled.'
+      };
+    }
+    if (!publishLogService.spreadsheetId) {
+      return {
+        success: false,
+        result: {
+          enabled: true,
+          configured: false,
+          oauthConnected,
+          spreadsheetId: publishLogService.spreadsheetId,
+          tabName: publishLogService.tabName,
+          authContext: publishLogService.authContext
+        },
+        message: 'Phase 5 Sheets publish log spreadsheet ID is required.'
+      };
+    }
+    if (!oauthConnected) {
+      return {
+        success: false,
+        result: {
+          enabled: true,
+          configured: true,
+          oauthConnected: false,
+          spreadsheetId: publishLogService.spreadsheetId,
+          tabName: publishLogService.tabName,
+          authContext: publishLogService.authContext
+        },
+        message: `Google OAuth is not connected for context '${publishLogService.authContext}'.`
+      };
+    }
+
+    const rows = await publishLogService.fetchLogRows();
+    return {
+      success: true,
+      result: {
+        enabled: true,
+        configured: publishLogService.isConfigured(),
+        oauthConnected: true,
+        spreadsheetId: publishLogService.spreadsheetId,
+        tabName: publishLogService.tabName,
+        authContext: publishLogService.authContext,
+        rowCount: Array.isArray(rows) ? Math.max(0, rows.length - 1) : 0
+      },
+      message: 'Phase 5 Sheets publish log configuration is valid.'
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: formatDetailedErrorMessage(error)
+    };
+  }
+});
+
+ipcMain.handle('phase5:validateBatchSchema', async (_, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options
+    };
+    const result = await validateBatchGovernanceSchema(runOptions);
+    return {
+      success: !!result?.ok,
+      result,
+      message: result?.message || (result?.ok ? 'Batch schema is valid.' : 'Batch schema validation failed.')
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: formatDetailedErrorMessage(error)
+    };
+  }
+});
+
+ipcMain.handle('phase5:getBatchSummaries', async (_, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options
+    };
+    const result = await getBatchSummaries(runOptions);
+    return {
+      success: true,
+      ...result
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: formatDetailedErrorMessage(error),
+      batches: []
+    };
+  }
+});
+
+ipcMain.handle('phase5:getBatchListings', async (_, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options
+    };
+    const result = await getBatchListings(runOptions);
+    const allListings = Array.isArray(result?.listings) ? result.listings : [];
+    const parsedPageSize = Number(options.pageSize);
+    const pageSize = Math.max(
+      1,
+      Math.min(500, Number.isFinite(parsedPageSize) ? parsedPageSize : allListings.length || 200)
+    );
+    const parsedCursor = Number.parseInt(String(options.cursor || '0'), 10);
+    const start = Number.isFinite(parsedCursor) && parsedCursor > 0 ? parsedCursor : 0;
+    const end = Math.min(allListings.length, start + pageSize);
+    const listings = allListings.slice(start, end);
+    const hasMore = end < allListings.length;
+
+    return {
+      success: true,
+      ...result,
+      total: Number(result?.total || allListings.length) || allListings.length,
+      listings,
+      hasMore,
+      nextCursor: hasMore ? String(end) : ''
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: formatDetailedErrorMessage(error),
+      listings: [],
+      total: 0,
+      hasMore: false,
+      nextCursor: ''
+    };
+  }
+});
+
+ipcMain.handle('phase5:setBatchStatus', async (_, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options
+    };
+    const result = await setPhase5BatchStatus(runOptions);
+    return {
+      success: true,
+      ...result
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: formatDetailedErrorMessage(error)
+    };
+  }
+});
+
+ipcMain.handle('phase5:createBatchFromListings', async (_, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = {
+      ...stored,
+      ...options
+    };
+    const result = await createBatchFromListings(runOptions);
+    return {
+      success: !!result?.success,
+      ...result
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: formatDetailedErrorMessage(error)
+    };
+  }
 });
 
 ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
@@ -2584,7 +2856,8 @@ ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
         options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
       ).trim(),
       phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
-      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : []
+      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : [],
+      phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : []
     };
 
     event.sender.send('phase5:progress', {
@@ -2674,7 +2947,8 @@ ipcMain.handle('phase5:dryRunPublishApproved', async (event, options = {}) => {
         options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
       ).trim(),
       phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
-      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : []
+      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : [],
+      phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : []
     };
 
     event.sender.send('phase5:progress', {
@@ -2740,7 +3014,8 @@ ipcMain.handle('phase5:startAutoPush', async (event, options = {}) => {
       phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
       phase5GroupValue: String(options.phase5GroupValue || stored.phase5GroupValue || '').trim(),
       phase5SchemaCsvPath: String(options.phase5SchemaCsvPath || stored.phase5SchemaCsvPath || '').trim(),
-      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : []
+      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : [],
+      phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : []
     };
 
     const execute = async ({ trigger }) => {
@@ -2873,63 +3148,6 @@ ipcMain.handle('phase5:testEbayCredentials', async (_, options = {}) => {
   }
 });
 
-ipcMain.handle('phase5:getBatchSummaries', async (_, options = {}) => {
-  try {
-    const stored = getInventoryConfig('phase2Config') || {};
-    const result = await getBatchSummaries({
-      ...stored,
-      ...options
-    });
-    return {
-      success: true,
-      ...result
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: formatDetailedErrorMessage(error)
-    };
-  }
-});
-
-ipcMain.handle('phase5:validateBatchSchema', async (_, options = {}) => {
-  try {
-    const stored = getInventoryConfig('phase2Config') || {};
-    const result = await validateBatchGovernanceSchema({
-      ...stored,
-      ...options
-    });
-    return {
-      success: true,
-      result
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: formatDetailedErrorMessage(error)
-    };
-  }
-});
-
-ipcMain.handle('phase5:setBatchStatus', async (_, options = {}) => {
-  try {
-    const stored = getInventoryConfig('phase2Config') || {};
-    const result = await setBatchStatus({
-      ...stored,
-      ...options
-    });
-    return {
-      success: true,
-      result
-    };
-  } catch (error) {
-    return {
-      success: false,
-      message: formatDetailedErrorMessage(error)
-    };
-  }
-});
-
 ipcMain.handle('phase5:runAutoPushNow', async (event, options = {}) => {
   try {
     const stored = getInventoryConfig('phase2Config') || {};
@@ -2961,7 +3179,8 @@ ipcMain.handle('phase5:runAutoPushNow', async (event, options = {}) => {
       phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
       phase5GroupValue: String(options.phase5GroupValue || stored.phase5GroupValue || '').trim(),
       phase5SchemaCsvPath: String(options.phase5SchemaCsvPath || stored.phase5SchemaCsvPath || '').trim(),
-      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : []
+      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : [],
+      phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : []
     };
 
     const result = await runPhase5AutoPushNow(async () => {
@@ -3078,7 +3297,7 @@ ipcMain.handle('phase4combined:run', async (event, options = {}) => {
       testTableName: '',
       testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-mini').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase4BClickupListName: String(
         options.phase4BClickupListName || stored.phase4BClickupListName || ''
@@ -3181,6 +3400,63 @@ ipcMain.handle('ebaymock:run', async (event, options = {}) => {
   } catch (error) {
     const message = formatDetailedErrorMessage(error);
     event.sender.send('ebaymock:progress', {
+      stage: 'error',
+      percent: 100,
+      counts: null,
+      message
+    });
+    return {
+      success: false,
+      message
+    };
+  }
+});
+
+ipcMain.handle('ebaysandbox:get-config', async () => {
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    tableName: String(
+      stored.ebaySandboxTableName || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+    ).trim(),
+    fetchLimit: Number(stored.ebaySandboxFetchLimit || 200) || 200,
+    dryRun:
+      typeof stored.ebaySandboxDryRun === 'boolean'
+        ? stored.ebaySandboxDryRun
+        : true
+  };
+});
+
+ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    const dryRun =
+      typeof options.ebaySandboxDryRun === 'boolean'
+        ? options.ebaySandboxDryRun
+        : typeof stored.ebaySandboxDryRun === 'boolean'
+          ? stored.ebaySandboxDryRun
+          : true;
+    const runOptions = {
+      ...stored,
+      ...options,
+      dryRun,
+      ebaySandboxDryRun: dryRun,
+      ebaySandboxTableName: String(
+        options.ebaySandboxTableName || stored.ebaySandboxTableName || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+      ).trim(),
+      ebaySandboxFetchLimit: Number(options.ebaySandboxFetchLimit || stored.ebaySandboxFetchLimit || 200) || 200
+    };
+
+    const summary = await runEbaySandboxInventoryImport(runOptions, progress => {
+      event.sender.send('ebaysandbox:progress', progress);
+    });
+
+    return {
+      success: true,
+      summary
+    };
+  } catch (error) {
+    const message = formatDetailedErrorMessage(error);
+    event.sender.send('ebaysandbox:progress', {
       stage: 'error',
       percent: 100,
       counts: null,

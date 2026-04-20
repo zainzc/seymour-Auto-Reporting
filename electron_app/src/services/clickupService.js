@@ -11,7 +11,7 @@ class ClickUpService {
     if (!this.token) {
       throw new Error('ClickUp configuration is missing CLICKUP_TOKEN.');
     }
-
+                                                                                                                                                                                                                
     this.client = axios.create({
       baseURL: 'https://api.clickup.com/api/v2',
       timeout: 30000,

@@ -39,7 +39,8 @@
     }
 
     .container {
-      max-width: 1060px;
+      width: min(1080px, calc(100vw - 32px));
+      max-width: none;
       margin: 0 auto;
       display: grid;
       gap: 16px;
@@ -51,6 +52,17 @@
       align-items: center;
       flex-wrap: wrap;
       gap: 10px;
+    }
+
+    .workspace-nav {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .btn-nav-active {
+      background: var(--brand-strong) !important;
+      color: #ffffff !important;
     }
 
     .back-link {
@@ -374,7 +386,12 @@
 <body>
   <div class="container">
     <div class="topbar">
-      <a href="../main-dashboard.html" class="back-link">Back to Main Dashboard</a>
+      <a href="index.html" class="back-link">Back to Milestone 1</a>
+      <div class="workspace-nav">
+        <button class="btn btn-primary btn-nav-active" type="button">Inventory Sync Workspace</button>
+        <button class="btn btn-secondary" type="button" onclick="navigateWorkspace('phase2-master-parts.html')">Master Parts Sync Workspace</button>
+        <button class="btn btn-secondary" type="button" onclick="navigateWorkspace('phase5-batch-approval.html')">Phase 5 Batch Approval</button>
+      </div>
     </div>
 
     <header class="header-card">
@@ -478,6 +495,19 @@
   </div>
 
   <script>
+    let isWorkspaceNavigating = false;
+    function navigateWorkspace(target) {
+      const next = String(target || '').trim();
+      if (!next || isWorkspaceNavigating) return;
+      isWorkspaceNavigating = true;
+      try {
+        document.querySelectorAll('.workspace-nav .btn').forEach(btn => {
+          btn.disabled = true;
+        });
+      } catch (_) {}
+      window.location.assign(next);
+    }
+
     let currentSpreadsheetId = null;
     let currentWorksheetName = null;
     let isDisconnecting = false;

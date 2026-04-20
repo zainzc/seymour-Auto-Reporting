@@ -359,6 +359,7 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
     recordsWritten: 0,
     skippedAlreadyPublished: 0,
     skippedAlreadyUpToDate: 0,
+    skippedStagingUnchanged: 0,
     tableCreated: false,
     fieldsCreated: 0,
     errors: []
@@ -409,10 +410,13 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
   );
   summary.tableCreated = Boolean(ensureResult.tableId);
   summary.fieldsCreated = Array.isArray(ensureResult.createdFields) ? ensureResult.createdFields.length : 0;
+  const payloadHashFieldName = normalizeText(stored.phase5PayloadHashFieldName || process.env.PHASE5_PAYLOAD_HASH_FIELD || 'Payload Hash');
+  const hasPayloadHashField = payloadHashFieldName && ensureResult?.existingFields?.has(payloadHashFieldName);
 
   let rowNumber = 1;
   const batch = [];
   const batchRowKeys = new Set();
+  const existingPayloadHashByRecordKey = new Map();
   const publishedIdentitySet = asIdentitySet(stored.phase5PublishedIdentities || []);
   const publishedPayloadHashSet = new Set(
     (Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : [])
@@ -444,6 +448,19 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
   } catch (_) {
     latestLoggedHashByItemId = new Map();
   }
+  try {
+    if (hasPayloadHashField) {
+      const existingRows = await itemService.fetchAllRecords(tableName, [PRIMARY_KEY_FIELD, payloadHashFieldName]);
+      for (const row of existingRows) {
+        const existingFields = row?.fields || {};
+        const recordKey = normalizeText(existingFields[PRIMARY_KEY_FIELD]);
+        if (!recordKey) continue;
+        const hash = normalizeText(existingFields[payloadHashFieldName]);
+        if (!hash) continue;
+        existingPayloadHashByRecordKey.set(recordKey, hash);
+      }
+    }
+  } catch (_) {}
 
   async function processRow(values = []) {
     rowNumber += 1;
@@ -477,6 +494,7 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
     const payloadHash = buildListingPayloadHash(fields, {
       includeFieldNames: payloadHashFields
     });
+    const stagingHash = normalizeText(existingPayloadHashByRecordKey.get(rowKey));
     const itemId = normalizeText(fields['Item ID'] || fields['ItemID'] || fields['eBay Item ID'] || fields['Ebay Item ID']);
     const latestLoggedHash = itemId ? normalizeText(latestLoggedHashByItemId.get(itemId)) : '';
     const liveListingHash = await fetchLiveListingPayloadHash(liveCompareContext, itemId, fields);
@@ -491,6 +509,14 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
     if (payloadHash && liveListingHash && liveListingHash === payloadHash) {
       summary.skippedAlreadyUpToDate += 1;
       return;
+    }
+    if (payloadHash && stagingHash && stagingHash === payloadHash) {
+      summary.skippedStagingUnchanged += 1;
+      return;
+    }
+    if (hasPayloadHashField && payloadHash) {
+      fields[payloadHashFieldName] = payloadHash;
+      existingPayloadHashByRecordKey.set(rowKey, payloadHash);
     }
 
     if (batchRowKeys.has(rowKey) && batch.length > 0) {
@@ -515,7 +541,7 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
         message:
           `Importing rows... scanned=${summary.rowsScanned}, written=${summary.recordsWritten}, ` +
           `planned=${summary.recordsPlanned}, skippedPublished=${summary.skippedAlreadyPublished}, ` +
-          `skippedUpToDate=${summary.skippedAlreadyUpToDate}`
+          `skippedUpToDate=${summary.skippedAlreadyUpToDate}, stagingUnchanged=${summary.skippedStagingUnchanged}`
       });
     }
   }
