@@ -243,7 +243,7 @@ async function resolveTablesAndFields(schemaService, options = {}) {
 }
 
 async function fetchCandidateListings(airtableService, resolved = {}, options = {}) {
-  const fieldsToFetch = ['Record Key', resolved.batchLinkField];
+  const fieldsToFetch = ['eBay Item ID', 'Record Key', resolved.batchLinkField];
   if (resolved.publishStatusField) fieldsToFetch.push(resolved.publishStatusField);
   const rows = await airtableService.fetchAllRecords(resolved.listingsTableId, Array.from(new Set(fieldsToFetch)));
 

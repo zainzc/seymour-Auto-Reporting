@@ -335,7 +335,10 @@ async function getBatchListings(options = {}) {
     return {
       recordId: normalizeText(row?.id),
       createdTime: normalizeText(row?.createdTime || ''),
-      recordKey: normalizeTextOrComparable(fields['Record Key']),
+      recordKey:
+        normalizeTextOrComparable(fields['eBay Item ID']) ||
+        normalizeTextOrComparable(fields['Ebay Item ID']) ||
+        normalizeTextOrComparable(fields['Record Key']),
       ipn: normalizeTextOrComparable(fields['c: partshunter203 ebay MOTORS interchange part number']),
       productTitle: normalizeTextOrComparable(fields['Product Title(New)']),
       description: normalizeTextOrComparable(fields['Description']),

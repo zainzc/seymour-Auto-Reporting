@@ -61,7 +61,11 @@ function buildListingIdentity(fields = {}, hints = {}) {
   );
   if (ipn) return `IPN:${ipn}`;
 
-  const recordKey = firstNonEmptyField(fields, hints.recordKeyFields || ['Record Key']);
+  const recordKey = firstNonEmptyField(fields, hints.recordKeyFields || [
+    'eBay Item ID',
+    'Ebay Item ID',
+    'Record Key'
+  ]);
   if (recordKey) return `RK:${recordKey}`;
   return '';
 }

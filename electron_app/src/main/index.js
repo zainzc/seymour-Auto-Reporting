@@ -65,6 +65,8 @@ let autoSyncInterval = null;
 let phase4WritebackInterval = null;
 let isPhase4WritebackPollerRunning = false;
 let dbReady = false;
+const LEGACY_EBAY_MOCK_TABLE = 'eBay Listings (API) (Mock)';
+const DEFAULT_EBAY_SANDBOX_TABLE = 'eBay Listings (API)';
 
 function parseBoolean(value, defaultValue = false) {
   if (typeof value === 'boolean') return value;
@@ -72,10 +74,30 @@ function parseBoolean(value, defaultValue = false) {
   return defaultValue;
 }
 
+function resolveEbaySandboxTableName(...candidates) {
+  for (const candidate of candidates) {
+    const text = String(candidate || '').trim();
+    if (!text) continue;
+    return text.toLowerCase() === LEGACY_EBAY_MOCK_TABLE.toLowerCase()
+      ? DEFAULT_EBAY_SANDBOX_TABLE
+      : text;
+  }
+  return DEFAULT_EBAY_SANDBOX_TABLE;
+}
+
 function formatDetailedErrorMessage(error) {
   const status = error?.response?.status;
   const payload = error?.response?.data;
+  const detailFromErrors = Array.isArray(payload?.errors)
+    ? payload.errors
+        .map(item => String(item?.longMessage || item?.message || item?.errorId || '').trim())
+        .filter(Boolean)
+        .join(' | ')
+    : '';
   const detail =
+    detailFromErrors ||
+    payload?.error_description ||
+    payload?.message ||
     payload?.error?.message ||
     payload?.error?.type ||
     payload?.error ||
@@ -1259,9 +1281,11 @@ ipcMain.handle('phase2-get-config', async () => {
       typeof stored.ebayMockDryRun === 'boolean'
         ? stored.ebayMockDryRun
         : true,
-    ebaySandboxTableName: String(
-      stored.ebaySandboxTableName || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
-    ).trim(),
+    ebaySandboxTableName: resolveEbaySandboxTableName(
+      stored.ebaySandboxTableName,
+      stored.phase5ListingsTable,
+      stored.ebayMockTableName
+    ),
     ebaySandboxFetchLimit: Number(stored.ebaySandboxFetchLimit || 200) || 200,
     ebaySandboxDryRun:
       typeof stored.ebaySandboxDryRun === 'boolean'
@@ -1317,6 +1341,11 @@ ipcMain.handle('phase2-get-config', async () => {
     phase5EbayDevId: String(stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
     phase5EbayClientSecret: String(stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '').trim(),
     phase5EbayRuName: String(stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
+    phase5EbayUserAccessToken: String(stored.phase5EbayUserAccessToken || process.env.EBAY_USER_ACCESS_TOKEN || '').trim(),
+    phase5EbayRefreshToken: String(stored.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || '').trim(),
+    phase5EbayUserAccessTokenIssuedAt: String(
+      stored.phase5EbayUserAccessTokenIssuedAt || process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT || ''
+    ).trim(),
     airtableToken: stored.airtableToken || '',
     clickupToken: stored.clickupToken || ''
   };
@@ -2581,6 +2610,11 @@ ipcMain.handle('phase5:get-config', async () => {
     phase5EbayDevId: String(stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
     phase5EbayClientSecret: String(stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '').trim(),
     phase5EbayRuName: String(stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
+    phase5EbayUserAccessToken: String(stored.phase5EbayUserAccessToken || process.env.EBAY_USER_ACCESS_TOKEN || '').trim(),
+    phase5EbayRefreshToken: String(stored.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || '').trim(),
+    phase5EbayUserAccessTokenIssuedAt: String(
+      stored.phase5EbayUserAccessTokenIssuedAt || process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT || ''
+    ).trim(),
     phase5AutoPushStatus: getPhase5AutoPushScheduleStatus(),
     phase5EnforceBatchApproval:
       String(stored.phase5EnforceBatchApproval ?? 'true').trim().toLowerCase() !== 'false',
@@ -3132,10 +3166,46 @@ ipcMain.handle('phase5:testEbayCredentials', async (_, options = {}) => {
       ebayClientSecret: String(
         options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
       ).trim(),
-      ebayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim()
+      ebayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
+      ebayUserAccessToken: String(
+        options.phase5EbayUserAccessToken || stored.phase5EbayUserAccessToken || process.env.EBAY_USER_ACCESS_TOKEN || ''
+      ).trim(),
+      ebayRefreshToken: String(
+        options.phase5EbayRefreshToken || stored.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || ''
+      ).trim(),
+      ebayUserAccessTokenIssuedAt: String(
+        options.phase5EbayUserAccessTokenIssuedAt ||
+          stored.phase5EbayUserAccessTokenIssuedAt ||
+          process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT ||
+          ''
+      ).trim()
     });
 
     const result = await publishService.testCredentials();
+    if (result?.success && result?.userAccessToken) {
+      saveInventoryConfig('phase2Config', {
+        ...stored,
+        ...options,
+        phase5EbayEnvironment: String(
+          options.phase5EbayEnvironment || stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox'
+        )
+          .trim()
+          .toLowerCase() === 'production' ? 'production' : 'sandbox',
+        phase5EbayClientId: String(options.phase5EbayClientId || stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
+        phase5EbayDevId: String(options.phase5EbayDevId || stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
+        phase5EbayClientSecret: String(
+          options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
+        ).trim(),
+        phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
+        phase5EbayRefreshToken: String(
+          options.phase5EbayRefreshToken || stored.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || ''
+        ).trim(),
+        phase5EbayUserAccessToken: String(result.userAccessToken || '').trim(),
+        phase5EbayUserAccessTokenIssuedAt: String(result.issuedAt || new Date().toISOString()).trim(),
+        phase5EbayUserAccessTokenExpiresIn: Number(result.expiresIn || 0) || 0
+      });
+      delete result.userAccessToken;
+    }
     return {
       success: true,
       result
@@ -3415,9 +3485,11 @@ ipcMain.handle('ebaymock:run', async (event, options = {}) => {
 ipcMain.handle('ebaysandbox:get-config', async () => {
   const stored = getInventoryConfig('phase2Config') || {};
   return {
-    tableName: String(
-      stored.ebaySandboxTableName || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
-    ).trim(),
+    tableName: resolveEbaySandboxTableName(
+      stored.ebaySandboxTableName,
+      stored.phase5ListingsTable,
+      stored.ebayMockTableName
+    ),
     fetchLimit: Number(stored.ebaySandboxFetchLimit || 200) || 200,
     dryRun:
       typeof stored.ebaySandboxDryRun === 'boolean'
@@ -3440,9 +3512,12 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
       ...options,
       dryRun,
       ebaySandboxDryRun: dryRun,
-      ebaySandboxTableName: String(
-        options.ebaySandboxTableName || stored.ebaySandboxTableName || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
-      ).trim(),
+      ebaySandboxTableName: resolveEbaySandboxTableName(
+        options.ebaySandboxTableName,
+        stored.ebaySandboxTableName,
+        stored.phase5ListingsTable,
+        stored.ebayMockTableName
+      ),
       ebaySandboxFetchLimit: Number(options.ebaySandboxFetchLimit || stored.ebaySandboxFetchLimit || 200) || 200
     };
 

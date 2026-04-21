@@ -33,7 +33,7 @@ const EBAY_LISTING_IPN_FIELDS = [
   'InventoryNumber',
   'Inventory Number'
 ];
-const EBAY_LISTING_RECORD_KEY_FIELD = 'Record Key';
+const EBAY_LISTING_RECORD_KEY_FIELD = 'eBay Item ID';
 const EBAY_LISTING_DESCRIPTION_FIELDS = [
   'Description',
   'Listing Description',
@@ -50,6 +50,8 @@ const EBAY_MOCK_KEY_FIELDS = [
   'Inventory Number',
   'SKU',
   'RNumber',
+  'eBay Item ID',
+  'Ebay Item ID',
   'Record Key'
 ];
 
@@ -2663,6 +2665,8 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
 
   const listingSelectFields = [
     EBAY_LISTING_RECORD_KEY_FIELD,
+    'Ebay Item ID',
+    'Record Key',
     ...EBAY_LISTING_IPN_FIELDS,
     EBAY_LISTING_TITLE_FIELD,
     EBAY_LISTING_CONDITIONS_FIELD,
@@ -2747,7 +2751,12 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     const row = listingsRows[i];
     const listingFields = row?.fields || {};
     const recordId = normalizeText(row?.id);
-    const recordKey = normalizeText(listingFields[EBAY_LISTING_RECORD_KEY_FIELD] || recordId);
+    const recordKey = normalizeText(
+      listingFields[EBAY_LISTING_RECORD_KEY_FIELD] ||
+      listingFields['Ebay Item ID'] ||
+      listingFields['Record Key'] ||
+      recordId
+    );
     const ipn = resolveListingIpn(listingFields);
     if (!ipn) {
       summary.skippedMissingIpn += 1;

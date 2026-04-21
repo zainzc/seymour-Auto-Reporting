@@ -13,7 +13,8 @@ loadEnv();
 
 const DEFAULT_TABLE_NAME = 'eBay Listings (API) (Mock)';
 const DEFAULT_BATCH_SIZE = 10;
-const PRIMARY_KEY_FIELD = 'Record Key';
+const PRIMARY_KEY_FIELD = 'eBay Item ID';
+const LEGACY_PRIMARY_KEY_FIELD = 'Record Key';
 const LISTING_CONDITIONS_OPTIONS_FIELD = 'Listing Conditions and Options';
 const MOCK_LISTING_CONDITIONS_OPTIONS = ['LH', 'RH', 'Black (BLK)', 'White (WHT)', 'Red (RED)', 'Blue (BLU)'];
 
@@ -79,6 +80,10 @@ function hasFieldName(fieldNames = [], target = '') {
 
 function getMockListingConditionsAndOptions(rowIndex = 0) {
   return MOCK_LISTING_CONDITIONS_OPTIONS[rowIndex % MOCK_LISTING_CONDITIONS_OPTIONS.length];
+}
+
+function resolvePrimaryKeyFromFields(fields = {}) {
+  return normalizeText(fields[PRIMARY_KEY_FIELD] || fields[LEGACY_PRIMARY_KEY_FIELD] || '');
 }
 
 async function fetchLiveListingPayloadHash(compareContext = {}, itemId = '', fields = {}) {
@@ -281,7 +286,12 @@ async function ensureTableAndFields(schemaService, tableName, fieldNames = [], d
       )
     : normalizeText((table?.fields || [])[0]?.name);
 
-  if (!dryRun && existed && primaryFieldName.toLowerCase() !== PRIMARY_KEY_FIELD.toLowerCase()) {
+  const normalizedPrimary = primaryFieldName.toLowerCase();
+  const allowedPrimaryNames = new Set([
+    PRIMARY_KEY_FIELD.toLowerCase(),
+    LEGACY_PRIMARY_KEY_FIELD.toLowerCase()
+  ]);
+  if (!dryRun && existed && !allowedPrimaryNames.has(normalizedPrimary)) {
     throw new Error(
       `Table '${tableName}' already exists with primary field '${primaryFieldName || 'unknown'}'. Please recreate it with primary field '${PRIMARY_KEY_FIELD}'.`
     );
@@ -296,7 +306,10 @@ async function ensureTableAndFields(schemaService, tableName, fieldNames = [], d
       if (existingFields.has(fieldName)) continue;
       const payload = {
         name: fieldName,
-        type: 'multilineText'
+        type:
+          fieldName === PRIMARY_KEY_FIELD || fieldName === LEGACY_PRIMARY_KEY_FIELD
+            ? 'singleLineText'
+            : 'multilineText'
       };
       await schemaService.createField(table.id, payload);
       existingFields.add(fieldName);
@@ -412,6 +425,7 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
   summary.fieldsCreated = Array.isArray(ensureResult.createdFields) ? ensureResult.createdFields.length : 0;
   const payloadHashFieldName = normalizeText(stored.phase5PayloadHashFieldName || process.env.PHASE5_PAYLOAD_HASH_FIELD || 'Payload Hash');
   const hasPayloadHashField = payloadHashFieldName && ensureResult?.existingFields?.has(payloadHashFieldName);
+  const hasLegacyPrimaryField = ensureResult?.existingFields?.has(LEGACY_PRIMARY_KEY_FIELD);
 
   let rowNumber = 1;
   const batch = [];
@@ -450,10 +464,13 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
   }
   try {
     if (hasPayloadHashField) {
-      const existingRows = await itemService.fetchAllRecords(tableName, [PRIMARY_KEY_FIELD, payloadHashFieldName]);
+      const existingRows = await itemService.fetchAllRecords(
+        tableName,
+        [PRIMARY_KEY_FIELD, LEGACY_PRIMARY_KEY_FIELD, payloadHashFieldName]
+      );
       for (const row of existingRows) {
         const existingFields = row?.fields || {};
-        const recordKey = normalizeText(existingFields[PRIMARY_KEY_FIELD]);
+        const recordKey = resolvePrimaryKeyFromFields(existingFields);
         if (!recordKey) continue;
         const hash = normalizeText(existingFields[payloadHashFieldName]);
         if (!hash) continue;
@@ -480,6 +497,9 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
     const fields = {};
     const rowKey = String(summary.rowsScanned);
     fields[PRIMARY_KEY_FIELD] = rowKey;
+    if (hasLegacyPrimaryField) {
+      fields[LEGACY_PRIMARY_KEY_FIELD] = rowKey;
+    }
 
     for (let i = 0; i < headerNames.length; i += 1) {
       const fieldName = headerNames[i];

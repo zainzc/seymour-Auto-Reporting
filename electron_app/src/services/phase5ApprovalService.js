@@ -321,7 +321,7 @@ class Phase5ApprovalService {
       'Listing ID',
       'ListingID'
     ]);
-    const recordKeyField = findFieldByAliases(lookup, ['Record Key']);
+    const recordKeyField = findFieldByAliases(lookup, ['eBay Item ID', 'Ebay Item ID', 'Record Key']);
     const approvalField = detectApprovalField(merged, this.approvalFieldName);
     const groupField = detectGroupField(merged, this.groupFieldName);
     const eligibilityField = detectEligibilityField(merged, this.autoPushEligibilityFieldName);
