@@ -176,7 +176,7 @@ function detectRequiredFieldNames(fieldNames = [], options = {}) {
     detectFieldByAliases(fieldNames, ['Item ID', 'ItemID', 'eBay Item ID', 'Ebay Item ID']);
   const batchLinkField =
     normalizeText(options.batchLinkFieldName) ||
-    detectFieldByAliases(fieldNames, ['Batch', 'Batch Link', 'Listing Batch', 'Listing Batches']);
+    detectFieldByAliases(fieldNames, ['Batch', 'Batch Link', 'Listing Batches', 'Listing Batch']);
   const blockedField =
     normalizeText(options.blockedFieldName) ||
     detectFieldByAliases(fieldNames, ['Blocked', 'Is Blocked', 'Hold']);

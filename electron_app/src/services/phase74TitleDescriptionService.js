@@ -4,15 +4,15 @@ const Phase4AiEvaluatorService = require('./phase4AiEvaluatorService');
 const { asIdentitySet, isPublishedIdentity } = require('./phase5IdentityService');
 const { isManualOverrideForField: isManualOverrideFromGovernance } = require('./phase5GovernanceService');
 
-const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API)';
 const DEFAULT_MASTER_TABLE = 'Master Parts Table';
-const LISTING_IPN_FIELD = 'c: partshunter203 ebay MOTORS interchange part number';
-const LISTING_TITLE_FIELD = 'Product Title';
-const LISTING_NEW_TITLE_FIELD = 'Product Title(New)';
+const LISTING_IPN_FIELD = 'IPN (Interchange Part Number)';
+const LISTING_TITLE_FIELD = 'Title';
+const LISTING_NEW_TITLE_FIELD = 'Title';
 const LISTING_DESCRIPTION_OUTPUT_FIELD = 'c: partshunter203 ebay MOTORS e commerce description';
 const LISTING_SHORT_DESCRIPTION_FIELD = 'Short Description';
-const LISTING_CONDITIONS_FIELD = 'c: partshunter203 ebay MOTORS conditions & options';
-const LISTING_CONDITIONS_FALLBACK_FIELD = 'Listing Conditions and Options';
+const LISTING_CONDITIONS_FIELD = 'Conditions & Options';
+const LISTING_CONDITIONS_FALLBACK_FIELD = 'Conditions & Options';
 const MASTER_IPN_FIELD = 'IPN';
 const MASTER_FITMENT_FIELD = 'Part Fitment';
 

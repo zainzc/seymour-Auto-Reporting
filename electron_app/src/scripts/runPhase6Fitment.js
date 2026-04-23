@@ -12,7 +12,7 @@ function parseArgs(argv = []) {
     argv.find(arg => arg.startsWith(`${name}=`))?.split('=').slice(1).join('=') || '';
   return {
     phase6ListingsTable: normalizeText(
-      getArg('--listings-table') || process.env.PHASE6_LISTINGS_TABLE || 'eBay Listings (API) (Mock)'
+      getArg('--listings-table') || process.env.PHASE6_LISTINGS_TABLE || 'eBay Listings (API)'
     ),
     airtableMasterTable: normalizeText(
       getArg('--master-table') || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'

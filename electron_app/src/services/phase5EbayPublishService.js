@@ -11,6 +11,12 @@ function normalizeOAuthToken(value) {
     .replace(/^['"]+|['"]+$/g, '');
 }
 
+function normalizeFieldKey(value) {
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
 function parseEpochMs(value) {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
     return Math.trunc(value);
@@ -27,6 +33,204 @@ function parseEpochMs(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
+function firstNonEmptyField(fields = {}, candidates = []) {
+  for (const name of Array.isArray(candidates) ? candidates : []) {
+    const key = normalizeText(name);
+    if (!key) continue;
+    const value = normalizeText(fields?.[key]);
+    if (value) return value;
+  }
+  return '';
+}
+
+function parseNumberValue(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const text = normalizeText(value).replace(/,/g, '');
+  if (!text) return null;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseIntegerValue(value, minimum = 0) {
+  const parsed = parseNumberValue(value);
+  if (!Number.isFinite(parsed)) return null;
+  const intValue = Math.trunc(parsed);
+  return intValue < minimum ? minimum : intValue;
+}
+
+function normalizeCondition(value) {
+  const text = normalizeText(value);
+  if (!text) return '';
+  return text
+    .toUpperCase()
+    .replace(/\s+/g, '_');
+}
+
+function normalizeDimensionUnit(value) {
+  const text = normalizeText(value).toUpperCase();
+  if (!text) return 'INCH';
+  if (text === 'IN' || text === 'INCH' || text === 'INCHES') return 'INCH';
+  if (text === 'CM' || text === 'CENTIMETER' || text === 'CENTIMETERS') return 'CENTIMETER';
+  return text;
+}
+
+function normalizeWeightUnit(value) {
+  const text = normalizeText(value).toUpperCase();
+  if (!text) return 'POUND';
+  if (text === 'LB' || text === 'LBS' || text === 'POUND' || text === 'POUNDS') return 'POUND';
+  if (text === 'KG' || text === 'KGS' || text === 'KILOGRAM' || text === 'KILOGRAMS') return 'KILOGRAM';
+  return text;
+}
+
+function parseJsonObject(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  const text = normalizeText(value);
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch (_) {}
+  return null;
+}
+
+function toStringList(value) {
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeText(item)).filter(Boolean);
+  }
+  if (value && typeof value === 'object') {
+    const candidate = normalizeText(value.name || value.label || value.value || '');
+    return candidate ? [candidate] : [];
+  }
+  const text = normalizeText(value);
+  if (!text) return [];
+
+  if ((text.startsWith('[') && text.endsWith(']')) || (text.startsWith('"') && text.endsWith('"'))) {
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        return parsed.map(item => normalizeText(item)).filter(Boolean);
+      }
+      const single = normalizeText(parsed);
+      return single ? [single] : [];
+    } catch (_) {}
+  }
+
+  return text
+    .split(/[\n,]+/)
+    .map(part => normalizeText(part))
+    .filter(Boolean);
+}
+
+function mergeAspect(aspects = {}, name = '', rawValue = null) {
+  const aspectName = normalizeText(name);
+  if (!aspectName) return;
+  const values = toStringList(rawValue);
+  if (values.length === 0) return;
+  const existing = Array.isArray(aspects[aspectName]) ? aspects[aspectName] : [];
+  const seen = new Set(existing.map(item => normalizeFieldKey(item)));
+  for (const value of values) {
+    const key = normalizeFieldKey(value);
+    if (!key || seen.has(key)) continue;
+    existing.push(value);
+    seen.add(key);
+  }
+  if (existing.length > 0) {
+    aspects[aspectName] = existing;
+  }
+}
+
+function parseLegacySpecificsText(text = '') {
+  const out = {};
+  for (const rawLine of normalizeText(text).split('\n')) {
+    const line = normalizeText(rawLine);
+    if (!line || !line.includes(':')) continue;
+    const index = line.indexOf(':');
+    const name = normalizeText(line.slice(0, index));
+    const value = normalizeText(line.slice(index + 1));
+    if (!name || !value) continue;
+    mergeAspect(out, name, value);
+  }
+  return out;
+}
+
+function buildAspectsFromListing(fields = {}) {
+  const aspects = {};
+  const itemSpecificsObject = parseJsonObject(fields['Item Specifics']);
+  if (itemSpecificsObject) {
+    for (const [name, value] of Object.entries(itemSpecificsObject)) {
+      mergeAspect(aspects, name, value);
+    }
+  }
+
+  const legacySpecifics = parseLegacySpecificsText(fields['Item Specifics - All C: values relevant to item']);
+  for (const [name, value] of Object.entries(legacySpecifics)) {
+    mergeAspect(aspects, name, value);
+  }
+
+  const mappings = [
+    ['Brand', ['Brand']],
+    ['Manufacturer Part Number', ['Manufacturer Part Number', 'c: partshunter203 ebay MOTORS manufacturer part number']],
+    ['Interchange Part Number', ['Interchange Part Number', 'IPN (Interchange Part Number)', 'c: partshunter203 ebay MOTORS interchange part number']],
+    ['Part Number', ['Part Number', 'c: partshunter203 ebay MOTORS part number']],
+    ['Warranty', ['Warranty']],
+    ['Type', ['Type']],
+    ['Placement on Vehicle', ['Placement on Vehicle']],
+    ['Material', ['Material']],
+    ['VIN #', ['VIN #', 'VIN Number']]
+  ];
+
+  for (const [aspectName, candidates] of mappings) {
+    const value = firstNonEmptyField(fields, candidates);
+    if (value) mergeAspect(aspects, aspectName, value);
+  }
+
+  return aspects;
+}
+
+function buildPackageWeightAndSize(fields = {}) {
+  const length = parseNumberValue(firstNonEmptyField(fields, ['Package Length']));
+  const width = parseNumberValue(firstNonEmptyField(fields, ['Package Width']));
+  const height = parseNumberValue(firstNonEmptyField(fields, ['Package Height']));
+  const dimensionUnit = normalizeDimensionUnit(
+    firstNonEmptyField(fields, ['Package Dimension Unit', 'Dimensions Unit', 'Dimension Unit'])
+  );
+  const weightValue = parseNumberValue(firstNonEmptyField(fields, ['Package Weight']));
+  const weightUnit = normalizeWeightUnit(firstNonEmptyField(fields, ['Package Weight Unit']));
+
+  const output = {};
+  if (Number.isFinite(length) && Number.isFinite(width) && Number.isFinite(height)) {
+    output.dimensions = {
+      length,
+      width,
+      height,
+      unit: dimensionUnit
+    };
+  }
+  if (Number.isFinite(weightValue)) {
+    output.weight = {
+      value: weightValue,
+      unit: weightUnit
+    };
+  }
+  return Object.keys(output).length > 0 ? output : null;
+}
+
+function formatEbayError(error) {
+  const status = Number(error?.response?.status || 0);
+  const data = error?.response?.data;
+  const details = Array.isArray(data?.errors)
+    ? data.errors
+        .map(entry => normalizeText(entry?.message || entry?.longMessage || entry?.errorId || ''))
+        .filter(Boolean)
+    : [];
+  const summary =
+    details.join(' | ') ||
+    normalizeText(data?.error_description || data?.message || data?.error || error?.message || String(error));
+  return status > 0 ? `HTTP ${status}: ${summary}` : summary;
+}
+
 const EBAY_INVENTORY_SCOPE_CANDIDATES = [
   'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
   'https://api.ebay.com/oauth/api_scope/sell.inventory'
@@ -37,9 +241,10 @@ class Phase5EbayPublishService {
   constructor(config = {}) {
     this.publishApiUrl = normalizeText(config.publishApiUrl || process.env.EBAY_PUBLISH_API_URL || '');
     this.publishApiKey = normalizeText(config.publishApiKey || process.env.EBAY_PUBLISH_API_KEY || '');
-    this.ebayEnvironment = normalizeText(config.ebayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox').toLowerCase() === 'production'
-      ? 'production'
-      : 'sandbox';
+    this.ebayEnvironment =
+      normalizeText(config.ebayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox').toLowerCase() === 'production'
+        ? 'production'
+        : 'sandbox';
     this.ebayClientId = normalizeText(config.ebayClientId || process.env.EBAY_CLIENT_ID || '');
     this.ebayDevId = normalizeText(config.ebayDevId || process.env.EBAY_DEV_ID || '');
     this.ebayClientSecret = normalizeText(config.ebayClientSecret || process.env.EBAY_CLIENT_SECRET || '');
@@ -59,38 +264,6 @@ class Phase5EbayPublishService {
     });
   }
 
-  getItemId(listingFields = {}, schema = {}) {
-    const itemIdField = normalizeText(schema.itemIdField || '');
-    return itemIdField ? normalizeText(listingFields[itemIdField]) : '';
-  }
-
-  detectOperation(listingFields = {}, schema = {}) {
-    const itemId = this.getItemId(listingFields, schema);
-    return {
-      operation: 'revise',
-      itemId
-    };
-  }
-
-  buildPublishPayload(record = {}, schema = {}) {
-    const listingFields = record?.fields || {};
-    const op = this.detectOperation(listingFields, schema);
-    return {
-      operation: op.operation,
-      itemId: op.itemId,
-      airtableRecordId: normalizeText(record?.id),
-      tableName: normalizeText(schema.tableName),
-      listing: listingFields,
-      publishContext: {
-        environment: this.ebayEnvironment,
-        clientId: this.ebayClientId,
-        devId: this.ebayDevId,
-        clientSecret: this.ebayClientSecret,
-        ruName: this.ebayRuName
-      }
-    };
-  }
-
   getIdentityTokenUrl() {
     return this.ebayEnvironment === 'production'
       ? 'https://api.ebay.com/identity/v1/oauth2/token'
@@ -101,6 +274,81 @@ class Phase5EbayPublishService {
     return this.ebayEnvironment === 'production'
       ? 'https://api.ebay.com'
       : 'https://api.sandbox.ebay.com';
+  }
+
+  getItemId(listingFields = {}, schema = {}) {
+    const itemIdField = normalizeText(schema.itemIdField || '');
+    return firstNonEmptyField(listingFields, [itemIdField, 'eBay Item ID', 'Ebay Item ID', 'Item ID', 'ItemID']);
+  }
+
+  getSku(listingFields = {}, schema = {}) {
+    const skuField = normalizeText(schema.skuField || '');
+    return firstNonEmptyField(listingFields, [skuField, 'SKU', 'Sku', 'sku']);
+  }
+
+  buildInventoryPayload(record = {}, schema = {}) {
+    const listingFields = record?.fields || {};
+    const sku = this.getSku(listingFields, schema);
+    if (!sku) {
+      throw new Error('Missing SKU. Phase 5 direct eBay publish requires SKU.');
+    }
+
+    const title = firstNonEmptyField(listingFields, [
+      schema.titleField,
+      'Title',
+      'Product Title(New)',
+      'Product Title',
+      'AI Optimized Title'
+    ]);
+    const description = firstNonEmptyField(listingFields, [
+      schema.descriptionField,
+      'Item Description',
+      'Description',
+      'c: partshunter203 ebay MOTORS e commerce description',
+      'Full listing description HTML'
+    ]);
+    const condition = normalizeCondition(firstNonEmptyField(listingFields, ['Condition']));
+    const conditionDescription = firstNonEmptyField(listingFields, ['Condition Description', 'conditionDescription']);
+    const quantity = parseIntegerValue(firstNonEmptyField(listingFields, ['Quantity', 'AvailableQuantity']), 0);
+    const locale = firstNonEmptyField(listingFields, ['Locale', 'locale']) || 'en_US';
+    const aspects = buildAspectsFromListing(listingFields);
+    const packageWeightAndSize = buildPackageWeightAndSize(listingFields);
+    const imageUrls = toStringList(firstNonEmptyField(listingFields, ['Image URLs', 'Image URL', 'ImageUrls', 'imageUrls']));
+
+    const payload = {
+      locale
+    };
+    if (condition) {
+      payload.condition = condition;
+    }
+    if (conditionDescription) {
+      payload.conditionDescription = conditionDescription;
+    }
+    if (Number.isFinite(quantity)) {
+      payload.availability = {
+        shipToLocationAvailability: {
+          quantity
+        }
+      };
+    }
+    if (packageWeightAndSize) {
+      payload.packageWeightAndSize = packageWeightAndSize;
+    }
+
+    const product = {};
+    if (title) product.title = title;
+    if (description) product.description = description;
+    if (Object.keys(aspects).length > 0) product.aspects = aspects;
+    if (imageUrls.length > 0) product.imageUrls = imageUrls;
+    if (Object.keys(product).length > 0) {
+      payload.product = product;
+    }
+
+    return {
+      sku,
+      itemId: this.getItemId(listingFields, schema),
+      payload
+    };
   }
 
   async requestUserAccessTokenFromRefreshToken() {
@@ -142,10 +390,7 @@ class Phase5EbayPublishService {
   async ensureUserAccessToken() {
     const issuedAtMs = parseEpochMs(this.ebayUserAccessTokenIssuedAt);
     const tokenAgeMs = issuedAtMs > 0 ? Math.max(0, Date.now() - issuedAtMs) : Number.MAX_SAFE_INTEGER;
-    const tokenIsFresh =
-      Boolean(this.ebayUserAccessToken) &&
-      issuedAtMs > 0 &&
-      tokenAgeMs < USER_ACCESS_TOKEN_MAX_AGE_MS;
+    const tokenIsFresh = Boolean(this.ebayUserAccessToken) && issuedAtMs > 0 && tokenAgeMs < USER_ACCESS_TOKEN_MAX_AGE_MS;
 
     if (tokenIsFresh) {
       return {
@@ -299,55 +544,89 @@ class Phase5EbayPublishService {
 
   async publishRecord(record = {}, schema = {}, options = {}) {
     const dryRun = options?.dryRun === true;
-    const payload = this.buildPublishPayload(record, schema);
-    if (!payload.itemId) {
-      throw new Error('Missing ItemID for revise-only publish.');
-    }
+    const prepared = this.buildInventoryPayload(record, schema);
+
     if (dryRun) {
       return {
         success: true,
         dryRun: true,
-        operation: payload.operation,
-        itemId: payload.itemId || '',
-        response: { simulated: true }
+        operation: 'upsert_inventory_item',
+        itemId: prepared.itemId || '',
+        sku: prepared.sku,
+        response: {
+          simulated: true,
+          endpoint: `${this.getSellApiBase()}/sell/inventory/v1/inventory_item/${encodeURIComponent(prepared.sku)}`,
+          payload: prepared.payload
+        }
       };
     }
 
-    if (!this.publishApiUrl) {
-      throw new Error('Missing eBay publish API URL (EBAY_PUBLISH_API_URL).');
+    if (this.ebayEnvironment !== 'sandbox') {
+      throw new Error('Direct Phase 5 eBay publish is currently enabled for sandbox only.');
     }
 
-    const headers = {
-      'Content-Type': 'application/json'
-    };
-    if (this.publishApiKey) {
-      headers.Authorization = `Bearer ${this.publishApiKey}`;
+    const resolved = await this.ensureUserAccessToken();
+    if (!resolved.accessToken) {
+      throw new Error('Missing eBay user access token for direct inventory publish.');
     }
 
-    const response = await retryWithBackoff(
-      async () =>
-        this.client.post(this.publishApiUrl, payload, {
-          headers
-        }),
-      {
-        maxAttempts: this.maxAttempts,
-        baseDelayMs: this.baseDelayMs
+    const endpoint = `${this.getSellApiBase()}/sell/inventory/v1/inventory_item/${encodeURIComponent(prepared.sku)}`;
+    let response;
+    let finalToken = resolved.accessToken;
+
+    try {
+      response = await retryWithBackoff(
+        async () =>
+          this.client.put(endpoint, prepared.payload, {
+            headers: {
+              Authorization: `Bearer ${finalToken}`,
+              'Content-Type': 'application/json',
+              Accept: 'application/json',
+              'Content-Language': 'en-US'
+            }
+          }),
+        {
+          maxAttempts: this.maxAttempts,
+          baseDelayMs: this.baseDelayMs
+        }
+      );
+    } catch (error) {
+      const status = Number(error?.response?.status || 0);
+      const canRefresh = this.ebayRefreshToken && this.ebayClientId && this.ebayClientSecret;
+      if (status === 401 && canRefresh) {
+        const refreshed = await this.requestUserAccessTokenFromRefreshToken();
+        finalToken = refreshed.accessToken;
+        response = await retryWithBackoff(
+          async () =>
+            this.client.put(endpoint, prepared.payload, {
+              headers: {
+                Authorization: `Bearer ${finalToken}`,
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+                'Content-Language': 'en-US'
+              }
+            }),
+          {
+            maxAttempts: this.maxAttempts,
+            baseDelayMs: this.baseDelayMs
+          }
+        );
+      } else {
+        throw new Error(`eBay inventory update failed for SKU '${prepared.sku}': ${formatEbayError(error)}`);
       }
-    );
+    }
 
     const status = Number(response?.status || 0);
     if (status < 200 || status >= 300) {
-      throw new Error(`eBay publish API returned status ${status || 'n/a'}.`);
+      throw new Error(`eBay inventory update failed for SKU '${prepared.sku}' with status ${status || 'n/a'}.`);
     }
 
     return {
       success: true,
       dryRun: false,
-      operation: payload.operation,
-      itemId:
-        normalizeText(response?.data?.itemId) ||
-        payload.itemId ||
-        '',
+      operation: 'upsert_inventory_item',
+      itemId: prepared.itemId || '',
+      sku: prepared.sku,
       response: response?.data || {}
     };
   }

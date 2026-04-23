@@ -12,6 +12,27 @@ function normalizeTextOrComparable(value) {
   return normalizeText(normalizeComparableValue(value));
 }
 
+function detectLinkedRecordField(fields = [], linkedTableId = '', preferred = []) {
+  const targetLinkedTableId = normalizeText(linkedTableId);
+  const normalizedPreferred = (Array.isArray(preferred) ? preferred : [])
+    .map(name => normalizeText(name).toLowerCase())
+    .filter(Boolean);
+  const candidates = (Array.isArray(fields) ? fields : []).filter(field => {
+    if (normalizeText(field?.type) !== 'multipleRecordLinks') return false;
+    const fieldLinkedTableId = normalizeText(field?.options?.linkedTableId);
+    return targetLinkedTableId && fieldLinkedTableId === targetLinkedTableId;
+  });
+  if (candidates.length === 0) return '';
+
+  for (const wanted of normalizedPreferred) {
+    const exact = candidates.find(field => normalizeText(field?.name).toLowerCase() === wanted);
+    if (exact?.name) return normalizeText(exact.name);
+  }
+
+  const first = candidates[0];
+  return normalizeText(first?.name || '');
+}
+
 function normalizeValueSet(list = []) {
   const set = new Set();
   for (const item of Array.isArray(list) ? list : []) {
@@ -143,14 +164,27 @@ async function validateBatchGovernanceSchema(options = {}) {
   }
 
   const required = resolveBatchSchemaFieldNames(options);
-  const names = new Set((batchTable.fields || []).map(f => normalizeText(f?.name)).filter(Boolean));
-  const missing = Object.values(required).filter(name => name && !names.has(name));
+  const batchFields = Array.isArray(batchTable.fields) ? batchTable.fields : [];
+  const names = new Set(batchFields.map(f => normalizeText(f?.name)).filter(Boolean));
+  const detectedItemsField = detectLinkedRecordField(batchFields, schema.tableId, [
+    required.itemsField,
+    'Items',
+    schema.tableName
+  ]);
+  const missing = Object.entries(required)
+    .filter(([key, name]) => {
+      if (!name) return false;
+      if (key === 'itemsField') return !detectedItemsField;
+      return !names.has(name);
+    })
+    .map(([, name]) => name);
   const ok = missing.length === 0;
   return {
     ok,
     batchTableName,
     missing,
     required,
+    detectedItemsField,
     message: ok
       ? 'Batch schema is valid.'
       : `Batch schema missing required fields: ${missing.join(', ')}`
@@ -284,13 +318,19 @@ async function getBatchListings(options = {}) {
   if (!batchRecordId) throw new Error('batchRecordId is required.');
   const batchTableName = normalizeText(options.phase5BatchesTable || schema.batchTableName || 'Listing Batches');
   const batchSchemaFields = resolveBatchSchemaFieldNames(options);
-  const itemsField = normalizeText(batchSchemaFields.itemsField || 'Items');
+  const configuredItemsField = normalizeText(batchSchemaFields.itemsField || 'Items');
 
   const tables = await schemaService.listTables();
   const batchTable = (tables || []).find(t => normalizeText(t?.name).toLowerCase() === batchTableName.toLowerCase());
   if (!batchTable?.id) {
     throw new Error(`Batch table '${batchTableName}' not found.`);
   }
+  const itemsField =
+    detectLinkedRecordField(batchTable.fields || [], schema.tableId, [
+      configuredItemsField,
+      'Items',
+      schema.tableName
+    ]) || configuredItemsField;
 
   const batchRow = await airtableService.request(
     'GET',
@@ -332,17 +372,34 @@ async function getBatchListings(options = {}) {
   const listingRows = orderedRows.map(row => {
     const fields = row?.fields || {};
     const gate = passCoreGate(fields, schema, options);
+    const sku =
+      normalizeTextOrComparable(fields['SKU']) ||
+      normalizeTextOrComparable(fields['Sku']) ||
+      normalizeTextOrComparable(fields['sku']);
+    const ipn =
+      normalizeTextOrComparable(fields['IPN (Interchange Part Number)']) ||
+      normalizeTextOrComparable(fields['c: partshunter203 ebay MOTORS interchange part number']);
+    const productTitle =
+      normalizeTextOrComparable(fields['Title']) ||
+      normalizeTextOrComparable(fields['Product Title(New)']);
+    const description =
+      normalizeTextOrComparable(fields['Item Description']) ||
+      normalizeTextOrComparable(fields['Description']);
     return {
       recordId: normalizeText(row?.id),
       createdTime: normalizeText(row?.createdTime || ''),
+      sku,
       recordKey:
+        sku ||
         normalizeTextOrComparable(fields['eBay Item ID']) ||
         normalizeTextOrComparable(fields['Ebay Item ID']) ||
         normalizeTextOrComparable(fields['Record Key']),
-      ipn: normalizeTextOrComparable(fields['c: partshunter203 ebay MOTORS interchange part number']),
-      productTitle: normalizeTextOrComparable(fields['Product Title(New)']),
-      description: normalizeTextOrComparable(fields['Description']),
+      ipn,
+      productTitle,
+      description,
       ebayCategoryId:
+        normalizeTextOrComparable(fields['eBay Category ID']) ||
+        normalizeTextOrComparable(fields['eBay Category_ID']) ||
         normalizeTextOrComparable(fields['eBay Category ID (from Category Definitions) (from Master Part Record)']) ||
         normalizeTextOrComparable(fields[schema.categoryIdField || '']),
       eligibilityComputed:

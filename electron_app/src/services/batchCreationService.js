@@ -59,6 +59,39 @@ function detectFieldByName(fieldNames = [], preferred = []) {
   return '';
 }
 
+function detectLinkedRecordField(fields = [], linkedTableId = '', preferred = []) {
+  const targetLinkedTableId = normalizeText(linkedTableId);
+  const normalizedPreferred = (Array.isArray(preferred) ? preferred : [])
+    .map(name => normalizeText(name).toLowerCase())
+    .filter(Boolean);
+  const candidates = (Array.isArray(fields) ? fields : []).filter(field => {
+    if (normalizeText(field?.type) !== 'multipleRecordLinks') return false;
+    const fieldLinkedTableId = normalizeText(field?.options?.linkedTableId);
+    return targetLinkedTableId && fieldLinkedTableId === targetLinkedTableId;
+  });
+  if (candidates.length === 0) return '';
+
+  for (const wanted of normalizedPreferred) {
+    const exact = candidates.find(field => normalizeText(field?.name).toLowerCase() === wanted);
+    if (exact?.name) return normalizeText(exact.name);
+  }
+
+  const first = candidates[0];
+  return normalizeText(first?.name || '');
+}
+
+function detectLinkedRecordFieldNames(fields = [], linkedTableId = '') {
+  const targetLinkedTableId = normalizeText(linkedTableId);
+  return (Array.isArray(fields) ? fields : [])
+    .filter(field => {
+      if (normalizeText(field?.type) !== 'multipleRecordLinks') return false;
+      const fieldLinkedTableId = normalizeText(field?.options?.linkedTableId);
+      return targetLinkedTableId && fieldLinkedTableId === targetLinkedTableId;
+    })
+    .map(field => normalizeText(field?.name))
+    .filter(Boolean);
+}
+
 async function createFieldWithFallback(schemaService, tableId = '', payloadVariants = []) {
   let lastError = null;
   for (const payload of payloadVariants) {
@@ -93,7 +126,8 @@ async function ensureBatchTableExists(schemaService, listingsTable = {}, tables 
 
   const tableId = normalizeText(batchTable?.id || '');
   if (!tableId) throw new Error(`Failed to create or resolve batch table '${batchTableName}'.`);
-  const existing = new Set((batchTable?.fields || []).map(f => normalizeText(f?.name)).filter(Boolean));
+  let batchTableFields = Array.isArray(batchTable?.fields) ? batchTable.fields : [];
+  const existing = new Set(batchTableFields.map(f => normalizeText(f?.name)).filter(Boolean));
 
   if (!existing.has(batchStatusField)) {
     await createFieldWithFallback(schemaService, tableId, [
@@ -121,25 +155,30 @@ async function ensureBatchTableExists(schemaService, listingsTable = {}, tables 
     existing.add(fieldName);
   }
 
-  if (!existing.has('Items')) {
-    await createFieldWithFallback(schemaService, tableId, [
+  const preferredItemsField = normalizeText(options.phase5BatchItemsFieldName || process.env.PHASE5_BATCH_ITEMS_FIELD || 'Items');
+  const existingItemsLinkField =
+    detectLinkedRecordField(batchTableFields, linkedListingsTableId, [preferredItemsField, 'Items']) || '';
+  if (!existingItemsLinkField) {
+    const createdItemsField = await createFieldWithFallback(schemaService, tableId, [
       {
-        name: 'Items',
+        name: preferredItemsField || 'Items',
         type: 'multipleRecordLinks',
         options: { linkedTableId: linkedListingsTableId }
       },
       {
-        name: 'Items',
+        name: preferredItemsField || 'Items',
         type: 'multipleRecordLinks',
         options: { linkedTableId: linkedListingsTableId, prefersSingleRecordLink: false }
       },
       {
-        name: 'Items',
+        name: preferredItemsField || 'Items',
         type: 'multipleRecordLinks',
         options: { linkedTableId: linkedListingsTableId, isReversed: false }
       }
     ]);
-    existing.add('Items');
+    const createdName = normalizeText(createdItemsField?.name || preferredItemsField || 'Items');
+    if (createdName) existing.add(createdName);
+    batchTableFields = [...batchTableFields, ...(createdItemsField ? [createdItemsField] : [])];
   }
 
   return {
@@ -187,22 +226,33 @@ async function resolveTablesAndFields(schemaService, options = {}) {
   );
 
   let tables = await schemaService.listTables();
-  const listingsTable = (tables || []).find(t => normalizeText(t?.name).toLowerCase() === listingsTableName.toLowerCase());
+  let listingsTable = (tables || []).find(t => normalizeText(t?.name).toLowerCase() === listingsTableName.toLowerCase());
   if (!listingsTable?.id) throw new Error(`Listings table not found: '${listingsTableName}'.`);
 
-  let batchesTable = (tables || []).find(t => normalizeText(t?.name).toLowerCase() === batchTableName.toLowerCase());
-  if (!batchesTable?.id) {
-    const created = await ensureBatchTableExists(schemaService, listingsTable, tables, options);
-    tables = await schemaService.listTables();
-    batchesTable = (tables || []).find(t => normalizeText(t?.id) === normalizeText(created.id));
-  }
+  // Always ensure batch table + required fields first. This can also create reciprocal
+  // linked fields in listings, so we must refresh schema before resolving link fields.
+  const ensuredBatch = await ensureBatchTableExists(schemaService, listingsTable, tables, options);
+  tables = await schemaService.listTables();
+  listingsTable =
+    (tables || []).find(t => normalizeText(t?.id) === normalizeText(listingsTable.id)) ||
+    (tables || []).find(t => normalizeText(t?.name).toLowerCase() === listingsTableName.toLowerCase());
+  let batchesTable =
+    (tables || []).find(t => normalizeText(t?.id) === normalizeText(ensuredBatch.id)) ||
+    (tables || []).find(t => normalizeText(t?.name).toLowerCase() === batchTableName.toLowerCase());
+
+  if (!listingsTable?.id) throw new Error(`Listings table not found after schema refresh: '${listingsTableName}'.`);
   if (!batchesTable?.id) throw new Error(`Batch table not found: '${batchTableName}'.`);
 
-  let listingFieldNames = (listingsTable.fields || []).map(f => normalizeText(f?.name)).filter(Boolean);
+  let listingFields = Array.isArray(listingsTable.fields) ? listingsTable.fields : [];
+  let listingFieldNames = listingFields.map(f => normalizeText(f?.name)).filter(Boolean);
+  const batchFields = Array.isArray(batchesTable.fields) ? batchesTable.fields : [];
   const batchFieldNames = (batchesTable.fields || []).map(f => normalizeText(f?.name)).filter(Boolean);
 
+  let listingBatchLinkFields = detectLinkedRecordFieldNames(listingFields, normalizeText(batchesTable.id));
   let batchLinkField =
-    detectFieldByName(listingFieldNames, [batchLinkFieldPreferred, 'Listing Batches', 'Batch', 'Batch Link']) || '';
+    detectFieldByName(listingBatchLinkFields, [batchLinkFieldPreferred, 'Listing Batches', 'Batch', 'Batch Link']) ||
+    listingBatchLinkFields[0] ||
+    '';
   if (!batchLinkField) {
     batchLinkField = await ensureListingsBatchLinkField(
       schemaService,
@@ -212,9 +262,13 @@ async function resolveTablesAndFields(schemaService, options = {}) {
     );
     tables = await schemaService.listTables();
     const refreshedListingsTable = (tables || []).find(t => normalizeText(t?.id) === normalizeText(listingsTable.id));
-    listingFieldNames = (refreshedListingsTable?.fields || []).map(f => normalizeText(f?.name)).filter(Boolean);
+    listingFields = Array.isArray(refreshedListingsTable?.fields) ? refreshedListingsTable.fields : [];
+    listingFieldNames = listingFields.map(f => normalizeText(f?.name)).filter(Boolean);
+    listingBatchLinkFields = detectLinkedRecordFieldNames(listingFields, normalizeText(batchesTable.id));
     batchLinkField =
-      detectFieldByName(listingFieldNames, [batchLinkField, batchLinkFieldPreferred, 'Listing Batches', 'Batch', 'Batch Link']) || '';
+      detectFieldByName(listingBatchLinkFields, [batchLinkField, batchLinkFieldPreferred, 'Listing Batches', 'Batch', 'Batch Link']) ||
+      listingBatchLinkFields[0] ||
+      '';
   }
   if (!batchLinkField) throw new Error(`Batch link field not found on listings table '${listingsTableName}'.`);
 
@@ -227,6 +281,12 @@ async function resolveTablesAndFields(schemaService, options = {}) {
     detectFieldByName(batchFieldNames, [runIdFieldPreferred, 'Run ID', 'RunId']) || '';
   const batchCreatedBySystemField =
     detectFieldByName(batchFieldNames, [createdBySystemFieldPreferred, 'Created By System']) || '';
+  const batchItemsField = detectLinkedRecordField(batchFields, normalizeText(listingsTable.id), [
+    options.phase5BatchItemsFieldName,
+    process.env.PHASE5_BATCH_ITEMS_FIELD,
+    'Items',
+    listingsTableName
+  ]);
 
   return {
     listingsTableId: normalizeText(listingsTable.id),
@@ -235,7 +295,9 @@ async function resolveTablesAndFields(schemaService, options = {}) {
     batchesTableName: normalizeText(batchesTable.name),
     batchStatusField,
     batchLinkField,
+    listingBatchLinkFields: Array.isArray(listingBatchLinkFields) ? listingBatchLinkFields : [],
     publishStatusField,
+    batchItemsField,
     batchCreatedAtField,
     batchRunIdField,
     batchCreatedBySystemField
@@ -243,7 +305,10 @@ async function resolveTablesAndFields(schemaService, options = {}) {
 }
 
 async function fetchCandidateListings(airtableService, resolved = {}, options = {}) {
-  const fieldsToFetch = ['eBay Item ID', 'Record Key', resolved.batchLinkField];
+  const linkFieldNames = Array.isArray(resolved.listingBatchLinkFields) && resolved.listingBatchLinkFields.length > 0
+    ? resolved.listingBatchLinkFields
+    : [resolved.batchLinkField].filter(Boolean);
+  const fieldsToFetch = [...linkFieldNames];
   if (resolved.publishStatusField) fieldsToFetch.push(resolved.publishStatusField);
   const rows = await airtableService.fetchAllRecords(resolved.listingsTableId, Array.from(new Set(fieldsToFetch)));
 
@@ -254,16 +319,37 @@ async function fetchCandidateListings(airtableService, resolved = {}, options = 
       .filter(Boolean)
   );
 
-  return rows.filter(row => {
+  let excludedAlreadyLinked = 0;
+  let excludedAlreadyPublished = 0;
+  const candidates = rows.filter(row => {
     const fields = row?.fields || {};
-    const links = extractLinkedRecordIds(fields[resolved.batchLinkField]);
-    if (links.length > 0) return false;
+    const hasAnyBatchLink = linkFieldNames.some(fieldName => {
+      const links = extractLinkedRecordIds(fields[fieldName]);
+      return links.length > 0;
+    });
+    if (hasAnyBatchLink) {
+      excludedAlreadyLinked += 1;
+      return false;
+    }
     if (resolved.publishStatusField) {
       const status = normalizeTextOrComparable(fields[resolved.publishStatusField]).toLowerCase();
-      if (status && publishedStatusValues.has(status)) return false;
+      if (status && publishedStatusValues.has(status)) {
+        excludedAlreadyPublished += 1;
+        return false;
+      }
     }
     return true;
   });
+
+  return {
+    candidates,
+    diagnostics: {
+      totalRows: rows.length,
+      excludedAlreadyLinked,
+      excludedAlreadyPublished,
+      candidates: candidates.length
+    }
+  };
 }
 
 async function createBatchRecord(airtableService, resolved = {}, options = {}) {
@@ -334,7 +420,52 @@ async function linkListingsToBatchInChunks(airtableService, resolved = {}, batch
   return { attempted, linked, failed };
 }
 
+async function linkListingsToBatchViaBatchItemsField(airtableService, resolved = {}, batchId = '', rows = []) {
+  const attempted = Array.isArray(rows) ? rows.length : 0;
+  const listingIds = Array.from(
+    new Set(
+      (Array.isArray(rows) ? rows : [])
+        .map(row => normalizeText(row?.id))
+        .filter(Boolean)
+    )
+  );
+
+  if (!batchId || !resolved.batchItemsField || listingIds.length === 0) {
+    return { attempted, linked: 0, failed: attempted > 0 ? [{ recordId: '', error: 'Batch items link field not resolved.' }] : [] };
+  }
+
+  try {
+    await withRetry(
+      () =>
+        airtableService.request('PATCH', `/${encodeURIComponent(resolved.batchesTableId)}`, {
+          data: {
+            records: [{ id: batchId, fields: { [resolved.batchItemsField]: listingIds } }],
+            typecast: true
+          }
+        }),
+      { maxAttempts: 3, baseDelayMs: 450 }
+    );
+    return { attempted, linked: listingIds.length, failed: [] };
+  } catch (error) {
+    return {
+      attempted,
+      linked: 0,
+      failed: [{ recordId: '', error: formatAirtableError(error) }]
+    };
+  }
+}
+
 async function verifyBatchLinkCount(airtableService, resolved = {}, batchId = '') {
+  if (resolved.batchItemsField) {
+    try {
+      const batchRow = await airtableService.request(
+        'GET',
+        `/${encodeURIComponent(resolved.batchesTableId)}/${encodeURIComponent(batchId)}`
+      );
+      return extractLinkedRecordIds(batchRow?.fields?.[resolved.batchItemsField]).length;
+    } catch (_) {}
+  }
+
   const escapedBatchId = String(batchId).replace(/"/g, '\\"');
   const escapedLinkField = String(resolved.batchLinkField || '').replace(/}/g, '\\}');
   const formula = `FIND("${escapedBatchId}", ARRAYJOIN({${escapedLinkField}}))`;
@@ -380,8 +511,13 @@ async function createBatchFromListings(options = {}) {
     const airtableService = new AirtableService({ token: airtableToken, baseId: airtableBaseId });
     const resolved = await resolveTablesAndFields(schemaService, options);
 
-    const candidates = await fetchCandidateListings(airtableService, resolved, options);
+    const candidateResult = await fetchCandidateListings(airtableService, resolved, options);
+    const candidates = Array.isArray(candidateResult?.candidates) ? candidateResult.candidates : [];
+    const diagnostics = candidateResult?.diagnostics || {};
     if (candidates.length === 0) {
+      const totalRows = Number(diagnostics.totalRows || 0) || 0;
+      const excludedAlreadyLinked = Number(diagnostics.excludedAlreadyLinked || 0) || 0;
+      const excludedAlreadyPublished = Number(diagnostics.excludedAlreadyPublished || 0) || 0;
       return {
         success: true,
         batchId: null,
@@ -390,7 +526,15 @@ async function createBatchFromListings(options = {}) {
         failedRecords: 0,
         status: 'NoCandidates',
         runId: '',
-        message: 'No listings available for batch creation.'
+        diagnostics: {
+          totalRows,
+          excludedAlreadyLinked,
+          excludedAlreadyPublished,
+          candidates: 0
+        },
+        message:
+          'No listings available for batch creation.' +
+          ` totalRows=${totalRows}, excludedAlreadyLinked=${excludedAlreadyLinked}, excludedAlreadyPublished=${excludedAlreadyPublished}`
       };
     }
 
@@ -407,7 +551,9 @@ async function createBatchFromListings(options = {}) {
 
     for (const candidateChunk of candidateChunks) {
       const { batchId, runId } = await createBatchRecord(airtableService, resolved, options);
-      const linkResult = await linkListingsToBatchInChunks(airtableService, resolved, batchId, candidateChunk);
+      const linkResult = resolved.batchItemsField
+        ? await linkListingsToBatchViaBatchItemsField(airtableService, resolved, batchId, candidateChunk)
+        : await linkListingsToBatchInChunks(airtableService, resolved, batchId, candidateChunk);
       const verifiedCount = await verifyBatchLinkCount(airtableService, resolved, batchId);
 
       const failedForBatch = linkResult.failed.length + Math.max(0, linkResult.attempted - verifiedCount);
@@ -416,6 +562,7 @@ async function createBatchFromListings(options = {}) {
       if (allLinked) {
         await updateBatchStatus(airtableService, resolved, batchId, 'Ready');
       } else {
+        await updateBatchStatus(airtableService, resolved, batchId, 'PartialFailure');
         partialFailure = true;
         if (Array.isArray(linkResult.failed) && linkResult.failed.length > 0) {
           allErrors.push(...linkResult.failed.slice(0, 100));
@@ -449,6 +596,12 @@ async function createBatchFromListings(options = {}) {
       runId: firstBatch?.runId || '',
       batchesCreated: createdBatches.length,
       maxBatchSize,
+      diagnostics: {
+        totalRows: Number(diagnostics.totalRows || 0) || 0,
+        excludedAlreadyLinked: Number(diagnostics.excludedAlreadyLinked || 0) || 0,
+        excludedAlreadyPublished: Number(diagnostics.excludedAlreadyPublished || 0) || 0,
+        candidates: Number(diagnostics.candidates || candidates.length) || candidates.length
+      },
       createdBatches,
       message: success
         ? `Batches created successfully. batches=${createdBatches.length}, linked=${totalLinked}, maxBatchSize=${maxBatchSize}`

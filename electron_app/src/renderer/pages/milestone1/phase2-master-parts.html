@@ -1191,7 +1191,7 @@
               </div>
               <div class="form-group">
                 <label for="phase5-required-title-field">Required Title Field</label>
-                <input id="phase5-required-title-field" type="text" value="Product Title(New)">
+                <input id="phase5-required-title-field" type="text" value="Title">
               </div>
               <div class="form-group">
                 <label for="phase5-required-description-field">Required Description Field</label>
@@ -1203,7 +1203,7 @@
               </div>
               <div class="form-group">
                 <label for="phase5-required-item-specific-fields">Required Item Specific Field Names</label>
-                <input id="phase5-required-item-specific-fields" type="text" value="Brand,Manufacturer,Model Number">
+                <input id="phase5-required-item-specific-fields" type="text" value="">
               </div>
               <div class="form-group">
                 <label for="phase5-blocked-field-name">Blocked Field Name</label>
@@ -1311,7 +1311,7 @@
         <div>
           <div class="form-group">
             <label for="phase6-listings-table">Listings Table Name</label>
-            <input id="phase6-listings-table" type="text" value="eBay Listings (API) (Mock)">
+            <input id="phase6-listings-table" type="text" value="eBay Listings (API)">
           </div>
           <div class="form-group">
             <label for="phase6-max-ipns">Max IPNs (Testing)</label>
@@ -1367,7 +1367,7 @@
         <div>
           <div class="form-group">
             <label for="phase74-listings-table">Listings Table Name</label>
-            <input id="phase74-listings-table" type="text" value="eBay Listings (API) (Mock)">
+            <input id="phase74-listings-table" type="text" value="eBay Listings (API)">
           </div>
           <div class="form-group">
             <label for="phase74-max-listings">Max Listings (Testing)</label>
@@ -1379,7 +1379,7 @@
           <div class="form-group">
             <label for="phase74-test-ipns">Test IPNs (optional)</label>
             <textarea id="phase74-test-ipns" placeholder="Enter IPNs separated by comma or new lines"></textarea>
-            <div class="hint">Generated title writes to <code>Product Title(New)</code>.</div>
+            <div class="hint">Generated title writes to <code>Title</code>.</div>
           </div>
           <div class="btn-group">
             <button id="run-phase74-btn" class="btn btn-primary" onclick="runPhase74()">Run Phase 7.4 Title/Description</button>
@@ -1525,14 +1525,18 @@
     const DEFAULT_EBAY_MOCK_TABLE_NAME = 'eBay Listings (API) (Mock)';
     const DEFAULT_EBAY_SANDBOX_TABLE_NAME = 'eBay Listings (API)';
     const DEFAULT_EBAY_MOCK_DRY_RUN = true;
-    const DEFAULT_PHASE6_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+    const DEFAULT_PHASE6_LISTINGS_TABLE = 'eBay Listings (API)';
     const DEFAULT_PHASE6_MAX_IPNS = 5;
     const DEFAULT_PHASE72_MAX_IPNS = 5;
-    const DEFAULT_PHASE74_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+    const DEFAULT_PHASE74_LISTINGS_TABLE = 'eBay Listings (API)';
     const DEFAULT_PHASE74_MAX_LISTINGS = 5;
     const DEFAULT_PHASE5_MODE = 'A';
     const DEFAULT_PHASE5_AUTOPUSH_ENABLED = false;
     const DEFAULT_PHASE5_AUTOPUSH_CRON = '0 * * * *';
+    const DEFAULT_PHASE5_AUTOPUSH_ELIGIBILITY_FIELD = 'Approval Status';
+    const DEFAULT_PHASE5_AUTOPUSH_ELIGIBILITY_VALUES = 'Approved';
+    const LEGACY_PHASE5_TITLE_FIELD = 'Product Title(New)';
+    const LEGACY_PHASE5_REQUIRED_ITEM_SPECIFIC_FIELDS = 'Brand,Manufacturer,Model Number';
     const DEFAULT_PHASE5_BATCHES_TABLE = 'Listing Batches';
     const DEFAULT_PHASE5_BATCH_STATUS_FIELD = 'Batch Status';
     const DEFAULT_PHASE5_BATCH_APPROVED_VALUE = 'Approved';
@@ -2320,6 +2324,14 @@
         : text;
     }
 
+    function normalizeListingsTableName(value = '', fallback = 'eBay Listings (API)') {
+      const text = String(value || '').trim();
+      if (!text) return fallback;
+      return text.toLowerCase() === DEFAULT_EBAY_MOCK_TABLE_NAME.toLowerCase()
+        ? fallback
+        : text;
+    }
+
     function syncEbaySandboxControls({ tableName, fetchLimit, dryRun }) {
       const controls = getEbaySandboxControls();
       if (typeof tableName === 'string' && tableName.trim()) {
@@ -2483,10 +2495,16 @@
           config.phase5BatchApprovedValue || DEFAULT_PHASE5_BATCH_APPROVED_VALUE;
         document.getElementById('phase5-batch-link-field-name').value = config.phase5BatchLinkFieldName || '';
         document.getElementById('phase5-required-category-id-field').value = config.phase5RequiredCategoryIdFieldName || '';
-        document.getElementById('phase5-required-title-field').value = config.phase5RequiredTitleFieldName || '';
+        document.getElementById('phase5-required-title-field').value =
+          (config.phase5RequiredTitleFieldName || '').trim().toLowerCase() === LEGACY_PHASE5_TITLE_FIELD.toLowerCase()
+            ? 'Title'
+            : (config.phase5RequiredTitleFieldName || '');
         document.getElementById('phase5-required-description-field').value = config.phase5RequiredDescriptionFieldName || '';
         document.getElementById('phase5-required-item-specifics-field').value = config.phase5RequiredItemSpecificsFieldName || '';
-        document.getElementById('phase5-required-item-specific-fields').value = config.phase5RequiredItemSpecificFieldNames || '';
+        document.getElementById('phase5-required-item-specific-fields').value =
+          (config.phase5RequiredItemSpecificFieldNames || '').trim().toLowerCase() === LEGACY_PHASE5_REQUIRED_ITEM_SPECIFIC_FIELDS.toLowerCase()
+            ? ''
+            : (config.phase5RequiredItemSpecificFieldNames || '');
         document.getElementById('phase5-blocked-field-name').value = config.phase5BlockedFieldName || '';
         document.getElementById('phase5-clickup-exception-field-name').value = config.phase5ClickupExceptionFieldName || '';
         document.getElementById('phase5-clickup-resolved-values').value =
@@ -2495,7 +2513,8 @@
         document.getElementById('phase5-published-at-field-name').value = config.phase5PublishedAtFieldName || '';
         document.getElementById('phase5-publish-run-id-field-name').value = config.phase5PublishRunIdFieldName || '';
         document.getElementById('phase5-payload-hash-field-name').value = config.phase5PayloadHashFieldName || '';
-        document.getElementById('phase5-payload-hash-fields').value = config.phase5PayloadHashFields || '';
+        document.getElementById('phase5-payload-hash-fields').value = String(config.phase5PayloadHashFields || '')
+          .replace(/Product Title\(New\)/gi, 'Title');
         document.getElementById('phase5-published-log-pending-value').value =
           config.phase5PublishedLogPendingValue || 'Published (Log Pending)';
         document.getElementById('phase5-sheets-log-enabled').value =
@@ -2562,7 +2581,7 @@
         document.getElementById('phase4c-clickup-open-status').value =
           config.phase4CClickupOpenStatus || config.phase4BClickupOpenStatus || DEFAULT_PHASE4C_CLICKUP_OPEN_STATUS;
         document.getElementById('phase6-listings-table').value =
-          config.phase6ListingsTable || DEFAULT_PHASE6_LISTINGS_TABLE;
+          normalizeListingsTableName(config.phase6ListingsTable, DEFAULT_PHASE6_LISTINGS_TABLE);
         document.getElementById('phase6-test-ipns').value = config.phase6TestIpns || '';
         document.getElementById('phase6-max-ipns').value = String(
           Number(config.phase6MaxIpns || DEFAULT_PHASE6_MAX_IPNS) || DEFAULT_PHASE6_MAX_IPNS
@@ -2573,7 +2592,7 @@
         );
         document.getElementById('phase72-drive-folder-id').value = config.phase72DriveFolderId || '';
         document.getElementById('phase74-listings-table').value =
-          config.phase74ListingsTable || DEFAULT_PHASE74_LISTINGS_TABLE;
+          normalizeListingsTableName(config.phase74ListingsTable, DEFAULT_PHASE74_LISTINGS_TABLE);
         document.getElementById('phase74-test-ipns').value = config.phase74TestIpns || '';
         document.getElementById('phase74-max-listings').value = String(
           Number(config.phase74MaxListings || DEFAULT_PHASE74_MAX_LISTINGS) || DEFAULT_PHASE74_MAX_LISTINGS
@@ -2720,13 +2739,21 @@
             document.getElementById('phase5-required-category-id-field').value =
               phase5Config.phase5RequiredCategoryIdFieldName || document.getElementById('phase5-required-category-id-field').value || '';
             document.getElementById('phase5-required-title-field').value =
-              phase5Config.phase5RequiredTitleFieldName || document.getElementById('phase5-required-title-field').value || '';
+              (String(phase5Config.phase5RequiredTitleFieldName || '').trim().toLowerCase() === LEGACY_PHASE5_TITLE_FIELD.toLowerCase()
+                ? 'Title'
+                : (phase5Config.phase5RequiredTitleFieldName || '')) ||
+              document.getElementById('phase5-required-title-field').value ||
+              'Title';
             document.getElementById('phase5-required-description-field').value =
               phase5Config.phase5RequiredDescriptionFieldName || document.getElementById('phase5-required-description-field').value || '';
             document.getElementById('phase5-required-item-specifics-field').value =
               phase5Config.phase5RequiredItemSpecificsFieldName || document.getElementById('phase5-required-item-specifics-field').value || '';
             document.getElementById('phase5-required-item-specific-fields').value =
-              phase5Config.phase5RequiredItemSpecificFieldNames || document.getElementById('phase5-required-item-specific-fields').value || '';
+              (String(phase5Config.phase5RequiredItemSpecificFieldNames || '').trim().toLowerCase() === LEGACY_PHASE5_REQUIRED_ITEM_SPECIFIC_FIELDS.toLowerCase()
+                ? ''
+                : (phase5Config.phase5RequiredItemSpecificFieldNames || '')) ||
+              document.getElementById('phase5-required-item-specific-fields').value ||
+              '';
             document.getElementById('phase5-blocked-field-name').value =
               phase5Config.phase5BlockedFieldName || document.getElementById('phase5-blocked-field-name').value || '';
             document.getElementById('phase5-clickup-exception-field-name').value =
@@ -2742,7 +2769,8 @@
             document.getElementById('phase5-payload-hash-field-name').value =
               phase5Config.phase5PayloadHashFieldName || document.getElementById('phase5-payload-hash-field-name').value || '';
             document.getElementById('phase5-payload-hash-fields').value =
-              phase5Config.phase5PayloadHashFields || document.getElementById('phase5-payload-hash-fields').value || '';
+              String(phase5Config.phase5PayloadHashFields || document.getElementById('phase5-payload-hash-fields').value || '')
+                .replace(/Product Title\(New\)/gi, 'Title');
             document.getElementById('phase5-published-log-pending-value').value =
               phase5Config.phase5PublishedLogPendingValue || document.getElementById('phase5-published-log-pending-value').value || 'Published (Log Pending)';
             document.getElementById('phase5-sheets-log-enabled').value =
@@ -2820,10 +2848,19 @@
               phase5Config.phase5AutoPushCron || document.getElementById('phase5-autopush-cron').value || DEFAULT_PHASE5_AUTOPUSH_CRON;
             document.getElementById('phase5-autopush-timezone').value =
               phase5Config.phase5AutoPushTimezone || document.getElementById('phase5-autopush-timezone').value || '';
+            const resolvedApprovalField =
+              phase5Config.phase5ApprovalFieldName ||
+              document.getElementById('phase5-approval-field-name').value ||
+              DEFAULT_PHASE5_AUTOPUSH_ELIGIBILITY_FIELD;
             document.getElementById('phase5-autopush-eligibility-field').value =
-              phase5Config.phase5AutoPushEligibilityFieldName || document.getElementById('phase5-autopush-eligibility-field').value || '';
+              phase5Config.phase5AutoPushEligibilityFieldName ||
+              document.getElementById('phase5-autopush-eligibility-field').value ||
+              resolvedApprovalField ||
+              DEFAULT_PHASE5_AUTOPUSH_ELIGIBILITY_FIELD;
             document.getElementById('phase5-autopush-eligibility-values').value =
-              phase5Config.phase5AutoPushEligibilityValues || document.getElementById('phase5-autopush-eligibility-values').value || '';
+              phase5Config.phase5AutoPushEligibilityValues ||
+              document.getElementById('phase5-autopush-eligibility-values').value ||
+              DEFAULT_PHASE5_AUTOPUSH_ELIGIBILITY_VALUES;
             if (phase5Config.phase5AutoPushStatus && typeof phase5Config.phase5AutoPushStatus === 'object') {
               const st = phase5Config.phase5AutoPushStatus;
               document.getElementById('phase5-autopush-status-text').textContent =
@@ -3165,6 +3202,30 @@
 
     function collectConfigFromForm() {
       syncPhase4UnifiedInputsToLegacy();
+      const phase5ApprovalFieldName =
+        document.getElementById('phase5-approval-field-name').value.trim() || DEFAULT_PHASE5_AUTOPUSH_ELIGIBILITY_FIELD;
+      const phase5AutoPushEligibilityFieldNameRaw =
+        document.getElementById('phase5-autopush-eligibility-field').value.trim();
+      const phase5AutoPushEligibilityValuesRaw =
+        document.getElementById('phase5-autopush-eligibility-values').value.trim();
+      const phase5AutoPushEligibilityFieldName =
+        phase5AutoPushEligibilityFieldNameRaw || phase5ApprovalFieldName || DEFAULT_PHASE5_AUTOPUSH_ELIGIBILITY_FIELD;
+      const phase5AutoPushEligibilityValues =
+        phase5AutoPushEligibilityValuesRaw || DEFAULT_PHASE5_AUTOPUSH_ELIGIBILITY_VALUES;
+      const rawRequiredTitleField = document.getElementById('phase5-required-title-field').value.trim();
+      const phase5RequiredTitleFieldName =
+        rawRequiredTitleField && rawRequiredTitleField.toLowerCase() !== LEGACY_PHASE5_TITLE_FIELD.toLowerCase()
+          ? rawRequiredTitleField
+          : 'Title';
+      const rawRequiredItemSpecificFieldNames = document.getElementById('phase5-required-item-specific-fields').value.trim();
+      const phase5RequiredItemSpecificFieldNames =
+        rawRequiredItemSpecificFieldNames.toLowerCase() === LEGACY_PHASE5_REQUIRED_ITEM_SPECIFIC_FIELDS.toLowerCase()
+          ? ''
+          : rawRequiredItemSpecificFieldNames;
+      const phase5PayloadHashFields = document
+        .getElementById('phase5-payload-hash-fields')
+        .value.trim()
+        .replace(/Product Title\(New\)/gi, 'Title');
       return {
         sheetId: document.getElementById('sheet-id').value.trim(),
         tabName: document.getElementById('tab-name').value.trim(),
@@ -3232,12 +3293,9 @@
           document.getElementById('phase5-autopush-cron').value.trim() || DEFAULT_PHASE5_AUTOPUSH_CRON,
         phase5AutoPushTimezone:
           document.getElementById('phase5-autopush-timezone').value.trim(),
-        phase5AutoPushEligibilityFieldName:
-          document.getElementById('phase5-autopush-eligibility-field').value.trim(),
-        phase5AutoPushEligibilityValues:
-          document.getElementById('phase5-autopush-eligibility-values').value.trim(),
-        phase5ApprovalFieldName:
-          document.getElementById('phase5-approval-field-name').value.trim(),
+        phase5AutoPushEligibilityFieldName,
+        phase5AutoPushEligibilityValues,
+        phase5ApprovalFieldName,
         phase5GroupFieldName:
           document.getElementById('phase5-group-field-name').value.trim(),
         phase5GroupValue:
@@ -3258,14 +3316,12 @@
           document.getElementById('phase5-batch-link-field-name').value.trim(),
         phase5RequiredCategoryIdFieldName:
           document.getElementById('phase5-required-category-id-field').value.trim(),
-        phase5RequiredTitleFieldName:
-          document.getElementById('phase5-required-title-field').value.trim(),
+        phase5RequiredTitleFieldName,
         phase5RequiredDescriptionFieldName:
           document.getElementById('phase5-required-description-field').value.trim(),
         phase5RequiredItemSpecificsFieldName:
           document.getElementById('phase5-required-item-specifics-field').value.trim(),
-        phase5RequiredItemSpecificFieldNames:
-          document.getElementById('phase5-required-item-specific-fields').value.trim(),
+        phase5RequiredItemSpecificFieldNames,
         phase5BlockedFieldName:
           document.getElementById('phase5-blocked-field-name').value.trim(),
         phase5ClickupExceptionFieldName:
@@ -3280,8 +3336,7 @@
           document.getElementById('phase5-publish-run-id-field-name').value.trim(),
         phase5PayloadHashFieldName:
           document.getElementById('phase5-payload-hash-field-name').value.trim(),
-        phase5PayloadHashFields:
-          document.getElementById('phase5-payload-hash-fields').value.trim(),
+        phase5PayloadHashFields,
         phase5PublishedLogPendingValue:
           document.getElementById('phase5-published-log-pending-value').value.trim() || 'Published (Log Pending)',
         phase5SheetsLogEnabled:
@@ -3313,7 +3368,10 @@
         phase5EbayRefreshToken:
           document.getElementById('phase5-ebay-refresh-token').value.trim(),
         phase6ListingsTable:
-          document.getElementById('phase6-listings-table').value.trim() || DEFAULT_PHASE6_LISTINGS_TABLE,
+          normalizeListingsTableName(
+            document.getElementById('phase6-listings-table').value.trim(),
+            DEFAULT_PHASE6_LISTINGS_TABLE
+          ),
         phase6TestIpns:
           document.getElementById('phase6-test-ipns').value.trim(),
         phase6MaxIpns:
@@ -3325,7 +3383,10 @@
         phase72DriveFolderId:
           document.getElementById('phase72-drive-folder-id').value.trim(),
         phase74ListingsTable:
-          document.getElementById('phase74-listings-table').value.trim() || DEFAULT_PHASE74_LISTINGS_TABLE,
+          normalizeListingsTableName(
+            document.getElementById('phase74-listings-table').value.trim(),
+            DEFAULT_PHASE74_LISTINGS_TABLE
+          ),
         phase74TestIpns:
           document.getElementById('phase74-test-ipns').value.trim(),
         phase74MaxListings:
@@ -4808,7 +4869,21 @@
         const config = collectConfigFromForm();
         await window.phase2API.saveConfig(config);
         const response = await window.phase5API.createBatchFromListings(config);
-        if (!response?.success) throw new Error(response?.message || response?.result?.message || 'Batch creation failed.');
+        if (!response?.success) {
+          const failed = response?.result || response || {};
+          const diagnostics = failed?.diagnostics && typeof failed.diagnostics === 'object'
+            ? ` totalRows=${Number(failed.diagnostics.totalRows || 0) || 0}, excludedAlreadyLinked=${Number(failed.diagnostics.excludedAlreadyLinked || 0) || 0}, excludedAlreadyPublished=${Number(failed.diagnostics.excludedAlreadyPublished || 0) || 0}, candidates=${Number(failed.diagnostics.candidates || 0) || 0}`
+            : '';
+          const firstError = Array.isArray(failed?.errors) && failed.errors.length > 0
+            ? (() => {
+                const e = failed.errors[0] || {};
+                const recordId = String(e.recordId || '').trim();
+                const detail = String(e.error || '').trim();
+                return detail ? ` firstError=${recordId ? `${recordId}: ` : ''}${detail}` : '';
+              })()
+            : '';
+          throw new Error(`${failed?.message || response?.message || 'Batch creation failed.'}${diagnostics}${firstError}`);
+        }
 
         const result = response?.result || response;
         const created = result.batchId || '';
@@ -5001,10 +5076,10 @@
         showStatus(
           'run-status',
           'success',
-          `Phase 5 Option B run-now completed. Eligible=${summary.approvedFound || 0}, Published=${summary.publishedSuccess || 0}, Failed=${summary.publishedFailed || 0}, Removed=${summary.removedFromQueue || 0}, SkippedMissingItemId=${summary.skippedMissingItemId || 0}.`
+          `Phase 5 Option B run-now completed. Eligible=${summary.approvedFound || 0}, Published=${summary.publishedSuccess || 0}, Failed=${summary.publishedFailed || 0}, Removed=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedBatch=${summary.skippedBatchNotApproved || 0}, SkippedMissingRequired=${summary.skippedMissingRequired || 0}, SkippedMissingSKU=${summary.skippedMissingItemId || 0}.`
         );
         logLine(
-          `Phase 5 Option B run-now completed. Table=${summary.listingsTable || ''}, EligibilityField=${summary.eligibilityField || ''}, EligibilityValues=${(summary.eligibilityValues || []).join(',')}, EligibleFound=${summary.approvedFound || 0}, PublishedSuccess=${summary.publishedSuccess || 0}, PublishedFailed=${summary.publishedFailed || 0}, RemovedFromQueue=${summary.removedFromQueue || 0}`
+          `Phase 5 Option B run-now completed. Table=${summary.listingsTable || ''}, EligibilityField=${summary.eligibilityField || ''}, EligibilityValues=${(summary.eligibilityValues || []).join(',')}, EligibleFound=${summary.approvedFound || 0}, PublishedSuccess=${summary.publishedSuccess || 0}, PublishedFailed=${summary.publishedFailed || 0}, RemovedFromQueue=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedBatchNotApproved=${summary.skippedBatchNotApproved || 0}, SkippedMissingRequired=${summary.skippedMissingRequired || 0}, SkippedMissingSKU=${summary.skippedMissingItemId || 0}`
         );
       } catch (err) {
         showStatus('run-status', 'error', `Phase 5 Option B run-now failed: ${err.message}`);

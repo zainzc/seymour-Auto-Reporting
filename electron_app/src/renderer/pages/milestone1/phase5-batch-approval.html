@@ -330,9 +330,9 @@
           <table>
             <thead>
               <tr>
-                <th>eBay Item ID</th>
-                <th>Interchange Part #</th>
-                <th>Product Title(New)</th>
+                <th>SKU</th>
+                <th>IPN (Interchange Part Number)</th>
+                <th>Title</th>
                 <th>Description</th>
                 <th>eBay Category ID</th>
                 <th>Eligibility Computed</th>
@@ -439,7 +439,7 @@
         phase5BatchApprovedValue: phase5.phase5BatchApprovedValue || base.phase5BatchApprovedValue || 'Approved',
         phase5BatchLinkFieldName: phase5.phase5BatchLinkFieldName || base.phase5BatchLinkFieldName || 'Listing Batches',
         phase5RequiredCategoryIdFieldName: phase5.phase5RequiredCategoryIdFieldName || base.phase5RequiredCategoryIdFieldName || 'eBay Category ID',
-        phase5RequiredTitleFieldName: phase5.phase5RequiredTitleFieldName || base.phase5RequiredTitleFieldName || 'Product Title(New)',
+        phase5RequiredTitleFieldName: phase5.phase5RequiredTitleFieldName || base.phase5RequiredTitleFieldName || 'Title',
         phase5RequiredDescriptionFieldName: phase5.phase5RequiredDescriptionFieldName || base.phase5RequiredDescriptionFieldName || 'Description',
         phase5RequiredItemSpecificsFieldName: phase5.phase5RequiredItemSpecificsFieldName || base.phase5RequiredItemSpecificsFieldName || 'Item Specifics',
         phase5BlockedFieldName: phase5.phase5BlockedFieldName || base.phase5BlockedFieldName || 'Blocked',
@@ -571,7 +571,7 @@
     function listingRowHtml(item) {
       return `
         <tr>
-          <td>${esc(item.recordKey || '-')}</td>
+          <td>${esc(item.sku || item.recordKey || '-')}</td>
           <td>${esc(item.ipn || '-')}</td>
           <td>${esc(item.productTitle || '-')}</td>
           <td title="${esc(item.description || '')}">${esc((item.description || '').slice(0, 140) || '-')}</td>

@@ -52,6 +52,27 @@ function normalizeTextOrComparable(value) {
   return normalizeText(normalizeComparableValue(value));
 }
 
+function detectLinkedRecordField(fields = [], linkedTableId = '', preferred = []) {
+  const targetLinkedTableId = normalizeText(linkedTableId);
+  const normalizedPreferred = (Array.isArray(preferred) ? preferred : [])
+    .map(name => normalizeText(name).toLowerCase())
+    .filter(Boolean);
+  const candidates = (Array.isArray(fields) ? fields : []).filter(field => {
+    if (normalizeText(field?.type) !== 'multipleRecordLinks') return false;
+    const fieldLinkedTableId = normalizeText(field?.options?.linkedTableId);
+    return targetLinkedTableId && fieldLinkedTableId === targetLinkedTableId;
+  });
+  if (candidates.length === 0) return '';
+
+  for (const wanted of normalizedPreferred) {
+    const exact = candidates.find(field => normalizeText(field?.name).toLowerCase() === wanted);
+    if (exact?.name) return normalizeText(exact.name);
+  }
+
+  const first = candidates[0];
+  return normalizeText(first?.name || '');
+}
+
 function normalizeValueSet(list = []) {
   const set = new Set();
   for (const item of Array.isArray(list) ? list : []) {
@@ -125,12 +146,14 @@ async function loadBatchApprovalContext(airtableService, schemaService, schema, 
   const batchTableName = normalizeText(options.phase5BatchesTable || schema.batchTableName || 'Listing Batches');
   const batchStatusFieldName = normalizeText(options.phase5BatchStatusFieldName || schema.batchStatusFieldName || 'Batch Status');
   const batchApprovedValue = normalizeText(options.phase5BatchApprovedValue || schema.batchApprovedValue || 'Approved') || 'Approved';
-  const batchLinkField = normalizeText(options.phase5BatchLinkFieldName || schema.batchLinkField || schema.groupField || '');
+  const configuredBatchLinkField = normalizeText(
+    options.phase5BatchLinkFieldName || schema.batchLinkField || schema.groupField || ''
+  );
 
   if (!enforceBatchApproval) {
     return {
       enforceBatchApproval,
-      batchLinkField,
+      batchLinkField: configuredBatchLinkField,
       approvedBatchIds: new Set(),
       totalBatches: 0,
       approvedBatches: 0,
@@ -140,14 +163,22 @@ async function loadBatchApprovalContext(airtableService, schemaService, schema, 
     };
   }
 
-  if (!batchLinkField) {
-    throw new Error('Phase 5 requires a batch link field on listings table (e.g., Listing Batches link).');
-  }
-
   const tables = await schemaService.listTables();
   const batchTable = (tables || []).find(t => normalizeText(t?.name).toLowerCase() === batchTableName.toLowerCase());
   if (!batchTable?.id) {
     throw new Error(`Phase 5 requires batch table '${batchTableName}' but it was not found.`);
+  }
+  const listingTable = (tables || []).find(t => normalizeText(t?.id) === normalizeText(schema.tableId));
+  const detectedBatchLinkField = detectLinkedRecordField(listingTable?.fields || [], batchTable.id, [
+    configuredBatchLinkField,
+    'Listing Batches',
+    'Listing Batch',
+    'Batch',
+    'Batch Link'
+  ]);
+  const batchLinkField = detectedBatchLinkField || configuredBatchLinkField;
+  if (!batchLinkField) {
+    throw new Error('Phase 5 requires a batch link field on listings table (e.g., Listing Batches link).');
   }
 
   const rows = await airtableService.fetchAllRecords(batchTable.id, [batchStatusFieldName]);
@@ -333,7 +364,12 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     ebayClientId: options.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '',
     ebayDevId: options.phase5EbayDevId || process.env.EBAY_DEV_ID || '',
     ebayClientSecret: options.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '',
-    ebayRuName: options.phase5EbayRuName || process.env.EBAY_RUNAME || ''
+    ebayRuName: options.phase5EbayRuName || process.env.EBAY_RUNAME || '',
+    ebayUserAccessToken: options.phase5EbayUserAccessToken || process.env.EBAY_USER_ACCESS_TOKEN || '',
+    ebayRefreshToken: options.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || '',
+    ebayRefreshScope: options.phase5EbayRefreshScope || process.env.EBAY_REFRESH_SCOPE || '',
+    ebayUserAccessTokenIssuedAt:
+      options.phase5EbayUserAccessTokenIssuedAt || process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT || ''
   });
   const publishLogService = new Phase5PublishLogService({
     enabled: options.phase5SheetsLogEnabled ?? process.env.PHASE5_SHEETS_LOG_ENABLED ?? 'false',
@@ -469,6 +505,7 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     const identity = approvalService.buildRecordIdentity(record, schema);
     const recordFields = record?.fields || {};
     const itemId = normalizeText(schema?.itemIdField ? recordFields[schema.itemIdField] : '');
+    const sku = firstNonEmptyField(recordFields, ['SKU', 'Sku', 'sku']);
 
     if (identity && publishedIdentitySet.has(identity)) {
       summary.skippedAlreadyPublished += 1;
@@ -488,10 +525,10 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
       continue;
     }
 
-    if (!itemId) {
+    if (!sku) {
       summary.skippedMissingItemId += 1;
       if (summary.sampleSkips.length < 20) {
-        summary.sampleSkips.push(`skip=missing_item_id record='${recordId}'`);
+        summary.sampleSkips.push(`skip=missing_sku record='${recordId}'`);
       }
       continue;
     }
@@ -571,7 +608,7 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
 
       if ((publishSucceeded || isLogRetryOnly) && summary.samplePublished.length < 20) {
         summary.samplePublished.push(
-          `${isLogRetryOnly ? 'log_retry' : 'published'} record='${recordId}' itemId='${itemId}' hash='${payloadHash}'`
+          `${isLogRetryOnly ? 'log_retry' : 'published'} record='${recordId}' sku='${sku}' itemId='${itemId}' hash='${payloadHash}'`
         );
       }
     } catch (error) {

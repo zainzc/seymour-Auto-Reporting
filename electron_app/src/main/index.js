@@ -67,6 +67,7 @@ let isPhase4WritebackPollerRunning = false;
 let dbReady = false;
 const LEGACY_EBAY_MOCK_TABLE = 'eBay Listings (API) (Mock)';
 const DEFAULT_EBAY_SANDBOX_TABLE = 'eBay Listings (API)';
+const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 
 function parseBoolean(value, defaultValue = false) {
   if (typeof value === 'boolean') return value;
@@ -83,6 +84,17 @@ function resolveEbaySandboxTableName(...candidates) {
       : text;
   }
   return DEFAULT_EBAY_SANDBOX_TABLE;
+}
+
+function resolveListingsTableName(...candidates) {
+  for (const candidate of candidates) {
+    const text = String(candidate || '').trim();
+    if (!text) continue;
+    return text.toLowerCase() === LEGACY_EBAY_MOCK_TABLE.toLowerCase()
+      ? DEFAULT_EBAY_LISTINGS_TABLE
+      : text;
+  }
+  return DEFAULT_EBAY_LISTINGS_TABLE;
 }
 
 function formatDetailedErrorMessage(error) {
@@ -2357,7 +2369,11 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
 ipcMain.handle('phase6:get-config', async () => {
   const stored = getInventoryConfig('phase2Config') || {};
   return {
-    listingsTableName: String(stored.phase6ListingsTable || process.env.PHASE6_LISTINGS_TABLE || 'eBay Listings (API) (Mock)').trim(),
+    listingsTableName: resolveListingsTableName(
+      stored.phase6ListingsTable,
+      process.env.PHASE6_LISTINGS_TABLE,
+      DEFAULT_EBAY_LISTINGS_TABLE
+    ),
     masterTableName: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
     openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
     promptCacheEnabled:
@@ -2378,9 +2394,12 @@ ipcMain.handle('phase6:run', async (event, options = {}) => {
     const runOptions = {
       ...stored,
       ...options,
-      phase6ListingsTable: String(
-        options.phase6ListingsTable || stored.phase6ListingsTable || process.env.PHASE6_LISTINGS_TABLE || 'eBay Listings (API) (Mock)'
-      ).trim(),
+      phase6ListingsTable: resolveListingsTableName(
+        options.phase6ListingsTable,
+        stored.phase6ListingsTable,
+        process.env.PHASE6_LISTINGS_TABLE,
+        DEFAULT_EBAY_LISTINGS_TABLE
+      ),
       airtableMasterTable: String(
         options.airtableMasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
       ).trim(),
@@ -2508,9 +2527,13 @@ ipcMain.handle('phase72:run', async (event, options = {}) => {
 ipcMain.handle('phase74:get-config', async () => {
   const stored = getInventoryConfig('phase2Config') || {};
   return {
-    listingsTableName: String(
-      stored.phase6ListingsTable || stored.ebayMockTableName || stored.phase74ListingsTable || process.env.PHASE74_LISTINGS_TABLE || 'eBay Listings (API) (Mock)'
-    ).trim(),
+    listingsTableName: resolveListingsTableName(
+      stored.phase74ListingsTable,
+      stored.phase6ListingsTable,
+      stored.ebayMockTableName,
+      process.env.PHASE74_LISTINGS_TABLE,
+      DEFAULT_EBAY_LISTINGS_TABLE
+    ),
     masterTableName: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
     openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
     promptCacheEnabled:
@@ -2531,14 +2554,14 @@ ipcMain.handle('phase74:run', async (event, options = {}) => {
     const runOptions = {
       ...stored,
       ...options,
-      phase74ListingsTable: String(
-        options.phase74ListingsTable ||
-          stored.phase6ListingsTable ||
-          stored.ebayMockTableName ||
-          stored.phase74ListingsTable ||
-          process.env.PHASE74_LISTINGS_TABLE ||
-          'eBay Listings (API) (Mock)'
-      ).trim(),
+      phase74ListingsTable: resolveListingsTableName(
+        options.phase74ListingsTable,
+        stored.phase74ListingsTable,
+        stored.phase6ListingsTable,
+        stored.ebayMockTableName,
+        process.env.PHASE74_LISTINGS_TABLE,
+        DEFAULT_EBAY_LISTINGS_TABLE
+      ),
       airtableMasterTable: String(
         options.airtableMasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
       ).trim(),

@@ -11,7 +11,7 @@ const DEFAULT_FETCH_LIMIT = 200;
 const DEFAULT_PAGE_SIZE = 100;
 const BATCH_SIZE = 10;
 const USER_ACCESS_TOKEN_MAX_AGE_MS = 2 * 60 * 60 * 1000;
-const PRIMARY_KEY_FIELD = 'eBay Item ID';
+const PRIMARY_KEY_FIELD = 'SKU';
 const LEGACY_PRIMARY_KEY_FIELD = 'Record Key';
 const LEGACY_MOCK_TABLE_NAME = 'eBay Listings (API) (Mock)';
 const IPN_FIELD = 'c: partshunter203 ebay MOTORS interchange part number';
@@ -22,7 +22,6 @@ const ECOMMERCE_DESC_FIELD = 'c: partshunter203 ebay MOTORS e commerce descripti
 const UPSERT_FIELDS = [
   PRIMARY_KEY_FIELD,
   'Title',
-  'SKU',
   'Listing Date',
   'IPN (Interchange Part Number)',
   'eBay Category_ID',
@@ -89,6 +88,16 @@ function normalizeFieldKey(value) {
   return normalizeText(value)
     .toLowerCase()
     .replace(/\s+/g, ' ');
+}
+
+function hasFieldByNormalizedName(existingFields = new Set(), fieldName = '') {
+  if (!(existingFields instanceof Set)) return false;
+  const target = normalizeFieldKey(fieldName);
+  if (!target) return false;
+  for (const name of existingFields) {
+    if (normalizeFieldKey(name) === target) return true;
+  }
+  return false;
 }
 
 function normalizeEnvironment(value) {
@@ -678,6 +687,7 @@ function buildUpsertFields(
   existingFieldNames = new Set()
 ) {
   const sku = normalizeText(item?.sku);
+  if (!sku) return null;
   const aspects = item?.product?.aspects || {};
   const listingId = normalizeText(offer?.listingId);
   const offerId = normalizeText(offer?.offerId);
@@ -703,9 +713,7 @@ function buildUpsertFields(
   const cSpecificsText = toCSpecificsText(aspects, manufacturerPart, interchangePart, partNumber);
   const seoKeywords = buildSeoKeywords([brand, manufacturerPart, interchangePart, partNumber]);
   const listingDate = new Date().toISOString();
-  const primaryId = normalizeText(
-    listingId || `${environment.toUpperCase()}-SKU-${sku}`
-  );
+  const primaryId = sku;
   if (!primaryId) return null;
 
   const fields = {
@@ -743,7 +751,7 @@ function buildUpsertFields(
     'Last Synced At': new Date().toISOString()
   };
   if (hasLegacyPrimaryField) {
-    fields[LEGACY_PRIMARY_KEY_FIELD] = primaryId;
+    fields[LEGACY_PRIMARY_KEY_FIELD] = normalizeText(listingId || primaryId);
   }
   if (hasIpnField && interchangePart) {
     fields[IPN_FIELD] = interchangePart;
@@ -995,15 +1003,15 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
   if (!ensure.tableId) {
     throw new Error(`Airtable table '${tableName}' not found. Create/select this table first.`);
   }
-  if (!ensure.existingFields.has(PRIMARY_KEY_FIELD)) {
+  if (!hasFieldByNormalizedName(ensure.existingFields, PRIMARY_KEY_FIELD)) {
     throw new Error(
       `Airtable table '${tableName}' is missing required column '${PRIMARY_KEY_FIELD}'. Add it once, then re-run import.`
     );
   }
   summary.tableCreated = Boolean(ensure.createdTable);
   summary.fieldsCreated = Array.isArray(ensure.createdFields) ? ensure.createdFields.length : 0;
-  const hasIpnField = ensure.existingFields.has(IPN_FIELD);
-  const hasLegacyPrimaryField = ensure.existingFields.has(LEGACY_PRIMARY_KEY_FIELD);
+  const hasIpnField = hasFieldByNormalizedName(ensure.existingFields, IPN_FIELD);
+  const hasLegacyPrimaryField = hasFieldByNormalizedName(ensure.existingFields, LEGACY_PRIMARY_KEY_FIELD);
 
   const airtableService = new AirtableService({ token: airtableToken, baseId: airtableBaseId });
   const records = [];

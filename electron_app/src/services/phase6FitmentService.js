@@ -1,12 +1,12 @@
 const AirtableService = require('./airtableService');
 const Phase4AiEvaluatorService = require('./phase4AiEvaluatorService');
 
-const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API)';
 const DEFAULT_MASTER_TABLE = 'Master Parts Table';
 const LISTING_DESCRIPTION_FIELD = 'Description';
-const LISTING_IPN_FIELD = 'c: partshunter203 ebay MOTORS interchange part number';
-const LISTING_TITLE_FIELD = 'Product Title';
-const LISTING_CONDITIONS_FIELD = 'c: partshunter203 ebay MOTORS conditions & options';
+const LISTING_IPN_FIELD = 'IPN (Interchange Part Number)';
+const LISTING_TITLE_FIELD = 'Title';
+const LISTING_CONDITIONS_FIELD = 'Conditions & Options';
 const MASTER_FITMENT_FIELD = 'Part Fitment';
 const MASTER_TIMESTAMP_FIELD = 'Fitment Extraction Timestamp';
 
