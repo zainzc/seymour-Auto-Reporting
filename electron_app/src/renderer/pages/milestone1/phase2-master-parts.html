@@ -743,7 +743,7 @@
               </div>
               <div class="form-group">
                 <label for="phase4-unified-listings-table">Listings Table Name</label>
-                <input id="phase4-unified-listings-table" type="text" value="eBay Listings (API) (Mock)">
+                <input id="phase4-unified-listings-table" type="text" value="eBay Listings (API)">
               </div>
               <div class="form-group">
                 <label for="phase4-unified-test-ipn">Phase 4B Test IPN(s) (optional)</label>
@@ -928,7 +928,7 @@
               <div>
                 <div class="form-group">
                   <label for="phase4d-listings-table">Listings Table Name</label>
-                  <input id="phase4d-listings-table" type="text" value="eBay Listings (API) (Mock)">
+                  <input id="phase4d-listings-table" type="text" value="eBay Listings (API)">
                 </div>
                 <div class="form-group">
                 <label for="phase4d-test-ipn">Phase 4D Test IPN(s) (optional)</label>
@@ -1515,7 +1515,7 @@
     const DEFAULT_PHASE4BLITE_DRY_RUN = false;
     const DEFAULT_PHASE4CMF_DRY_RUN = false;
     const DEFAULT_PHASE4D_DRY_RUN = false;
-    const DEFAULT_PHASE4D_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+    const DEFAULT_PHASE4D_LISTINGS_TABLE = 'eBay Listings (API)';
     const DEFAULT_PHASE5_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
     const DEFAULT_OPENAI_MODEL = 'gpt-5.4-mini';
     const DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS = 'To Do';
@@ -2477,7 +2477,7 @@
         document.getElementById('phase4blite-dry-run').value = DEFAULT_PHASE4BLITE_DRY_RUN ? 'true' : 'false';
         document.getElementById('phase4cmf-dry-run').value = DEFAULT_PHASE4CMF_DRY_RUN ? 'true' : 'false';
         document.getElementById('phase4d-dry-run').value = DEFAULT_PHASE4D_DRY_RUN ? 'true' : 'false';
-        document.getElementById('phase4d-listings-table').value = config.phase4DListingsTable || DEFAULT_PHASE4D_LISTINGS_TABLE;
+        document.getElementById('phase4d-listings-table').value = DEFAULT_PHASE4D_LISTINGS_TABLE;
         document.getElementById('phase5-listings-table').value = config.phase5ListingsTable || DEFAULT_PHASE5_LISTINGS_TABLE;
         document.getElementById('phase5-mode').value = (config.phase5Mode || DEFAULT_PHASE5_MODE).toUpperCase() === 'B' ? 'B' : 'A';
         document.getElementById('phase5-approval-field-name').value = config.phase5ApprovalFieldName || '';
@@ -2571,7 +2571,7 @@
         document.getElementById('openai-model').value = config.openaiModel || DEFAULT_OPENAI_MODEL;
         document.getElementById('phase4b-clickup-list-name').value = config.phase4BClickupListName || '';
         document.getElementById('phase4b-clickup-list-id').value =
-          config.phase4BClickupListId || config.clickupListId || DEFAULT_PHASE4B_CLICKUP_LIST_ID;
+          config.phase4BClickupListId || DEFAULT_PHASE4B_CLICKUP_LIST_ID;
         document.getElementById('phase4b-clickup-open-status').value =
           config.phase4BClickupOpenStatus || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
         document.getElementById('phase4c-clickup-list-name').value =
@@ -2691,8 +2691,7 @@
             document.getElementById('phase4-rules-logic-sheet').value =
               phase4DConfig.logicSheetName || document.getElementById('phase4-rules-logic-sheet').value;
             document.getElementById('phase4d-dry-run').value = phase4DConfig.dryRun === false ? 'false' : 'true';
-            document.getElementById('phase4d-listings-table').value =
-              phase4DConfig.listingsTableName || DEFAULT_PHASE4D_LISTINGS_TABLE;
+            document.getElementById('phase4d-listings-table').value = DEFAULT_PHASE4D_LISTINGS_TABLE;
             const phase4dTestIpnInput = document.getElementById('phase4d-test-ipn');
             if (phase4dTestIpnInput) {
               phase4dTestIpnInput.value = phase4DConfig.testIpn || config.phase4DTestIpn || '';
@@ -3048,7 +3047,7 @@
       const unifiedClickupName = document.getElementById('phase4-unified-clickup-list-name')?.value?.trim() || '';
       const unifiedClickupId = document.getElementById('phase4-unified-clickup-list-id')?.value?.trim() || '';
       const unifiedClickupStatus = document.getElementById('phase4-unified-clickup-open-status')?.value?.trim() || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
-      const unifiedListingsTable = document.getElementById('phase4-unified-listings-table')?.value?.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE;
+      const unifiedListingsTable = DEFAULT_PHASE4D_LISTINGS_TABLE;
       const unifiedTestIpn = document.getElementById('phase4-unified-test-ipn')?.value?.trim() || '';
       const unifiedTestIpn4D = document.getElementById('phase4-unified-test-ipn-4d')?.value?.trim() || '';
       const unifiedDryRun = false;
@@ -3096,8 +3095,7 @@
         document.getElementById('phase4b-clickup-open-status').value.trim() ||
         document.getElementById('phase4c-clickup-open-status').value.trim() ||
         DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
-      document.getElementById('phase4-unified-listings-table').value =
-        document.getElementById('phase4d-listings-table').value.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE;
+      document.getElementById('phase4-unified-listings-table').value = DEFAULT_PHASE4D_LISTINGS_TABLE;
       document.getElementById('phase4-unified-test-ipn').value =
         document.getElementById('phase4b-test-ipn').value.trim();
       document.getElementById('phase4-unified-test-ipn-4d').value =
@@ -3255,7 +3253,7 @@
         phase4BLiteDryRun: false,
         phase4CMFDryRun: false,
         phase4DDryRun: false,
-        phase4DListingsTable: document.getElementById('phase4d-listings-table').value.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE,
+        phase4DListingsTable: DEFAULT_PHASE4D_LISTINGS_TABLE,
         phase4DTestIpn: document.getElementById('phase4d-test-ipn').value.trim(),
         phase4RunMirror: true,
         phase4Run4A: true,
@@ -4485,7 +4483,7 @@
           document.getElementById('phase4blite-status-text').textContent =
             `Phase 4B-lite status: completed (${mode}). VF Updated ${summary.vfFieldsUpdated || 0}, VMF Updated ${summary.vmfFieldsUpdated || 0}.`;
           logLine(
-            `Phase 4B-lite completed. Mode=${mode}, Tables=${summary.tablesScanned || 0}, Rows=${summary.rowsScanned || 0}, RowsWithIPN=${summary.rowsWithIPN || 0}, MissingMaster=${summary.masterPartsMissing || 0}, VFEvaluated=${summary.vfFieldsEvaluated || 0}, VFUpdated=${summary.vfFieldsUpdated || 0}, VFSkippedLowConfidence=${summary.vfFieldsLowConfidenceSkipped || 0}, VFDotSkipped=${summary.vfDotNumberSkipped || 0}, VMFEvaluated=${summary.vmfFieldsEvaluated || 0}, VMFUpdated=${summary.vmfFieldsUpdated || 0}, AIWebSearchUsed=${summary.aiWebSearchUsed || 0}, VMFTasksCreated=${summary.vmfLowConfidenceTasksCreated || 0}, VMFTasksUpdated=${summary.vmfLowConfidenceTasksUpdated || 0}, VMFTasksSkippedExisting=${summary.vmfLowConfidenceTasksSkippedExisting || 0}, VMFDeterminedFound=${summary.vmfDeterminedTasksFound || 0}, VMFWritebackSucceeded=${summary.vmfDeterminedWritebackSucceeded || 0}, VMFWritebackFailed=${summary.vmfDeterminedWritebackFailed || 0}, VMFClosed=${summary.vmfDeterminedTasksClosed || 0}, VMFCloseFailed=${summary.vmfDeterminedTaskCloseFailed || 0}`
+            `Phase 4B-lite completed. Mode=${mode}, ClickUpListId=${summary.phase4BClickupListId || ''}, Tables=${summary.tablesScanned || 0}, Rows=${summary.rowsScanned || 0}, RowsWithIPN=${summary.rowsWithIPN || 0}, MissingMaster=${summary.masterPartsMissing || 0}, VFEvaluated=${summary.vfFieldsEvaluated || 0}, VFUpdated=${summary.vfFieldsUpdated || 0}, VFSkippedLowConfidence=${summary.vfFieldsLowConfidenceSkipped || 0}, VFDotSkipped=${summary.vfDotNumberSkipped || 0}, VMFEvaluated=${summary.vmfFieldsEvaluated || 0}, VMFUpdated=${summary.vmfFieldsUpdated || 0}, AIWebSearchUsed=${summary.aiWebSearchUsed || 0}, VMFTasksCreated=${summary.vmfLowConfidenceTasksCreated || 0}, VMFTasksUpdated=${summary.vmfLowConfidenceTasksUpdated || 0}, VMFTasksSkippedExisting=${summary.vmfLowConfidenceTasksSkippedExisting || 0}, VMFDeterminedFound=${summary.vmfDeterminedTasksFound || 0}, VMFWritebackSucceeded=${summary.vmfDeterminedWritebackSucceeded || 0}, VMFWritebackFailed=${summary.vmfDeterminedWritebackFailed || 0}, VMFClosed=${summary.vmfDeterminedTasksClosed || 0}, VMFCloseFailed=${summary.vmfDeterminedTaskCloseFailed || 0}`
           );
           if (Array.isArray(summary.writeSamples) && summary.writeSamples.length > 0) {
             summary.writeSamples.forEach(line => logLine(`Phase4B-lite: ${line}`));
@@ -4809,12 +4807,12 @@
         showStatus(
           'run-status',
           'success',
-          `Phase 5 completed (${modeLabel}, ${summary.modeLabel || publishMode}). Eligible=${summary.approvedFound || 0}, Published=${summary.publishedSuccess || 0}, Failed=${summary.publishedFailed || 0}, Removed=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedMissingItemId=${summary.skippedMissingItemId || 0}.`
+          `Phase 5 completed (${modeLabel}, ${summary.modeLabel || publishMode}). Eligible=${summary.approvedFound || 0}, Published=${summary.publishedSuccess || 0}, Failed=${summary.publishedFailed || 0}, Removed=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedMissingSKU=${summary.skippedMissingSku || summary.skippedMissingItemId || 0}.`
         );
         document.getElementById('phase5-status-text').textContent =
           `Phase 5 status: completed (${modeLabel}, ${summary.modeLabel || publishMode}). Eligible ${summary.approvedFound || 0}, Published ${summary.publishedSuccess || 0}, Failed ${summary.publishedFailed || 0}, Removed ${summary.removedFromQueue || 0}.`;
         logLine(
-          `Phase 5 completed. RunMode=${modeLabel}, PublishMode=${summary.modeLabel || publishMode}, Table=${summary.listingsTable || ''}, ApprovalField=${summary.approvalField || ''}, GroupField=${summary.groupField || ''}, GroupValue=${summary.groupValue || ''}, EligibleFound=${summary.approvedFound || 0}, PublishedSuccess=${summary.publishedSuccess || 0}, PublishedFailed=${summary.publishedFailed || 0}, RemovedFromQueue=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedMissingItemId=${summary.skippedMissingItemId || 0}, SkippedAlreadyPublished=${summary.skippedAlreadyPublished || 0}`
+          `Phase 5 completed. RunMode=${modeLabel}, PublishMode=${summary.modeLabel || publishMode}, Table=${summary.listingsTable || ''}, ApprovalField=${summary.approvalField || ''}, GroupField=${summary.groupField || ''}, GroupValue=${summary.groupValue || ''}, EligibleFound=${summary.approvedFound || 0}, PublishedSuccess=${summary.publishedSuccess || 0}, PublishedFailed=${summary.publishedFailed || 0}, RemovedFromQueue=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedMissingSKU=${summary.skippedMissingSku || summary.skippedMissingItemId || 0}, SkippedAlreadyPublished=${summary.skippedAlreadyPublished || 0}`
         );
         if (Array.isArray(summary.sampleSkips) && summary.sampleSkips.length > 0) {
           summary.sampleSkips.forEach(line => logLine(`Phase5: ${line}`));
@@ -5076,10 +5074,10 @@
         showStatus(
           'run-status',
           'success',
-          `Phase 5 Option B run-now completed. Eligible=${summary.approvedFound || 0}, Published=${summary.publishedSuccess || 0}, Failed=${summary.publishedFailed || 0}, Removed=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedBatch=${summary.skippedBatchNotApproved || 0}, SkippedMissingRequired=${summary.skippedMissingRequired || 0}, SkippedMissingSKU=${summary.skippedMissingItemId || 0}.`
+          `Phase 5 Option B run-now completed. Eligible=${summary.approvedFound || 0}, Published=${summary.publishedSuccess || 0}, Failed=${summary.publishedFailed || 0}, Removed=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedBatch=${summary.skippedBatchNotApproved || 0}, SkippedMissingRequired=${summary.skippedMissingRequired || 0}, SkippedMissingSKU=${summary.skippedMissingSku || summary.skippedMissingItemId || 0}.`
         );
         logLine(
-          `Phase 5 Option B run-now completed. Table=${summary.listingsTable || ''}, EligibilityField=${summary.eligibilityField || ''}, EligibilityValues=${(summary.eligibilityValues || []).join(',')}, EligibleFound=${summary.approvedFound || 0}, PublishedSuccess=${summary.publishedSuccess || 0}, PublishedFailed=${summary.publishedFailed || 0}, RemovedFromQueue=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedBatchNotApproved=${summary.skippedBatchNotApproved || 0}, SkippedMissingRequired=${summary.skippedMissingRequired || 0}, SkippedMissingSKU=${summary.skippedMissingItemId || 0}`
+          `Phase 5 Option B run-now completed. Table=${summary.listingsTable || ''}, EligibilityField=${summary.eligibilityField || ''}, EligibilityValues=${(summary.eligibilityValues || []).join(',')}, EligibleFound=${summary.approvedFound || 0}, PublishedSuccess=${summary.publishedSuccess || 0}, PublishedFailed=${summary.publishedFailed || 0}, RemovedFromQueue=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedBatchNotApproved=${summary.skippedBatchNotApproved || 0}, SkippedMissingRequired=${summary.skippedMissingRequired || 0}, SkippedMissingSKU=${summary.skippedMissingSku || summary.skippedMissingItemId || 0}`
         );
       } catch (err) {
         showStatus('run-status', 'error', `Phase 5 Option B run-now failed: ${err.message}`);

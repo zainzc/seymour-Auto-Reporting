@@ -19,53 +19,10 @@ const MASTER_FITMENT_FIELD = 'Part Fitment';
 const LISTING_ITEM_SPECIFIC_FIELDS = [
   'Brand',
   'Manufacturer',
-  'Model Number',
-  'c: partshunter203 ebay MOTORS manufacturer part number',
-  'c: partshunter203 ebay MOTORS mpn',
-  'c: partshunter203 ebay MOTORS o e/ o e m part number',
-  'c: partshunter203 ebay MOTORS o e part number',
-  'c: partshunter203 ebay MOTORS other part number',
-  'c: partshunter203 ebay MOTORS part number',
-  'c: partshunter203 ebay MOTORS placement on vehicle',
-  'c: partshunter203 ebay MOTORS placement',
-  'c: partshunter203 ebay MOTORS lighting technology',
-  'c: partshunter203 ebay MOTORS housing color',
-  'c: partshunter203 ebay MOTORS lens color',
-  'c: partshunter203 ebay MOTORS light color',
-  'c: partshunter203 ebay MOTORS material',
-  'c: partshunter203 ebay MOTORS color',
-  'c: partshunter203 ebay MOTORS features',
-  'c: partshunter203 ebay MOTORS connector type',
-  'c: partshunter203 ebay MOTORS connector quantity',
-  'c: partshunter203 ebay MOTORS terminal type',
-  'c: partshunter203 ebay MOTORS terminal quantity',
-  'c: partshunter203 ebay MOTORS number of pieces',
-  'c: partshunter203 ebay MOTORS number of bulbs',
-  'c: partshunter203 ebay MOTORS number of holes',
-  'c: partshunter203 ebay MOTORS number of teeth',
-  'c: partshunter203 ebay MOTORS voltage',
-  'c: partshunter203 ebay MOTORS wattage',
-  'c: partshunter203 ebay MOTORS amperage',
-  'c: partshunter203 ebay MOTORS power rating',
-  'c: partshunter203 ebay MOTORS engine size',
-  'c: partshunter203 ebay MOTORS number of cylinders',
-  'c: partshunter203 ebay MOTORS transmission type',
-  'c: partshunter203 ebay MOTORS transmission speeds',
-  'c: partshunter203 ebay MOTORS drive type',
-  'c: partshunter203 ebay MOTORS fuel type',
-  'c: partshunter203 ebay MOTORS make',
-  'c: partshunter203 ebay MOTORS model',
-  'c: partshunter203 ebay MOTORS year',
-  'c: partshunter203 ebay MOTORS mileage',
-  'c: partshunter203 ebay MOTORS stock #'
+  'Model Number'
 ];
 
-const LISTING_CATEGORY_FIELDS = [
-  'Category',
-  'c: partshunter203 ebay MOTORS Store Category',
-  'c: partshunter203 ebay MOTORS Store Category 2',
-  'c: partshunter203 ebay MOTORS Import Category'
-];
+const LISTING_CATEGORY_FIELDS = ['Category'];
 
 function normalizeText(value) {
   if (Array.isArray(value)) {

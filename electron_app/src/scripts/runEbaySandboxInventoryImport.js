@@ -3,6 +3,8 @@ const { loadEnv } = require('../config/loadEnv');
 const AirtableService = require('../services/airtableService');
 const AirtableSchemaService = require('../services/airtableSchemaService');
 const { getInventoryConfig, saveInventoryConfig } = require('../config/configStore');
+const { asIdentitySet, isPublishedIdentity } = require('../services/phase5IdentityService');
+const { buildListingPayloadHash, parseCsvList } = require('../services/phase5GovernanceService');
 
 loadEnv();
 
@@ -98,6 +100,16 @@ function hasFieldByNormalizedName(existingFields = new Set(), fieldName = '') {
     if (normalizeFieldKey(name) === target) return true;
   }
   return false;
+}
+
+function resolvePrimaryKeyFromFields(fields = {}) {
+  return normalizeText(
+    fields[PRIMARY_KEY_FIELD] ||
+      fields.SKU ||
+      fields[LEGACY_PRIMARY_KEY_FIELD] ||
+      fields['Record Key'] ||
+      ''
+  );
 }
 
 function normalizeEnvironment(value) {
@@ -625,6 +637,38 @@ function extractUnknownFieldNames(error) {
   return Array.from(names);
 }
 
+function extractComputedFieldNames(error) {
+  const names = new Set();
+  const addFromText = value => {
+    const text = normalizeText(value);
+    if (!text) return;
+    const re = /Field\s+"([^"]+)"\s+cannot accept a value because the field is computed/gi;
+    let match = re.exec(text);
+    while (match) {
+      const name = normalizeText(match[1]);
+      if (name) names.add(name);
+      match = re.exec(text);
+    }
+  };
+
+  const data = error?.response?.data;
+  if (Array.isArray(data?.errors)) {
+    for (const item of data.errors) {
+      addFromText(item?.message);
+      addFromText(item?.longMessage);
+    }
+  }
+  if (data && typeof data.error === 'object') {
+    addFromText(data?.error?.message);
+    addFromText(data?.error?.type);
+  } else {
+    addFromText(data?.error);
+  }
+  addFromText(data?.message);
+  addFromText(error?.message);
+  return Array.from(names);
+}
+
 function removeUnknownFieldsFromRows(rows = [], unknownNames = []) {
   const targetNames = new Set((Array.isArray(unknownNames) ? unknownNames : []).map(v => normalizeText(v)).filter(Boolean));
   if (targetNames.size === 0) return 0;
@@ -775,6 +819,7 @@ async function flushBatch(airtableService, tableName, rows = [], summary = {}, d
   }
   const payloadRows = rows.map(row => ({ fields: { ...(row?.fields || {}) } }));
   const skippedUnknown = new Set();
+  const skippedComputed = new Set();
   let attempts = 0;
 
   while (true) {
@@ -795,18 +840,26 @@ async function flushBatch(airtableService, tableName, rows = [], summary = {}, d
           `Skipped unknown Airtable field(s): ${Array.from(skippedUnknown).join(', ')}`
         );
       }
+      if (skippedComputed.size > 0) {
+        summary.errors.push(
+          `Skipped computed/non-writable Airtable field(s): ${Array.from(skippedComputed).join(', ')}`
+        );
+      }
       return;
     } catch (error) {
       const status = Number(error?.response?.status || 0);
       const unknownFields = extractUnknownFieldNames(error);
-      if (status !== 422 || unknownFields.length === 0) {
+      const computedFields = extractComputedFieldNames(error);
+      const removableFields = Array.from(new Set([...(unknownFields || []), ...(computedFields || [])]));
+      if (status !== 422 || removableFields.length === 0) {
         throw error;
       }
-      const removed = removeUnknownFieldsFromRows(payloadRows, unknownFields);
+      const removed = removeUnknownFieldsFromRows(payloadRows, removableFields);
       if (removed === 0 || attempts >= 6) {
         throw error;
       }
       unknownFields.forEach(name => skippedUnknown.add(name));
+      computedFields.forEach(name => skippedComputed.add(name));
       attempts += 1;
     }
   }
@@ -880,6 +933,9 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
     recordsPlanned: 0,
     recordsWritten: 0,
     skippedInvalidRows: 0,
+    skippedAlreadyPublished: 0,
+    skippedAlreadyUpToDate: 0,
+    skippedStagingUnchanged: 0,
     fieldsCreated: 0,
     tableCreated: false,
     errors: []
@@ -1012,8 +1068,39 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
   summary.fieldsCreated = Array.isArray(ensure.createdFields) ? ensure.createdFields.length : 0;
   const hasIpnField = hasFieldByNormalizedName(ensure.existingFields, IPN_FIELD);
   const hasLegacyPrimaryField = hasFieldByNormalizedName(ensure.existingFields, LEGACY_PRIMARY_KEY_FIELD);
+  const payloadHashFieldName = normalizeText(
+    runOptions.phase5PayloadHashFieldName || process.env.PHASE5_PAYLOAD_HASH_FIELD || 'Payload Hash'
+  );
+  const hasPayloadHashField = payloadHashFieldName
+    ? hasFieldByNormalizedName(ensure.existingFields, payloadHashFieldName)
+    : false;
+  const existingPayloadHashByRecordKey = new Map();
+  const publishedIdentitySet = asIdentitySet(runOptions.phase5PublishedIdentities || []);
+  const publishedPayloadHashSet = new Set(
+    (Array.isArray(runOptions.phase5PublishedPayloadHashes) ? runOptions.phase5PublishedPayloadHashes : [])
+      .map(value => normalizeText(value))
+      .filter(Boolean)
+  );
+  const payloadHashFields = parseCsvList(runOptions.phase5PayloadHashFields || '');
 
   const airtableService = new AirtableService({ token: airtableToken, baseId: airtableBaseId });
+  try {
+    if (hasPayloadHashField) {
+      const existingRows = await airtableService.fetchAllRecords(
+        tableName,
+        [PRIMARY_KEY_FIELD, LEGACY_PRIMARY_KEY_FIELD, payloadHashFieldName]
+      );
+      for (const row of existingRows) {
+        const existingFields = row?.fields || {};
+        const recordKey = resolvePrimaryKeyFromFields(existingFields);
+        if (!recordKey) continue;
+        const hash = normalizeText(existingFields[payloadHashFieldName]);
+        if (!hash) continue;
+        existingPayloadHashByRecordKey.set(recordKey, hash);
+      }
+    }
+  } catch (_) {}
+
   const records = [];
   for (let i = 0; i < inventoryItems.length; i += 1) {
     const item = inventoryItems[i] || {};
@@ -1031,6 +1118,55 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
       summary.skippedInvalidRows += 1;
       continue;
     }
+
+    if (isPublishedIdentity(fields, publishedIdentitySet)) {
+      summary.skippedAlreadyPublished += 1;
+      continue;
+    }
+
+    const payloadHash = buildListingPayloadHash(fields, {
+      includeFieldNames: payloadHashFields,
+      categoryIdField: 'eBay Category ID',
+      titleField: 'Title',
+      descriptionField: 'Description',
+      itemSpecificsField: 'Item Specifics',
+      quantityField: 'Quantity',
+      priceField: 'Price'
+    });
+    const hashCandidates = new Set(payloadHash ? [payloadHash] : []);
+    if (payloadHashFields.length === 0) {
+      const compatHash = buildListingPayloadHash(fields, {
+        categoryIdField: 'eBay Category ID',
+        titleField: 'Title',
+        descriptionField: ECOMMERCE_DESC_FIELD,
+        itemSpecificsField: 'Item Specifics'
+      });
+      if (compatHash) hashCandidates.add(compatHash);
+      const legacyHash = buildListingPayloadHash(fields, {
+        categoryIdField: 'eBay Category ID',
+        descriptionField: ECOMMERCE_DESC_FIELD,
+        itemSpecificsField: 'Item Specifics'
+      });
+      if (legacyHash) hashCandidates.add(legacyHash);
+    }
+    const recordKey = resolvePrimaryKeyFromFields(fields);
+    const stagingHash = normalizeText(existingPayloadHashByRecordKey.get(recordKey));
+
+    if (Array.from(hashCandidates).some(hash => publishedPayloadHashSet.has(hash))) {
+      summary.skippedAlreadyUpToDate += 1;
+      continue;
+    }
+    if (stagingHash && hashCandidates.has(stagingHash)) {
+      summary.skippedStagingUnchanged += 1;
+      continue;
+    }
+    if (hasPayloadHashField && payloadHash) {
+      fields[payloadHashFieldName] = payloadHash;
+      if (recordKey) {
+        existingPayloadHashByRecordKey.set(recordKey, payloadHash);
+      }
+    }
+
     records.push({ fields });
 
     if (records.length >= BATCH_SIZE) {
@@ -1044,7 +1180,9 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
         counts: summary,
         message:
           `Importing rows ${i + 1}/${inventoryItems.length} ` +
-          `(planned=${summary.recordsPlanned}, written=${summary.recordsWritten}, skipped=${summary.skippedInvalidRows})`
+          `(planned=${summary.recordsPlanned}, written=${summary.recordsWritten}, skippedInvalid=${summary.skippedInvalidRows}, ` +
+          `skippedPublished=${summary.skippedAlreadyPublished}, skippedUpToDate=${summary.skippedAlreadyUpToDate}, ` +
+          `stagingUnchanged=${summary.skippedStagingUnchanged})`
       });
     }
   }

@@ -65,6 +65,68 @@ async function fetchAllRecordsWithFallback(service, tableNameOrId, selectFields 
   }
 }
 
+async function fetchAllRecordsWithProgress(
+  service,
+  tableNameOrId,
+  selectFields = [],
+  {
+    progressCallback = () => {},
+    stage = 'running',
+    startPercent = 0,
+    endPercent = 100,
+    messagePrefix = 'Loading records',
+    counts = null
+  } = {}
+) {
+  const walk = async useSelectFields => {
+    const records = [];
+    let offset = null;
+    let page = 0;
+    const seenOffsets = new Set();
+
+    do {
+      const params = {};
+      if (offset) params.offset = offset;
+      if (useSelectFields && Array.isArray(selectFields) && selectFields.length > 0) {
+        params.fields = selectFields;
+      }
+
+      const data = await service.request('GET', `/${encodeURIComponent(tableNameOrId)}`, { params });
+      const batch = Array.isArray(data?.records) ? data.records : [];
+      records.push(...batch);
+      page += 1;
+
+      const progressSpan = Math.max(1, endPercent - startPercent);
+      const computedPercent = Math.min(
+        endPercent - 1,
+        startPercent + Math.min(progressSpan - 1, Math.floor(page / 2) + 1)
+      );
+      emitProgress(progressCallback, {
+        stage,
+        percent: computedPercent,
+        counts,
+        message: `${messagePrefix}... loaded=${records.length} (pages=${page})`
+      });
+
+      const nextOffset = data?.offset || null;
+      if (nextOffset && seenOffsets.has(nextOffset)) {
+        throw new Error(`Airtable pagination loop detected while loading '${tableNameOrId}'.`);
+      }
+      if (nextOffset) seenOffsets.add(nextOffset);
+      offset = nextOffset;
+    } while (offset);
+
+    return records;
+  };
+
+  try {
+    return await walk(true);
+  } catch (error) {
+    if (error?.response?.status !== 422) throw error;
+    return walk(false);
+  }
+}
+
 function escapeAirtableFormulaValue(value) {
   return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
@@ -235,7 +297,14 @@ async function runPhase6Fitment(options = {}, progressCallback = () => {}) {
     message: `Loading Master Parts records from '${masterTable}'...`
   });
 
-  const masterRows = await fetchAllRecordsWithFallback(airtableService, masterTable, ['IPN', MASTER_FITMENT_FIELD]);
+  const masterRows = await fetchAllRecordsWithProgress(airtableService, masterTable, ['IPN', MASTER_FITMENT_FIELD], {
+    progressCallback,
+    stage: 'phase6_load_master',
+    startPercent: 8,
+    endPercent: 20,
+    messagePrefix: `Loading Master Parts records from '${masterTable}'`,
+    counts: summary
+  });
   const masterByIpn = new Map();
   for (const row of masterRows) {
     const ipn = normalizeIpn(row?.fields?.IPN);
@@ -259,7 +328,14 @@ async function runPhase6Fitment(options = {}, progressCallback = () => {}) {
   const listingRows =
     testIpnSet.size > 0
       ? await fetchListingRowsByIpnSet(airtableService, listingsTable, Array.from(testIpnSet), listingSelectFields)
-      : await fetchAllRecordsWithFallback(airtableService, listingsTable, listingSelectFields);
+      : await fetchAllRecordsWithProgress(airtableService, listingsTable, listingSelectFields, {
+          progressCallback,
+          stage: 'phase6_scan_listings',
+          startPercent: 20,
+          endPercent: 32,
+          messagePrefix: `Loading listing HTML records from '${listingsTable}'`,
+          counts: summary
+        });
   summary.listingRowsScanned = listingRows.length;
 
   const processedIpns = new Set();
@@ -302,7 +378,7 @@ async function runPhase6Fitment(options = {}, progressCallback = () => {}) {
 
     emitProgress(progressCallback, {
       stage: 'phase6_extract_fitment',
-      percent: Math.min(70, 20 + Math.floor(((i + 1) / Math.max(1, listingRows.length)) * 50)),
+      percent: Math.min(74, 32 + Math.floor(((i + 1) / Math.max(1, listingRows.length)) * 42)),
       counts: summary,
       message: `Extracting fitment block for IPN '${ipn}' (${i + 1}/${listingRows.length})...`
     });
@@ -330,7 +406,7 @@ async function runPhase6Fitment(options = {}, progressCallback = () => {}) {
 
     emitProgress(progressCallback, {
       stage: 'phase6_rewrite_fitment',
-      percent: Math.min(85, 70 + Math.floor(((i + 1) / Math.max(1, listingRows.length)) * 15)),
+      percent: Math.min(88, 74 + Math.floor(((i + 1) / Math.max(1, listingRows.length)) * 14)),
       counts: summary,
       message: `Rewriting fitment text via AI for IPN '${ipn}'...`
     });
@@ -363,7 +439,7 @@ async function runPhase6Fitment(options = {}, progressCallback = () => {}) {
 
     emitProgress(progressCallback, {
       stage: 'phase6_write_master',
-      percent: Math.min(97, 85 + Math.floor(((i + 1) / Math.max(1, listingRows.length)) * 12)),
+      percent: Math.min(97, 88 + Math.floor(((i + 1) / Math.max(1, listingRows.length)) * 9)),
       counts: summary,
       message: `Writing rewritten fitment to Master Parts for IPN '${ipn}'...`
     });
@@ -399,7 +475,7 @@ async function runPhase6Fitment(options = {}, progressCallback = () => {}) {
       lastProgressAt = now;
       emitProgress(progressCallback, {
         stage: 'phase6_scan_listings',
-        percent: Math.min(95, 20 + Math.floor(((i + 1) / Math.max(1, listingRows.length)) * 70)),
+        percent: Math.min(95, 32 + Math.floor(((i + 1) / Math.max(1, listingRows.length)) * 63)),
         counts: summary,
         message:
           `Phase 6 progress ${i + 1}/${listingRows.length}: matched=${summary.masterPartsMatched}, ` +

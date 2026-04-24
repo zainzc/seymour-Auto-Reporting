@@ -62,9 +62,10 @@ function passCoreGate(fields = {}, schema = {}, options = {}) {
   const resolvedExceptionValues = parseCsvList(
     options.phase5ClickupResolvedValues || process.env.PHASE5_CLICKUP_RESOLVED_VALUES || 'resolved,done,closed,complete'
   );
-  const itemIdField = normalizeText(schema.itemIdField || '');
-
-  const hasItemId = itemIdField ? !!normalizeTextOrComparable(fields[itemIdField]) : false;
+  const hasSku =
+    !!normalizeTextOrComparable(fields['SKU']) ||
+    !!normalizeTextOrComparable(fields['Sku']) ||
+    !!normalizeTextOrComparable(fields['sku']);
   const hasCategory = categoryIdField ? !!normalizeTextOrComparable(fields[categoryIdField]) : true;
   const hasTitle = titleField ? !!normalizeTextOrComparable(fields[titleField]) : true;
   const hasDescription = descriptionField ? !!normalizeTextOrComparable(fields[descriptionField]) : true;
@@ -74,7 +75,7 @@ function passCoreGate(fields = {}, schema = {}, options = {}) {
   const hasException = exceptionField ? !isExceptionResolved(fields[exceptionField], resolvedExceptionValues) : false;
 
   const eligible =
-    hasItemId &&
+    hasSku &&
     hasCategory &&
     hasTitle &&
     hasDescription &&
@@ -399,8 +400,6 @@ async function getBatchListings(options = {}) {
       description,
       ebayCategoryId:
         normalizeTextOrComparable(fields['eBay Category ID']) ||
-        normalizeTextOrComparable(fields['eBay Category_ID']) ||
-        normalizeTextOrComparable(fields['eBay Category ID (from Category Definitions) (from Master Part Record)']) ||
         normalizeTextOrComparable(fields[schema.categoryIdField || '']),
       eligibilityComputed:
         normalizeTextOrComparable(fields['Eligibility Computed']) ||

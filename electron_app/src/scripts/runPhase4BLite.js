@@ -17,42 +17,36 @@ loadEnv();
 const LOW_CONFIDENCE_THRESHOLD = 0.75;
 const DEFAULT_PHASE4B_DETERMINED_STATUS = 'Value Determined';
 const DEFAULT_PHASE4B_COMPLETED_STATUS = 'Completed / Closed';
-const DEFAULT_EBAY_MOCK_TABLE = 'eBay Listings (API) (Mock)';
-const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
-const EBAY_MOCK_TITLE_FIELD = 'Product Title';
-const EBAY_MOCK_CONDITIONS_FIELD = 'Listing Conditions and Options';
-const EBAY_MOCK_DESCRIPTION_FIELD = 'Description';
-const EBAY_LISTING_TITLE_FIELD = 'Product Title';
-const EBAY_LISTING_CONDITIONS_FIELD = 'c: partshunter203 ebay MOTORS conditions & options';
-const EBAY_LISTING_IPN_FIELD = 'c: partshunter203 ebay MOTORS interchange part number';
+const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
+const EBAY_LISTING_TITLE_FIELD = 'Title';
+const EBAY_LISTING_CONDITIONS_FIELD = 'Conditions & Options';
+const EBAY_LISTING_IPN_FIELD = 'IPN (Interchange Part Number)';
 const EBAY_LISTING_IPN_FIELDS = [
   EBAY_LISTING_IPN_FIELD,
+  'c: partshunter203 ebay MOTORS interchange part number',
   'C: partshunter203 ebay MOTORS interchange part number',
   'IPN',
   'IP',
   'InventoryNumber',
   'Inventory Number'
 ];
-const EBAY_LISTING_RECORD_KEY_FIELD = 'eBay Item ID';
+const EBAY_LISTING_RECORD_KEY_FIELD = 'SKU';
+const EBAY_LISTING_LOOKUP_KEY_FIELDS = [
+  ...EBAY_LISTING_IPN_FIELDS,
+  'SKU',
+  'sku',
+  'Item ID',
+  'eBay Item ID',
+  'Ebay Item ID',
+  'Record Key'
+];
 const EBAY_LISTING_DESCRIPTION_FIELDS = [
   'Description',
+  'Full listing description HTML',
   'Listing Description',
   'Item Description',
   'Product Description',
   'c: partshunter203 ebay MOTORS description'
-];
-const EBAY_MOCK_KEY_FIELDS = [
-  'c: partshunter203 ebay MOTORS interchange part number',
-  'C: partshunter203 ebay MOTORS interchange part number',
-  'IPN',
-  'IP',
-  'InventoryNumber',
-  'Inventory Number',
-  'SKU',
-  'RNumber',
-  'eBay Item ID',
-  'Ebay Item ID',
-  'Record Key'
 ];
 
 function normalizeText(value) {
@@ -72,6 +66,10 @@ function parseIpnSet(value) {
       .map(item => normalizeIpn(item))
       .filter(Boolean)
   );
+}
+
+function normalizeListingsTableName(value = '') {
+  return DEFAULT_EBAY_LISTINGS_TABLE;
 }
 
 function getFieldValueByName(fields = {}, name = '') {
@@ -171,7 +169,7 @@ function escapeAirtableFormulaValue(value) {
 
 function buildEbayLookupFormula(ipn) {
   const safe = escapeAirtableFormulaValue(ipn);
-  const clauses = EBAY_MOCK_KEY_FIELDS.map(fieldName => `{${fieldName}}="${safe}"`);
+  const clauses = EBAY_LISTING_LOOKUP_KEY_FIELDS.map(fieldName => `{${fieldName}}="${safe}"`);
   return `OR(${clauses.join(',')})`;
 }
 
@@ -202,18 +200,19 @@ async function fetchEbayContextByIpn(service, tableName, ipn) {
   if (!key) return null;
 
   const selectFields = [
-    ...EBAY_MOCK_KEY_FIELDS,
-    EBAY_MOCK_TITLE_FIELD,
-    EBAY_MOCK_CONDITIONS_FIELD,
-    EBAY_MOCK_DESCRIPTION_FIELD,
+    ...EBAY_LISTING_LOOKUP_KEY_FIELDS,
     EBAY_LISTING_TITLE_FIELD,
+    'Product Title',
+    'Product Title(New)',
     EBAY_LISTING_CONDITIONS_FIELD,
+    'c: partshunter203 ebay MOTORS conditions & options',
+    'Listing Conditions and Options',
     ...EBAY_LISTING_DESCRIPTION_FIELDS
   ];
 
   const formulas = [];
   const safe = escapeAirtableFormulaValue(key);
-  for (const fieldName of EBAY_MOCK_KEY_FIELDS) {
+  for (const fieldName of EBAY_LISTING_LOOKUP_KEY_FIELDS) {
     formulas.push(`{${fieldName}}="${safe}"`);
   }
   formulas.push(buildEbayLookupFormula(key));
@@ -230,15 +229,18 @@ async function fetchEbayContextByIpn(service, tableName, ipn) {
 
     for (const row of records) {
       const fields = row?.fields || {};
-      const productTitle = firstNonEmptyField(fields, [EBAY_MOCK_TITLE_FIELD, 'Title', 'Listing Title', EBAY_LISTING_TITLE_FIELD]);
+      const productTitle = firstNonEmptyField(fields, [
+        EBAY_LISTING_TITLE_FIELD,
+        'Product Title',
+        'Product Title(New)',
+        'Listing Title'
+      ]);
       const listingConditionsAndOptions = firstNonEmptyField(fields, [
-        EBAY_LISTING_CONDITIONS_FIELD
+        EBAY_LISTING_CONDITIONS_FIELD,
+        'c: partshunter203 ebay MOTORS conditions & options',
+        'Listing Conditions and Options'
       ]);
       const listingDescriptionRaw = firstNonEmptyField(fields, [
-        EBAY_MOCK_DESCRIPTION_FIELD,
-        'Listing Description',
-        'Item Description',
-        'Product Description',
         ...EBAY_LISTING_DESCRIPTION_FIELDS
       ]);
       const extraction = extractStrictFitmentBlock(listingDescriptionRaw);
@@ -1298,8 +1300,8 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   const masterTable = normalizeText(
     process.env.AIRTABLE_MASTER_TABLE || stored.airtableMasterTable || 'Master Parts Table'
   );
-  const ebayMockTableName = normalizeText(
-    process.env.EBAY_MOCK_TABLE_NAME || stored.ebayMockTableName || DEFAULT_EBAY_MOCK_TABLE
+  const ebayListingsTableName = normalizeListingsTableName(
+    process.env.PHASE4D_LISTINGS_TABLE || stored.phase4DListingsTable || DEFAULT_EBAY_LISTINGS_TABLE
   );
   const itemSpecificsBaseId = normalizeText(
     process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
@@ -1409,7 +1411,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   emitProgress(progressCallback, {
     stage: 'phase4blite_load_master',
     percent: 19,
-    message: `Preparing eBay mock listing lookup from '${ebayMockTableName}'...`
+    message: `Preparing eBay listing lookup from '${ebayListingsTableName}'...`
   });
   const ebayContextCache = new Map();
   const ebayContextStats = {
@@ -1434,7 +1436,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       let context = null;
       for (const service of ebayLookupServices) {
         try {
-          context = await fetchEbayContextByIpn(service, ebayMockTableName, key);
+          context = await fetchEbayContextByIpn(service, ebayListingsTableName, key);
         } catch (innerError) {
           continue;
         }
@@ -2544,7 +2546,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   const masterTable = normalizeText(
     process.env.AIRTABLE_MASTER_TABLE || stored.airtableMasterTable || 'Master Parts Table'
   );
-  const listingsTable = normalizeText(
+  const listingsTable = normalizeListingsTableName(
     args.phase4DListingsTable ||
       process.env.PHASE4D_LISTINGS_TABLE ||
       stored.phase4DListingsTable ||
@@ -2602,17 +2604,11 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   const configuredListingsTableObj = (tables || []).find(
     table => normalizeText(table?.name).toLowerCase() === listingsTable.toLowerCase()
   );
-  const mockListingsTableObj = (tables || []).find(
-    table => normalizeText(table?.name).toLowerCase() === DEFAULT_EBAY_MOCK_TABLE.toLowerCase()
-  );
-  const prioritizedListingsTableObj = mockListingsTableObj || configuredListingsTableObj;
-  if (!prioritizedListingsTableObj?.id) {
-    throw new Error(
-      `Listing table not found. Checked '${DEFAULT_EBAY_MOCK_TABLE}' and '${listingsTable}'.`
-    );
+  if (!configuredListingsTableObj?.id) {
+    throw new Error(`Listing table not found: '${listingsTable}'.`);
   }
-  const listingsTableId = normalizeText(prioritizedListingsTableObj.id);
-  const selectedListingsTableName = normalizeText(prioritizedListingsTableObj.name || listingsTable);
+  const listingsTableId = normalizeText(configuredListingsTableObj.id);
+  const selectedListingsTableName = normalizeText(configuredListingsTableObj.name || listingsTable);
   const tableFieldsByName = new Map(
     (tables || [])
       .map(table => [
@@ -2656,20 +2652,20 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   emitProgress(progressCallback, {
     stage: 'phase4d_scan_listings',
     percent: 20,
-    message:
-      configuredListingsTableObj &&
-      selectedListingsTableName.toLowerCase() !== listingsTable.toLowerCase()
-        ? `Loading listings from '${selectedListingsTableName}' (prioritized over configured '${listingsTable}')...`
-        : `Loading listings from '${selectedListingsTableName}'...`
+    message: `Loading listings from '${selectedListingsTableName}'...`
   });
 
   const listingSelectFields = [
     EBAY_LISTING_RECORD_KEY_FIELD,
+    'Item ID',
+    'eBay Item ID',
     'Ebay Item ID',
     'Record Key',
     ...EBAY_LISTING_IPN_FIELDS,
     EBAY_LISTING_TITLE_FIELD,
     EBAY_LISTING_CONDITIONS_FIELD,
+    'c: partshunter203 ebay MOTORS conditions & options',
+    'Listing Conditions and Options',
     ...EBAY_LISTING_DESCRIPTION_FIELDS
   ];
   const effectiveListingsTableName = selectedListingsTableName;
@@ -2751,12 +2747,13 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     const row = listingsRows[i];
     const listingFields = row?.fields || {};
     const recordId = normalizeText(row?.id);
-    const recordKey = normalizeText(
-      listingFields[EBAY_LISTING_RECORD_KEY_FIELD] ||
-      listingFields['Ebay Item ID'] ||
-      listingFields['Record Key'] ||
-      recordId
-    );
+    const recordKey = firstNonEmptyField(listingFields, [
+      EBAY_LISTING_RECORD_KEY_FIELD,
+      'Item ID',
+      'eBay Item ID',
+      'Ebay Item ID',
+      'Record Key'
+    ]) || recordId;
     const ipn = resolveListingIpn(listingFields);
     if (!ipn) {
       summary.skippedMissingIpn += 1;
@@ -2888,9 +2885,19 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         currentValue,
         masterPartsData: buildAiMasterContext(master?.fields || {}),
         allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
-        listingTitle: compactText(listingFields[EBAY_LISTING_TITLE_FIELD], 1000),
+        listingTitle: compactText(
+          firstNonEmptyField(listingFields, [EBAY_LISTING_TITLE_FIELD, 'Product Title', 'Product Title(New)', 'Listing Title']),
+          1000
+        ),
         listingDescription: compactText(firstNonEmptyField(listingFields, EBAY_LISTING_DESCRIPTION_FIELDS), 4000),
-        listingConditionsAndOptions: compactText(listingFields[EBAY_LISTING_CONDITIONS_FIELD], 2000)
+        listingConditionsAndOptions: compactText(
+          firstNonEmptyField(listingFields, [
+            EBAY_LISTING_CONDITIONS_FIELD,
+            'c: partshunter203 ebay MOTORS conditions & options',
+            'Listing Conditions and Options'
+          ]),
+          2000
+        )
       });
     }
 

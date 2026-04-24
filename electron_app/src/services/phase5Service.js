@@ -208,7 +208,7 @@ function buildLogRow(record = {}, schema = {}, publishState = {}) {
   const batchLinks = extractLinkedRecordIds(fields[schema.batchLinkField || '']);
   const batchId = batchLinks[0] || normalizeText(fields[schema.groupField || '']);
   const itemId = firstNonEmptyField(fields, [schema.itemIdField, 'Item ID', 'ItemID', 'eBay Item ID', 'Ebay Item ID']);
-  const categoryId = firstNonEmptyField(fields, [schema.categoryIdField, 'eBay Category ID', 'Category ID']);
+  const categoryId = firstNonEmptyField(fields, [schema.categoryIdField, 'eBay Category ID']);
   const categoryName = firstNonEmptyField(fields, ['Category Name', 'Category']);
   const storeCategory = firstNonEmptyField(fields, ['eBay Store Category', 'Store Category', 'c: partshunter203 ebay MOTORS Store Category']);
   const aiTitle = firstNonEmptyField(fields, [schema.titleField, 'AI Optimized Title', 'Product Title(New)', 'Product Title']);
@@ -307,6 +307,7 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     removedFromQueue: 0,
     skippedNotApproved: 0,
     skippedAlreadyPublished: 0,
+    skippedMissingSku: 0,
     skippedMissingItemId: 0,
     skippedBatchNotApproved: 0,
     skippedBlocked: 0,
@@ -369,7 +370,11 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     ebayRefreshToken: options.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || '',
     ebayRefreshScope: options.phase5EbayRefreshScope || process.env.EBAY_REFRESH_SCOPE || '',
     ebayUserAccessTokenIssuedAt:
-      options.phase5EbayUserAccessTokenIssuedAt || process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT || ''
+      options.phase5EbayUserAccessTokenIssuedAt || process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT || '',
+    allowProductionPublish:
+      typeof options.phase5AllowProductionPublish !== 'undefined'
+        ? options.phase5AllowProductionPublish
+        : process.env.PHASE5_ALLOW_PRODUCTION_PUBLISH
   });
   const publishLogService = new Phase5PublishLogService({
     enabled: options.phase5SheetsLogEnabled ?? process.env.PHASE5_SHEETS_LOG_ENABLED ?? 'false',
@@ -526,6 +531,7 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     }
 
     if (!sku) {
+      summary.skippedMissingSku += 1;
       summary.skippedMissingItemId += 1;
       if (summary.sampleSkips.length < 20) {
         summary.sampleSkips.push(`skip=missing_sku record='${recordId}'`);
@@ -534,10 +540,12 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     }
 
     const payloadHash = buildListingPayloadHash(recordFields, {
-      categoryIdField: options.phase5RequiredCategoryIdFieldName || schema.categoryIdField,
-      titleField: options.phase5RequiredTitleFieldName || schema.titleField,
-      descriptionField: options.phase5RequiredDescriptionFieldName || schema.descriptionField,
-      itemSpecificsField: options.phase5RequiredItemSpecificsFieldName || schema.itemSpecificsField,
+      categoryIdField: options.phase5RequiredCategoryIdFieldName || schema.categoryIdField || 'eBay Category ID',
+      titleField: options.phase5RequiredTitleFieldName || schema.titleField || 'Title',
+      descriptionField: options.phase5RequiredDescriptionFieldName || schema.descriptionField || 'Description',
+      itemSpecificsField: options.phase5RequiredItemSpecificsFieldName || schema.itemSpecificsField || 'Item Specifics',
+      quantityField: options.phase5QuantityFieldName || 'Quantity',
+      priceField: options.phase5PriceFieldName || 'Price',
       includeFieldNames: options.phase5PayloadHashFields || ''
     });
 

@@ -242,16 +242,27 @@ function normalizeIpn(value) {
   return normalizeText(value).toUpperCase();
 }
 
+function normalizeSku(value) {
+  return normalizeText(value).toUpperCase();
+}
+
 function buildPublishedIdentity(fields = {}, fieldHints = {}) {
   const ipnField = normalizeText(fieldHints.ipnField || '');
   const itemIdField = normalizeText(fieldHints.itemIdField || '');
   const recordKeyField = normalizeText(fieldHints.recordKeyField || '');
+  const skuField = normalizeText(fieldHints.skuField || '');
   const ipn = normalizeIpn(ipnField ? fields[ipnField] : '');
   const itemId = normalizeText(itemIdField ? fields[itemIdField] : '');
   const recordKey = normalizeText(recordKeyField ? fields[recordKeyField] : '');
+  const sku = normalizeSku(
+    skuField
+      ? fields[skuField]
+      : (fields.SKU || fields.Sku || fields.sku || '')
+  );
   if (itemId) return `ITEM:${itemId}`;
   if (ipn) return `IPN:${ipn}`;
   if (recordKey) return `RK:${recordKey}`;
+  if (sku) return `SKU:${sku}`;
   return '';
 }
 
@@ -273,7 +284,7 @@ class Phase5ApprovalService {
     this.batchStatusFieldName = normalizeText(config.batchStatusFieldName || process.env.PHASE5_BATCH_STATUS_FIELD || 'Batch Status');
     this.batchApprovedValue = normalizeText(config.batchApprovedValue || process.env.PHASE5_BATCH_APPROVED_VALUE || 'Approved') || 'Approved';
     this.requiredCategoryIdFieldName = normalizeText(
-      config.requiredCategoryIdFieldName || process.env.PHASE5_REQUIRED_CATEGORY_ID_FIELD || ''
+      config.requiredCategoryIdFieldName || process.env.PHASE5_REQUIRED_CATEGORY_ID_FIELD || 'eBay Category ID'
     );
     this.requiredTitleFieldName = normalizeText(config.requiredTitleFieldName || process.env.PHASE5_REQUIRED_TITLE_FIELD || '');
     this.requiredDescriptionFieldName = normalizeText(

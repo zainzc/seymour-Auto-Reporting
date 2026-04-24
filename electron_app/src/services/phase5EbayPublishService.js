@@ -58,6 +58,16 @@ function parseIntegerValue(value, minimum = 0) {
   return intValue < minimum ? minimum : intValue;
 }
 
+function parseBoolean(value, defaultValue = false) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const text = normalizeText(value).toLowerCase();
+  if (!text) return defaultValue;
+  if (['true', '1', 'yes', 'y', 'on'].includes(text)) return true;
+  if (['false', '0', 'no', 'n', 'off'].includes(text)) return false;
+  return defaultValue;
+}
+
 function normalizeCondition(value) {
   const text = normalizeText(value);
   if (!text) return '';
@@ -155,6 +165,26 @@ function parseLegacySpecificsText(text = '') {
   return out;
 }
 
+const C_SPECIFIC_SKIP_FIELDS = new Set([
+  'c: partshunter203 ebay motors conditions & options',
+  'c: partshunter203 ebay motors condition and options',
+  'c: partshunter203 ebay motors e commerce description',
+  'c: partshunter203 ebay motors store category'
+]);
+
+function normalizeCSpecificAspectName(fieldName = '') {
+  const text = normalizeText(fieldName);
+  if (!text) return '';
+  return normalizeText(text.replace(/^c:\s*/i, ''));
+}
+
+function shouldSkipCSpecificField(fieldName = '') {
+  const normalized = normalizeFieldKey(fieldName);
+  if (!normalized) return true;
+  if (!normalized.startsWith('c:')) return true;
+  return C_SPECIFIC_SKIP_FIELDS.has(normalized);
+}
+
 function buildAspectsFromListing(fields = {}) {
   const aspects = {};
   const itemSpecificsObject = parseJsonObject(fields['Item Specifics']);
@@ -167,6 +197,14 @@ function buildAspectsFromListing(fields = {}) {
   const legacySpecifics = parseLegacySpecificsText(fields['Item Specifics - All C: values relevant to item']);
   for (const [name, value] of Object.entries(legacySpecifics)) {
     mergeAspect(aspects, name, value);
+  }
+
+  // Auto-include enriched Item Specifics columns from Airtable (`C:*`) into eBay aspects.
+  for (const [fieldName, rawValue] of Object.entries(fields || {})) {
+    if (shouldSkipCSpecificField(fieldName)) continue;
+    const aspectName = normalizeCSpecificAspectName(fieldName);
+    if (!aspectName) continue;
+    mergeAspect(aspects, aspectName, rawValue);
   }
 
   const mappings = [
@@ -254,6 +292,12 @@ class Phase5EbayPublishService {
     this.ebayRefreshScope = normalizeText(config.ebayRefreshScope || process.env.EBAY_REFRESH_SCOPE || '');
     this.ebayUserAccessTokenIssuedAt = normalizeText(
       config.ebayUserAccessTokenIssuedAt || process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT || ''
+    );
+    this.allowProductionPublish = parseBoolean(
+      typeof config.allowProductionPublish !== 'undefined'
+        ? config.allowProductionPublish
+        : process.env.PHASE5_ALLOW_PRODUCTION_PUBLISH,
+      false
     );
     this.timeoutMs = Math.max(5000, Number(config.timeoutMs || process.env.EBAY_PUBLISH_TIMEOUT_MS || 30000) || 30000);
     this.maxAttempts = Math.max(1, Number(config.maxAttempts || process.env.EBAY_PUBLISH_MAX_ATTEMPTS || 2) || 2);
@@ -561,8 +605,10 @@ class Phase5EbayPublishService {
       };
     }
 
-    if (this.ebayEnvironment !== 'sandbox') {
-      throw new Error('Direct Phase 5 eBay publish is currently enabled for sandbox only.');
+    if (this.ebayEnvironment === 'production' && !this.allowProductionPublish) {
+      throw new Error(
+        'Direct Phase 5 production publish is disabled. Set phase5AllowProductionPublish=true (or PHASE5_ALLOW_PRODUCTION_PUBLISH=true) to enable.'
+      );
     }
 
     const resolved = await this.ensureUserAccessToken();

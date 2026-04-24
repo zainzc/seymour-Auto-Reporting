@@ -157,7 +157,7 @@ function detectFieldByAliases(fieldNames = [], aliases = []) {
 function detectRequiredFieldNames(fieldNames = [], options = {}) {
   const categoryIdField =
     normalizeText(options.categoryIdFieldName) ||
-    detectFieldByAliases(fieldNames, ['eBay Category ID', 'Category ID', 'Category']);
+    detectFieldByAliases(fieldNames, ['eBay Category ID']);
   const titleField =
     normalizeText(options.titleFieldName) ||
     detectFieldByAliases(fieldNames, ['AI Optimized Title', 'Product Title(New)', 'Product Title']);

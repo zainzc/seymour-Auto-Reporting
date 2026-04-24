@@ -117,8 +117,14 @@ class Phase5PublishLogService {
       const row = rows[i] || [];
       const itemId = normalizeText(row[4]);
       const payloadHash = normalizeText(row[13]);
-      if (!itemId || !payloadHash) continue;
-      map.set(itemId, payloadHash);
+      if (!itemId) continue;
+      if (payloadHash) {
+        map.set(itemId, payloadHash);
+        continue;
+      }
+      if (!map.has(itemId)) {
+        map.set(itemId, '');
+      }
     }
     return map;
   }

@@ -6,6 +6,10 @@ function normalizeIpn(value) {
   return normalizeText(value).toUpperCase();
 }
 
+function normalizeSku(value) {
+  return normalizeText(value).toUpperCase();
+}
+
 function normalizeKey(value) {
   return normalizeText(value).toLowerCase();
 }
@@ -67,6 +71,15 @@ function buildListingIdentity(fields = {}, hints = {}) {
     'Record Key'
   ]);
   if (recordKey) return `RK:${recordKey}`;
+
+  const sku = normalizeSku(
+    firstNonEmptyField(fields, hints.skuFields || [
+      'SKU',
+      'Sku',
+      'sku'
+    ])
+  );
+  if (sku) return `SKU:${sku}`;
   return '';
 }
 

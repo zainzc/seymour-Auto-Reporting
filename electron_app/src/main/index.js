@@ -997,7 +997,11 @@ setPostPushHook(async payload => {
       authContext: 'inventory',
       rulesDriveFile: phase4RulesDriveFile,
       logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
-      phase4DListingsTable: String(phase4Stored.phase4DListingsTable || 'eBay Listings (API) (Mock)').trim(),
+      phase4DListingsTable: resolveListingsTableName(
+        phase4Stored.phase4DListingsTable,
+        process.env.PHASE4D_LISTINGS_TABLE,
+        DEFAULT_EBAY_LISTINGS_TABLE
+      ),
       openaiApiKey: phase4OpenAiKey,
       openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
       openaiBaseUrl: String(phase4Stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
@@ -1286,7 +1290,7 @@ ipcMain.handle('phase2-get-config', async () => {
     phase4BClickupListName:
       stored.phase4BClickupListName || '',
     phase4BClickupListId:
-      stored.phase4BClickupListId || process.env.PHASE4B_CLICKUP_LIST_ID || merged.clickupListId || '',
+      stored.phase4BClickupListId || process.env.PHASE4B_CLICKUP_LIST_ID || '',
     ebayMockCsvPath: stored.ebayMockCsvPath || '',
     ebayMockTableName: stored.ebayMockTableName || 'eBay Listings (API) (Mock)',
     ebayMockDryRun:
@@ -2014,7 +2018,11 @@ ipcMain.handle('phase4d:get-config', async () => {
       typeof stored.phase4DDryRun === 'boolean'
         ? stored.phase4DDryRun
         : true,
-    listingsTableName: String(stored.phase4DListingsTable || process.env.PHASE4D_LISTINGS_TABLE || 'eBay Listings (API) (Mock)').trim(),
+    listingsTableName: resolveListingsTableName(
+      stored.phase4DListingsTable,
+      process.env.PHASE4D_LISTINGS_TABLE,
+      DEFAULT_EBAY_LISTINGS_TABLE
+    ),
     testIpn: String(stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
     openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
     authContext: 'inventory'
@@ -2045,12 +2053,12 @@ ipcMain.handle('phase4d:run', async (event, options = {}) => {
             ''
         ).trim(),
       logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
-      phase4DListingsTable: String(
-        options.phase4DListingsTable ||
-          stored.phase4DListingsTable ||
-          process.env.PHASE4D_LISTINGS_TABLE ||
-          'eBay Listings (API) (Mock)'
-      ).trim(),
+      phase4DListingsTable: resolveListingsTableName(
+        options.phase4DListingsTable,
+        stored.phase4DListingsTable,
+        process.env.PHASE4D_LISTINGS_TABLE,
+        DEFAULT_EBAY_LISTINGS_TABLE
+      ),
       phase4DTestIpn: String(options.phase4DTestIpn || stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
       testTableName: '',
       testMaxTables: 0,
@@ -2323,7 +2331,12 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
               ''
           ).trim(),
         logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
-        phase4DListingsTable: String(options.phase4DListingsTable || stored.phase4DListingsTable || 'eBay Listings (API) (Mock)').trim(),
+        phase4DListingsTable: resolveListingsTableName(
+          options.phase4DListingsTable,
+          stored.phase4DListingsTable,
+          process.env.PHASE4D_LISTINGS_TABLE,
+          DEFAULT_EBAY_LISTINGS_TABLE
+        ),
         phase4DTestIpn: String(options.phase4DTestIpn || stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
         openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
         openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
