@@ -804,6 +804,7 @@ const {
   setPostPushHook,
   getScheduleStatus,
   getExecutionLogs: getInventoryLogs,
+  clearExecutionLogs: clearInventoryLogs,
   initializeSchedule: initInventorySchedule
 } = require('../services/inventoryScheduleService');
 
@@ -1167,6 +1168,18 @@ ipcMain.handle('inventory-sheets-get-logs', async () => {
   }
 });
 
+ipcMain.handle('inventory-sheets-clear-logs', async () => {
+  try {
+    clearInventoryLogs();
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to clear execution logs: ${error.message}`
+    };
+  }
+});
+
 /* ---------------------------
    PHASE 2 HANDLERS (GOOGLE SHEETS -> AIRTABLE)
 ---------------------------- */
@@ -1307,7 +1320,7 @@ ipcMain.handle('phase2-get-config', async () => {
       typeof stored.ebaySandboxDryRun === 'boolean'
         ? stored.ebaySandboxDryRun
         : true,
-    phase5ListingsTable: String(stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)').trim(),
+    phase5ListingsTable: String(stored.phase5ListingsTable || stored.ebaySandboxTableName || 'eBay Listings (API)').trim(),
     phase5Mode: String(stored.phase5Mode || 'A').trim().toUpperCase() === 'B' ? 'B' : 'A',
     phase5ApprovalFieldName: String(stored.phase5ApprovalFieldName || '').trim(),
     phase5GroupFieldName: String(stored.phase5GroupFieldName || '').trim(),
@@ -2686,7 +2699,7 @@ ipcMain.handle('phase5:get-config', async () => {
     phase5TestBatchRecordIds: String(stored.phase5TestBatchRecordIds || '').trim(),
     phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : [],
     listingsTableName: String(
-      stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+      stored.phase5ListingsTable || stored.ebaySandboxTableName || 'eBay Listings (API)'
     ).trim(),
     approvalFieldName: String(stored.phase5ApprovalFieldName || '').trim(),
     groupFieldName: String(stored.phase5GroupFieldName || '').trim(),
@@ -2911,7 +2924,7 @@ ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
       dryRun: false,
       phase5Mode,
       phase5ListingsTable: String(
-        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebaySandboxTableName || 'eBay Listings (API)'
       ).trim(),
       phase5ApprovalFieldName: String(options.phase5ApprovalFieldName || stored.phase5ApprovalFieldName || '').trim(),
       phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
@@ -3002,7 +3015,7 @@ ipcMain.handle('phase5:dryRunPublishApproved', async (event, options = {}) => {
       dryRun: true,
       phase5Mode,
       phase5ListingsTable: String(
-        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebaySandboxTableName || 'eBay Listings (API)'
       ).trim(),
       phase5ApprovalFieldName: String(options.phase5ApprovalFieldName || stored.phase5ApprovalFieldName || '').trim(),
       phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
@@ -3078,7 +3091,7 @@ ipcMain.handle('phase5:startAutoPush', async (event, options = {}) => {
       ).trim(),
       phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
       phase5ListingsTable: String(
-        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebaySandboxTableName || 'eBay Listings (API)'
       ).trim(),
       phase5ApprovalFieldName: String(options.phase5ApprovalFieldName || stored.phase5ApprovalFieldName || '').trim(),
       phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
@@ -3279,7 +3292,7 @@ ipcMain.handle('phase5:runAutoPushNow', async (event, options = {}) => {
       ).trim(),
       phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
       phase5ListingsTable: String(
-        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
+        options.phase5ListingsTable || stored.phase5ListingsTable || stored.ebaySandboxTableName || 'eBay Listings (API)'
       ).trim(),
       phase5ApprovalFieldName: String(options.phase5ApprovalFieldName || stored.phase5ApprovalFieldName || '').trim(),
       phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
@@ -3668,7 +3681,7 @@ function createWindow() {
             phase5Mode: 'B',
             phase5AutoPushEnabled: true,
             phase5ListingsTable: String(
-              storedPhase2.phase5ListingsTable || storedPhase2.ebayMockTableName || 'eBay Listings (API) (Mock)'
+              storedPhase2.phase5ListingsTable || storedPhase2.ebaySandboxTableName || 'eBay Listings (API)'
             ).trim(),
             phase5ApprovalFieldName: String(storedPhase2.phase5ApprovalFieldName || '').trim(),
             phase5GroupFieldName: String(storedPhase2.phase5GroupFieldName || '').trim(),

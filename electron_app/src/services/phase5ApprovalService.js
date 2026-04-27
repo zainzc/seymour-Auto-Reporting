@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { detectRequiredFieldNames } = require('./phase5GovernanceService');
 
-const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API)';
 
 function normalizeText(value) {
   return String(value || '').trim();

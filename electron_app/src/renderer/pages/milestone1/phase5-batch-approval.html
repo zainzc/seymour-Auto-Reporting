@@ -433,7 +433,7 @@
       return {
         ...base,
         ...phase5,
-        phase5ListingsTable: phase5.listingsTableName || base.phase5ListingsTable || base.ebayMockTableName || 'eBay Listings (API) (Mock)',
+        phase5ListingsTable: phase5.listingsTableName || base.phase5ListingsTable || 'eBay Listings (API)',
         phase5BatchesTable: phase5.phase5BatchesTable || base.phase5BatchesTable || 'Listing Batches',
         phase5BatchStatusFieldName: phase5.phase5BatchStatusFieldName || base.phase5BatchStatusFieldName || 'Batch Status',
         phase5BatchApprovedValue: phase5.phase5BatchApprovedValue || base.phase5BatchApprovedValue || 'Approved',

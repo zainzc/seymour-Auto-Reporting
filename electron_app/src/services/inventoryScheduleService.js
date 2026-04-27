@@ -189,6 +189,14 @@ function getExecutionLogs() {
 }
 
 /**
+ * Clear execution logs
+ */
+function clearExecutionLogs() {
+  saveInventoryConfig('executionLogs', []);
+  saveInventoryConfig('lastExecution', null);
+}
+
+/**
  * Initialize schedule on app startup if it was previously active
  */
 function initializeSchedule() {
@@ -209,5 +217,6 @@ module.exports = {
   setPostPushHook,
   getScheduleStatus,
   getExecutionLogs,
+  clearExecutionLogs,
   initializeSchedule
 };

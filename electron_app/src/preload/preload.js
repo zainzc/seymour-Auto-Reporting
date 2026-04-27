@@ -60,6 +60,7 @@ contextBridge.exposeInMainWorld('inventorySheetsAPI', {
   pushNow: (spreadsheetId, worksheetName) => ipcRenderer.invoke('inventory-sheets-push-now', spreadsheetId, worksheetName),
   getStatus: () => ipcRenderer.invoke('inventory-sheets-get-status'),
   getLogs: () => ipcRenderer.invoke('inventory-sheets-get-logs'),
+  clearLogs: () => ipcRenderer.invoke('inventory-sheets-clear-logs'),
   onProgress: (callback) => ipcRenderer.on('inventory-sheets:progress', callback)
 });
 

@@ -18,6 +18,7 @@ const LOW_CONFIDENCE_THRESHOLD = 0.75;
 const DEFAULT_PHASE4B_DETERMINED_STATUS = 'Value Determined';
 const DEFAULT_PHASE4B_COMPLETED_STATUS = 'Completed / Closed';
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
+const LEGACY_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
 const EBAY_LISTING_TITLE_FIELD = 'Title';
 const EBAY_LISTING_CONDITIONS_FIELD = 'Conditions & Options';
 const EBAY_LISTING_IPN_FIELD = 'IPN (Interchange Part Number)';
@@ -25,10 +26,7 @@ const EBAY_LISTING_IPN_FIELDS = [
   EBAY_LISTING_IPN_FIELD,
   'c: partshunter203 ebay MOTORS interchange part number',
   'C: partshunter203 ebay MOTORS interchange part number',
-  'IPN',
-  'IP',
-  'InventoryNumber',
-  'Inventory Number'
+  'IPN'
 ];
 const EBAY_LISTING_RECORD_KEY_FIELD = 'SKU';
 const EBAY_LISTING_LOOKUP_KEY_FIELDS = [
@@ -69,7 +67,12 @@ function parseIpnSet(value) {
 }
 
 function normalizeListingsTableName(value = '') {
-  return DEFAULT_EBAY_LISTINGS_TABLE;
+  const text = normalizeText(value);
+  if (!text) return DEFAULT_EBAY_LISTINGS_TABLE;
+  if (text.toLowerCase() === LEGACY_EBAY_LISTINGS_TABLE.toLowerCase()) {
+    return DEFAULT_EBAY_LISTINGS_TABLE;
+  }
+  return text;
 }
 
 function getFieldValueByName(fields = {}, name = '') {

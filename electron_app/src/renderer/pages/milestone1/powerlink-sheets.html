@@ -314,6 +314,23 @@
       padding: 10px;
     }
 
+    .logs-toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .logs-toolbar select {
+      border: 1px solid #bfcfe4;
+      border-radius: 8px;
+      padding: 7px 10px;
+      color: #1a304d;
+      background: #fcfdff;
+      font-size: 13px;
+    }
+
     .log-entry {
       background: #ffffff;
       border: 1px solid #dae5f2;
@@ -488,6 +505,16 @@
 
     <section class="card">
       <h2 class="card-title">Execution History</h2>
+      <div class="logs-toolbar">
+        <button id="toggle-exec-logs-btn" class="btn btn-secondary" type="button" onclick="toggleExecutionLogs()">Collapse Logs</button>
+        <select id="exec-log-filter" onchange="renderExecutionLogs()">
+          <option value="all">All</option>
+          <option value="error">Errors only</option>
+          <option value="success">Success only</option>
+          <option value="latest">Latest 20</option>
+        </select>
+        <button class="btn btn-secondary" type="button" onclick="clearExecutionLogs()">Clear Logs</button>
+      </div>
       <div id="logs-container" class="logs-container">
         <p class="info-text">No execution logs yet.</p>
       </div>
@@ -512,6 +539,8 @@
     let currentWorksheetName = null;
     let isDisconnecting = false;
     let inventoryAuthSource = 'none';
+    let executionLogs = [];
+    let executionLogsCollapsed = false;
 
     window.addEventListener('load', async () => {
       await checkGoogleAuth();
@@ -729,14 +758,30 @@
     async function loadExecutionLogs() {
       try {
         const logs = await window.inventorySheetsAPI.getLogs();
-        displayLogs(logs);
+        executionLogs = Array.isArray(logs) ? logs : [];
+        renderExecutionLogs();
       } catch (err) {
         console.error('Failed to load logs:', err);
+        executionLogs = [];
+        renderExecutionLogs();
       }
     }
 
-    function displayLogs(logs) {
+    function renderExecutionLogs() {
       const container = document.getElementById('logs-container');
+      const filterEl = document.getElementById('exec-log-filter');
+      const filter = filterEl ? String(filterEl.value || 'all') : 'all';
+      const allLogs = Array.isArray(executionLogs) ? [...executionLogs] : [];
+      container.style.display = executionLogsCollapsed ? 'none' : 'block';
+
+      let logs = allLogs;
+      if (filter === 'error') {
+        logs = allLogs.filter(log => !log?.success);
+      } else if (filter === 'success') {
+        logs = allLogs.filter(log => Boolean(log?.success));
+      } else if (filter === 'latest') {
+        logs = allLogs.slice(0, 20);
+      }
 
       if (!logs || logs.length === 0) {
         container.innerHTML = '<p class="info-text">No execution logs yet.</p>';
@@ -753,6 +798,33 @@
           </div>
         </div>
       `).join('');
+    }
+
+    function toggleExecutionLogs() {
+      executionLogsCollapsed = !executionLogsCollapsed;
+      const btn = document.getElementById('toggle-exec-logs-btn');
+      if (btn) {
+        btn.textContent = executionLogsCollapsed ? 'Expand Logs' : 'Collapse Logs';
+      }
+      renderExecutionLogs();
+    }
+
+    async function clearExecutionLogs() {
+      if (!confirm('Clear execution history logs?')) {
+        return;
+      }
+      try {
+        if (window.inventorySheetsAPI?.clearLogs) {
+          const result = await window.inventorySheetsAPI.clearLogs();
+          if (result?.success === false) {
+            throw new Error(result.message || 'Failed to clear execution logs.');
+          }
+        }
+        executionLogs = [];
+        renderExecutionLogs();
+      } catch (err) {
+        console.error('Failed to clear execution logs:', err);
+      }
     }
 
     async function testConnection() {

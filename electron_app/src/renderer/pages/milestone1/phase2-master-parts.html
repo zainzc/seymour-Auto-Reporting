@@ -1020,7 +1020,7 @@
             </div>
             <div class="form-group">
               <label for="phase5-listings-table">Listings Queue Table</label>
-              <input id="phase5-listings-table" type="text" value="eBay Listings (API) (Mock)">
+              <input id="phase5-listings-table" type="text" value="eBay Listings (API)">
             </div>
             <div class="form-group">
               <label for="phase5-batches-table">Batches Table</label>
@@ -1399,7 +1399,6 @@
       </div>
       <div class="btn-group">
         <button id="run-sync-btn" class="btn btn-primary" onclick="runPhase2()">Run Sync</button>
-        <button id="run-item-specific-sync-btn" class="btn btn-secondary" onclick="runItemSpecificSync()">Run Item Specific Table Sync</button>
       </div>
       <div class="btn-group" style="margin-top: 10px;">
         <button class="btn btn-secondary" onclick="startWritebackPoller()">Start Write-back</button>
@@ -1516,7 +1515,7 @@
     const DEFAULT_PHASE4CMF_DRY_RUN = false;
     const DEFAULT_PHASE4D_DRY_RUN = false;
     const DEFAULT_PHASE4D_LISTINGS_TABLE = 'eBay Listings (API)';
-    const DEFAULT_PHASE5_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+    const DEFAULT_PHASE5_LISTINGS_TABLE = 'eBay Listings (API)';
     const DEFAULT_OPENAI_MODEL = 'gpt-5.4-mini';
     const DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS = 'To Do';
     const DEFAULT_PHASE4B_CLICKUP_LIST_ID = '';
@@ -1912,7 +1911,6 @@
       const runPhase74Btn = document.getElementById('run-phase74-btn');
       const runEbayMockImportBtn = document.getElementById('run-ebay-mock-import-btn');
       const runEbaySandboxImportBtn = document.getElementById('run-ebay-sandbox-import-btn');
-      const runItemSpecificSyncBtn = document.getElementById('run-item-specific-sync-btn');
       const busy =
         isRunning ||
         isPhase3Running ||
@@ -2030,7 +2028,6 @@
         const hasTableName = Boolean(getEbaySandboxControls().primaryTableEl?.value?.trim());
         runEbaySandboxImportBtn.disabled = busy || !hasTableName || !hasAirtableCore || !hasPhase5EbaySandboxAuth;
       }
-      runItemSpecificSyncBtn.disabled = busy || !hasItemSpecificBaseId;
     }
 
     function attachFieldListeners() {
