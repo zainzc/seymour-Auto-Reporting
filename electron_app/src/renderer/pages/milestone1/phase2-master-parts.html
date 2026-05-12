@@ -966,7 +966,7 @@
                   <input id="ebay-mock-table-name" type="text" value="eBay Listings (API) (Mock)">
                 </div>
                 <div class="form-group">
-                  <label for="ebay-sandbox-table-name">Sandbox Import Table Name</label>
+                  <label for="ebay-sandbox-table-name">Listings Import Table Name</label>
                   <input id="ebay-sandbox-table-name" type="text" value="eBay Listings (API)">
                 </div>
               </div>
@@ -979,11 +979,11 @@
                   </select>
                 </div>
                 <div class="form-group">
-                  <label for="ebay-sandbox-fetch-limit">Sandbox Fetch Limit</label>
+                  <label for="ebay-sandbox-fetch-limit">Listings Fetch Limit</label>
                   <input id="ebay-sandbox-fetch-limit" type="number" min="1" step="1" value="200">
                 </div>
                 <div class="form-group">
-                  <label for="ebay-sandbox-dry-run">Sandbox Import Dry Run</label>
+                  <label for="ebay-sandbox-dry-run">Listings Import Dry Run</label>
                   <select id="ebay-sandbox-dry-run">
                     <option value="true" selected>True (No Airtable Writes)</option>
                     <option value="false">False (Upsert fetched inventory rows)</option>
@@ -992,10 +992,10 @@
                 </div>
                 <div class="btn-group">
                   <button id="run-ebay-mock-import-btn" class="btn btn-secondary" onclick="runEbayMockImport()">Run eBay Mock Import</button>
-                  <button id="run-ebay-sandbox-import-btn" class="btn btn-secondary" onclick="runEbaySandboxImport()">Fetch eBay Inventory</button>
+                  <button id="run-ebay-sandbox-import-btn" class="btn btn-secondary" onclick="runEbaySandboxImport()">Fetch eBay Listings</button>
                 </div>
                 <div class="hint" id="ebay-mock-status-text">eBay Mock Import status: idle</div>
-                <div class="hint" id="ebay-sandbox-status-text">eBay Sandbox Import status: idle</div>
+                <div class="hint" id="ebay-sandbox-status-text">eBay Listings Import status: idle</div>
               </div>
             </div>
           </div>
@@ -1049,6 +1049,14 @@
                 </select>
               </div>
               <div class="form-group">
+                <label for="phase5-ebay-listings-source-api">Listings API Source</label>
+                <select id="phase5-ebay-listings-source-api">
+                  <option value="auto" selected>Auto (Prod=Trading, Sandbox=Inventory)</option>
+                  <option value="trading">Trading API (GetMyeBaySelling)</option>
+                  <option value="inventory">Sell Inventory API</option>
+                </select>
+              </div>
+              <div class="form-group">
                 <label for="phase5-ebay-runame">eBay RuName</label>
                 <input id="phase5-ebay-runame" type="text" placeholder="RuName">
               </div>
@@ -1069,25 +1077,31 @@
                 <textarea id="phase5-ebay-refresh-token" placeholder="Paste eBay refresh token for auto access-token renewal"></textarea>
                 <div class="hint">With Refresh Token + Client ID + Cert ID, app auto-renews access token after ~2 hours.</div>
               </div>
+              <div class="form-group full-width">
+                <label for="phase5-ebay-user-access-token">eBay User Access Token (IAF Token)</label>
+                <textarea id="phase5-ebay-user-access-token" placeholder="Paste the same user access token used in your working Trading API cURL (X-EBAY-API-IAF-TOKEN)"></textarea>
+                <div class="hint">Used directly for credential tests/import. If refresh token is invalid, this token can still work.</div>
+              </div>
             </div>
             <div class="btn-group" style="margin-top: 8px;">
               <button id="phase5-test-ebay-creds-btn" class="btn btn-secondary" onclick="testPhase5EbayCredentials()">Test eBay Credentials</button>
             </div>
+            <div class="hint">Credential test checks Inventory API auth. Listings import can use Trading API mode.</div>
           </div>
 
           <div class="phase-panel">
-            <h3 class="phase5-panel-title">Sandbox Import</h3>
+            <h3 class="phase5-panel-title">eBay Listings Import</h3>
             <div class="phase5-grid">
               <div class="form-group full-width">
-                <label for="phase5-ebay-sandbox-table-name">Sandbox Import Table Name</label>
+                <label for="phase5-ebay-sandbox-table-name">Listings Import Table Name</label>
                 <input id="phase5-ebay-sandbox-table-name" type="text" value="eBay Listings (API)">
               </div>
               <div class="form-group">
-                <label for="phase5-ebay-sandbox-fetch-limit">Sandbox Fetch Limit</label>
+                <label for="phase5-ebay-sandbox-fetch-limit">Listings Fetch Limit</label>
                 <input id="phase5-ebay-sandbox-fetch-limit" type="number" min="1" step="1" value="200">
               </div>
               <div class="form-group">
-                <label for="phase5-ebay-sandbox-dry-run">Sandbox Import Dry Run</label>
+                <label for="phase5-ebay-sandbox-dry-run">Listings Import Dry Run</label>
                 <select id="phase5-ebay-sandbox-dry-run">
                   <option value="true" selected>True (No Airtable Writes)</option>
                   <option value="false">False (Upsert fetched inventory rows)</option>
@@ -1095,9 +1109,10 @@
               </div>
             </div>
             <div class="btn-group" style="margin-top: 8px;">
-              <button id="run-ebay-sandbox-import-phase5-btn" class="btn btn-primary" onclick="runEbaySandboxImport()">Fetch eBay Sandbox Inventory</button>
+              <button id="run-ebay-sandbox-import-phase5-btn" class="btn btn-primary" onclick="runEbaySandboxImport()">Fetch eBay Listings</button>
             </div>
-            <div class="hint" id="phase5-ebay-sandbox-status-text">eBay Sandbox Import status: idle</div>
+            <div class="hint">Auto mode uses Trading API for Production and Inventory API for Sandbox.</div>
+            <div class="hint" id="phase5-ebay-sandbox-status-text">eBay Listings Import status: idle</div>
           </div>
         </div>
 
@@ -1540,6 +1555,144 @@
     const DEFAULT_PHASE5_BATCH_STATUS_FIELD = 'Batch Status';
     const DEFAULT_PHASE5_BATCH_APPROVED_VALUE = 'Approved';
     const DEFAULT_EBAY_SANDBOX_FETCH_LIMIT = 200;
+    const EBAY_ENVIRONMENTS = ['sandbox', 'production'];
+    const PHASE5_EBAY_CREDENTIAL_FIELD_IDS = [
+      'phase5-ebay-client-id',
+      'phase5-ebay-dev-id',
+      'phase5-ebay-client-secret',
+      'phase5-ebay-runame',
+      'phase5-ebay-refresh-token',
+      'phase5-ebay-user-access-token'
+    ];
+    let activePhase5EbayEnvironment = 'sandbox';
+    let phase5EbayCredentialSets = {
+      sandbox: {
+        phase5EbayClientId: '',
+        phase5EbayDevId: '',
+        phase5EbayClientSecret: '',
+        phase5EbayRuName: '',
+        phase5EbayRefreshToken: '',
+        phase5EbayUserAccessToken: '',
+        phase5EbayRefreshScope: '',
+        phase5EbayUserAccessTokenIssuedAt: ''
+      },
+      production: {
+        phase5EbayClientId: '',
+        phase5EbayDevId: '',
+        phase5EbayClientSecret: '',
+        phase5EbayRuName: '',
+        phase5EbayRefreshToken: '',
+        phase5EbayUserAccessToken: '',
+        phase5EbayRefreshScope: '',
+        phase5EbayUserAccessTokenIssuedAt: ''
+      }
+    };
+
+    function normalizeEbayEnvironmentValue(value) {
+      return String(value || '').trim().toLowerCase() === 'production' ? 'production' : 'sandbox';
+    }
+
+    function normalizeEbayCredentialSet(raw = {}) {
+      return {
+        phase5EbayClientId: String(raw.phase5EbayClientId || '').trim(),
+        phase5EbayDevId: String(raw.phase5EbayDevId || '').trim(),
+        phase5EbayClientSecret: String(raw.phase5EbayClientSecret || '').trim(),
+        phase5EbayRuName: String(raw.phase5EbayRuName || '').trim(),
+        phase5EbayRefreshToken: String(raw.phase5EbayRefreshToken || '').trim(),
+        phase5EbayUserAccessToken: String(raw.phase5EbayUserAccessToken || '').trim(),
+        phase5EbayRefreshScope: String(raw.phase5EbayRefreshScope || '').trim(),
+        phase5EbayUserAccessTokenIssuedAt: String(raw.phase5EbayUserAccessTokenIssuedAt || '').trim()
+      };
+    }
+
+    function normalizeEbayCredentialSets(input = {}) {
+      return {
+        sandbox: normalizeEbayCredentialSet(input?.sandbox || {}),
+        production: normalizeEbayCredentialSet(input?.production || {})
+      };
+    }
+
+    function hasAnyEbayCredentialValue(set = {}) {
+      return [
+        'phase5EbayClientId',
+        'phase5EbayDevId',
+        'phase5EbayClientSecret',
+        'phase5EbayRuName',
+        'phase5EbayRefreshToken',
+        'phase5EbayUserAccessToken',
+        'phase5EbayRefreshScope',
+        'phase5EbayUserAccessTokenIssuedAt'
+      ].some(key => Boolean(String(set?.[key] || '').trim()));
+    }
+
+    function readEbayCredentialFieldsFromForm() {
+      return normalizeEbayCredentialSet({
+        phase5EbayClientId: document.getElementById('phase5-ebay-client-id').value.trim(),
+        phase5EbayDevId: document.getElementById('phase5-ebay-dev-id').value.trim(),
+        phase5EbayClientSecret: document.getElementById('phase5-ebay-client-secret').value.trim(),
+        phase5EbayRuName: document.getElementById('phase5-ebay-runame').value.trim(),
+        phase5EbayRefreshToken: document.getElementById('phase5-ebay-refresh-token').value.trim(),
+        phase5EbayUserAccessToken: document.getElementById('phase5-ebay-user-access-token').value.trim()
+      });
+    }
+
+    function writeEbayCredentialFieldsToForm(set = {}) {
+      const normalized = normalizeEbayCredentialSet(set);
+      document.getElementById('phase5-ebay-client-id').value = normalized.phase5EbayClientId;
+      document.getElementById('phase5-ebay-dev-id').value = normalized.phase5EbayDevId;
+      document.getElementById('phase5-ebay-client-secret').value = normalized.phase5EbayClientSecret;
+      document.getElementById('phase5-ebay-runame').value = normalized.phase5EbayRuName;
+      document.getElementById('phase5-ebay-refresh-token').value = normalized.phase5EbayRefreshToken;
+      document.getElementById('phase5-ebay-user-access-token').value = normalized.phase5EbayUserAccessToken;
+    }
+
+    function saveCurrentEnvironmentEbayCredentials(environment = activePhase5EbayEnvironment) {
+      const env = normalizeEbayEnvironmentValue(environment);
+      phase5EbayCredentialSets[env] = {
+        ...phase5EbayCredentialSets[env],
+        ...readEbayCredentialFieldsFromForm()
+      };
+    }
+
+    function applyEnvironmentEbayCredentials(environment = activePhase5EbayEnvironment) {
+      const env = normalizeEbayEnvironmentValue(environment);
+      const nextSet = phase5EbayCredentialSets[env] || normalizeEbayCredentialSet({});
+      writeEbayCredentialFieldsToForm(nextSet);
+      const envEl = document.getElementById('phase5-ebay-environment');
+      if (envEl) envEl.value = env;
+      activePhase5EbayEnvironment = env;
+    }
+
+    function switchEnvironmentEbayCredentials(nextEnvironment = 'sandbox') {
+      const next = normalizeEbayEnvironmentValue(nextEnvironment);
+      saveCurrentEnvironmentEbayCredentials(activePhase5EbayEnvironment);
+      applyEnvironmentEbayCredentials(next);
+    }
+
+    function hydrateEbayCredentialSetsFromConfig(config = {}) {
+      const configEnvironment = normalizeEbayEnvironmentValue(config.phase5EbayEnvironment || activePhase5EbayEnvironment);
+      const fromConfigSets = normalizeEbayCredentialSets(config.phase5EbayCredentialSets || {});
+      phase5EbayCredentialSets = {
+        sandbox: fromConfigSets.sandbox,
+        production: fromConfigSets.production
+      };
+
+      const legacySet = normalizeEbayCredentialSet({
+        phase5EbayClientId: config.phase5EbayClientId || '',
+        phase5EbayDevId: config.phase5EbayDevId || '',
+        phase5EbayClientSecret: config.phase5EbayClientSecret || '',
+        phase5EbayRuName: config.phase5EbayRuName || '',
+        phase5EbayRefreshToken: config.phase5EbayRefreshToken || '',
+        phase5EbayUserAccessToken: config.phase5EbayUserAccessToken || '',
+        phase5EbayRefreshScope: config.phase5EbayRefreshScope || '',
+        phase5EbayUserAccessTokenIssuedAt: config.phase5EbayUserAccessTokenIssuedAt || ''
+      });
+      if (hasAnyEbayCredentialValue(legacySet) && !hasAnyEbayCredentialValue(phase5EbayCredentialSets[configEnvironment])) {
+        phase5EbayCredentialSets[configEnvironment] = legacySet;
+      }
+
+      applyEnvironmentEbayCredentials(configEnvironment);
+    }
     const REQUIRED_FIELDS = [
       ['sheet-id', 'Google Sheet ID'],
       ['tab-name', 'Google Tab Name'],
@@ -1660,13 +1813,28 @@
       error: 'eBay Mock: Failed'
     };
     const EBAY_SANDBOX_STAGE_LABELS = {
-      ebaysandbox_auth: 'eBay Sandbox: Authenticating',
-      ebaysandbox_fetch_items: 'eBay Sandbox: Fetching inventory items',
-      ebaysandbox_fetch_offers: 'eBay Sandbox: Fetching offers',
-      ebaysandbox_prepare_table: 'eBay Sandbox: Preparing Airtable table',
-      ebaysandbox_import_rows: 'eBay Sandbox: Importing rows',
-      completed: 'eBay Sandbox: Completed',
-      error: 'eBay Sandbox: Failed'
+      ebaysandbox_auth: 'eBay Listings: Authenticating',
+      ebaysandbox_fetch_items: 'eBay Listings: Fetching items',
+      ebaysandbox_fetch_offers: 'eBay Listings: Fetching offers',
+      ebaysandbox_prepare_table: 'eBay Listings: Preparing Airtable table',
+      ebaysandbox_import_rows: 'eBay Listings: Importing rows',
+      ebaysandbox_post_import: 'eBay Listings: Post-import automation',
+      ebaysandbox_post_import_start: 'Post-import: Starting',
+      ebaysandbox_post_import_batch: 'Post-import: Creating batches',
+      ebaysandbox_post_import_phase4a: 'Post-import: Phase 4A',
+      ebaysandbox_post_import_phase4b: 'Post-import: Phase 4B-lite',
+      ebaysandbox_post_import_phase4c: 'Post-import: Phase 4C',
+      ebaysandbox_post_import_phase4d: 'Post-import: Phase 4D',
+      ebaysandbox_post_import_phase6: 'Post-import: Phase 6',
+      ebaysandbox_post_import_phase72: 'Post-import: Phase 7.2',
+      ebaysandbox_post_import_phase74: 'Post-import: Phase 7.4',
+      ebaysandbox_post_import_complete: 'Post-import: Completed',
+      ebaysandbox_post_import_blocked: 'Post-import: Blocked',
+      ebaysandbox_post_import_failed: 'Post-import: Failed',
+      ebaysandbox_post_import_skipped_no_writes: 'Post-import: Skipped (No Writes)',
+      ebaysandbox_post_import_skipped_no_candidates: 'Post-import: Skipped (No Batch Candidates)',
+      completed: 'eBay Listings: Completed',
+      error: 'eBay Listings: Failed'
     };
 
     window.addEventListener('load', async () => {
@@ -1939,7 +2107,9 @@
         Boolean(document.getElementById('phase5-ebay-client-secret').value.trim()) &&
         Boolean(document.getElementById('phase5-ebay-runame').value.trim());
       const hasPhase5EbayRefreshToken = Boolean(document.getElementById('phase5-ebay-refresh-token')?.value?.trim());
+      const hasPhase5EbayUserAccessToken = Boolean(document.getElementById('phase5-ebay-user-access-token')?.value?.trim());
       const hasPhase5EbaySandboxAuth =
+        hasPhase5EbayUserAccessToken ||
         (
           hasPhase5EbayRefreshToken &&
           Boolean(document.getElementById('phase5-ebay-client-id').value.trim()) &&
@@ -1949,6 +2119,8 @@
           Boolean(document.getElementById('phase5-ebay-client-id').value.trim()) &&
           Boolean(document.getElementById('phase5-ebay-client-secret').value.trim())
         );
+      const ebayEnvironment = normalizeEbayEnvironmentValue(document.getElementById('phase5-ebay-environment')?.value || 'sandbox');
+      const requiresAirtableForEbayImport = ebayEnvironment !== 'production';
       const isPhase5OptionB = (document.getElementById('phase5-mode')?.value || 'A').toUpperCase() === 'B';
       const hasPhase72DriveFolder = Boolean(document.getElementById('phase72-drive-folder-id').value.trim());
       runBtn.disabled = busy || !validateForm(false);
@@ -2005,7 +2177,10 @@
       }
       if (runPhase5EbaySandboxImportBtn) {
         const hasTableName = Boolean(getEbaySandboxControls().primaryTableEl?.value?.trim());
-        runPhase5EbaySandboxImportBtn.disabled = busy || !hasTableName || !hasAirtableCore || !hasPhase5EbaySandboxAuth;
+        runPhase5EbaySandboxImportBtn.disabled =
+          busy ||
+          !hasPhase5EbaySandboxAuth ||
+          (requiresAirtableForEbayImport && (!hasTableName || !hasAirtableCore));
       }
       if (phase5RefreshBatchMetricsBtn) {
         phase5RefreshBatchMetricsBtn.disabled = busy || !hasAirtableCore;
@@ -2026,7 +2201,10 @@
       }
       if (runEbaySandboxImportBtn) {
         const hasTableName = Boolean(getEbaySandboxControls().primaryTableEl?.value?.trim());
-        runEbaySandboxImportBtn.disabled = busy || !hasTableName || !hasAirtableCore || !hasPhase5EbaySandboxAuth;
+        runEbaySandboxImportBtn.disabled =
+          busy ||
+          !hasPhase5EbaySandboxAuth ||
+          (requiresAirtableForEbayImport && (!hasTableName || !hasAirtableCore));
       }
     }
 
@@ -2106,11 +2284,13 @@
         'phase5-batch-record-id',
         'phase5-batch-status-value',
         'phase5-ebay-environment',
+        'phase5-ebay-listings-source-api',
         'phase5-ebay-client-id',
         'phase5-ebay-dev-id',
         'phase5-ebay-client-secret',
         'phase5-ebay-runame',
         'phase5-ebay-refresh-token',
+        'phase5-ebay-user-access-token',
         'phase5-ebay-sandbox-table-name',
         'phase5-ebay-sandbox-fetch-limit',
         'phase5-ebay-sandbox-dry-run',
@@ -2142,11 +2322,22 @@
           if (id.startsWith('phase4-unified-')) {
             syncPhase4UnifiedInputsToLegacy();
           }
+          if (PHASE5_EBAY_CREDENTIAL_FIELD_IDS.includes(id)) {
+            saveCurrentEnvironmentEbayCredentials(activePhase5EbayEnvironment);
+          }
           clearFieldError(id);
           updateHealthBadges();
           updateRunButtonState();
         });
       });
+
+      const ebayEnvironmentEl = document.getElementById('phase5-ebay-environment');
+      if (ebayEnvironmentEl) {
+        ebayEnvironmentEl.addEventListener('change', () => {
+          switchEnvironmentEbayCredentials(ebayEnvironmentEl.value);
+          updateRunButtonState();
+        });
+      }
     }
 
     function formatProgressText(payload = {}) {
@@ -2278,7 +2469,7 @@
     function formatEbaySandboxProgressText(payload = {}) {
       const stage = String(payload.stage || '').trim();
       const percent = Number(payload.percent || 0);
-      const label = EBAY_SANDBOX_STAGE_LABELS[stage] || 'eBay Sandbox import running';
+      const label = EBAY_SANDBOX_STAGE_LABELS[stage] || 'eBay listings import running';
       const message = String(payload.message || '').trim();
       if (message) return `${label} (${percent}%): ${message}`;
       return `${label} (${percent}%)`;
@@ -2524,13 +2715,11 @@
         document.getElementById('phase5-live-compare-api-url').value = config.phase5LiveCompareApiUrl || '';
         document.getElementById('phase5-live-compare-api-key').value = config.phase5LiveCompareApiKey || '';
         document.getElementById('phase5-test-batch-record-ids').value = config.phase5TestBatchRecordIds || '';
-        document.getElementById('phase5-ebay-environment').value =
-          (config.phase5EbayEnvironment || 'sandbox').toLowerCase() === 'production' ? 'production' : 'sandbox';
-        document.getElementById('phase5-ebay-client-id').value = config.phase5EbayClientId || '';
-        document.getElementById('phase5-ebay-dev-id').value = config.phase5EbayDevId || '';
-        document.getElementById('phase5-ebay-client-secret').value = config.phase5EbayClientSecret || '';
-        document.getElementById('phase5-ebay-runame').value = config.phase5EbayRuName || '';
-        document.getElementById('phase5-ebay-refresh-token').value = config.phase5EbayRefreshToken || '';
+        hydrateEbayCredentialSetsFromConfig(config);
+        document.getElementById('phase5-ebay-listings-source-api').value =
+          ['auto', 'trading', 'inventory'].includes(String(config.ebayListingsSourceApi || '').toLowerCase())
+            ? String(config.ebayListingsSourceApi || '').toLowerCase()
+            : 'auto';
         document.getElementById('phase5-ebay-sandbox-table-name').value =
           normalizeEbaySandboxTableName(config.ebaySandboxTableName || config.phase5ListingsTable || config.ebayMockTableName || DEFAULT_EBAY_SANDBOX_TABLE_NAME);
         document.getElementById('phase5-ebay-sandbox-fetch-limit').value = String(
@@ -2791,21 +2980,30 @@
               phase5Config.phase5LiveCompareApiKey || document.getElementById('phase5-live-compare-api-key').value || '';
             document.getElementById('phase5-test-batch-record-ids').value =
               phase5Config.phase5TestBatchRecordIds || document.getElementById('phase5-test-batch-record-ids').value || '';
-            document.getElementById('phase5-ebay-environment').value =
-              (phase5Config.phase5EbayEnvironment || document.getElementById('phase5-ebay-environment').value || 'sandbox')
-                .toLowerCase() === 'production'
-                ? 'production'
-                : 'sandbox';
-            document.getElementById('phase5-ebay-client-id').value =
-              phase5Config.phase5EbayClientId || document.getElementById('phase5-ebay-client-id').value || '';
-            document.getElementById('phase5-ebay-dev-id').value =
-              phase5Config.phase5EbayDevId || document.getElementById('phase5-ebay-dev-id').value || '';
-            document.getElementById('phase5-ebay-client-secret').value =
-              phase5Config.phase5EbayClientSecret || document.getElementById('phase5-ebay-client-secret').value || '';
-            document.getElementById('phase5-ebay-runame').value =
-              phase5Config.phase5EbayRuName || document.getElementById('phase5-ebay-runame').value || '';
-            document.getElementById('phase5-ebay-refresh-token').value =
-              phase5Config.phase5EbayRefreshToken || document.getElementById('phase5-ebay-refresh-token').value || '';
+            hydrateEbayCredentialSetsFromConfig({
+              phase5EbayEnvironment:
+                phase5Config.phase5EbayEnvironment || document.getElementById('phase5-ebay-environment').value || 'sandbox',
+              phase5EbayCredentialSets:
+                phase5Config.phase5EbayCredentialSets || phase5EbayCredentialSets,
+              phase5EbayClientId: phase5Config.phase5EbayClientId || '',
+              phase5EbayDevId: phase5Config.phase5EbayDevId || '',
+              phase5EbayClientSecret: phase5Config.phase5EbayClientSecret || '',
+              phase5EbayRuName: phase5Config.phase5EbayRuName || '',
+              phase5EbayRefreshToken: phase5Config.phase5EbayRefreshToken || '',
+              phase5EbayUserAccessToken: phase5Config.phase5EbayUserAccessToken || '',
+              phase5EbayRefreshScope: phase5Config.phase5EbayRefreshScope || '',
+              phase5EbayUserAccessTokenIssuedAt: phase5Config.phase5EbayUserAccessTokenIssuedAt || ''
+            });
+            document.getElementById('phase5-ebay-listings-source-api').value =
+              ['auto', 'trading', 'inventory'].includes(
+                String(
+                  phase5Config.ebayListingsSourceApi || document.getElementById('phase5-ebay-listings-source-api').value || ''
+                ).toLowerCase()
+              )
+                ? String(
+                    phase5Config.ebayListingsSourceApi || document.getElementById('phase5-ebay-listings-source-api').value || 'auto'
+                  ).toLowerCase()
+                : 'auto';
             document.getElementById('phase5-ebay-sandbox-table-name').value =
               normalizeEbaySandboxTableName(
                 phase5Config.ebaySandboxTableName ||
@@ -2943,6 +3141,11 @@
         updateHealthBadges();
         updateRunButtonState();
       } catch (err) {
+        // Keep unified Phase 4 inputs in sync with whatever legacy values did load,
+        // even if one of the optional config fetches fails mid-initialization.
+        syncPhase4LegacyInputsToUnified();
+        updateHealthBadges();
+        updateRunButtonState();
         setRunState('Error', `Failed to load config: ${err.message}`);
         logLine(`Failed to load sync config: ${err.message}`, 'error');
       }
@@ -3221,6 +3424,15 @@
         .getElementById('phase5-payload-hash-fields')
         .value.trim()
         .replace(/Product Title\(New\)/gi, 'Title');
+      const phase5EbayEnvironment = normalizeEbayEnvironmentValue(
+        document.getElementById('phase5-ebay-environment').value
+      );
+      saveCurrentEnvironmentEbayCredentials(activePhase5EbayEnvironment);
+      if (activePhase5EbayEnvironment !== phase5EbayEnvironment) {
+        activePhase5EbayEnvironment = phase5EbayEnvironment;
+      }
+      const activePhase5EbayCredentials =
+        phase5EbayCredentialSets[phase5EbayEnvironment] || normalizeEbayCredentialSet({});
       return {
         sheetId: document.getElementById('sheet-id').value.trim(),
         tabName: document.getElementById('tab-name').value.trim(),
@@ -3350,18 +3562,21 @@
           document.getElementById('phase5-live-compare-api-key').value.trim(),
         phase5TestBatchRecordIds:
           document.getElementById('phase5-test-batch-record-ids').value.trim(),
-        phase5EbayEnvironment:
-          document.getElementById('phase5-ebay-environment').value.trim().toLowerCase() === 'production' ? 'production' : 'sandbox',
-        phase5EbayClientId:
-          document.getElementById('phase5-ebay-client-id').value.trim(),
-        phase5EbayDevId:
-          document.getElementById('phase5-ebay-dev-id').value.trim(),
-        phase5EbayClientSecret:
-          document.getElementById('phase5-ebay-client-secret').value.trim(),
-        phase5EbayRuName:
-          document.getElementById('phase5-ebay-runame').value.trim(),
-        phase5EbayRefreshToken:
-          document.getElementById('phase5-ebay-refresh-token').value.trim(),
+        phase5EbayEnvironment,
+        phase5EbayCredentialSets: normalizeEbayCredentialSets(phase5EbayCredentialSets),
+        ebayListingsSourceApi:
+          ['auto', 'trading', 'inventory'].includes(document.getElementById('phase5-ebay-listings-source-api').value.trim().toLowerCase())
+            ? document.getElementById('phase5-ebay-listings-source-api').value.trim().toLowerCase()
+            : 'auto',
+        phase5EbayClientId: activePhase5EbayCredentials.phase5EbayClientId || '',
+        phase5EbayDevId: activePhase5EbayCredentials.phase5EbayDevId || '',
+        phase5EbayClientSecret: activePhase5EbayCredentials.phase5EbayClientSecret || '',
+        phase5EbayRuName: activePhase5EbayCredentials.phase5EbayRuName || '',
+        phase5EbayRefreshToken: activePhase5EbayCredentials.phase5EbayRefreshToken || '',
+        phase5EbayUserAccessToken: activePhase5EbayCredentials.phase5EbayUserAccessToken || '',
+        phase5EbayRefreshScope: activePhase5EbayCredentials.phase5EbayRefreshScope || '',
+        phase5EbayUserAccessTokenIssuedAt:
+          activePhase5EbayCredentials.phase5EbayUserAccessTokenIssuedAt || '',
         phase6ListingsTable:
           normalizeListingsTableName(
             document.getElementById('phase6-listings-table').value.trim(),
@@ -3817,7 +4032,7 @@
           const percent = Number(payload.percent || 0);
           document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
           document.getElementById('progress-text').textContent = formatEbaySandboxProgressText(payload);
-          setEbaySandboxStatusText(`eBay Sandbox Import status: ${formatEbaySandboxProgressText(payload)}`);
+          setEbaySandboxStatusText(`eBay Listings Import status: ${formatEbaySandboxProgressText(payload)}`);
           if (payload.stage) {
             const level = payload.stage === 'error' ? 'error' : 'info';
             logLine(`eBaySandbox progress: ${formatEbaySandboxProgressText(payload)}`, level);
@@ -5094,9 +5309,10 @@
       const clientId = document.getElementById('phase5-ebay-client-id')?.value.trim() || '';
       const clientSecret = document.getElementById('phase5-ebay-client-secret')?.value.trim() || '';
       const refreshToken = document.getElementById('phase5-ebay-refresh-token')?.value.trim() || '';
+      const userAccessToken = document.getElementById('phase5-ebay-user-access-token')?.value.trim() || '';
       const hasClientCredentials = Boolean(clientId && clientSecret);
-      if (!refreshToken && !hasClientCredentials) {
-        showStatus('run-status', 'error', 'Provide eBay Refresh Token, or App ID + Cert ID.');
+      if (!userAccessToken && !refreshToken && !hasClientCredentials) {
+        showStatus('run-status', 'error', 'Provide eBay User Access Token, eBay Refresh Token, or App ID + Cert ID.');
         return;
       }
       try {
@@ -5193,7 +5409,7 @@
     async function runEbaySandboxImport() {
       if (isPhase4PipelineRunning || isEbayMockImportRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.ebaySandboxImportAPI || typeof window.ebaySandboxImportAPI.run !== 'function') {
-        showStatus('run-status', 'error', 'eBay Sandbox Import API is unavailable.');
+        showStatus('run-status', 'error', 'eBay Listings Import API is unavailable.');
         return;
       }
 
@@ -5201,62 +5417,75 @@
       const tableName = normalizeEbaySandboxTableName(controls.primaryTableEl?.value?.trim() || '');
       const fetchLimit = Number(controls.primaryFetchLimitEl?.value?.trim()) || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT;
       const dryRun = controls.primaryDryRunEl?.value === 'true';
+      const ebayEnvironment = normalizeEbayEnvironmentValue(
+        document.getElementById('phase5-ebay-environment')?.value || 'sandbox'
+      );
+      const requiresAirtable = ebayEnvironment !== 'production';
       const clientId = document.getElementById('phase5-ebay-client-id')?.value.trim() || '';
       const clientSecret = document.getElementById('phase5-ebay-client-secret')?.value.trim() || '';
       const refreshToken = document.getElementById('phase5-ebay-refresh-token')?.value.trim() || '';
-      if (!tableName) {
+      const userAccessToken = document.getElementById('phase5-ebay-user-access-token')?.value.trim() || '';
+      if (requiresAirtable && !tableName) {
         if (controls.phase5TableEl) setFieldError('phase5-ebay-sandbox-table-name', 'Airtable table name is required.');
         if (controls.legacyTableEl) setFieldError('ebay-sandbox-table-name', 'Airtable table name is required.');
-        showStatus('run-status', 'error', 'Enter table name before running eBay Sandbox import.');
+        showStatus('run-status', 'error', 'Enter table name before running eBay Listings import.');
         return;
       }
-      if (!refreshToken && (!clientId || !clientSecret)) {
-        showStatus('run-status', 'error', 'Provide eBay Refresh Token, or App ID + Cert ID.');
+      if (!userAccessToken && !refreshToken && (!clientId || !clientSecret)) {
+        showStatus('run-status', 'error', 'Provide eBay User Access Token, eBay Refresh Token, or App ID + Cert ID.');
         return;
       }
-      if (!document.getElementById('airtable-token').value.trim() || !document.getElementById('airtable-base-id').value.trim()) {
-        setRunState('Error', 'Airtable settings are required for eBay Sandbox import.');
+      if (
+        requiresAirtable &&
+        (!document.getElementById('airtable-token').value.trim() || !document.getElementById('airtable-base-id').value.trim())
+      ) {
+        setRunState('Error', 'Airtable settings are required for eBay Listings import.');
         showStatus('run-status', 'error', 'Please complete Airtable token/base fields first.');
         return;
       }
 
       isEbayMockImportRunning = true;
       updateRunButtonState();
-      setRunState('Running', 'eBay Sandbox inventory import is in progress...');
-      showStatus('run-status', 'info', 'eBay Sandbox inventory import started...');
+      setRunState('Running', 'eBay listings import is in progress...');
+      showStatus('run-status', 'info', 'eBay listings import started...');
       syncEbaySandboxControls({ tableName, fetchLimit, dryRun });
-      setEbaySandboxStatusText('eBay Sandbox Import status: running...');
-      logLine(`Starting eBay Sandbox inventory import (limit=${fetchLimit}).`);
+      setEbaySandboxStatusText('eBay Listings Import status: running...');
+      logLine(`Starting eBay listings import (limit=${fetchLimit}).`);
 
       try {
         const config = collectConfigFromForm();
+        // Destination mode is environment-driven:
+        // production => mirror to sandbox (no Airtable)
+        // sandbox => import to Airtable only
+        config.ebaySandboxDestination = ebayEnvironment === 'production' ? 'sandbox' : 'airtable';
         await window.phase2API.saveConfig(config);
         const result = await window.ebaySandboxImportAPI.run(config);
         if (!result?.success) {
-          throw new Error(result?.message || 'eBay Sandbox inventory import failed.');
+          throw new Error(result?.message || 'eBay listings import failed.');
         }
         const summary = result.summary || {};
         const mode = summary.dryRun ? 'dry run' : 'write run';
-        setRunState('Success', 'eBay Sandbox inventory import completed.');
+        const apiLabel = summary.sourceLabel || (summary.sourceApi === 'trading' ? 'Trading API' : 'Inventory API');
+        setRunState('Success', 'eBay listings import completed.');
         showStatus(
           'run-status',
           'success',
-          `eBay Sandbox inventory import completed (${mode}). Items=${summary.inventoryItemsFetched || 0}, Offers=${summary.offersFetched || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}.`
+          `eBay listings import completed (${mode}, ${apiLabel}). Items=${summary.inventoryItemsFetched || 0}, Offers=${summary.offersFetched || 0}, Deep=${summary.deepListingsFetched || 0}, GetItemFailed=${summary.failedGetItemCount || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}.`
         );
         setEbaySandboxStatusText(
-          `eBay Sandbox Import status: completed (${mode}). Items ${summary.inventoryItemsFetched || 0}, Written ${summary.recordsWritten || 0}, Planned ${summary.recordsPlanned || 0}.`
+          `eBay Listings Import status: completed (${mode}, ${apiLabel}). Items ${summary.inventoryItemsFetched || 0}, Written ${summary.recordsWritten || 0}, Planned ${summary.recordsPlanned || 0}.`
         );
         logLine(
-          `eBay Sandbox import completed. Mode=${mode}, Env=${summary.environment || ''}, Table=${summary.tableName || ''}, Items=${summary.inventoryItemsFetched || 0}, Offers=${summary.offersFetched || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}, Skipped=${summary.skippedInvalidRows || 0}`
+          `eBay listings import completed. Mode=${mode}, API=${apiLabel}, Env=${summary.environment || ''}, Table=${summary.tableName || ''}, Items=${summary.inventoryItemsFetched || 0}, Offers=${summary.offersFetched || 0}, Deep=${summary.deepListingsFetched || 0}, GetItemFailed=${summary.failedGetItemCount || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}, Skipped=${summary.skippedInvalidRows || 0}`
         );
         if (Array.isArray(summary.errors) && summary.errors.length > 0) {
           summary.errors.forEach(err => logLine(`eBaySandbox: ${err}`, 'error'));
         }
       } catch (err) {
-        setRunState('Error', `eBay Sandbox inventory import failed: ${err.message}`);
-        showStatus('run-status', 'error', `eBay Sandbox inventory import failed: ${err.message}`);
-        setEbaySandboxStatusText(`eBay Sandbox Import status: failed (${err.message})`);
-        logLine(`eBay Sandbox inventory import failed: ${err.message}`, 'error');
+        setRunState('Error', `eBay listings import failed: ${err.message}`);
+        showStatus('run-status', 'error', `eBay listings import failed: ${err.message}`);
+        setEbaySandboxStatusText(`eBay Listings Import status: failed (${err.message})`);
+        logLine(`eBay listings import failed: ${err.message}`, 'error');
       } finally {
         isEbayMockImportRunning = false;
         updateRunButtonState();

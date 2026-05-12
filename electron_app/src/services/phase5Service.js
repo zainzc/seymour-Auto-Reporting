@@ -97,6 +97,9 @@ function isExceptionResolved(value, resolvedValues = []) {
   const resolved = normalizeValueSet(resolvedValues);
   const text = normalizeTextOrComparable(value).toLowerCase();
   if (!text) return true;
+  // Support boolean-style exception flags in listings table.
+  if (['false', '0', 'no', 'n', 'none', 'clear', 'cleared'].includes(text)) return true;
+  if (['true', '1', 'yes', 'y', 'open', 'pending', 'exception', 'flagged'].includes(text)) return false;
   if (resolved.size === 0) return false;
   return resolved.has(text);
 }
@@ -211,7 +214,13 @@ function buildLogRow(record = {}, schema = {}, publishState = {}) {
   const categoryId = firstNonEmptyField(fields, [schema.categoryIdField, 'eBay Category ID']);
   const categoryName = firstNonEmptyField(fields, ['Category Name', 'Category']);
   const storeCategory = firstNonEmptyField(fields, ['eBay Store Category', 'Store Category', 'c: partshunter203 ebay MOTORS Store Category']);
-  const aiTitle = firstNonEmptyField(fields, [schema.titleField, 'AI Optimized Title', 'Product Title(New)', 'Product Title']);
+  const aiTitle = firstNonEmptyField(fields, [
+    schema.titleField,
+    'Item Title',
+    'AI Optimized Title',
+    'Product Title(New)',
+    'Product Title'
+  ]);
   const quantity = firstNonEmptyField(fields, ['Quantity', 'AvailableQuantity']);
   const price = firstNonEmptyField(fields, ['Price', 'Start Price', 'Current Price']);
   const publishedAtIso = normalizeText(publishState.publishedAt || new Date().toISOString());
@@ -541,8 +550,8 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
 
     const payloadHash = buildListingPayloadHash(recordFields, {
       categoryIdField: options.phase5RequiredCategoryIdFieldName || schema.categoryIdField || 'eBay Category ID',
-      titleField: options.phase5RequiredTitleFieldName || schema.titleField || 'Title',
-      descriptionField: options.phase5RequiredDescriptionFieldName || schema.descriptionField || 'Description',
+      titleField: options.phase5RequiredTitleFieldName || schema.titleField || 'Item Title',
+      descriptionField: options.phase5RequiredDescriptionFieldName || schema.descriptionField || 'Item Description',
       itemSpecificsField: options.phase5RequiredItemSpecificsFieldName || schema.itemSpecificsField || 'Item Specifics',
       quantityField: options.phase5QuantityFieldName || 'Quantity',
       priceField: options.phase5PriceFieldName || 'Price',
@@ -564,6 +573,21 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
         if (publishResult?.success) {
           summary.publishedSuccess += 1;
           publishSucceeded = true;
+          const op = normalizeText(publishResult?.operation || '');
+          const ack = normalizeText(publishResult?.response?.ack || '');
+          const messages = Array.isArray(publishResult?.response?.messages)
+            ? publishResult.response.messages.map(value => normalizeText(value)).filter(Boolean)
+            : [];
+          if (messages.length > 0 && summary.errors.length < 200) {
+            summary.errors.push(
+              `publish_warning record='${recordId}' sku='${sku}' op='${op || 'unknown'}' ack='${ack || 'unknown'}': ${messages.join(' | ')}`
+            );
+          }
+          if (summary.samplePublished.length < 20) {
+            summary.samplePublished.push(
+              `publish_result record='${recordId}' sku='${sku}' op='${op || 'unknown'}' ack='${ack || 'unknown'}'`
+            );
+          }
         } else {
           summary.publishedFailed += 1;
           summary.errors.push(`publish_failed record='${recordId}' unknown_failure`);
@@ -573,8 +597,15 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
       if ((publishSucceeded || isLogRetryOnly) && !dryRun) {
         const logRow = buildLogRow(record, schema, { publishedAt, publishRunId, payloadHash });
         try {
-          await publishLogService.appendLogRow(logRow);
+          const logResult = await publishLogService.appendLogRow(logRow);
           summary.loggedToSheets += 1;
+          if (summary.samplePublished.length < 20) {
+            const logRange = normalizeText(logResult?.updates?.updatedRange || '');
+            const logTarget = `${publishLogService.spreadsheetId || 'unknown'}:${publishLogService.tabName || 'Log'}`;
+            summary.samplePublished.push(
+              `publish_log_written record='${recordId}' target='${logTarget}' range='${logRange || 'n/a'}'`
+            );
+          }
 
           if (schema.publishStatusField || schema.payloadHashField || schema.publishedAtField || schema.publishRunIdField) {
             await patchListingRecordFields(airtableService, schema.tableId, recordId, {

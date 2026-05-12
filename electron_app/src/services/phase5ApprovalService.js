@@ -171,7 +171,9 @@ function detectEligibilityField(fieldNames = [], explicitFieldName = '') {
     'Auto Push Eligible',
     'Publish Eligible',
     'Eligibility Status',
-    'Auto Push Status'
+    'Auto Push Status',
+    'Eligibility Computed',
+    'Eligible Flag'
   ];
   const lookup = buildFieldLookup(fieldNames);
   const byAlias = findFieldByAliases(lookup, aliases);

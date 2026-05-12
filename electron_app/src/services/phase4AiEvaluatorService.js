@@ -119,7 +119,11 @@ class Phase4AiEvaluatorService {
       allowedValues: Array.isArray(payload.allowedValues) ? payload.allowedValues : [],
       listingTitle: normalizeText(payload.listingTitle),
       listingDescription: normalizeText(payload.listingDescription),
-      listingConditionsAndOptions: normalizeText(payload.listingConditionsAndOptions)
+      listingConditionsAndOptions: normalizeText(payload.listingConditionsAndOptions),
+      listingItemSpecifics: normalizeText(payload.listingItemSpecifics),
+      listingItemSpecificsAllCValuesRelevantToItem: normalizeText(
+        payload.listingItemSpecificsAllCValuesRelevantToItem
+      )
     };
   }
 
@@ -134,7 +138,11 @@ class Phase4AiEvaluatorService {
       allowedValues: Array.isArray(promptInput.allowedValues) ? promptInput.allowedValues : [],
       listingTitle: normalizeText(promptInput.listingTitle),
       listingDescription: normalizeText(promptInput.listingDescription),
-      listingConditionsAndOptions: normalizeText(promptInput.listingConditionsAndOptions)
+      listingConditionsAndOptions: normalizeText(promptInput.listingConditionsAndOptions),
+      listingItemSpecifics: normalizeText(promptInput.listingItemSpecifics),
+      listingItemSpecificsAllCValuesRelevantToItem: normalizeText(
+        promptInput.listingItemSpecificsAllCValuesRelevantToItem
+      )
     });
   }
 
@@ -159,7 +167,7 @@ class Phase4AiEvaluatorService {
     return [
       'Return only valid JSON.',
       'You are resolving exactly one eBay item-specific field for an automotive part.',
-      'Use only the evidence provided in masterPartsData, listingTitle, listingDescription, listingConditionsAndOptions, fieldInstructions, allowedValues, and webEvidence.',
+      'Use only the evidence provided in masterPartsData, listingTitle, listingDescription, listingConditionsAndOptions, listingItemSpecifics, listingItemSpecificsAllCValuesRelevantToItem, fieldInstructions, allowedValues, and webEvidence.',
       'Never guess.',
       'Do not infer a technical value from category, table name, IPN prefix, or part type alone unless the evidence explicitly supports it.',
       'If evidence is missing, weak, ambiguous, or conflicting, return an empty string and low confidence.',
@@ -237,7 +245,11 @@ class Phase4AiEvaluatorService {
       masterPartsData: first.masterPartsData || {},
       listingTitle: normalizeText(first.listingTitle),
       listingDescription: normalizeText(first.listingDescription),
-      listingConditionsAndOptions: normalizeText(first.listingConditionsAndOptions)
+      listingConditionsAndOptions: normalizeText(first.listingConditionsAndOptions),
+      listingItemSpecifics: normalizeText(first.listingItemSpecifics),
+      listingItemSpecificsAllCValuesRelevantToItem: normalizeText(
+        first.listingItemSpecificsAllCValuesRelevantToItem
+      )
     };
     const fields = items.map(item => ({
       fieldName: normalizeText(item.fieldName),
@@ -686,7 +698,7 @@ class Phase4AiEvaluatorService {
               'Return only valid JSON.',
               'Resolve multiple item-specific fields for multiple IPNs.',
               'Never guess.',
-              'Use only each item input evidence (masterPartsData, listingTitle, listingDescription, listingConditionsAndOptions, allowedValues).',
+              'Use only each item input evidence (masterPartsData, listingTitle, listingDescription, listingConditionsAndOptions, listingItemSpecifics, listingItemSpecificsAllCValuesRelevantToItem, allowedValues).',
               'If evidence is weak or missing, return empty value and low confidence.',
               'If allowedValues is non-empty, value must exactly match one allowed value.',
               'Output exact JSON shape: {"results":[{"requestId":"string","value":"string_or_empty","confidence":0,"reason":"short_reason"}]}'

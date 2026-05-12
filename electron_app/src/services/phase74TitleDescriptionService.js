@@ -7,12 +7,13 @@ const { isManualOverrideForField: isManualOverrideFromGovernance } = require('./
 const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API)';
 const DEFAULT_MASTER_TABLE = 'Master Parts Table';
 const LISTING_IPN_FIELD = 'IPN (Interchange Part Number)';
-const LISTING_TITLE_FIELD = 'Title';
-const LISTING_NEW_TITLE_FIELD = 'Title';
-const LISTING_DESCRIPTION_OUTPUT_FIELD = 'c: partshunter203 ebay MOTORS e commerce description';
+const LISTING_LEGACY_TITLE_FIELD = 'Title';
+const LISTING_OUTPUT_TITLE_FIELD = 'Item Title';
+const LISTING_OUTPUT_DESCRIPTION_FIELD = 'Item Description';
 const LISTING_SHORT_DESCRIPTION_FIELD = 'Short Description';
 const LISTING_CONDITIONS_FIELD = 'Conditions & Options';
 const LISTING_CONDITIONS_FALLBACK_FIELD = 'Conditions & Options';
+const LISTING_C_SPECIFICS_FIELD = 'Item Specifics - All C: values relevant to item';
 const MASTER_IPN_FIELD = 'IPN';
 const MASTER_FITMENT_FIELD = 'Part Fitment';
 
@@ -49,6 +50,50 @@ function getFieldValueByName(fields = {}, name = '') {
   const key = Object.keys(fields).find(item => normalizeKey(item) === target);
   if (!key) return '';
   return fields[key];
+}
+
+function parseJsonObject(value) {
+  if (!value && value !== 0) return null;
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  const text = normalizeText(value);
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+function parseListingCSpecifics(fields = {}) {
+  const parsed = parseJsonObject(getFieldValueByName(fields, LISTING_C_SPECIFICS_FIELD));
+  const out = {};
+  if (!parsed) return out;
+  for (const [name, rawValue] of Object.entries(parsed)) {
+    const key = normalizeText(name);
+    if (!key) continue;
+    if (Array.isArray(rawValue)) {
+      const values = rawValue.map(item => normalizeText(item)).filter(Boolean);
+      if (values.length > 0) out[key] = values.join(', ');
+      continue;
+    }
+    const value = normalizeText(rawValue);
+    if (value) out[key] = value;
+  }
+  return out;
+}
+
+function resolveListingConditionsAndOptions(fields = {}, cSpecifics = {}) {
+  const direct =
+    normalizeText(fields[LISTING_CONDITIONS_FIELD]) || normalizeText(fields[LISTING_CONDITIONS_FALLBACK_FIELD]);
+  if (direct) return direct;
+  const entries = Object.entries(cSpecifics || {});
+  const match = entries.find(([name]) => {
+    const key = normalizeKey(name);
+    return key.includes('conditions') && key.includes('option');
+  });
+  return normalizeText(match?.[1]);
 }
 
 function parseIpnList(value) {
@@ -117,12 +162,16 @@ async function fetchMasterRowsByIpnSet(service, tableName, ipns = [], selectFiel
   return rows;
 }
 
-function buildItemSpecifics(fields = {}) {
+function buildItemSpecifics(fields = {}, cSpecifics = {}) {
   const out = {};
   for (const name of LISTING_ITEM_SPECIFIC_FIELDS) {
     const value = normalizeText(fields[name]);
     if (!value) continue;
     out[name] = value;
+  }
+  for (const [name, value] of Object.entries(cSpecifics || {})) {
+    if (!normalizeText(name) || !normalizeText(value)) continue;
+    out[name] = normalizeText(value);
   }
   return out;
 }
@@ -263,8 +312,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   });
 
   const ensureResult = await ensureFields(schemaService, listingsTable, [
-    LISTING_NEW_TITLE_FIELD,
-    LISTING_DESCRIPTION_OUTPUT_FIELD
+    LISTING_OUTPUT_TITLE_FIELD,
+    LISTING_OUTPUT_DESCRIPTION_FIELD
   ]);
   summary.listingFieldsCreated = (ensureResult?.createdFields || []).length;
 
@@ -272,22 +321,23 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
 
   const selectFields = [
     LISTING_IPN_FIELD,
-    LISTING_TITLE_FIELD,
-    LISTING_NEW_TITLE_FIELD,
-    LISTING_DESCRIPTION_OUTPUT_FIELD,
-    `${LISTING_NEW_TITLE_FIELD} Manual Override`,
-    `${LISTING_NEW_TITLE_FIELD} Override`,
-    `${LISTING_NEW_TITLE_FIELD} Locked`,
-    `${LISTING_NEW_TITLE_FIELD} Manual`,
-    `${LISTING_DESCRIPTION_OUTPUT_FIELD} Manual Override`,
-    `${LISTING_DESCRIPTION_OUTPUT_FIELD} Override`,
-    `${LISTING_DESCRIPTION_OUTPUT_FIELD} Locked`,
-    `${LISTING_DESCRIPTION_OUTPUT_FIELD} Manual`,
+    LISTING_LEGACY_TITLE_FIELD,
+    LISTING_OUTPUT_TITLE_FIELD,
+    LISTING_OUTPUT_DESCRIPTION_FIELD,
+    `${LISTING_OUTPUT_TITLE_FIELD} Manual Override`,
+    `${LISTING_OUTPUT_TITLE_FIELD} Override`,
+    `${LISTING_OUTPUT_TITLE_FIELD} Locked`,
+    `${LISTING_OUTPUT_TITLE_FIELD} Manual`,
+    `${LISTING_OUTPUT_DESCRIPTION_FIELD} Manual Override`,
+    `${LISTING_OUTPUT_DESCRIPTION_FIELD} Override`,
+    `${LISTING_OUTPUT_DESCRIPTION_FIELD} Locked`,
+    `${LISTING_OUTPUT_DESCRIPTION_FIELD} Manual`,
     'Manual Override',
     'Manual Edit',
     'Manual Edited',
     LISTING_CONDITIONS_FIELD,
     LISTING_CONDITIONS_FALLBACK_FIELD,
+    LISTING_C_SPECIFICS_FIELD,
     'Condition',
     'Condition Note',
     ...LISTING_CATEGORY_FIELDS,
@@ -360,10 +410,10 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     }
     summary.masterMatched += 1;
 
-    const conditionsAndOptions =
-      normalizeText(fields[LISTING_CONDITIONS_FIELD]) || normalizeText(fields[LISTING_CONDITIONS_FALLBACK_FIELD]);
+    const cSpecifics = parseListingCSpecifics(fields);
+    const conditionsAndOptions = resolveListingConditionsAndOptions(fields, cSpecifics);
     const categoryContext = buildCategoryContext(fields);
-    const itemSpecifics = buildItemSpecifics(fields);
+    const itemSpecifics = buildItemSpecifics(fields, cSpecifics);
 
     emitProgress(progressCallback, {
       stage: 'phase74_generate',
@@ -382,7 +432,9 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         conditionNote: normalizeText(fields['Condition Note']),
         itemSpecifics,
         partFitment: normalizeText(master?.fields?.[MASTER_FITMENT_FIELD]),
-        currentTitle: normalizeText(fields[LISTING_TITLE_FIELD])
+        currentTitle:
+          normalizeText(getFieldValueByName(fields, LISTING_OUTPUT_TITLE_FIELD)) ||
+          normalizeText(getFieldValueByName(fields, LISTING_LEGACY_TITLE_FIELD))
       });
     } catch (error) {
       summary.aiFailures += 1;
@@ -404,25 +456,25 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       continue;
     }
 
-    const existingTitleNew = normalizeText(fields[LISTING_NEW_TITLE_FIELD]);
-    const existingDescriptionOut = normalizeText(fields[LISTING_DESCRIPTION_OUTPUT_FIELD]);
+    const existingTitleNew = normalizeText(fields[LISTING_OUTPUT_TITLE_FIELD]);
+    const existingDescriptionOut = normalizeText(fields[LISTING_OUTPUT_DESCRIPTION_FIELD]);
     const existingShort = hasShortDescriptionField ? normalizeText(fields[LISTING_SHORT_DESCRIPTION_FIELD]) : '';
-    const titleManualOverride = isManualOverrideForField(fields, LISTING_NEW_TITLE_FIELD);
-    const descriptionManualOverride = isManualOverrideForField(fields, LISTING_DESCRIPTION_OUTPUT_FIELD);
+    const titleManualOverride = isManualOverrideForField(fields, LISTING_OUTPUT_TITLE_FIELD);
+    const descriptionManualOverride = isManualOverrideForField(fields, LISTING_OUTPUT_DESCRIPTION_FIELD);
     const shortDescriptionManualOverride =
       hasShortDescriptionField && isManualOverrideForField(fields, LISTING_SHORT_DESCRIPTION_FIELD);
 
     const writeFields = {};
 
     if (!titleManualOverride && nextTitle && nextTitle !== existingTitleNew) {
-      writeFields[LISTING_NEW_TITLE_FIELD] = nextTitle;
+      writeFields[LISTING_OUTPUT_TITLE_FIELD] = nextTitle;
       summary.titleGenerated += 1;
     } else if (titleManualOverride) {
       summary.skippedManualOverride += 1;
     }
 
     if (!descriptionManualOverride && nextDescription && nextDescription !== existingDescriptionOut) {
-      writeFields[LISTING_DESCRIPTION_OUTPUT_FIELD] = nextDescription;
+      writeFields[LISTING_OUTPUT_DESCRIPTION_FIELD] = nextDescription;
       summary.descriptionGenerated += 1;
     } else if (descriptionManualOverride) {
       summary.skippedManualOverride += 1;

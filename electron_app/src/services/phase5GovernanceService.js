@@ -160,10 +160,11 @@ function detectRequiredFieldNames(fieldNames = [], options = {}) {
     detectFieldByAliases(fieldNames, ['eBay Category ID']);
   const titleField =
     normalizeText(options.titleFieldName) ||
-    detectFieldByAliases(fieldNames, ['AI Optimized Title', 'Product Title(New)', 'Product Title']);
+    detectFieldByAliases(fieldNames, ['Item Title', 'AI Optimized Title', 'Product Title(New)', 'Product Title']);
   const descriptionField =
     normalizeText(options.descriptionFieldName) ||
     detectFieldByAliases(fieldNames, [
+      'Item Description',
       'AI Description',
       'Buyer-visible Description',
       'c: partshunter203 ebay MOTORS e commerce description'
@@ -179,13 +180,15 @@ function detectRequiredFieldNames(fieldNames = [], options = {}) {
     detectFieldByAliases(fieldNames, ['Batch', 'Batch Link', 'Listing Batches', 'Listing Batch']);
   const blockedField =
     normalizeText(options.blockedFieldName) ||
-    detectFieldByAliases(fieldNames, ['Blocked', 'Is Blocked', 'Hold']);
+    detectFieldByAliases(fieldNames, ['Blocked', 'Is Blocked', 'Hold', 'Blocked Flag']);
   const exceptionField =
     normalizeText(options.exceptionFieldName) ||
     detectFieldByAliases(fieldNames, [
       'ClickUp Exception Status',
       'Exception Status',
-      'Required Exception Status'
+      'Required Exception Status',
+      'Exception Flag',
+      'Has Exception'
     ]);
   const publishStatusField =
     normalizeText(options.publishStatusFieldName) ||

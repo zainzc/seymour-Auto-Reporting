@@ -97,6 +97,186 @@ function resolveListingsTableName(...candidates) {
   return DEFAULT_EBAY_LISTINGS_TABLE;
 }
 
+function normalizeEbayEnvironment(value) {
+  return String(value || '').trim().toLowerCase() === 'production' ? 'production' : 'sandbox';
+}
+
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function normalizeEbayCredentialSet(raw = {}) {
+  return {
+    phase5EbayClientId: normalizeText(raw.phase5EbayClientId || ''),
+    phase5EbayDevId: normalizeText(raw.phase5EbayDevId || ''),
+    phase5EbayClientSecret: normalizeText(raw.phase5EbayClientSecret || ''),
+    phase5EbayRuName: normalizeText(raw.phase5EbayRuName || ''),
+    phase5EbayRefreshToken: normalizeText(raw.phase5EbayRefreshToken || ''),
+    phase5EbayUserAccessToken: normalizeText(raw.phase5EbayUserAccessToken || ''),
+    phase5EbayRefreshScope: normalizeText(raw.phase5EbayRefreshScope || ''),
+    phase5EbayUserAccessTokenIssuedAt: normalizeText(raw.phase5EbayUserAccessTokenIssuedAt || '')
+  };
+}
+
+function hasAnyEbayCredentialValue(set = {}) {
+  if (!set || typeof set !== 'object') return false;
+  return [
+    'phase5EbayClientId',
+    'phase5EbayDevId',
+    'phase5EbayClientSecret',
+    'phase5EbayRuName',
+    'phase5EbayRefreshToken',
+    'phase5EbayUserAccessToken',
+    'phase5EbayRefreshScope',
+    'phase5EbayUserAccessTokenIssuedAt'
+  ].some(key => Boolean(normalizeText(set[key] || '')));
+}
+
+function getLegacyEbayCredentialSet(stored = {}) {
+  return normalizeEbayCredentialSet({
+    phase5EbayClientId: stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '',
+    phase5EbayDevId: stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '',
+    phase5EbayClientSecret: stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '',
+    phase5EbayRuName: stored.phase5EbayRuName || process.env.EBAY_RUNAME || '',
+    phase5EbayRefreshToken: stored.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || '',
+    phase5EbayUserAccessToken: stored.phase5EbayUserAccessToken || process.env.EBAY_USER_ACCESS_TOKEN || '',
+    phase5EbayRefreshScope: stored.phase5EbayRefreshScope || process.env.EBAY_REFRESH_SCOPE || '',
+    phase5EbayUserAccessTokenIssuedAt:
+      stored.phase5EbayUserAccessTokenIssuedAt || process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT || ''
+  });
+}
+
+function getEnvSpecificEbayCredentialSet(env = 'sandbox', stored = {}) {
+  const upper = env === 'production' ? 'PRODUCTION' : 'SANDBOX';
+  return normalizeEbayCredentialSet({
+    phase5EbayClientId: process.env[`EBAY_${upper}_CLIENT_ID`] || '',
+    phase5EbayDevId: process.env[`EBAY_${upper}_DEV_ID`] || '',
+    phase5EbayClientSecret: process.env[`EBAY_${upper}_CLIENT_SECRET`] || '',
+    phase5EbayRuName: process.env[`EBAY_${upper}_RUNAME`] || '',
+    phase5EbayRefreshToken: process.env[`EBAY_${upper}_REFRESH_TOKEN`] || '',
+    phase5EbayUserAccessToken: process.env[`EBAY_${upper}_USER_ACCESS_TOKEN`] || '',
+    phase5EbayRefreshScope: process.env[`EBAY_${upper}_REFRESH_SCOPE`] || '',
+    phase5EbayUserAccessTokenIssuedAt: process.env[`EBAY_${upper}_USER_ACCESS_TOKEN_ISSUED_AT`] || ''
+  });
+}
+
+function getEbayCredentialSets(stored = {}) {
+  const selectedEnvironment = normalizeEbayEnvironment(
+    stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox'
+  );
+  const legacy = getLegacyEbayCredentialSet(stored);
+  const rawSets =
+    stored.phase5EbayCredentialSets && typeof stored.phase5EbayCredentialSets === 'object'
+      ? stored.phase5EbayCredentialSets
+      : {};
+
+  const sandboxBase = normalizeEbayCredentialSet({
+    ...getEnvSpecificEbayCredentialSet('sandbox', stored),
+    ...(rawSets.sandbox || {})
+  });
+  const productionBase = normalizeEbayCredentialSet({
+    ...getEnvSpecificEbayCredentialSet('production', stored),
+    ...(rawSets.production || {})
+  });
+
+  if (hasAnyEbayCredentialValue(legacy)) {
+    if (selectedEnvironment === 'production' && !hasAnyEbayCredentialValue(productionBase)) {
+      Object.assign(productionBase, legacy);
+    }
+    if (selectedEnvironment === 'sandbox' && !hasAnyEbayCredentialValue(sandboxBase)) {
+      Object.assign(sandboxBase, legacy);
+    }
+  }
+
+  return {
+    sandbox: normalizeEbayCredentialSet(sandboxBase),
+    production: normalizeEbayCredentialSet(productionBase)
+  };
+}
+
+function normalizeAndAttachEbayCredentials(existing = {}, incoming = {}) {
+  const merged = {
+    ...existing,
+    ...incoming
+  };
+  const selectedEnvironment = normalizeEbayEnvironment(
+    merged.phase5EbayEnvironment || existing.phase5EbayEnvironment || 'sandbox'
+  );
+  const existingSets = getEbayCredentialSets(existing);
+  const incomingSets =
+    incoming.phase5EbayCredentialSets && typeof incoming.phase5EbayCredentialSets === 'object'
+      ? incoming.phase5EbayCredentialSets
+      : {};
+
+  const sets = {
+    sandbox: normalizeEbayCredentialSet({
+      ...existingSets.sandbox,
+      ...(incomingSets.sandbox || {})
+    }),
+    production: normalizeEbayCredentialSet({
+      ...existingSets.production,
+      ...(incomingSets.production || {})
+    })
+  };
+
+  const flatCredentialKeys = [
+    'phase5EbayClientId',
+    'phase5EbayDevId',
+    'phase5EbayClientSecret',
+    'phase5EbayRuName',
+    'phase5EbayRefreshToken',
+    'phase5EbayUserAccessToken',
+    'phase5EbayRefreshScope',
+    'phase5EbayUserAccessTokenIssuedAt'
+  ];
+  const hasFlatOverrides = flatCredentialKeys.some(key =>
+    Object.prototype.hasOwnProperty.call(incoming, key)
+  );
+
+  if (hasFlatOverrides) {
+    sets[selectedEnvironment] = normalizeEbayCredentialSet({
+      ...sets[selectedEnvironment],
+      phase5EbayClientId: Object.prototype.hasOwnProperty.call(incoming, 'phase5EbayClientId')
+        ? incoming.phase5EbayClientId
+        : sets[selectedEnvironment].phase5EbayClientId,
+      phase5EbayDevId: Object.prototype.hasOwnProperty.call(incoming, 'phase5EbayDevId')
+        ? incoming.phase5EbayDevId
+        : sets[selectedEnvironment].phase5EbayDevId,
+      phase5EbayClientSecret: Object.prototype.hasOwnProperty.call(incoming, 'phase5EbayClientSecret')
+        ? incoming.phase5EbayClientSecret
+        : sets[selectedEnvironment].phase5EbayClientSecret,
+      phase5EbayRuName: Object.prototype.hasOwnProperty.call(incoming, 'phase5EbayRuName')
+        ? incoming.phase5EbayRuName
+        : sets[selectedEnvironment].phase5EbayRuName,
+      phase5EbayRefreshToken: Object.prototype.hasOwnProperty.call(incoming, 'phase5EbayRefreshToken')
+        ? incoming.phase5EbayRefreshToken
+        : sets[selectedEnvironment].phase5EbayRefreshToken,
+      phase5EbayUserAccessToken: Object.prototype.hasOwnProperty.call(incoming, 'phase5EbayUserAccessToken')
+        ? incoming.phase5EbayUserAccessToken
+        : sets[selectedEnvironment].phase5EbayUserAccessToken,
+      phase5EbayRefreshScope: Object.prototype.hasOwnProperty.call(incoming, 'phase5EbayRefreshScope')
+        ? incoming.phase5EbayRefreshScope
+        : sets[selectedEnvironment].phase5EbayRefreshScope,
+      phase5EbayUserAccessTokenIssuedAt: Object.prototype.hasOwnProperty.call(incoming, 'phase5EbayUserAccessTokenIssuedAt')
+        ? incoming.phase5EbayUserAccessTokenIssuedAt
+        : sets[selectedEnvironment].phase5EbayUserAccessTokenIssuedAt
+    });
+  }
+
+  const active = sets[selectedEnvironment] || normalizeEbayCredentialSet({});
+  merged.phase5EbayEnvironment = selectedEnvironment;
+  merged.phase5EbayCredentialSets = sets;
+  merged.phase5EbayClientId = active.phase5EbayClientId;
+  merged.phase5EbayDevId = active.phase5EbayDevId;
+  merged.phase5EbayClientSecret = active.phase5EbayClientSecret;
+  merged.phase5EbayRuName = active.phase5EbayRuName;
+  merged.phase5EbayRefreshToken = active.phase5EbayRefreshToken;
+  merged.phase5EbayUserAccessToken = active.phase5EbayUserAccessToken;
+  merged.phase5EbayRefreshScope = active.phase5EbayRefreshScope;
+  merged.phase5EbayUserAccessTokenIssuedAt = active.phase5EbayUserAccessTokenIssuedAt;
+  return merged;
+}
+
 function formatDetailedErrorMessage(error) {
   const status = error?.response?.status;
   const payload = error?.response?.data;
@@ -137,6 +317,315 @@ function emitInventoryAutoChainLog(text, level = 'info') {
       });
     }
   } catch (_) {}
+}
+
+async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
+  const runtime = baseConfig && typeof baseConfig === 'object' ? baseConfig : {};
+  const persisted = getInventoryConfig('phase2Config') || {};
+  const stored = {
+    ...persisted,
+    ...runtime
+  };
+  const summary = {};
+  const firstNonEmpty = (...values) => {
+    for (const value of values) {
+      const text = normalizeText(value);
+      if (text) return text;
+    }
+    return '';
+  };
+  const emitStepProgress = (stage, percent, message) => {
+    if (typeof hooks?.onProgress !== 'function') return;
+    try {
+      hooks.onProgress({
+        stage,
+        percent,
+        counts: summary,
+        message
+      });
+    } catch (_) {}
+  };
+
+  emitStepProgress('ebaysandbox_post_import_start', 99, 'Post-import automation started.');
+  emitInventoryAutoChainLog('Post-import automation started: Phase4 -> Phase6 -> Phase7.2 -> Phase7.4');
+
+  const listingsTable = resolveListingsTableName(
+    runtime.phase4DListingsTable,
+    persisted.phase4DListingsTable,
+    runtime.phase6ListingsTable,
+    persisted.phase6ListingsTable,
+    runtime.phase74ListingsTable,
+    persisted.phase74ListingsTable,
+    runtime.ebaySandboxTableName,
+    persisted.ebaySandboxTableName,
+    runtime.phase5ListingsTable,
+    persisted.phase5ListingsTable,
+    process.env.PHASE6_LISTINGS_TABLE,
+    process.env.PHASE74_LISTINGS_TABLE,
+    DEFAULT_EBAY_LISTINGS_TABLE
+  );
+
+  emitStepProgress('ebaysandbox_post_import_batch', 99, 'Creating listing batches from imported listings...');
+  summary.phase5BatchCreation = await createBatchFromListings({
+    ...stored,
+    phase5ListingsTable: listingsTable,
+    phase4DListingsTable: listingsTable
+  });
+  emitInventoryAutoChainLog(
+    `Post-import automation: Batch creation completed ` +
+      `(status=${summary.phase5BatchCreation?.status || 'unknown'}, ` +
+      `batches=${summary.phase5BatchCreation?.batchesCreated || 0}, ` +
+      `linked=${summary.phase5BatchCreation?.linkedRecords || 0}, ` +
+      `failed=${summary.phase5BatchCreation?.failedRecords || 0})`
+  );
+  if (summary.phase5BatchCreation?.success === false) {
+    emitInventoryAutoChainLog(
+      `Post-import automation: Batch creation returned non-success ` +
+        `(message=${summary.phase5BatchCreation?.message || 'unknown'})`,
+      'error'
+    );
+  }
+  const batchDiagnostics = summary.phase5BatchCreation?.diagnostics || {};
+  const noBatchCandidates =
+    String(summary.phase5BatchCreation?.status || '').toLowerCase() === 'nocandidates' ||
+    Number(summary.phase5BatchCreation?.linkedRecords || 0) <= 0;
+  if (noBatchCandidates) {
+    const detail =
+      `Post-import automation skipped: batch creation returned no eligible candidates ` +
+      `(status=${summary.phase5BatchCreation?.status || 'unknown'}, ` +
+      `totalRows=${Number(batchDiagnostics.totalRows || 0)}, ` +
+      `excludedAlreadyLinked=${Number(batchDiagnostics.excludedAlreadyLinked || 0)}, ` +
+      `excludedAlreadyPublished=${Number(batchDiagnostics.excludedAlreadyPublished || 0)}, ` +
+      `candidates=${Number(batchDiagnostics.candidates || 0)}).`;
+    summary.blocked = true;
+    summary.message = detail;
+    emitStepProgress('ebaysandbox_post_import_skipped_no_candidates', 100, detail);
+    emitInventoryAutoChainLog(detail);
+    return summary;
+  }
+
+  const phase4RulesDriveFile = String(
+    firstNonEmpty(runtime.phase4RulesDriveFile, persisted.phase4RulesDriveFile) ||
+      process.env.PHASE4_RULES_DRIVE_FILE ||
+      process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+      ''
+  ).trim();
+  const phase4OpenAiKey = String(firstNonEmpty(runtime.openaiApiKey, persisted.openaiApiKey) || process.env.OPENAI_API_KEY || '').trim();
+  const phase4BListId = String(
+    firstNonEmpty(runtime.phase4BClickupListId, persisted.phase4BClickupListId) || process.env.PHASE4B_CLICKUP_LIST_ID || ''
+  ).trim();
+  const phase4CListId = String(
+    firstNonEmpty(runtime.phase4CClickupListId, persisted.phase4CClickupListId) ||
+      process.env.PHASE4C_CLICKUP_LIST_ID ||
+      phase4BListId
+  ).trim();
+  const resolvedAirtableToken = firstNonEmpty(runtime.airtableToken, persisted.airtableToken, process.env.AIRTABLE_TOKEN);
+  const resolvedAirtableBaseId = firstNonEmpty(runtime.airtableBaseId, persisted.airtableBaseId, process.env.AIRTABLE_BASE_ID);
+  const resolvedItemSpecificsBaseId = firstNonEmpty(runtime.itemSpecificsBaseId, persisted.itemSpecificsBaseId);
+  const resolvedClickupToken = firstNonEmpty(runtime.clickupToken, persisted.clickupToken, process.env.CLICKUP_TOKEN);
+  const chainBase = {
+    ...stored,
+    airtableToken: resolvedAirtableToken,
+    airtableBaseId: resolvedAirtableBaseId,
+    itemSpecificsBaseId: resolvedItemSpecificsBaseId,
+    clickupToken: resolvedClickupToken,
+    openaiApiKey: phase4OpenAiKey,
+    phase4BClickupListId: phase4BListId,
+    phase4CClickupListId: phase4CListId,
+    phase4RulesDriveFile
+  };
+  const missingPhase4Config = [];
+  if (!resolvedAirtableToken) missingPhase4Config.push('airtableToken');
+  if (!resolvedAirtableBaseId) missingPhase4Config.push('airtableBaseId');
+  if (!resolvedItemSpecificsBaseId) missingPhase4Config.push('itemSpecificsBaseId');
+  if (!resolvedClickupToken) missingPhase4Config.push('clickupToken');
+  if (!phase4RulesDriveFile) missingPhase4Config.push('phase4RulesDriveFile');
+  if (!phase4OpenAiKey) missingPhase4Config.push('openaiApiKey');
+  if (!phase4BListId) missingPhase4Config.push('phase4BClickupListId');
+  if (!phase4CListId) missingPhase4Config.push('phase4CClickupListId');
+  if (missingPhase4Config.length > 0) {
+    const detail = `Post-import automation blocked: missing Phase 4 config (${missingPhase4Config.join(', ')})`;
+    summary.blocked = true;
+    summary.message = detail;
+    summary.missingPhase4Config = missingPhase4Config;
+    emitStepProgress('ebaysandbox_post_import_blocked', 100, detail);
+    emitInventoryAutoChainLog(detail, 'error');
+    return summary;
+  }
+
+  emitStepProgress('ebaysandbox_post_import_phase4a', 99, 'Running Phase 4A...');
+
+  const rulesDryRun =
+    typeof stored.phase4RulesDryRun === 'boolean'
+      ? stored.phase4RulesDryRun
+      : false;
+  summary.phase4A = await runPhase4RulesPopulate({
+    ...chainBase,
+    dryRun: rulesDryRun,
+    execute: !rulesDryRun,
+    ruleTypes: ['F'],
+    authContext: 'inventory',
+    rulesDriveFile: phase4RulesDriveFile,
+    globalDefaultsTable: String(
+      stored.phase4GlobalDefaultsTable ||
+        process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+        'Fixed Item Specifics (Global Defaults)'
+    ).trim(),
+    logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim()
+  }, () => {});
+  emitInventoryAutoChainLog(`Post-import automation: Phase 4A completed (updated=${summary.phase4A?.fixedFieldsUpdated || 0})`);
+
+  emitStepProgress('ebaysandbox_post_import_phase4b', 99, 'Running Phase 4B-lite...');
+  const bliteDryRun =
+    typeof stored.phase4BLiteDryRun === 'boolean'
+      ? stored.phase4BLiteDryRun
+      : false;
+  summary.phase4B = await runPhase4BLite({
+    ...chainBase,
+    dryRun: bliteDryRun,
+    execute: !bliteDryRun,
+    authContext: 'inventory',
+    rulesDriveFile: phase4RulesDriveFile,
+    logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim(),
+    testTableName: '',
+    testMaxTables: 0,
+    openaiApiKey: phase4OpenAiKey,
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+    phase4BClickupListName: String(stored.phase4BClickupListName || '').trim(),
+    phase4BClickupListId: phase4BListId,
+    clickupOpenStatus: String(
+      stored.phase4BClickupOpenStatus ||
+        process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
+        'To Do'
+    ).trim()
+  }, () => {});
+  emitInventoryAutoChainLog(
+    `Post-import automation: Phase 4B completed ` +
+      `(vmfUpdated=${summary.phase4B?.vmfFieldsUpdated || 0}, vmfTasksCreated=${summary.phase4B?.vmfTasksCreated || 0})`
+  );
+
+  emitStepProgress('ebaysandbox_post_import_phase4c', 99, 'Running Phase 4C...');
+  const cmfDryRun =
+    typeof stored.phase4CMFDryRun === 'boolean'
+      ? stored.phase4CMFDryRun
+      : false;
+  summary.phase4C = await runPhase4CMF({
+    ...chainBase,
+    dryRun: cmfDryRun,
+    execute: !cmfDryRun,
+    authContext: 'inventory',
+    rulesDriveFile: phase4RulesDriveFile,
+    logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim(),
+    phase4CClickupListName: String(
+      stored.phase4CClickupListName || stored.phase4BClickupListName || ''
+    ).trim(),
+    phase4CClickupListId: phase4CListId,
+    phase4CClickupOpenStatus: String(
+      stored.phase4CClickupOpenStatus ||
+        stored.phase4BClickupOpenStatus ||
+        process.env.PHASE4C_CLICKUP_OPEN_STATUS ||
+        process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
+        'To Do'
+    ).trim()
+  }, () => {});
+  emitInventoryAutoChainLog(
+    `Post-import automation: Phase 4C completed ` +
+      `(mfTasksCreated=${summary.phase4C?.mfTasksCreated || 0}, mfWritebacksCompleted=${summary.phase4C?.mfWritebacksCompleted || 0})`
+  );
+
+  emitStepProgress('ebaysandbox_post_import_phase4d', 99, 'Running Phase 4D...');
+  const dDryRun =
+    typeof stored.phase4DDryRun === 'boolean'
+      ? stored.phase4DDryRun
+      : false;
+  summary.phase4D = await runPhase4DListing({
+    ...chainBase,
+    dryRun: dDryRun,
+    execute: !dDryRun,
+    authContext: 'inventory',
+    rulesDriveFile: phase4RulesDriveFile,
+    logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim(),
+    phase4DListingsTable: listingsTable,
+    openaiApiKey: phase4OpenAiKey,
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
+  }, () => {});
+  emitInventoryAutoChainLog(
+    `Post-import automation: Phase 4D completed ` +
+      `(listingsEligible=${summary.phase4D?.listingsEligible || 0})`
+  );
+
+  emitStepProgress('ebaysandbox_post_import_phase6', 99, 'Running Phase 6 fitment extraction...');
+  summary.phase6 = await runPhase6Fitment({
+    ...chainBase,
+    phase6ListingsTable: listingsTable,
+    airtableMasterTable: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
+    openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+    phase6PromptCacheEnabled:
+      String(stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
+      'false',
+    phase6PromptCacheKey: String(
+      stored.phase6PromptCacheKey ||
+        process.env.PHASE6_PROMPT_CACHE_KEY ||
+        process.env.OPENAI_PROMPT_CACHE_KEY ||
+        'phase6_fitment_v1'
+    ).trim(),
+    phase6TestIpns: String(stored.phase6TestIpns || process.env.PHASE6_TEST_IPNS || '').trim(),
+    phase6MaxIpns: Number(stored.phase6MaxIpns || process.env.PHASE6_MAX_IPNS || 0) || 0,
+    sampleLimit: Number(stored.phase6SampleLimit || process.env.PHASE6_SAMPLE_LIMIT || 20) || 20
+  }, () => {});
+  emitInventoryAutoChainLog(`Post-import automation: Phase 6 completed (updated=${summary.phase6?.masterPartsUpdated || 0})`);
+
+  emitStepProgress('ebaysandbox_post_import_phase72', 99, 'Running Phase 7.2 fitment image generation...');
+  summary.phase72 = await runPhase72FitmentImage({
+    ...chainBase,
+    phase72MasterTable: String(
+      stored.phase72MasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
+    ).trim(),
+    phase72DriveFolderId: String(stored.phase72DriveFolderId || process.env.PHASE72_DRIVE_FOLDER_ID || '').trim(),
+    phase72TestIpns: String(stored.phase72TestIpns || process.env.PHASE72_TEST_IPNS || '').trim(),
+    phase72MaxIpns: Number(stored.phase72MaxIpns || process.env.PHASE72_MAX_IPNS || 0) || 0,
+    phase72ForceRegenerate:
+      String(stored.phase72ForceRegenerate ?? process.env.PHASE72_FORCE_REGENERATE ?? 'false').trim().toLowerCase() === 'true',
+    sampleLimit: Number(stored.phase72SampleLimit || process.env.PHASE72_SAMPLE_LIMIT || 20) || 20
+  }, () => {});
+  emitInventoryAutoChainLog(
+    `Post-import automation: Phase 7.2 completed ` +
+      `(generated=${summary.phase72?.fitmentImagesGenerated || 0}, alreadyPresent=${summary.phase72?.fitmentImagesAlreadyPresent || 0})`
+  );
+
+  emitStepProgress('ebaysandbox_post_import_phase74', 99, 'Running Phase 7.4 title/description generation...');
+  summary.phase74 = await runPhase74TitleDescription({
+    ...chainBase,
+    phase74ListingsTable: listingsTable,
+    airtableMasterTable: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
+    openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+    phase74PromptCacheEnabled:
+      String(stored.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
+      'false',
+    phase74PromptCacheKey: String(
+      stored.phase74PromptCacheKey ||
+        process.env.PHASE74_PROMPT_CACHE_KEY ||
+        process.env.OPENAI_PROMPT_CACHE_KEY ||
+        'phase74_title_description_v1'
+    ).trim(),
+    phase74TestIpns: String(stored.phase74TestIpns || process.env.PHASE74_TEST_IPNS || '').trim(),
+    phase74MaxListings: Number(stored.phase74MaxListings || process.env.PHASE74_MAX_LISTINGS || 0) || 0,
+    sampleLimit: Number(stored.phase74SampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20
+  }, () => {});
+  emitInventoryAutoChainLog(
+    `Post-import automation: Phase 7.4 completed ` +
+      `(titles=${summary.phase74?.titleGenerated || 0}, descriptions=${summary.phase74?.descriptionGenerated || 0})`
+  );
+
+  emitStepProgress('ebaysandbox_post_import_complete', 100, 'Post-import automation completed.');
+  emitInventoryAutoChainLog('Post-import automation completed: Phase4 -> Phase6 -> Phase7.2 -> Phase7.4');
+  return summary;
 }
 
 /* ---------------------------
@@ -812,7 +1301,7 @@ setPostPushHook(async payload => {
   const phase2Result = await phase2AutoRunService.onPhase1PushSuccess(payload);
   if (phase2Result?.skipped) {
     emitInventoryAutoChainLog(
-      `Phase3/Phase4 auto-run skipped after Phase1 push: Phase2 did not run (reason=${phase2Result.reason || 'unknown'})`
+      `Phase3 auto-run skipped after Phase1 push: Phase2 did not run (reason=${phase2Result.reason || 'unknown'})`
     );
     return;
   }
@@ -828,7 +1317,7 @@ setPostPushHook(async payload => {
     Boolean(phase3Config?.shipstationApiSecret);
 
   if (!hasPhase3MinimumConfig) {
-    emitInventoryAutoChainLog('Phase3/Phase4 auto-run skipped after Phase2 success: missing Phase3 config');
+    emitInventoryAutoChainLog('Phase3 auto-run skipped after Phase2 success: missing Phase3 config');
     return;
   }
 
@@ -841,181 +1330,12 @@ setPostPushHook(async payload => {
         `ipnsUpdated=${phase3Summary?.ipnsUpdated || 0}, ` +
         `dryRun=${Boolean(phase3Config?.phase3DryRun)})`
     );
+    emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase3 by configuration.');
   } catch (error) {
     emitInventoryAutoChainLog(
-      `Phase3 auto-run failed after Phase2 success. Phase4 auto-run blocked: ${error.message}`,
+      `Phase3 auto-run failed after Phase2 success: ${error.message}`,
       'error'
     );
-    return;
-  }
-
-  const phase4Stored = getInventoryConfig('phase2Config') || {};
-  const phase4RulesDriveFile = String(
-    phase4Stored.phase4RulesDriveFile ||
-      process.env.PHASE4_RULES_DRIVE_FILE ||
-      process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-      ''
-  ).trim();
-  const phase4OpenAiKey = String(
-    phase4Stored.openaiApiKey ||
-      process.env.OPENAI_API_KEY ||
-      ''
-  ).trim();
-  const phase4BListId = String(
-    phase4Stored.phase4BClickupListId ||
-      process.env.PHASE4B_CLICKUP_LIST_ID ||
-      ''
-  ).trim();
-  const phase4CListId = String(
-    phase4Stored.phase4CClickupListId ||
-      process.env.PHASE4C_CLICKUP_LIST_ID ||
-      phase4BListId
-  ).trim();
-  const hasPhase4MinimumConfig =
-    Boolean(phase4Stored?.airtableToken) &&
-    Boolean(phase4Stored?.airtableBaseId) &&
-    Boolean(phase4Stored?.itemSpecificsBaseId) &&
-    Boolean(phase4Stored?.clickupToken) &&
-    Boolean(phase4RulesDriveFile) &&
-    Boolean(phase4OpenAiKey) &&
-    Boolean(phase4BListId) &&
-    Boolean(phase4CListId);
-  if (!hasPhase4MinimumConfig) {
-    emitInventoryAutoChainLog('Phase4 auto-run skipped after Phase3 success: missing Phase4 config');
-    return;
-  }
-
-  try {
-    emitInventoryAutoChainLog('Phase4 auto-run started after Phase1+Phase2+Phase3 success');
-
-    const mirrorOptions = {
-      ...phase4Stored,
-      authContext: 'inventory',
-      itemSpecificsBaseId: String(phase4Stored.itemSpecificsBaseId || '').trim(),
-      dryRun:
-        typeof phase4Stored.phase4DryRun === 'boolean'
-          ? phase4Stored.phase4DryRun
-          : true,
-      incrementalEnabled:
-        typeof phase4Stored.phase4IncrementalEnabled === 'boolean'
-          ? phase4Stored.phase4IncrementalEnabled
-          : true
-    };
-    const mirrorSummary = await runPhase4Mirroring(mirrorOptions, () => {});
-    emitInventoryAutoChainLog(
-      `Phase4 auto-run: mirroring completed ` +
-        `(scanned=${mirrorSummary?.masterRecordsScanned || 0}, ` +
-        `eligible=${mirrorSummary?.masterRecordsEligible || 0}, ` +
-        `created=${mirrorSummary?.ipnRowsCreated || 0}, ` +
-        `planned=${mirrorSummary?.ipnRowsPlanned || 0})`
-    );
-
-    const rulesDryRun =
-      typeof phase4Stored.phase4RulesDryRun === 'boolean'
-        ? phase4Stored.phase4RulesDryRun
-        : true;
-    const phase4ASummary = await runPhase4RulesPopulate({
-      ...phase4Stored,
-      dryRun: rulesDryRun,
-      execute: !rulesDryRun,
-      ruleTypes: ['F'],
-      authContext: 'inventory',
-      rulesDriveFile: phase4RulesDriveFile,
-      globalDefaultsTable: String(
-        phase4Stored.phase4GlobalDefaultsTable ||
-          process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
-          'Fixed Item Specifics (Global Defaults)'
-      ).trim(),
-      logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim()
-    }, () => {});
-    emitInventoryAutoChainLog(
-      `Phase4 auto-run: 4A completed (updated=${phase4ASummary?.fixedFieldsUpdated || 0})`
-    );
-
-    const bliteDryRun =
-      typeof phase4Stored.phase4BLiteDryRun === 'boolean'
-        ? phase4Stored.phase4BLiteDryRun
-        : true;
-    const phase4BSummary = await runPhase4BLite({
-      ...phase4Stored,
-      dryRun: bliteDryRun,
-      execute: !bliteDryRun,
-      authContext: 'inventory',
-      rulesDriveFile: phase4RulesDriveFile,
-      logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
-      openaiApiKey: phase4OpenAiKey,
-      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
-      openaiBaseUrl: String(phase4Stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
-      phase4BClickupListName: String(phase4Stored.phase4BClickupListName || '').trim(),
-      phase4BClickupListId: phase4BListId,
-      clickupOpenStatus: String(
-        phase4Stored.phase4BClickupOpenStatus ||
-          process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
-          'To Do'
-      ).trim()
-    }, () => {});
-    emitInventoryAutoChainLog(
-      `Phase4 auto-run: 4B completed ` +
-        `(vmfUpdated=${phase4BSummary?.vmfFieldsUpdated || 0}, ` +
-        `vmfTasksCreated=${phase4BSummary?.vmfTasksCreated || 0})`
-    );
-
-    const cmfDryRun =
-      typeof phase4Stored.phase4CMFDryRun === 'boolean'
-        ? phase4Stored.phase4CMFDryRun
-        : true;
-    const phase4CSummary = await runPhase4CMF({
-      ...phase4Stored,
-      dryRun: cmfDryRun,
-      execute: !cmfDryRun,
-      authContext: 'inventory',
-      rulesDriveFile: phase4RulesDriveFile,
-      logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
-      phase4CClickupListName: String(phase4Stored.phase4CClickupListName || phase4Stored.phase4BClickupListName || '').trim(),
-      phase4CClickupListId: phase4CListId,
-      phase4CClickupOpenStatus: String(
-        phase4Stored.phase4CClickupOpenStatus ||
-          phase4Stored.phase4BClickupOpenStatus ||
-          process.env.PHASE4C_CLICKUP_OPEN_STATUS ||
-          process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
-          'To Do'
-      ).trim()
-    }, () => {});
-    emitInventoryAutoChainLog(
-      `Phase4 auto-run: 4C completed ` +
-        `(mfTasksCreated=${phase4CSummary?.mfTasksCreated || 0}, ` +
-        `mfWritebacksCompleted=${phase4CSummary?.mfWritebacksCompleted || 0})`
-    );
-
-    const dDryRun =
-      typeof phase4Stored.phase4DDryRun === 'boolean'
-        ? phase4Stored.phase4DDryRun
-        : true;
-    const phase4DSummary = await runPhase4DListing({
-      ...phase4Stored,
-      dryRun: dDryRun,
-      execute: !dDryRun,
-      authContext: 'inventory',
-      rulesDriveFile: phase4RulesDriveFile,
-      logicSheetName: String(phase4Stored.phase4RulesLogicSheet || 'Logic').trim(),
-      phase4DListingsTable: resolveListingsTableName(
-        phase4Stored.phase4DListingsTable,
-        process.env.PHASE4D_LISTINGS_TABLE,
-        DEFAULT_EBAY_LISTINGS_TABLE
-      ),
-      openaiApiKey: phase4OpenAiKey,
-      openaiModel: String(phase4Stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
-      openaiBaseUrl: String(phase4Stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
-    }, () => {});
-    emitInventoryAutoChainLog(
-      `Phase4 auto-run: 4D completed ` +
-        `(listingsEligible=${phase4DSummary?.listingsEligible || 0}, ` +
-        `writes=${(phase4DSummary?.fsvFieldsUpdated || 0) + (phase4DSummary?.v1FieldsUpdated || 0) + (phase4DSummary?.v2FieldsUpdated || 0) + (phase4DSummary?.vbFieldsUpdated || 0)})`
-    );
-
-    emitInventoryAutoChainLog('Phase4 auto-run completed after Phase1+Phase2+Phase3 success');
-  } catch (error) {
-    emitInventoryAutoChainLog(`Phase4 auto-run failed after Phase3 success: ${error.message}`, 'error');
   }
 });
 
@@ -1255,6 +1575,14 @@ function startPhase4WritebackPoller() {
 
 ipcMain.handle('phase2-get-config', async () => {
   const stored = getInventoryConfig('phase2Config') || {};
+  const phase5EbayEnvironment = normalizeEbayEnvironment(
+    stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox'
+  );
+  const phase5EbayCredentialSets = getEbayCredentialSets({
+    ...stored,
+    phase5EbayEnvironment
+  });
+  const activePhase5EbayCredentials = phase5EbayCredentialSets[phase5EbayEnvironment] || normalizeEbayCredentialSet({});
   const merged = buildPhase2Config(stored);
   const phase3Config = buildPhase3Config(stored);
 
@@ -1365,16 +1693,20 @@ ipcMain.handle('phase2-get-config', async () => {
     phase5AutoPushTimezone: String(stored.phase5AutoPushTimezone || '').trim(),
     phase5AutoPushEligibilityFieldName: String(stored.phase5AutoPushEligibilityFieldName || '').trim(),
     phase5AutoPushEligibilityValues: String(stored.phase5AutoPushEligibilityValues || '').trim(),
-    phase5EbayEnvironment: String(stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox').trim().toLowerCase(),
-    phase5EbayClientId: String(stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
-    phase5EbayDevId: String(stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
-    phase5EbayClientSecret: String(stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '').trim(),
-    phase5EbayRuName: String(stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
-    phase5EbayUserAccessToken: String(stored.phase5EbayUserAccessToken || process.env.EBAY_USER_ACCESS_TOKEN || '').trim(),
-    phase5EbayRefreshToken: String(stored.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || '').trim(),
-    phase5EbayUserAccessTokenIssuedAt: String(
-      stored.phase5EbayUserAccessTokenIssuedAt || process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT || ''
-    ).trim(),
+    phase5EbayEnvironment,
+    phase5EbayCredentialSets,
+    ebayListingsSourceApi:
+      ['auto', 'trading', 'inventory'].includes(String(stored.ebayListingsSourceApi || '').trim().toLowerCase())
+        ? String(stored.ebayListingsSourceApi || '').trim().toLowerCase()
+        : 'auto',
+    phase5EbayClientId: activePhase5EbayCredentials.phase5EbayClientId,
+    phase5EbayDevId: activePhase5EbayCredentials.phase5EbayDevId,
+    phase5EbayClientSecret: activePhase5EbayCredentials.phase5EbayClientSecret,
+    phase5EbayRuName: activePhase5EbayCredentials.phase5EbayRuName,
+    phase5EbayUserAccessToken: activePhase5EbayCredentials.phase5EbayUserAccessToken,
+    phase5EbayRefreshToken: activePhase5EbayCredentials.phase5EbayRefreshToken,
+    phase5EbayRefreshScope: activePhase5EbayCredentials.phase5EbayRefreshScope,
+    phase5EbayUserAccessTokenIssuedAt: activePhase5EbayCredentials.phase5EbayUserAccessTokenIssuedAt,
     airtableToken: stored.airtableToken || '',
     clickupToken: stored.clickupToken || ''
   };
@@ -1382,10 +1714,7 @@ ipcMain.handle('phase2-get-config', async () => {
 
 ipcMain.handle('phase2-save-config', async (_, configPayload = {}) => {
   const existing = getInventoryConfig('phase2Config') || {};
-  const merged = {
-    ...existing,
-    ...configPayload
-  };
+  const merged = normalizeAndAttachEbayCredentials(existing, configPayload);
 
   saveInventoryConfig('phase2Config', merged);
   return { success: true, message: 'Phase 2 configuration saved.' };
@@ -2646,6 +2975,14 @@ ipcMain.handle('phase74:run', async (event, options = {}) => {
 
 ipcMain.handle('phase5:get-config', async () => {
   const stored = getInventoryConfig('phase2Config') || {};
+  const phase5EbayEnvironment = normalizeEbayEnvironment(
+    stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox'
+  );
+  const phase5EbayCredentialSets = getEbayCredentialSets({
+    ...stored,
+    phase5EbayEnvironment
+  });
+  const activePhase5EbayCredentials = phase5EbayCredentialSets[phase5EbayEnvironment] || normalizeEbayCredentialSet({});
   return {
     phase5Mode: String(stored.phase5Mode || 'A').trim().toUpperCase() === 'B' ? 'B' : 'A',
     phase5AutoPushEnabled:
@@ -2654,16 +2991,20 @@ ipcMain.handle('phase5:get-config', async () => {
     phase5AutoPushTimezone: String(stored.phase5AutoPushTimezone || '').trim(),
     phase5AutoPushEligibilityFieldName: String(stored.phase5AutoPushEligibilityFieldName || '').trim(),
     phase5AutoPushEligibilityValues: String(stored.phase5AutoPushEligibilityValues || '').trim(),
-    phase5EbayEnvironment: String(stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox').trim().toLowerCase(),
-    phase5EbayClientId: String(stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
-    phase5EbayDevId: String(stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
-    phase5EbayClientSecret: String(stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '').trim(),
-    phase5EbayRuName: String(stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
-    phase5EbayUserAccessToken: String(stored.phase5EbayUserAccessToken || process.env.EBAY_USER_ACCESS_TOKEN || '').trim(),
-    phase5EbayRefreshToken: String(stored.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || '').trim(),
-    phase5EbayUserAccessTokenIssuedAt: String(
-      stored.phase5EbayUserAccessTokenIssuedAt || process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT || ''
-    ).trim(),
+    phase5EbayEnvironment,
+    phase5EbayCredentialSets,
+    ebayListingsSourceApi:
+      ['auto', 'trading', 'inventory'].includes(String(stored.ebayListingsSourceApi || '').trim().toLowerCase())
+        ? String(stored.ebayListingsSourceApi || '').trim().toLowerCase()
+        : 'auto',
+    phase5EbayClientId: activePhase5EbayCredentials.phase5EbayClientId,
+    phase5EbayDevId: activePhase5EbayCredentials.phase5EbayDevId,
+    phase5EbayClientSecret: activePhase5EbayCredentials.phase5EbayClientSecret,
+    phase5EbayRuName: activePhase5EbayCredentials.phase5EbayRuName,
+    phase5EbayUserAccessToken: activePhase5EbayCredentials.phase5EbayUserAccessToken,
+    phase5EbayRefreshToken: activePhase5EbayCredentials.phase5EbayRefreshToken,
+    phase5EbayRefreshScope: activePhase5EbayCredentials.phase5EbayRefreshScope,
+    phase5EbayUserAccessTokenIssuedAt: activePhase5EbayCredentials.phase5EbayUserAccessTokenIssuedAt,
     phase5AutoPushStatus: getPhase5AutoPushScheduleStatus(),
     phase5EnforceBatchApproval:
       String(stored.phase5EnforceBatchApproval ?? 'true').trim().toLowerCase() !== 'false',
@@ -3206,55 +3547,30 @@ ipcMain.handle('phase5:getAutoPushStatus', async () => {
 ipcMain.handle('phase5:testEbayCredentials', async (_, options = {}) => {
   try {
     const stored = getInventoryConfig('phase2Config') || {};
+    const resolved = normalizeAndAttachEbayCredentials(stored, options);
     const publishService = new (require('../services/phase5EbayPublishService').Phase5EbayPublishService)({
-      ebayEnvironment: String(options.phase5EbayEnvironment || stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox')
-        .trim()
-        .toLowerCase() === 'production' ? 'production' : 'sandbox',
-      ebayClientId: String(options.phase5EbayClientId || stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
-      ebayDevId: String(options.phase5EbayDevId || stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
-      ebayClientSecret: String(
-        options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
-      ).trim(),
-      ebayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
-      ebayUserAccessToken: String(
-        options.phase5EbayUserAccessToken || stored.phase5EbayUserAccessToken || process.env.EBAY_USER_ACCESS_TOKEN || ''
-      ).trim(),
-      ebayRefreshToken: String(
-        options.phase5EbayRefreshToken || stored.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || ''
-      ).trim(),
-      ebayUserAccessTokenIssuedAt: String(
-        options.phase5EbayUserAccessTokenIssuedAt ||
-          stored.phase5EbayUserAccessTokenIssuedAt ||
-          process.env.EBAY_USER_ACCESS_TOKEN_ISSUED_AT ||
-          ''
-      ).trim()
+      ebayEnvironment: resolved.phase5EbayEnvironment,
+      ebayClientId: resolved.phase5EbayClientId,
+      ebayDevId: resolved.phase5EbayDevId,
+      ebayClientSecret: resolved.phase5EbayClientSecret,
+      ebayRuName: resolved.phase5EbayRuName,
+      ebayUserAccessToken: resolved.phase5EbayUserAccessToken,
+      ebayRefreshToken: resolved.phase5EbayRefreshToken,
+      ebayUserAccessTokenIssuedAt: resolved.phase5EbayUserAccessTokenIssuedAt
     });
 
     const result = await publishService.testCredentials();
+    let toSave = normalizeAndAttachEbayCredentials(stored, options);
     if (result?.success && result?.userAccessToken) {
-      saveInventoryConfig('phase2Config', {
-        ...stored,
-        ...options,
-        phase5EbayEnvironment: String(
-          options.phase5EbayEnvironment || stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox'
-        )
-          .trim()
-          .toLowerCase() === 'production' ? 'production' : 'sandbox',
-        phase5EbayClientId: String(options.phase5EbayClientId || stored.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
-        phase5EbayDevId: String(options.phase5EbayDevId || stored.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
-        phase5EbayClientSecret: String(
-          options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
-        ).trim(),
-        phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
-        phase5EbayRefreshToken: String(
-          options.phase5EbayRefreshToken || stored.phase5EbayRefreshToken || process.env.EBAY_REFRESH_TOKEN || ''
-        ).trim(),
+      toSave = normalizeAndAttachEbayCredentials(toSave, {
+        phase5EbayEnvironment: resolved.phase5EbayEnvironment,
         phase5EbayUserAccessToken: String(result.userAccessToken || '').trim(),
         phase5EbayUserAccessTokenIssuedAt: String(result.issuedAt || new Date().toISOString()).trim(),
         phase5EbayUserAccessTokenExpiresIn: Number(result.expiresIn || 0) || 0
       });
       delete result.userAccessToken;
     }
+    saveInventoryConfig('phase2Config', toSave);
     return {
       success: true,
       result
@@ -3573,6 +3889,94 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
     const summary = await runEbaySandboxInventoryImport(runOptions, progress => {
       event.sender.send('ebaysandbox:progress', progress);
     });
+
+    const autoRunPostImport =
+      String(
+        runOptions.ebaySandboxAutoRunPostImportPhases ??
+          stored.ebaySandboxAutoRunPostImportPhases ??
+          process.env.EBAY_SANDBOX_AUTO_RUN_POST_IMPORT_PHASES ??
+          'true'
+      )
+        .trim()
+        .toLowerCase() !== 'false';
+    const wroteListingRows = Number(summary?.recordsWritten || 0) > 0;
+
+    if (!dryRun && autoRunPostImport && wroteListingRows) {
+      event.sender.send('ebaysandbox:progress', {
+        stage: 'ebaysandbox_post_import',
+        percent: 99,
+        counts: summary,
+        message: 'Starting post-import automation: Phase4 -> Phase6 -> Phase7.2 -> Phase7.4...'
+      });
+
+      try {
+        const postImportSummary = await runPostEbayListingsAutomation({
+          ...runOptions,
+          phase4DListingsTable: resolveListingsTableName(
+            runOptions.phase4DListingsTable,
+            runOptions.ebaySandboxTableName,
+            runOptions.phase6ListingsTable,
+            runOptions.phase74ListingsTable,
+            DEFAULT_EBAY_LISTINGS_TABLE
+          ),
+          phase6ListingsTable: resolveListingsTableName(
+            runOptions.phase6ListingsTable,
+            runOptions.ebaySandboxTableName,
+            runOptions.phase4DListingsTable,
+            runOptions.phase74ListingsTable,
+            DEFAULT_EBAY_LISTINGS_TABLE
+          ),
+          phase74ListingsTable: resolveListingsTableName(
+            runOptions.phase74ListingsTable,
+            runOptions.ebaySandboxTableName,
+            runOptions.phase6ListingsTable,
+            runOptions.phase4DListingsTable,
+            DEFAULT_EBAY_LISTINGS_TABLE
+          )
+        }, {
+          onProgress: payload => {
+            event.sender.send('ebaysandbox:progress', payload);
+          }
+        });
+        summary.postImportAutomation = postImportSummary;
+        if (postImportSummary?.blocked) {
+          event.sender.send('ebaysandbox:progress', {
+            stage: 'ebaysandbox_post_import_blocked',
+            percent: 100,
+            counts: summary,
+            message: postImportSummary?.message || 'Post-import automation blocked by missing configuration.'
+          });
+        } else {
+          event.sender.send('ebaysandbox:progress', {
+            stage: 'ebaysandbox_post_import',
+            percent: 100,
+            counts: summary,
+            message: 'Post-import automation completed: Phase4 -> Phase6 -> Phase7.2 -> Phase7.4.'
+          });
+        }
+      } catch (automationError) {
+        const detail = formatDetailedErrorMessage(automationError);
+        summary.postImportAutomationError = detail;
+        emitInventoryAutoChainLog(`Post-import automation failed: ${detail}`, 'error');
+        event.sender.send('ebaysandbox:progress', {
+          stage: 'ebaysandbox_post_import_failed',
+          percent: 100,
+          counts: summary,
+          message: `Post-import automation failed: ${detail}`
+        });
+      }
+    } else if (!dryRun && autoRunPostImport && !wroteListingRows) {
+      const reason =
+        `Post-import automation skipped: no new listing rows were written to Airtable ` +
+        `(recordsWritten=${Number(summary?.recordsWritten || 0)}, recordsPlanned=${Number(summary?.recordsPlanned || 0)}).`;
+      emitInventoryAutoChainLog(reason);
+      event.sender.send('ebaysandbox:progress', {
+        stage: 'ebaysandbox_post_import_skipped_no_writes',
+        percent: 100,
+        counts: summary,
+        message: reason
+      });
+    }
 
     return {
       success: true,

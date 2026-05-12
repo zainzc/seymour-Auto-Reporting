@@ -17,6 +17,16 @@ function normalizeFieldKey(value) {
     .replace(/\s+/g, ' ');
 }
 
+function getFieldValueByName(fields = {}, name = '') {
+  if (!fields || typeof fields !== 'object') return '';
+  if (Object.prototype.hasOwnProperty.call(fields, name)) return fields[name];
+  const target = normalizeFieldKey(name);
+  if (!target) return '';
+  const key = Object.keys(fields).find(item => normalizeFieldKey(item) === target);
+  if (!key) return '';
+  return fields[key];
+}
+
 function parseEpochMs(value) {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
     return Math.trunc(value);
@@ -73,7 +83,89 @@ function normalizeCondition(value) {
   if (!text) return '';
   return text
     .toUpperCase()
-    .replace(/\s+/g, '_');
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_+/g, '_');
+}
+
+const SUPPORTED_CONDITION_ENUMS = new Set([
+  'NEW',
+  'LIKE_NEW',
+  'NEW_OTHER',
+  'NEW_WITH_DEFECTS',
+  'CERTIFIED_REFURBISHED',
+  'EXCELLENT_REFURBISHED',
+  'VERY_GOOD_REFURBISHED',
+  'GOOD_REFURBISHED',
+  'SELLER_REFURBISHED',
+  'PRE_OWNED_EXCELLENT',
+  'USED_EXCELLENT',
+  'PRE_OWNED_FAIR',
+  'USED_VERY_GOOD',
+  'USED_GOOD',
+  'USED_ACCEPTABLE',
+  'FOR_PARTS_OR_NOT_WORKING'
+]);
+
+const CONDITION_ID_TO_ENUM = new Map([
+  [1000, 'NEW'],
+  [1500, 'NEW_OTHER'],
+  [1750, 'NEW_WITH_DEFECTS'],
+  [2000, 'CERTIFIED_REFURBISHED'],
+  [2010, 'EXCELLENT_REFURBISHED'],
+  [2020, 'VERY_GOOD_REFURBISHED'],
+  [2030, 'GOOD_REFURBISHED'],
+  [2500, 'SELLER_REFURBISHED'],
+  [2750, 'LIKE_NEW'],
+  [2990, 'PRE_OWNED_EXCELLENT'],
+  [3000, 'USED_EXCELLENT'],
+  [3010, 'PRE_OWNED_FAIR'],
+  [4000, 'USED_VERY_GOOD'],
+  [5000, 'USED_GOOD'],
+  [6000, 'USED_ACCEPTABLE'],
+  [7000, 'FOR_PARTS_OR_NOT_WORKING']
+]);
+
+const CONDITION_TEXT_TO_ENUM = new Map([
+  ['BRAND_NEW', 'NEW'],
+  ['NEW', 'NEW'],
+  ['NEW_OTHER', 'NEW_OTHER'],
+  ['OPEN_BOX', 'NEW_OTHER'],
+  ['NEW_WITH_DEFECTS', 'NEW_WITH_DEFECTS'],
+  ['CERTIFIED_REFURBISHED', 'CERTIFIED_REFURBISHED'],
+  ['EXCELLENT_REFURBISHED', 'EXCELLENT_REFURBISHED'],
+  ['VERY_GOOD_REFURBISHED', 'VERY_GOOD_REFURBISHED'],
+  ['GOOD_REFURBISHED', 'GOOD_REFURBISHED'],
+  ['SELLER_REFURBISHED', 'SELLER_REFURBISHED'],
+  ['LIKE_NEW', 'LIKE_NEW'],
+  ['PRE_OWNED_EXCELLENT', 'PRE_OWNED_EXCELLENT'],
+  ['PRE_OWNED_FAIR', 'PRE_OWNED_FAIR'],
+  ['USED_EXCELLENT', 'USED_EXCELLENT'],
+  ['USED_VERY_GOOD', 'USED_VERY_GOOD'],
+  ['USED_GOOD', 'USED_GOOD'],
+  ['USED_ACCEPTABLE', 'USED_ACCEPTABLE'],
+  ['USED', 'USED_GOOD'],
+  ['FOR_PARTS_OR_NOT_WORKING', 'FOR_PARTS_OR_NOT_WORKING'],
+  ['FOR_PARTS', 'FOR_PARTS_OR_NOT_WORKING'],
+  ['NOT_WORKING', 'FOR_PARTS_OR_NOT_WORKING']
+]);
+
+function deriveInventoryConditionEnum(listingFields = {}) {
+  const conditionId = parseIntegerValue(
+    firstNonEmptyField(listingFields, ['Condition ID', 'ConditionID']),
+    0
+  );
+  if (Number.isFinite(conditionId) && CONDITION_ID_TO_ENUM.has(conditionId)) {
+    return CONDITION_ID_TO_ENUM.get(conditionId);
+  }
+
+  const token = normalizeCondition(
+    firstNonEmptyField(listingFields, ['Condition', 'Condition Display Name', 'condition'])
+  );
+  if (!token) return '';
+  if (SUPPORTED_CONDITION_ENUMS.has(token)) return token;
+  if (CONDITION_TEXT_TO_ENUM.has(token)) return CONDITION_TEXT_TO_ENUM.get(token);
+  return '';
 }
 
 function normalizeDimensionUnit(value) {
@@ -92,6 +184,9 @@ function normalizeWeightUnit(value) {
   return text;
 }
 
+const LISTING_PUBLISH_TITLE_FIELD = 'Item Title';
+const LISTING_PUBLISH_DESCRIPTION_FIELD = 'Item Description';
+
 function parseJsonObject(value) {
   if (value && typeof value === 'object' && !Array.isArray(value)) return value;
   const text = normalizeText(value);
@@ -107,9 +202,25 @@ function parseJsonObject(value) {
 
 function toStringList(value) {
   if (Array.isArray(value)) {
-    return value.map(item => normalizeText(item)).filter(Boolean);
+    const out = [];
+    for (const item of value) {
+      if (item && typeof item === 'object') {
+        const url =
+          normalizeText(item.url || item.thumbnails?.full?.url || item.thumbnails?.large?.url || '');
+        if (url) {
+          out.push(url);
+          continue;
+        }
+      }
+      const text = normalizeText(item);
+      if (text) out.push(text);
+    }
+    return out;
   }
   if (value && typeof value === 'object') {
+    const url =
+      normalizeText(value.url || value.thumbnails?.full?.url || value.thumbnails?.large?.url || '');
+    if (url) return [url];
     const candidate = normalizeText(value.name || value.label || value.value || '');
     return candidate ? [candidate] : [];
   }
@@ -152,17 +263,50 @@ function mergeAspect(aspects = {}, name = '', rawValue = null) {
 }
 
 function parseLegacySpecificsText(text = '') {
+  const parsed = parseJsonObject(text);
+  if (parsed) {
+    const out = {};
+    for (const [name, value] of Object.entries(parsed)) {
+      const normalizedName = normalizeCSpecificAspectName(name) || normalizeText(name);
+      mergeAspect(out, normalizedName, value);
+    }
+    return out;
+  }
   const out = {};
   for (const rawLine of normalizeText(text).split('\n')) {
     const line = normalizeText(rawLine);
     if (!line || !line.includes(':')) continue;
     const index = line.indexOf(':');
-    const name = normalizeText(line.slice(0, index));
+    const rawName = normalizeText(line.slice(0, index));
+    const name = normalizeCSpecificAspectName(rawName) || rawName;
     const value = normalizeText(line.slice(index + 1));
     if (!name || !value) continue;
     mergeAspect(out, name, value);
   }
   return out;
+}
+
+function parseImageUrlsFromListing(fields = {}) {
+  const imageFieldCandidates = ['Image', 'Image URLs', 'Image URL', 'ImageUrls', 'imageUrls', 'Picture URLs'];
+  for (const fieldName of imageFieldCandidates) {
+    const rawValue = getFieldValueByName(fields, fieldName);
+    const parsed = toStringList(rawValue);
+    if (parsed.length > 0) return parsed;
+  }
+
+  const rawItem = parseJsonObject(fields['Raw eBay Item JSON']);
+  const rawDeep = parseJsonObject(fields['Raw eBay Offer JSON']);
+  const candidates = [
+    rawItem?.rawDeepListing?.pictureUrls,
+    rawItem?.pictureUrls,
+    rawItem?.product?.imageUrls,
+    rawDeep?.product?.imageUrls
+  ];
+  for (const candidate of candidates) {
+    const urls = toStringList(candidate);
+    if (urls.length > 0) return urls;
+  }
+  return [];
 }
 
 const C_SPECIFIC_SKIP_FIELDS = new Set([
@@ -273,7 +417,86 @@ const EBAY_INVENTORY_SCOPE_CANDIDATES = [
   'https://api.ebay.com/oauth/api_scope/sell.inventory.readonly',
   'https://api.ebay.com/oauth/api_scope/sell.inventory'
 ];
+const EBAY_TRADING_COMPATIBILITY_LEVEL = '1271';
+const EBAY_TRADING_DEFAULT_SITE_ID = '0';
+const EBAY_TRADING_MOTORS_SITE_ID = '100';
 const USER_ACCESS_TOKEN_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+
+function escapeXml(value = '') {
+  const text = String(value || '');
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function extractXmlTagValue(xml = '', tagName = '') {
+  const source = String(xml || '');
+  const tag = normalizeText(tagName);
+  if (!source || !tag) return '';
+  const match = source.match(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'i'));
+  return normalizeText(match?.[1] || '');
+}
+
+function extractXmlErrorMessages(xml = '') {
+  const source = String(xml || '');
+  if (!source) return [];
+  const out = [];
+  const blocks = source.match(/<Errors(?:\s[^>]*)?>[\s\S]*?<\/Errors>/gi) || [];
+  for (const block of blocks) {
+    const code = extractXmlTagValue(block, 'ErrorCode');
+    const longMessage = extractXmlTagValue(block, 'LongMessage');
+    const shortMessage = extractXmlTagValue(block, 'ShortMessage');
+    const detail = longMessage || shortMessage;
+    if (code && detail) out.push(`${code}: ${detail}`);
+    else if (detail) out.push(detail);
+    else if (code) out.push(code);
+  }
+  return out;
+}
+
+function hasInvalidIafTokenError(messages = []) {
+  const list = Array.isArray(messages) ? messages : [];
+  return list.some(message => normalizeText(message).includes('21916984'));
+}
+
+function hasCategoryInvalidError(messages = []) {
+  const list = Array.isArray(messages) ? messages : [];
+  return list.some(message => normalizeText(message).includes('107:'));
+}
+
+function hasConditionNotApplicableError(messages = []) {
+  const list = Array.isArray(messages) ? messages : [];
+  return list.some(message => normalizeText(message).includes('21917121'));
+}
+
+function buildTradingSiteFallbackOrder(initialSiteId = '') {
+  const normalized = normalizeText(initialSiteId);
+  const ordered = [];
+  const pushUnique = (siteId) => {
+    const value = normalizeText(siteId);
+    if (!value || ordered.includes(value)) return;
+    ordered.push(value);
+  };
+
+  if (normalized === EBAY_TRADING_DEFAULT_SITE_ID) {
+    pushUnique(EBAY_TRADING_DEFAULT_SITE_ID);
+    pushUnique(EBAY_TRADING_MOTORS_SITE_ID);
+    return ordered;
+  }
+  if (normalized === EBAY_TRADING_MOTORS_SITE_ID) {
+    pushUnique(EBAY_TRADING_MOTORS_SITE_ID);
+    pushUnique(EBAY_TRADING_DEFAULT_SITE_ID);
+    return ordered;
+  }
+
+  pushUnique(normalized);
+  pushUnique(EBAY_TRADING_DEFAULT_SITE_ID);
+  pushUnique(EBAY_TRADING_MOTORS_SITE_ID);
+  return ordered;
+}
 
 class Phase5EbayPublishService {
   constructor(config = {}) {
@@ -320,6 +543,12 @@ class Phase5EbayPublishService {
       : 'https://api.sandbox.ebay.com';
   }
 
+  getTradingApiUrl() {
+    return this.ebayEnvironment === 'production'
+      ? 'https://api.ebay.com/ws/api.dll'
+      : 'https://api.sandbox.ebay.com/ws/api.dll';
+  }
+
   getItemId(listingFields = {}, schema = {}) {
     const itemIdField = normalizeText(schema.itemIdField || '');
     return firstNonEmptyField(listingFields, [itemIdField, 'eBay Item ID', 'Ebay Item ID', 'Item ID', 'ItemID']);
@@ -337,27 +566,15 @@ class Phase5EbayPublishService {
       throw new Error('Missing SKU. Phase 5 direct eBay publish requires SKU.');
     }
 
-    const title = firstNonEmptyField(listingFields, [
-      schema.titleField,
-      'Title',
-      'Product Title(New)',
-      'Product Title',
-      'AI Optimized Title'
-    ]);
-    const description = firstNonEmptyField(listingFields, [
-      schema.descriptionField,
-      'Item Description',
-      'Description',
-      'c: partshunter203 ebay MOTORS e commerce description',
-      'Full listing description HTML'
-    ]);
-    const condition = normalizeCondition(firstNonEmptyField(listingFields, ['Condition']));
+    const title = normalizeText(getFieldValueByName(listingFields, LISTING_PUBLISH_TITLE_FIELD));
+    const description = normalizeText(getFieldValueByName(listingFields, LISTING_PUBLISH_DESCRIPTION_FIELD));
+    const condition = deriveInventoryConditionEnum(listingFields);
     const conditionDescription = firstNonEmptyField(listingFields, ['Condition Description', 'conditionDescription']);
     const quantity = parseIntegerValue(firstNonEmptyField(listingFields, ['Quantity', 'AvailableQuantity']), 0);
     const locale = firstNonEmptyField(listingFields, ['Locale', 'locale']) || 'en_US';
     const aspects = buildAspectsFromListing(listingFields);
     const packageWeightAndSize = buildPackageWeightAndSize(listingFields);
-    const imageUrls = toStringList(firstNonEmptyField(listingFields, ['Image URLs', 'Image URL', 'ImageUrls', 'imageUrls']));
+    const imageUrls = parseImageUrlsFromListing(listingFields);
 
     const payload = {
       locale
@@ -393,6 +610,75 @@ class Phase5EbayPublishService {
       itemId: this.getItemId(listingFields, schema),
       payload
     };
+  }
+
+  resolveTradingSiteId(record = {}) {
+    const listingFields = record?.fields || {};
+    const explicit = firstNonEmptyField(listingFields, ['Site ID', 'SiteID', 'eBay Site ID']);
+    if (explicit && /^\d+$/.test(explicit)) {
+      return explicit;
+    }
+    const siteText = normalizeText(firstNonEmptyField(listingFields, ['Site', 'Marketplace Site'])).toLowerCase();
+    if (siteText === 'ebaymotors' || siteText === 'ebay motors') {
+      return EBAY_TRADING_MOTORS_SITE_ID;
+    }
+    return EBAY_TRADING_DEFAULT_SITE_ID;
+  }
+
+  buildReviseFixedPriceItemXml(prepared = {}) {
+    const itemId = normalizeText(prepared?.itemId);
+    const sku = normalizeText(prepared?.sku);
+    const title = normalizeText(prepared?.payload?.product?.title);
+    const description = normalizeText(prepared?.payload?.product?.description);
+    if (!itemId) {
+      throw new Error('Missing Item ID. Trading API revise requires Item ID for existing listing update.');
+    }
+    if (!title && !description) {
+      throw new Error(
+        `Missing publish content for SKU '${sku || 'unknown'}'. Populate 'Item Title' and/or 'Item Description' before publish.`
+      );
+    }
+
+    const itemLines = [`<ItemID>${escapeXml(itemId)}</ItemID>`];
+    if (title) itemLines.push(`<Title>${escapeXml(title.slice(0, 80))}</Title>`);
+    if (description) itemLines.push(`<Description>${escapeXml(description)}</Description>`);
+
+    return (
+      `<?xml version="1.0" encoding="utf-8"?>` +
+      `<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
+      `<ErrorLanguage>en_US</ErrorLanguage>` +
+      `<WarningLevel>High</WarningLevel>` +
+      `<Item>${itemLines.join('')}</Item>` +
+      `</ReviseFixedPriceItemRequest>`
+    );
+  }
+
+  buildReviseItemXml(prepared = {}) {
+    const itemId = normalizeText(prepared?.itemId);
+    const sku = normalizeText(prepared?.sku);
+    const title = normalizeText(prepared?.payload?.product?.title);
+    const description = normalizeText(prepared?.payload?.product?.description);
+    if (!itemId) {
+      throw new Error('Missing Item ID. Trading API revise requires Item ID for existing listing update.');
+    }
+    if (!title && !description) {
+      throw new Error(
+        `Missing publish content for SKU '${sku || 'unknown'}'. Populate 'Item Title' and/or 'Item Description' before publish.`
+      );
+    }
+
+    const itemLines = [`<ItemID>${escapeXml(itemId)}</ItemID>`];
+    if (title) itemLines.push(`<Title>${escapeXml(title.slice(0, 80))}</Title>`);
+    if (description) itemLines.push(`<Description>${escapeXml(description)}</Description>`);
+
+    return (
+      `<?xml version="1.0" encoding="utf-8"?>` +
+      `<ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
+      `<ErrorLanguage>en_US</ErrorLanguage>` +
+      `<WarningLevel>High</WarningLevel>` +
+      `<Item>${itemLines.join('')}</Item>` +
+      `</ReviseItemRequest>`
+    );
   }
 
   async requestUserAccessTokenFromRefreshToken() {
@@ -436,13 +722,14 @@ class Phase5EbayPublishService {
     const tokenAgeMs = issuedAtMs > 0 ? Math.max(0, Date.now() - issuedAtMs) : Number.MAX_SAFE_INTEGER;
     const tokenIsFresh = Boolean(this.ebayUserAccessToken) && issuedAtMs > 0 && tokenAgeMs < USER_ACCESS_TOKEN_MAX_AGE_MS;
 
-    if (tokenIsFresh) {
+    if (this.ebayUserAccessToken) {
       return {
         accessToken: this.ebayUserAccessToken,
         refreshed: false,
         issuedAt: this.ebayUserAccessTokenIssuedAt,
         expiresIn: 0,
-        tokenType: 'Bearer'
+        tokenType: 'Bearer',
+        tokenFresh: tokenIsFresh
       };
     }
 
@@ -589,18 +876,24 @@ class Phase5EbayPublishService {
   async publishRecord(record = {}, schema = {}, options = {}) {
     const dryRun = options?.dryRun === true;
     const prepared = this.buildInventoryPayload(record, schema);
+    const siteId = this.resolveTradingSiteId(record);
+    const tradingEndpoint = this.getTradingApiUrl();
+    const tradingXml = this.buildReviseFixedPriceItemXml(prepared);
+    const reviseItemXml = this.buildReviseItemXml(prepared);
 
     if (dryRun) {
       return {
         success: true,
         dryRun: true,
-        operation: 'upsert_inventory_item',
+        operation: 'revise_fixed_price_item',
         itemId: prepared.itemId || '',
         sku: prepared.sku,
         response: {
           simulated: true,
-          endpoint: `${this.getSellApiBase()}/sell/inventory/v1/inventory_item/${encodeURIComponent(prepared.sku)}`,
-          payload: prepared.payload
+          endpoint: tradingEndpoint,
+          siteId,
+          callName: 'ReviseFixedPriceItem',
+          payloadXml: tradingXml
         }
       };
     }
@@ -613,22 +906,26 @@ class Phase5EbayPublishService {
 
     const resolved = await this.ensureUserAccessToken();
     if (!resolved.accessToken) {
-      throw new Error('Missing eBay user access token for direct inventory publish.');
+      throw new Error('Missing eBay user access token for direct trading publish.');
     }
 
-    const endpoint = `${this.getSellApiBase()}/sell/inventory/v1/inventory_item/${encodeURIComponent(prepared.sku)}`;
-    let response;
+    const endpoint = tradingEndpoint;
     let finalToken = resolved.accessToken;
-
-    try {
-      response = await retryWithBackoff(
+    let finalSiteId = normalizeText(siteId) || EBAY_TRADING_DEFAULT_SITE_ID;
+    const canRefresh = this.ebayRefreshToken && this.ebayClientId && this.ebayClientSecret;
+    const postTradingRevise = async (accessToken, requestSiteId, callName, requestXml) =>
+      retryWithBackoff(
         async () =>
-          this.client.put(endpoint, prepared.payload, {
+          this.client.post(endpoint, requestXml, {
+            responseType: 'text',
             headers: {
-              Authorization: `Bearer ${finalToken}`,
-              'Content-Type': 'application/json',
-              Accept: 'application/json',
-              'Content-Language': 'en-US'
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'text/xml',
+              Accept: 'text/xml',
+              'X-EBAY-API-COMPATIBILITY-LEVEL': EBAY_TRADING_COMPATIBILITY_LEVEL,
+              'X-EBAY-API-CALL-NAME': callName,
+              'X-EBAY-API-SITEID': requestSiteId,
+              'X-EBAY-API-IAF-TOKEN': accessToken
             }
           }),
         {
@@ -636,44 +933,178 @@ class Phase5EbayPublishService {
           baseDelayMs: this.baseDelayMs
         }
       );
+
+    let response;
+    try {
+      response = await postTradingRevise(finalToken, finalSiteId, 'ReviseFixedPriceItem', tradingXml);
     } catch (error) {
       const status = Number(error?.response?.status || 0);
-      const canRefresh = this.ebayRefreshToken && this.ebayClientId && this.ebayClientSecret;
       if (status === 401 && canRefresh) {
         const refreshed = await this.requestUserAccessTokenFromRefreshToken();
         finalToken = refreshed.accessToken;
-        response = await retryWithBackoff(
-          async () =>
-            this.client.put(endpoint, prepared.payload, {
-              headers: {
-                Authorization: `Bearer ${finalToken}`,
-                'Content-Type': 'application/json',
-                Accept: 'application/json',
-                'Content-Language': 'en-US'
-              }
-            }),
-          {
-            maxAttempts: this.maxAttempts,
-            baseDelayMs: this.baseDelayMs
-          }
-        );
+        response = await postTradingRevise(finalToken, finalSiteId, 'ReviseFixedPriceItem', tradingXml);
       } else {
-        throw new Error(`eBay inventory update failed for SKU '${prepared.sku}': ${formatEbayError(error)}`);
+        throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${formatEbayError(error)}`);
       }
     }
 
     const status = Number(response?.status || 0);
     if (status < 200 || status >= 300) {
-      throw new Error(`eBay inventory update failed for SKU '${prepared.sku}' with status ${status || 'n/a'}.`);
+      throw new Error(`eBay trading revise failed for SKU '${prepared.sku}' with status ${status || 'n/a'}.`);
+    }
+
+    const responseXml = String(response?.data || '');
+    const ack = extractXmlTagValue(responseXml, 'Ack');
+    const xmlMessages = extractXmlErrorMessages(responseXml);
+    let isSuccessAck = ['Success', 'Warning'].includes(ack);
+    if (!isSuccessAck && hasInvalidIafTokenError(xmlMessages) && canRefresh) {
+      const refreshed = await this.requestUserAccessTokenFromRefreshToken();
+      finalToken = refreshed.accessToken;
+      response = await postTradingRevise(finalToken, finalSiteId, 'ReviseFixedPriceItem', tradingXml);
+      const retriedXml = String(response?.data || '');
+      const retriedAck = extractXmlTagValue(retriedXml, 'Ack');
+      const retriedMessages = extractXmlErrorMessages(retriedXml);
+      if (!['Success', 'Warning'].includes(retriedAck)) {
+        const detail = retriedMessages.join(' | ') || `Ack=${retriedAck || 'Unknown'}`;
+        throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${detail}`);
+      }
+      return {
+        success: true,
+        dryRun: false,
+        operation: 'revise_fixed_price_item',
+        itemId: prepared.itemId || '',
+        sku: prepared.sku,
+        response: {
+          ack: retriedAck,
+          messages: retriedMessages,
+          raw: retriedXml
+        }
+      };
+    }
+    if (!isSuccessAck && (hasCategoryInvalidError(xmlMessages) || hasConditionNotApplicableError(xmlMessages))) {
+      const fallbackAttempts = [];
+      const attemptedKeys = new Set();
+      const appendAttempt = (callName, requestSiteId, xml, tag) => {
+        const normalizedSiteId = normalizeText(requestSiteId);
+        if (!callName || !normalizedSiteId || !xml) return;
+        const key = `${callName}:${normalizedSiteId}`;
+        if (attemptedKeys.has(key)) return;
+        attemptedKeys.add(key);
+        fallbackAttempts.push({ callName, siteId: normalizedSiteId, xml, tag });
+      };
+
+      const siteFallbackOrder = buildTradingSiteFallbackOrder(finalSiteId);
+      for (const requestSiteId of siteFallbackOrder) {
+        const isPrimary = requestSiteId === finalSiteId;
+        appendAttempt(
+          'ReviseItem',
+          requestSiteId,
+          reviseItemXml,
+          isPrimary
+            ? `fallback=call_switch,siteid=${requestSiteId}`
+            : `fallback=site_switch,from=${finalSiteId},to=${requestSiteId},call=ReviseItem`
+        );
+        appendAttempt(
+          'ReviseFixedPriceItem',
+          requestSiteId,
+          tradingXml,
+          isPrimary
+            ? `fallback=retry_same_call,siteid=${requestSiteId}`
+            : `fallback=site_switch,from=${finalSiteId},to=${requestSiteId},call=ReviseFixedPriceItem`
+        );
+      }
+
+      let lastDetail = xmlMessages.join(' | ') || `Ack=${ack || 'Unknown'}`;
+      for (const attempt of fallbackAttempts) {
+        try {
+          let retryResponse = await postTradingRevise(finalToken, attempt.siteId, attempt.callName, attempt.xml);
+          let retryXml = String(retryResponse?.data || '');
+          let retryAck = extractXmlTagValue(retryXml, 'Ack');
+          let retryMessages = extractXmlErrorMessages(retryXml);
+
+          if (!['Success', 'Warning'].includes(retryAck) && hasInvalidIafTokenError(retryMessages) && canRefresh) {
+            const refreshed = await this.requestUserAccessTokenFromRefreshToken();
+            finalToken = refreshed.accessToken;
+            retryResponse = await postTradingRevise(finalToken, attempt.siteId, attempt.callName, attempt.xml);
+            retryXml = String(retryResponse?.data || '');
+            retryAck = extractXmlTagValue(retryXml, 'Ack');
+            retryMessages = extractXmlErrorMessages(retryXml);
+          }
+
+          if (!['Success', 'Warning'].includes(retryAck)) {
+            lastDetail = retryMessages.join(' | ') || `Ack=${retryAck || 'Unknown'}`;
+            continue;
+          }
+          return {
+            success: true,
+            dryRun: false,
+            operation: 'revise_fixed_price_item',
+            itemId: prepared.itemId || '',
+            sku: prepared.sku,
+            response: {
+              ack: retryAck,
+              messages: [
+                ...retryMessages,
+                attempt.tag
+              ],
+              raw: retryXml
+            }
+          };
+        } catch (attemptError) {
+          const status = Number(attemptError?.response?.status || 0);
+          if (status === 401 && canRefresh) {
+            try {
+              const refreshed = await this.requestUserAccessTokenFromRefreshToken();
+              finalToken = refreshed.accessToken;
+              const retryResponse = await postTradingRevise(finalToken, attempt.siteId, attempt.callName, attempt.xml);
+              const retryXml = String(retryResponse?.data || '');
+              const retryAck = extractXmlTagValue(retryXml, 'Ack');
+              const retryMessages = extractXmlErrorMessages(retryXml);
+              if (['Success', 'Warning'].includes(retryAck)) {
+                return {
+                  success: true,
+                  dryRun: false,
+                  operation: 'revise_fixed_price_item',
+                  itemId: prepared.itemId || '',
+                  sku: prepared.sku,
+                  response: {
+                    ack: retryAck,
+                    messages: [
+                      ...retryMessages,
+                      `${attempt.tag},token_refresh_retry=1`
+                    ],
+                    raw: retryXml
+                  }
+                };
+              }
+              lastDetail = retryMessages.join(' | ') || `Ack=${retryAck || 'Unknown'}`;
+              continue;
+            } catch (refreshAttemptError) {
+              lastDetail = formatEbayError(refreshAttemptError) || formatEbayError(attemptError) || lastDetail;
+              continue;
+            }
+          }
+          lastDetail = formatEbayError(attemptError) || lastDetail;
+        }
+      }
+      throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${lastDetail}`);
+    }
+    if (!isSuccessAck) {
+      const detail = xmlMessages.join(' | ') || `Ack=${ack || 'Unknown'}`;
+      throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${detail}`);
     }
 
     return {
       success: true,
       dryRun: false,
-      operation: 'upsert_inventory_item',
+      operation: 'revise_fixed_price_item',
       itemId: prepared.itemId || '',
       sku: prepared.sku,
-      response: response?.data || {}
+      response: {
+        ack,
+        messages: xmlMessages,
+        raw: responseXml
+      }
     };
   }
 }

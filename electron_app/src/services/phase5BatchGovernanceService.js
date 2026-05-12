@@ -47,6 +47,9 @@ function isExceptionResolved(value, resolvedValues = []) {
   const resolved = normalizeValueSet(resolvedValues);
   const text = normalizeTextOrComparable(value).toLowerCase();
   if (!text) return true;
+  // Support boolean-style exception flags in listings table.
+  if (['false', '0', 'no', 'n', 'none', 'clear', 'cleared'].includes(text)) return true;
+  if (['true', '1', 'yes', 'y', 'open', 'pending', 'exception', 'flagged'].includes(text)) return false;
   if (resolved.size === 0) return false;
   return resolved.has(text);
 }
@@ -381,6 +384,7 @@ async function getBatchListings(options = {}) {
       normalizeTextOrComparable(fields['IPN (Interchange Part Number)']) ||
       normalizeTextOrComparable(fields['c: partshunter203 ebay MOTORS interchange part number']);
     const productTitle =
+      normalizeTextOrComparable(fields['Item Title']) ||
       normalizeTextOrComparable(fields['Title']) ||
       normalizeTextOrComparable(fields['Product Title(New)']);
     const description =
