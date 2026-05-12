@@ -17,6 +17,7 @@ loadEnv();
 const LOW_CONFIDENCE_THRESHOLD = 0.75;
 const DEFAULT_PHASE4B_DETERMINED_STATUS = 'Value Determined';
 const DEFAULT_PHASE4B_COMPLETED_STATUS = 'Completed / Closed';
+const MASTER_LOAD_LOG_EVERY_ROWS = 20000;
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const LEGACY_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
 const LISTING_ITEM_SPECIFICS_FIELD = 'Item Specifics';
@@ -469,6 +470,11 @@ function parsePrefixFromTableName(tableName) {
   return match ? match[1] : '';
 }
 
+function parsePrefixFromIpn(ipn) {
+  const match = normalizeText(ipn).toUpperCase().match(/^(\d{3})[\s.-]?/);
+  return match ? match[1] : '';
+}
+
 function emitProgress(progressCallback, payload = {}) {
   if (typeof progressCallback === 'function') {
     progressCallback(payload);
@@ -600,7 +606,13 @@ function parseArgs(argv = []) {
     phase4BClickupListId: normalizeText(
       getArg('--phase4b-clickup-list-id') || process.env.PHASE4B_CLICKUP_LIST_ID || ''
     ),
-    clickupOpenStatus: normalizeText(getArg('--clickup-open-status') || process.env.PHASE4B_CLICKUP_OPEN_STATUS || 'To Do')
+    clickupOpenStatus: normalizeText(getArg('--clickup-open-status') || process.env.PHASE4B_CLICKUP_OPEN_STATUS || 'To Do'),
+    restrictToListingsPrefixIpns:
+      normalizeText(
+        getArg('--restrict-to-listing-prefix-ipns') ||
+          process.env.PHASE4B_RESTRICT_TO_LISTING_PREFIX_IPNS ||
+          'true'
+      ).toLowerCase() !== 'false'
   };
 }
 
@@ -1278,6 +1290,8 @@ async function upsertMfManualTasks(clickupService, summary, tasks = [], options 
   const dryRun = Boolean(options.dryRun);
   const sampleLimit = Number(options.sampleLimit || 20);
   const openStatus = normalizeText(options.openStatus || 'To Do');
+  const progressCallback = options.progressCallback;
+  const progressStage = normalizeText(options.progressStage || 'phase4cmf_tasks');
 
   if (!clickupService || tasks.length === 0) return;
 
@@ -1292,7 +1306,38 @@ async function upsertMfManualTasks(clickupService, summary, tasks = [], options 
     existingMap.set(taskKey, task);
   }
 
+  emitProgress(progressCallback, {
+    stage: progressStage,
+    percent: 86,
+    counts: summary,
+    message:
+      `MF task upsert started: total=${tasks.length}, existingOpen=${existingMap.size}, mode=${dryRun ? 'dry-run' : 'write'}`
+  });
+
+  let processed = 0;
+  let lastUpsertHeartbeatAt = Date.now();
   for (const item of tasks) {
+    processed += 1;
+    const emitUpsertProgressIfDue = () => {
+      const now = Date.now();
+      const shouldEmit =
+        processed === 1 ||
+        processed % 25 === 0 ||
+        processed === tasks.length ||
+        now - lastUpsertHeartbeatAt >= 5000;
+      if (!shouldEmit) return;
+      lastUpsertHeartbeatAt = now;
+      emitProgress(progressCallback, {
+        stage: progressStage,
+        percent: 88,
+        counts: summary,
+        message:
+          `MF task upsert progress ${processed}/${tasks.length} ` +
+          `(created=${summary.mfTasksCreated || 0}, updated=${summary.mfTasksUpdated || 0}, ` +
+          `skipped=${summary.mfTasksSkippedExisting || 0}, errors=${summary.errors.length || 0})`
+      });
+    };
+
     const payload = buildMfTaskPayload(item, openStatus);
     const existing = existingMap.get(item.taskKey);
     if (!existing) {
@@ -1330,6 +1375,7 @@ async function upsertMfManualTasks(clickupService, summary, tasks = [], options 
       if (summary.mfTaskSamples.length < sampleLimit) {
         summary.mfTaskSamples.push(`[mf_manual] task=create title='${payload.name}'`);
       }
+      emitUpsertProgressIfDue();
       continue;
     }
 
@@ -1337,6 +1383,7 @@ async function upsertMfManualTasks(clickupService, summary, tasks = [], options 
     const existingDescription = normalizeText(existing.description);
     if (existingName === payload.name && existingDescription === normalizeText(payload.description)) {
       summary.mfTasksSkippedExisting += 1;
+      emitUpsertProgressIfDue();
       continue;
     }
 
@@ -1357,7 +1404,17 @@ async function upsertMfManualTasks(clickupService, summary, tasks = [], options 
     if (summary.mfTaskSamples.length < sampleLimit) {
       summary.mfTaskSamples.push(`[mf_manual] task=update title='${payload.name}'`);
     }
+    emitUpsertProgressIfDue();
   }
+
+  emitProgress(progressCallback, {
+    stage: progressStage,
+    percent: 90,
+    counts: summary,
+    message:
+      `MF task upsert finished: processed=${tasks.length}, created=${summary.mfTasksCreated || 0}, ` +
+      `updated=${summary.mfTasksUpdated || 0}, skipped=${summary.mfTasksSkippedExisting || 0}, errors=${summary.errors.length || 0}`
+  });
 }
 
 async function findRecordIdByIpn(itemService, tableId, ipn) {
@@ -1386,6 +1443,9 @@ async function runMfDeterminedWriteback(itemService, clickupService, summary, op
   const sampleLimit = Number(options.sampleLimit || 20);
   const determinedStatus = normalizeText(options.determinedStatus || DEFAULT_PHASE4B_DETERMINED_STATUS);
   const preferredCompletedStatus = normalizeText(options.completedStatus || DEFAULT_PHASE4B_COMPLETED_STATUS);
+  const allowedIpnSet = options.allowedIpnSet instanceof Set ? options.allowedIpnSet : null;
+  const progressCallback = options.progressCallback;
+  const progressStage = normalizeText(options.progressStage || 'phase4cmf_writeback');
   const tablesByName = options.tablesByName || new Map();
   const tableFieldsByName = options.tableFieldsByName || new Map();
 
@@ -1399,13 +1459,52 @@ async function runMfDeterminedWriteback(itemService, clickupService, summary, op
     const taskKey = normalizeText(parseTaskDescriptionLine(description, 'TaskKey'));
     return ruleType === 'MF' || taskKey.includes('phase=4C|rule=MF');
   });
+  const scopedMfTasks = allowedIpnSet
+    ? mfTasks.filter(task => {
+        const ipn = normalizeIpn(parsePhase4BTaskMetadata(task)?.ipn);
+        return ipn && allowedIpnSet.has(ipn);
+      })
+    : mfTasks;
+  if (allowedIpnSet) {
+    summary.mfWritebacksSkippedOutOfListingScope =
+      Number(summary.mfWritebacksSkippedOutOfListingScope || 0) +
+      Math.max(0, mfTasks.length - scopedMfTasks.length);
+  }
+  emitProgress(progressCallback, {
+    stage: progressStage,
+    percent: 95,
+    counts: summary,
+    message:
+      `MF writeback queue loaded: status='${determinedStatus}', candidates=${mfTasks.length}, ` +
+      `inScope=${scopedMfTasks.length}, outOfScopeSkipped=${summary.mfWritebacksSkippedOutOfListingScope || 0}`
+  });
 
   const closeStatus = dryRun ? '' : resolvePreferredClosedStatus(await clickupService.getList(), preferredCompletedStatus);
   if (!dryRun && !closeStatus) {
     summary.errors.push('Phase4C writeback: unable to resolve a closed/completed status in ClickUp list.');
   }
 
-  for (const task of mfTasks) {
+  let lastWritebackHeartbeatAt = Date.now();
+  for (let index = 0; index < scopedMfTasks.length; index += 1) {
+    const task = scopedMfTasks[index];
+    const now = Date.now();
+    const shouldEmitHeartbeat =
+      index === 0 ||
+      index + 1 === scopedMfTasks.length ||
+      (index + 1) % 25 === 0 ||
+      now - lastWritebackHeartbeatAt >= 5000;
+    if (shouldEmitHeartbeat) {
+      lastWritebackHeartbeatAt = now;
+      emitProgress(progressCallback, {
+        stage: progressStage,
+        percent: 95,
+        counts: summary,
+        message:
+          `MF writeback progress ${index + 1}/${scopedMfTasks.length} ` +
+          `(completed=${summary.mfWritebacksCompleted || 0}, skippedFilled=${summary.mfWritebacksSkippedAlreadyFilled || 0}, ` +
+          `schemaMissing=${summary.fieldsMissingInSchema || 0}, errors=${summary.errors.length || 0})`
+      });
+    }
     const meta = parsePhase4BTaskMetadata(task);
     const finalValue = extractFinalValueFromTask(task);
 
@@ -1508,6 +1607,14 @@ async function runMfDeterminedWriteback(itemService, clickupService, summary, op
       }
     }
   }
+  emitProgress(progressCallback, {
+    stage: progressStage,
+    percent: 96,
+    counts: summary,
+    message:
+      `MF writeback finished: processed=${scopedMfTasks.length}, completed=${summary.mfWritebacksCompleted || 0}, ` +
+      `skippedFilled=${summary.mfWritebacksSkippedAlreadyFilled || 0}, errors=${summary.errors.length || 0}`
+  });
 }
 
 async function runPhase4BLite(options = {}, progressCallback = () => {}) {
@@ -1604,21 +1711,24 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     percent: 18,
     message: 'Loading Master Parts records for AI context...'
   });
-  let lastMasterLoadProgressAt = Date.now();
+  let nextMasterLoadLogAt = MASTER_LOAD_LOG_EVERY_ROWS;
   const masterRows = await fetchAllRecordsWithFallbackAndProgress(
     masterService,
     masterTable,
     [],
     state => {
-      const now = Date.now();
-      if (!state?.hasMore || now - lastMasterLoadProgressAt >= 800) {
-        lastMasterLoadProgressAt = now;
+      const loaded = Number(state?.loaded || 0);
+      const shouldEmit = !state?.hasMore || loaded >= nextMasterLoadLogAt;
+      if (shouldEmit) {
+        while (loaded >= nextMasterLoadLogAt) {
+          nextMasterLoadLogAt += MASTER_LOAD_LOG_EVERY_ROWS;
+        }
         emitProgress(progressCallback, {
           stage: 'phase4blite_load_master',
           percent: 18,
           message:
             `Loading Master Parts records for AI context... ` +
-            `Loaded ${Number(state?.loaded || 0)} rows (page ${Number(state?.page || 1)}).`
+            `Loaded ${loaded} rows (page ${Number(state?.page || 1)}).`
         });
       }
     }
@@ -1696,6 +1806,73 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     throw new Error(`Test table not found: '${requestedTableName}'. Use exact Airtable table name.`);
   }
 
+  const listingsScopeByPrefix = new Map();
+  let listingsScopeRowsScanned = 0;
+  let listingsScopeIpnCount = 0;
+  if (args.restrictToListingsPrefixIpns) {
+    emitProgress(progressCallback, {
+      stage: 'phase4blite_load_master',
+      percent: 19,
+      message: `Loading listing-driven IPN scope from '${ebayListingsTableName}'...`
+    });
+    const listingScopeSelectFields = [...EBAY_LISTING_LOOKUP_KEY_FIELDS, LISTING_C_SPECIFICS_FIELD];
+    let scopeLoaded = false;
+    for (const service of [masterService, itemService]) {
+      try {
+        let lastScopeLoadProgressAt = Date.now();
+        const listingRows = await fetchAllRecordsWithFallbackAndProgress(
+          service,
+          ebayListingsTableName,
+          listingScopeSelectFields,
+          state => {
+            const now = Date.now();
+            if (!state?.hasMore || now - lastScopeLoadProgressAt >= 800) {
+              lastScopeLoadProgressAt = now;
+              emitProgress(progressCallback, {
+                stage: 'phase4blite_load_master',
+                percent: 19,
+                message:
+                  `Loading listing-driven IPN scope from '${ebayListingsTableName}'... ` +
+                  `Loaded ${Number(state?.loaded || 0)} rows (page ${Number(state?.page || 1)}).`
+              });
+            }
+          }
+        );
+        listingsScopeRowsScanned = listingRows.length;
+        for (const listingRow of listingRows) {
+          const listingFields = listingRow?.fields || {};
+          const listingCSpecificMap = parseListingCSpecificMap(listingFields);
+          const ipn = resolveListingIpnFromCSpecifics(listingFields, listingCSpecificMap);
+          const prefix = parsePrefixFromIpn(ipn);
+          if (!ipn || !prefix) continue;
+          if (!listingsScopeByPrefix.has(prefix)) listingsScopeByPrefix.set(prefix, new Set());
+          listingsScopeByPrefix.get(prefix).add(ipn);
+        }
+        listingsScopeIpnCount = Array.from(listingsScopeByPrefix.values()).reduce(
+          (sum, set) => sum + Number(set?.size || 0),
+          0
+        );
+        scopeLoaded = true;
+        break;
+      } catch (_) {
+        continue;
+      }
+    }
+    if (!scopeLoaded) {
+      throw new Error(
+        `Unable to build listing-driven IPN scope from '${ebayListingsTableName}'. ` +
+          `Ensure the eBay listings table exists and is accessible in configured Airtable bases.`
+      );
+    }
+    emitProgress(progressCallback, {
+      stage: 'phase4blite_load_master',
+      percent: 19,
+      message:
+        `Listing-driven IPN scope ready: prefixes=${listingsScopeByPrefix.size}, ` +
+        `ipns=${listingsScopeIpnCount}, rowsScanned=${listingsScopeRowsScanned}`
+    });
+  }
+
   const summary = {
     dryRun: args.dryRun,
     ruleTypes: args.ruleTypes,
@@ -1708,6 +1885,10 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     promptCacheEnabled: Boolean(args.promptCacheEnabled),
     promptCacheKey: normalizeText(args.promptCacheKey),
     phase4BClickupListId: clickupListId,
+    restrictToListingsPrefixIpns: Boolean(args.restrictToListingsPrefixIpns),
+    listingsScopeRowsScanned,
+    listingsScopePrefixes: listingsScopeByPrefix.size,
+    listingsScopeIpns: listingsScopeIpnCount,
     testTableName: requestedTableName,
     testIpn: requestedIpnLabel,
     testMaxTables: Number(args.testMaxTables || 0),
@@ -1736,6 +1917,9 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     tablesScanned: 0,
     rowsScanned: 0,
     rowsWithIPN: 0,
+    rowsInListingsScope: 0,
+    rowsSkippedNotInListingsScope: 0,
+    tablesSkippedNoListingsPrefixScope: 0,
     masterPartsMissing: 0,
     vfFieldsEvaluated: 0,
     vfFieldsUpdated: 0,
@@ -1788,6 +1972,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     counts: summary,
     message:
       `Rules parsed: prefixes=${rulesByPrefix.size}, rows=${logicRowsScanned}, aiConcurrency=${args.aiConcurrency}, aiTimeoutMs=${args.aiTimeoutMs}, aiMaxAttempts=${args.aiMaxAttempts}` +
+      `${args.restrictToListingsPrefixIpns ? `, listingScopePrefixes=${summary.listingsScopePrefixes}, listingScopeIpns=${summary.listingsScopeIpns}` : ''}` +
       `${summary.testTableName ? `, testTableName='${summary.testTableName}'` : ''}` +
       `${summary.testIpn ? `, testIpn='${summary.testIpn}'` : ''}` +
       `${summary.testMaxTables > 0 ? `, testMaxTables=${summary.testMaxTables}` : ''}`
@@ -1798,6 +1983,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     const tableName = normalizeText(table?.name);
     const tableId = normalizeText(table?.id);
     const prefix = parsePrefixFromTableName(tableName);
+    const prefixListingsScopeIpns = listingsScopeByPrefix.get(prefix) || new Set();
     if (!tableId || !prefix) continue;
 
     summary.tablesScanned += 1;
@@ -1809,6 +1995,19 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         counts: summary,
         message: `Processing table ${i + 1}/${routableTables.length}: ${tableName}`
       });
+    }
+
+    if (args.restrictToListingsPrefixIpns && prefixListingsScopeIpns.size === 0) {
+      summary.tablesSkippedNoListingsPrefixScope += 1;
+      emitProgress(progressCallback, {
+        stage: 'phase4blite_scan_tables',
+        percent: Math.min(95, 20 + Math.floor(((i + 1) / Math.max(1, routableTables.length)) * 70)),
+        counts: summary,
+        message:
+          `Skipping table ${i + 1}/${routableTables.length}: ${tableName} (prefix ${prefix}) ` +
+          `-> no matching listings-scope IPNs for this prefix`
+      });
+      continue;
     }
 
     const prefixRules = rulesByPrefix.get(prefix);
@@ -1883,6 +2082,11 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       if (!ipn) continue;
       if (requestedIpnSet.size > 0 && !requestedIpnSet.has(ipn)) continue;
       summary.rowsWithIPN += 1;
+      if (args.restrictToListingsPrefixIpns && !prefixListingsScopeIpns.has(ipn)) {
+        summary.rowsSkippedNotInListingsScope += 1;
+        continue;
+      }
+      summary.rowsInListingsScope += 1;
 
       const master = masterMap.get(ipn);
       if (!master) {
@@ -2257,6 +2461,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     counts: summary,
     message:
       `Phase 4B-lite completed (${args.dryRun ? 'dry run' : 'write run'}). ` +
+      `${args.restrictToListingsPrefixIpns ? `Listing scope prefixes=${summary.listingsScopePrefixes || 0}, ipns=${summary.listingsScopeIpns || 0}, rowsInScope=${summary.rowsInListingsScope || 0}, rowsSkippedOutOfScope=${summary.rowsSkippedNotInListingsScope || 0}. ` : ''}` +
       `AI failed=${summary.aiCallsFailed || 0}${summary.aiCallsFailed > 0 ? ` (types: ${formatTopErrorStats(summary.aiFailureTypes)})` : ''}. ` +
       `eBayContext lookups=${summary.ebayContextLookupCount || 0}, hits=${summary.ebayContextLookupHits || 0}, cacheHits=${summary.ebayContextCacheHits || 0}, ` +
       `matched=${summary.ebayContextMatchedRows}, missing=${summary.ebayContextMissingRows}.`
@@ -2446,6 +2651,8 @@ async function runPhase4CMFWritebackOnly(options = {}, progressCallback = () => 
     sampleLimit: Number(args.sampleLimit || 20),
     determinedStatus: DEFAULT_PHASE4B_DETERMINED_STATUS,
     completedStatus: DEFAULT_PHASE4B_COMPLETED_STATUS,
+    progressCallback,
+    progressStage: 'phase4cmf_writeback',
     tablesByName,
     tableFieldsByName
   });
@@ -2470,6 +2677,7 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
   const stored = loadPhaseConfigFromStore();
 
   const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
+  const masterBaseId = normalizeText(process.env.AIRTABLE_BASE_ID || stored.airtableBaseId);
   const itemSpecificsBaseId = normalizeText(
     process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
       process.env.ITEM_SPECIFICS_BASE_ID ||
@@ -2483,6 +2691,12 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
       process.env.PHASE4B_CLICKUP_LIST_ID ||
       stored.phase4CClickupListId ||
       stored.phase4BClickupListId
+  );
+  const listingsTableName = normalizeListingsTableName(
+    args.phase4DListingsTable ||
+      process.env.PHASE4D_LISTINGS_TABLE ||
+      stored.phase4DListingsTable ||
+      DEFAULT_EBAY_LISTINGS_TABLE
   );
   const openStatus = normalizeText(
     args.phase4CClickupOpenStatus ||
@@ -2519,6 +2733,13 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
     token: airtableToken,
     baseId: itemSpecificsBaseId
   });
+  const masterBaseService =
+    masterBaseId && masterBaseId !== itemSpecificsBaseId
+      ? new AirtableService({
+          token: airtableToken,
+          baseId: masterBaseId
+        })
+      : null;
   const clickupService = new ClickUpService({
     token: clickupToken,
     listId: clickupListId
@@ -2536,6 +2757,71 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
       : allRoutableTables;
   if (requestedTableName && routableTables.length === 0) {
     throw new Error(`Test table not found: '${requestedTableName}'. Use exact Airtable table name.`);
+  }
+  const listingsScopeByPrefix = new Map();
+  const allowedListingIpnSet = new Set();
+  let listingsScopeRowsScanned = 0;
+  let listingsScopeIpns = 0;
+  if (args.restrictToListingsPrefixIpns) {
+    emitProgress(progressCallback, {
+      stage: 'phase4cmf_load_rules',
+      percent: 15,
+      message: `Loading listing-driven IPN scope from '${listingsTableName}'...`
+    });
+    let scopeLoaded = false;
+    const listingScopeServices = masterBaseService ? [masterBaseService, itemService] : [itemService];
+    for (const service of listingScopeServices) {
+      try {
+        let lastListingScopeHeartbeatAt = Date.now();
+        const listingRows = await fetchAllRecordsWithFallbackAndProgress(
+          service,
+          listingsTableName,
+          [...EBAY_LISTING_IPN_FIELDS, LISTING_C_SPECIFICS_FIELD],
+          state => {
+            const now = Date.now();
+            if (!state?.hasMore || now - lastListingScopeHeartbeatAt >= 800) {
+              lastListingScopeHeartbeatAt = now;
+              emitProgress(progressCallback, {
+                stage: 'phase4cmf_load_rules',
+                percent: 16,
+                message:
+                  `Loading listing-driven IPN scope from '${listingsTableName}'... ` +
+                  `loaded=${Number(state?.loaded || 0)} rows (page ${Number(state?.page || 1)})`
+              });
+            }
+          }
+        );
+        listingsScopeRowsScanned = listingRows.length;
+        for (const listingRow of listingRows) {
+          const listingFields = listingRow?.fields || {};
+          const listingCSpecificMap = parseListingCSpecificMap(listingFields);
+          const ipn = resolveListingIpnFromCSpecifics(listingFields, listingCSpecificMap);
+          const prefix = parsePrefixFromIpn(ipn);
+          if (!ipn || !prefix) continue;
+          if (!listingsScopeByPrefix.has(prefix)) listingsScopeByPrefix.set(prefix, new Set());
+          listingsScopeByPrefix.get(prefix).add(ipn);
+          allowedListingIpnSet.add(ipn);
+        }
+        listingsScopeIpns = allowedListingIpnSet.size;
+        scopeLoaded = true;
+        break;
+      } catch (_) {
+        continue;
+      }
+    }
+    if (!scopeLoaded) {
+      throw new Error(
+        `Unable to build listing-driven IPN scope from '${listingsTableName}'. ` +
+          `Ensure eBay listings table is accessible in configured Airtable bases.`
+      );
+    }
+    emitProgress(progressCallback, {
+      stage: 'phase4cmf_load_rules',
+      percent: 18,
+      message:
+        `Listing-driven IPN scope ready: prefixes=${listingsScopeByPrefix.size}, ` +
+        `ipns=${listingsScopeIpns}, rowsScanned=${listingsScopeRowsScanned}`
+    });
   }
 
   const tablesByName = new Map(
@@ -2555,9 +2841,17 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
   const summary = {
     dryRun: Boolean(args.dryRun),
     rulesSource: `google_drive:${fileId}`,
+    listingsTable: listingsTableName,
+    restrictToListingsPrefixIpns: Boolean(args.restrictToListingsPrefixIpns),
+    listingsScopePrefixes: listingsScopeByPrefix.size,
+    listingsScopeIpns,
+    listingsScopeRowsScanned,
     tablesScanned: 0,
+    tablesSkippedNoListingsPrefixScope: 0,
     rowsScanned: 0,
     rowsWithIPN: 0,
+    rowsInListingsScope: 0,
+    rowsSkippedNotInListingsScope: 0,
     mfFieldsScanned: 0,
     mfFieldsAlreadyFilled: 0,
     mfFieldsFixedLockedSkipped: 0,
@@ -2566,6 +2860,7 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
     mfTasksSkippedExisting: 0,
     mfWritebacksCompleted: 0,
     mfWritebacksSkippedAlreadyFilled: 0,
+    mfWritebacksSkippedOutOfListingScope: 0,
     mfFixedLocked: 0,
     fieldsMissingInSchema: 0,
     mfTaskSamples: [],
@@ -2586,9 +2881,22 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
     const tableName = normalizeText(table?.name);
     const tableId = normalizeText(table?.id);
     const prefix = parsePrefixFromTableName(tableName);
+    const prefixListingScope = listingsScopeByPrefix.get(prefix) || new Set();
     if (!tableId || !prefix) continue;
 
     summary.tablesScanned += 1;
+    if (args.restrictToListingsPrefixIpns && prefixListingScope.size === 0) {
+      summary.tablesSkippedNoListingsPrefixScope += 1;
+      emitProgress(progressCallback, {
+        stage: 'phase4cmf_scan_tables',
+        percent: Math.min(80, 20 + Math.floor(((i + 1) / Math.max(1, routableTables.length)) * 50)),
+        counts: summary,
+        message:
+          `Skipping table ${i + 1}/${routableTables.length}: ${tableName} ` +
+          `(prefix=${prefix}) -> no listing-scope IPNs`
+      });
+      continue;
+    }
     const mfFieldsMap = rulesByPrefix.get(prefix);
     if (!mfFieldsMap || mfFieldsMap.size === 0) continue;
 
@@ -2598,15 +2906,61 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
     summary.fieldsMissingInSchema += missingMfFields.length;
     if (mfFieldNames.length === 0) continue;
 
-    const rows = await fetchAllRecordsWithFallback(itemService, tableId, ['IPN', ...mfFieldNames]);
+    emitProgress(progressCallback, {
+      stage: 'phase4cmf_scan_tables',
+      percent: Math.min(80, 20 + Math.floor(((i + 1) / Math.max(1, routableTables.length)) * 50)),
+      counts: summary,
+      message:
+        `Fetching rows for table ${i + 1}/${routableTables.length}: ${tableName} ` +
+        `(fields=${mfFieldNames.length + 1})`
+    });
+    let lastTableFetchHeartbeatAt = Date.now();
+    const rows = await fetchAllRecordsWithFallbackAndProgress(itemService, tableId, ['IPN', ...mfFieldNames], state => {
+      const now = Date.now();
+      if (!state?.hasMore || now - lastTableFetchHeartbeatAt >= 900) {
+        lastTableFetchHeartbeatAt = now;
+        emitProgress(progressCallback, {
+          stage: 'phase4cmf_scan_tables',
+          percent: Math.min(80, 20 + Math.floor(((i + 1) / Math.max(1, routableTables.length)) * 50)),
+          counts: summary,
+          message:
+            `Fetching rows for table ${i + 1}/${routableTables.length}: ${tableName} ` +
+            `loaded=${Number(state?.loaded || 0)} rows (page ${Number(state?.page || 1)})`
+        });
+      }
+    });
     summary.rowsScanned += rows.length;
 
-    for (const row of rows) {
+    let lastRowLoopHeartbeatAt = Date.now();
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex];
+      const now = Date.now();
+      if (
+        rowIndex === 0 ||
+        rowIndex + 1 === rows.length ||
+        (rowIndex + 1) % 500 === 0 ||
+        now - lastRowLoopHeartbeatAt >= 6000
+      ) {
+        lastRowLoopHeartbeatAt = now;
+        emitProgress(progressCallback, {
+          stage: 'phase4cmf_scan_tables',
+          percent: Math.min(80, 20 + Math.floor(((i + 1) / Math.max(1, routableTables.length)) * 50)),
+          counts: summary,
+          message:
+            `Scanning rows ${rowIndex + 1}/${rows.length} in ${tableName} ` +
+            `(pendingTasks=${pendingMfTasks.length}, rowsWithIPN=${summary.rowsWithIPN}, inScope=${summary.rowsInListingsScope})`
+        });
+      }
       const rowId = normalizeText(row?.id);
       const fields = row?.fields || {};
       const ipn = normalizeIpn(fields.IPN);
       if (!ipn) continue;
       summary.rowsWithIPN += 1;
+      if (args.restrictToListingsPrefixIpns && !prefixListingScope.has(ipn)) {
+        summary.rowsSkippedNotInListingsScope += 1;
+        continue;
+      }
+      summary.rowsInListingsScope += 1;
 
       for (const fieldName of mfFieldNames) {
         summary.mfFieldsScanned += 1;
@@ -2637,7 +2991,9 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
         stage: 'phase4cmf_scan_tables',
         percent: Math.min(80, 20 + Math.floor(ratio * 50)),
         counts: summary,
-        message: `Scanning table ${i + 1}/${routableTables.length}: ${tableName}`
+        message:
+          `Completed table ${i + 1}/${routableTables.length}: ${tableName} ` +
+          `(rows=${rows.length}, mfFields=${mfFieldNames.length}, pendingTasks=${pendingMfTasks.length})`
       });
     }
   }
@@ -2656,7 +3012,9 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
   await upsertMfManualTasks(clickupService, summary, Array.from(mfTaskMap.values()), {
     dryRun: args.dryRun,
     sampleLimit: args.sampleLimit,
-    openStatus
+    openStatus,
+    progressCallback,
+    progressStage: 'phase4cmf_tasks'
   });
 
   emitProgress(progressCallback, {
@@ -2670,6 +3028,9 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
     sampleLimit: args.sampleLimit,
     determinedStatus: DEFAULT_PHASE4B_DETERMINED_STATUS,
     completedStatus: DEFAULT_PHASE4B_COMPLETED_STATUS,
+    allowedIpnSet: args.restrictToListingsPrefixIpns ? allowedListingIpnSet : null,
+    progressCallback,
+    progressStage: 'phase4cmf_writeback',
     tablesByName,
     tableFieldsByName
   });
@@ -2684,6 +3045,7 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
     counts: summary,
     message:
       `Phase 4C (MF) completed (${args.dryRun ? 'dry run' : 'write run'}). ` +
+      `${args.restrictToListingsPrefixIpns ? `Listing scope prefixes=${summary.listingsScopePrefixes || 0}, ipns=${summary.listingsScopeIpns || 0}, rowsInScope=${summary.rowsInListingsScope || 0}, scopeSkipped=${summary.rowsSkippedNotInListingsScope || 0}, writebackSkippedOutOfScope=${summary.mfWritebacksSkippedOutOfListingScope || 0}. ` : ''}` +
       `TasksCreated=${summary.mfTasksCreated}, TasksUpdated=${summary.mfTasksUpdated}, ` +
       `Writebacks=${summary.mfWritebacksCompleted}.`
   });
@@ -2816,7 +3178,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
   const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
-  const requestedIpnSet = parseIpnSet(args.phase4DTestIpn || args.phase4BTestIpn);
+  const requestedIpnSet = parseIpnSet(args.phase4DTestIpn);
   const requestedIpnLabel = requestedIpnSet.size > 0 ? Array.from(requestedIpnSet).join(', ') : '';
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
@@ -2876,21 +3238,24 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     percent: 16,
     message: 'Loading Master Parts records for Phase 4D context...'
   });
-  let lastMasterLoadProgressAt = Date.now();
+  let nextMasterLoadLogAt = MASTER_LOAD_LOG_EVERY_ROWS;
   const masterRows = await fetchAllRecordsWithFallbackAndProgress(
     airtableService,
     masterTable,
     [],
     state => {
-      const now = Date.now();
-      if (!state?.hasMore || now - lastMasterLoadProgressAt >= 800) {
-        lastMasterLoadProgressAt = now;
+      const loaded = Number(state?.loaded || 0);
+      const shouldEmit = !state?.hasMore || loaded >= nextMasterLoadLogAt;
+      if (shouldEmit) {
+        while (loaded >= nextMasterLoadLogAt) {
+          nextMasterLoadLogAt += MASTER_LOAD_LOG_EVERY_ROWS;
+        }
         emitProgress(progressCallback, {
           stage: 'phase4d_scan_listings',
           percent: 16,
           message:
             `Loading Master Parts records for Phase 4D context... ` +
-            `Loaded ${Number(state?.loaded || 0)} rows (page ${Number(state?.page || 1)}).`
+            `Loaded ${loaded} rows (page ${Number(state?.page || 1)}).`
         });
       }
     }
@@ -2945,6 +3310,37 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     }
   );
 
+  const listingsScopeByPrefix = new Map();
+  for (const row of listingsRows) {
+    const listingFields = row?.fields || {};
+    const listingCSpecificMap = parseListingCSpecificMap(listingFields);
+    const ipn = resolveListingIpnFromCSpecifics(listingFields, listingCSpecificMap);
+    const prefix = parsePrefixFromIpn(ipn);
+    if (!ipn || !prefix) continue;
+    if (!listingsScopeByPrefix.has(prefix)) listingsScopeByPrefix.set(prefix, new Set());
+    listingsScopeByPrefix.get(prefix).add(ipn);
+  }
+  const listingsScopeIpnCount = Array.from(listingsScopeByPrefix.values()).reduce(
+    (sum, set) => sum + Number(set?.size || 0),
+    0
+  );
+  emitProgress(progressCallback, {
+    stage: 'phase4d_scan_listings',
+    percent: 21,
+    message:
+      `Listing-driven AI scope ready: prefixes=${listingsScopeByPrefix.size}, ` +
+      `ipns=${listingsScopeIpnCount}, rowsScanned=${listingsRows.length}`
+  });
+  if (requestedIpnSet.size > 0) {
+    emitProgress(progressCallback, {
+      stage: 'phase4d_scan_listings',
+      percent: 21,
+      message:
+        `Phase 4D test IPN filter active: ${requestedIpnLabel} ` +
+        `(only these IPNs will be processed)`
+    });
+  }
+
   const summary = {
     dryRun: Boolean(args.dryRun),
     rulesSource: `google_drive:${fileId}`,
@@ -2952,6 +3348,11 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     listingsTable: effectiveListingsTableName,
     testIpn: requestedIpnLabel,
     listingsScanned: listingsRows.length,
+    restrictToListingsPrefixIpns: Boolean(args.restrictToListingsPrefixIpns),
+    listingsScopePrefixes: listingsScopeByPrefix.size,
+    listingsScopeIpns: listingsScopeIpnCount,
+    listingsInScope: 0,
+    listingsSkippedNotInListingsScope: 0,
     listingsEligible: 0,
     skippedAlreadyPublished: 0,
     skippedByTestIpn: 0,
@@ -3030,6 +3431,18 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     if (requestedIpnSet.size > 0 && !requestedIpnSet.has(ipn)) {
       summary.skippedByTestIpn += 1;
       continue;
+    }
+    if (args.restrictToListingsPrefixIpns) {
+      const listingPrefix = parsePrefixFromIpn(ipn);
+      const prefixScope = listingsScopeByPrefix.get(listingPrefix) || new Set();
+      if (!listingPrefix || !prefixScope.has(ipn)) {
+        summary.listingsSkippedNotInListingsScope += 1;
+        pushSkipSample(
+          `skip=not_in_listing_scope record='${recordKey || recordId}' ipn='${ipn}' prefix='${listingPrefix || 'n/a'}'`
+        );
+        continue;
+      }
+      summary.listingsInScope += 1;
     }
     if (isPublishedIdentity(listingFields, publishedIdentitySet)) {
       summary.skippedAlreadyPublished += 1;
@@ -3180,6 +3593,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         message:
           `Processing listing ${i + 1}/${listingsRows.length} ` +
           `(recordKey='${recordKey || recordId}', eligible=${summary.listingsEligible}, aiCalls=${aiCalls}, writes=${writesDone}, ` +
+          `inScope=${summary.listingsInScope || 0}, scopeSkipped=${summary.listingsSkippedNotInListingsScope || 0}, ` +
           `FsV=${summary.fsvFieldsUpdated}, V1=${summary.v1FieldsUpdated}, V2=${summary.v2FieldsUpdated}, VB=${summary.vbFieldsUpdated}, ` +
           `manualSkipped=${summary.manualOverrideSkipped}, publishedSkipped=${summary.skippedAlreadyPublished}, missingIpn=${summary.skippedMissingIpn}, ` +
           `outOfScope=${summary.skippedOutOfScope}, noPrefixRules=${summary.skippedNoPrefixRules}, masterMissing=${summary.masterPartsMissing})`
@@ -3213,16 +3627,48 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       listingItemSpecificsAllCValuesRelevantToItem:
         candidate.listingItemSpecificsAllCValuesRelevantToItem
     }));
+    let lastFirstPassBatchHeartbeatAt = Date.now();
     const firstPassBatch = await aiService.evaluateFieldChatBatch(firstPassPayloads, {
-      ipnBatchSize: Math.max(1, Math.min(300, Number(args.aiIpnBatchSize || 250) || 250))
+      ipnBatchSize: Math.max(1, Math.min(300, Number(args.aiIpnBatchSize || 250) || 250)),
+      onBatchComplete: state => {
+        const now = Date.now();
+        if (now - lastFirstPassBatchHeartbeatAt < 1000 && state?.index !== state?.total) return;
+        lastFirstPassBatchHeartbeatAt = now;
+        emitProgress(progressCallback, {
+          stage: 'phase4d_scan_listings',
+          percent: 95,
+          counts: summary,
+          message:
+            `AI first-pass batches: ${state?.index || 0}/${state?.total || 0} ` +
+            `(batchSize=${state?.size || 0}, candidates=${firstPassCandidates.length}, aiCalls=${aiCalls})`
+        });
+      }
     });
     aiCalls += firstPassCandidates.length;
     const firstPassResults = firstPassBatch?.resultsByRequestId instanceof Map
       ? firstPassBatch.resultsByRequestId
       : new Map();
 
+    let lastFirstPassApplyHeartbeatAt = Date.now();
     for (let idx = 0; idx < firstPassCandidates.length; idx += 1) {
       const candidate = firstPassCandidates[idx];
+      const now = Date.now();
+      if (
+        idx === 0 ||
+        idx + 1 === firstPassCandidates.length ||
+        (idx + 1) % 500 === 0 ||
+        now - lastFirstPassApplyHeartbeatAt >= 6000
+      ) {
+        lastFirstPassApplyHeartbeatAt = now;
+        emitProgress(progressCallback, {
+          stage: 'phase4d_scan_listings',
+          percent: 96,
+          counts: summary,
+          message:
+            `Applying AI first-pass results ${idx + 1}/${firstPassCandidates.length} ` +
+            `(writes=${writesDone}, pendingWebIpns=${pendingWebByIpn.size})`
+        });
+      }
       const requestId = firstPassPayloads[idx].requestId;
       const aiResult = firstPassResults.get(requestId) || {
         value: '',
@@ -3295,6 +3741,14 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
 
   const pendingWebCandidates = Array.from(pendingWebByIpn.values()).flat();
   if (pendingWebCandidates.length > 0) {
+    emitProgress(progressCallback, {
+      stage: 'phase4d_scan_listings',
+      percent: 97,
+      counts: summary,
+      message:
+        `Running AI shared web-search second pass for ${pendingWebCandidates.length} candidates ` +
+        `(ipnBatchSize=${args.aiIpnBatchSize})`
+    });
     const webPayloads = pendingWebCandidates.map((candidate, index) => ({
       requestId: `4d:web:${index + 1}:${candidate.recordId}:${candidate.fieldName}`,
       ipn: candidate.ipn,
@@ -3313,8 +3767,22 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     }));
     let webResultsByRequestId = new Map();
     try {
+      let lastWebBatchHeartbeatAt = Date.now();
       const webBatch = await aiService.evaluateFieldsWithSharedWebSearchBatch(webPayloads, {
-        ipnBatchSize: Math.max(1, Math.min(300, Number(args.aiIpnBatchSize || 250) || 250))
+        ipnBatchSize: Math.max(1, Math.min(300, Number(args.aiIpnBatchSize || 250) || 250)),
+        onBatchComplete: state => {
+          const now = Date.now();
+          if (now - lastWebBatchHeartbeatAt < 1000 && state?.index !== state?.total) return;
+          lastWebBatchHeartbeatAt = now;
+          emitProgress(progressCallback, {
+            stage: 'phase4d_scan_listings',
+            percent: 98,
+            counts: summary,
+            message:
+              `AI web-search batches: ${state?.index || 0}/${state?.total || 0} ` +
+              `(batchSize=${state?.size || 0}, candidates=${pendingWebCandidates.length})`
+          });
+        }
       });
       webResultsByRequestId =
         webBatch?.resultsByRequestId instanceof Map ? webBatch.resultsByRequestId : new Map();
@@ -3324,8 +3792,26 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       }
     }
 
+    let lastWebApplyHeartbeatAt = Date.now();
     for (let p = 0; p < pendingWebCandidates.length; p += 1) {
       const candidate = pendingWebCandidates[p];
+      const now = Date.now();
+      if (
+        p === 0 ||
+        p + 1 === pendingWebCandidates.length ||
+        (p + 1) % 500 === 0 ||
+        now - lastWebApplyHeartbeatAt >= 6000
+      ) {
+        lastWebApplyHeartbeatAt = now;
+        emitProgress(progressCallback, {
+          stage: 'phase4d_scan_listings',
+          percent: 99,
+          counts: summary,
+          message:
+            `Applying AI web-search results ${p + 1}/${pendingWebCandidates.length} ` +
+            `(writes=${writesDone}, webUsed=${summary.aiWebSearchUsed || 0})`
+        });
+      }
       const requestId = webPayloads[p].requestId;
       const webResult = webResultsByRequestId.get(requestId) || null;
       const webValue = enforceAllowedValue(
@@ -3416,7 +3902,12 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     stage: 'completed',
     percent: 100,
     counts: summary,
-    message: `Phase 4D completed (${args.dryRun ? 'dry run' : 'write run'}).`
+    message:
+      `Phase 4D completed (${args.dryRun ? 'dry run' : 'write run'}). ` +
+      `${args.restrictToListingsPrefixIpns ? `Listing scope prefixes=${summary.listingsScopePrefixes || 0}, ipns=${summary.listingsScopeIpns || 0}, inScope=${summary.listingsInScope || 0}, scopeSkipped=${summary.listingsSkippedNotInListingsScope || 0}. ` : ''}` +
+      `eligible=${summary.listingsEligible || 0}, skippedByTestIpn=${summary.skippedByTestIpn || 0}, ` +
+      `missingIpn=${summary.skippedMissingIpn || 0}, outOfScope=${summary.skippedOutOfScope || 0}, ` +
+      `publishedSkipped=${summary.skippedAlreadyPublished || 0}, masterMissing=${summary.masterPartsMissing || 0}.`
   });
   return summary;
 }

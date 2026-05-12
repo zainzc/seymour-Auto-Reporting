@@ -2733,7 +2733,6 @@
         document.getElementById('phase5-autopush-timezone').value = config.phase5AutoPushTimezone || '';
         document.getElementById('phase5-autopush-eligibility-field').value = config.phase5AutoPushEligibilityFieldName || '';
         document.getElementById('phase5-autopush-eligibility-values').value = config.phase5AutoPushEligibilityValues || '';
-        syncPhase4LegacyInputsToUnified();
         const phase4bTestTableInput = document.getElementById('phase4b-test-table-name');
         if (phase4bTestTableInput) {
           phase4bTestTableInput.value = config.testTableName || '';
@@ -3247,7 +3246,8 @@
       const unifiedClickupName = document.getElementById('phase4-unified-clickup-list-name')?.value?.trim() || '';
       const unifiedClickupId = document.getElementById('phase4-unified-clickup-list-id')?.value?.trim() || '';
       const unifiedClickupStatus = document.getElementById('phase4-unified-clickup-open-status')?.value?.trim() || DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
-      const unifiedListingsTable = DEFAULT_PHASE4D_LISTINGS_TABLE;
+      const unifiedListingsTable =
+        document.getElementById('phase4-unified-listings-table')?.value?.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE;
       const unifiedTestIpn = document.getElementById('phase4-unified-test-ipn')?.value?.trim() || '';
       const unifiedTestIpn4D = document.getElementById('phase4-unified-test-ipn-4d')?.value?.trim() || '';
       const unifiedDryRun = false;
@@ -3257,12 +3257,18 @@
       document.getElementById('phase4-rules-logic-sheet').value = unifiedLogic;
       if (unifiedOpenAiKey) document.getElementById('openai-api-key').value = unifiedOpenAiKey;
       document.getElementById('openai-model').value = unifiedOpenAiModel;
-      document.getElementById('phase4b-clickup-list-name').value = unifiedClickupName;
-      document.getElementById('phase4c-clickup-list-name').value = unifiedClickupName;
-      document.getElementById('phase4b-clickup-list-id').value = unifiedClickupId;
-      document.getElementById('phase4c-clickup-list-id').value = unifiedClickupId;
-      document.getElementById('phase4b-clickup-open-status').value = unifiedClickupStatus;
-      document.getElementById('phase4c-clickup-open-status').value = unifiedClickupStatus;
+      if (unifiedClickupName) {
+        document.getElementById('phase4b-clickup-list-name').value = unifiedClickupName;
+        document.getElementById('phase4c-clickup-list-name').value = unifiedClickupName;
+      }
+      if (unifiedClickupId) {
+        document.getElementById('phase4b-clickup-list-id').value = unifiedClickupId;
+        document.getElementById('phase4c-clickup-list-id').value = unifiedClickupId;
+      }
+      if (unifiedClickupStatus) {
+        document.getElementById('phase4b-clickup-open-status').value = unifiedClickupStatus;
+        document.getElementById('phase4c-clickup-open-status').value = unifiedClickupStatus;
+      }
       document.getElementById('phase4d-listings-table').value = unifiedListingsTable;
       document.getElementById('phase4b-test-ipn').value = unifiedTestIpn;
       document.getElementById('phase4d-test-ipn').value = unifiedTestIpn4D;
@@ -3295,7 +3301,9 @@
         document.getElementById('phase4b-clickup-open-status').value.trim() ||
         document.getElementById('phase4c-clickup-open-status').value.trim() ||
         DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS;
-      document.getElementById('phase4-unified-listings-table').value = DEFAULT_PHASE4D_LISTINGS_TABLE;
+      document.getElementById('phase4-unified-listings-table').value =
+        document.getElementById('phase4d-listings-table').value.trim() ||
+        DEFAULT_PHASE4D_LISTINGS_TABLE;
       document.getElementById('phase4-unified-test-ipn').value =
         document.getElementById('phase4b-test-ipn').value.trim();
       document.getElementById('phase4-unified-test-ipn-4d').value =

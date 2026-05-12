@@ -345,6 +345,46 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
       });
     } catch (_) {}
   };
+  const buildPostImportProgressBridge = (postImportStage, phaseLabel, options = {}) => {
+    const minPercent = Number(options.minPercent || 99);
+    const logIntervalMs = Number(options.logIntervalMs || 2000);
+    let lastUiEmitAt = 0;
+    let lastUiMessage = '';
+    let lastLogAt = 0;
+    let lastLogMessage = '';
+    return payload => {
+      const progress = payload && typeof payload === 'object' ? payload : {};
+      const stage = normalizeText(progress.stage).toLowerCase();
+      const incomingPercent = Number(progress.percent);
+      const percent = Number.isFinite(incomingPercent)
+        ? Math.max(minPercent, Math.min(100, incomingPercent))
+        : minPercent;
+      const message = normalizeText(progress.message) || `Running ${phaseLabel}...`;
+      const now = Date.now();
+      const terminalStage = stage === 'completed' || stage === 'error';
+      const shouldEmitUi =
+        terminalStage ||
+        !lastUiMessage ||
+        message !== lastUiMessage ||
+        now - lastUiEmitAt >= 800;
+      if (shouldEmitUi) {
+        lastUiEmitAt = now;
+        lastUiMessage = message;
+        emitStepProgress(postImportStage, percent, message);
+      }
+
+      const shouldLog =
+        terminalStage ||
+        !lastLogMessage ||
+        message !== lastLogMessage ||
+        now - lastLogAt >= logIntervalMs;
+      if (shouldLog) {
+        lastLogAt = now;
+        lastLogMessage = message;
+        emitInventoryAutoChainLog(`Post-import automation: ${phaseLabel} -> ${message}`);
+      }
+    };
+  };
 
   emitStepProgress('ebaysandbox_post_import_start', 99, 'Post-import automation started.');
   emitInventoryAutoChainLog('Post-import automation started: Phase4 -> Phase6 -> Phase7.2 -> Phase7.4');
@@ -472,7 +512,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
         'Fixed Item Specifics (Global Defaults)'
     ).trim(),
     logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim()
-  }, () => {});
+  }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4a', 'Phase 4A'));
   emitInventoryAutoChainLog(`Post-import automation: Phase 4A completed (updated=${summary.phase4A?.fixedFieldsUpdated || 0})`);
 
   emitStepProgress('ebaysandbox_post_import_phase4b', 99, 'Running Phase 4B-lite...');
@@ -499,7 +539,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
         process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
         'To Do'
     ).trim()
-  }, () => {});
+  }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4b', 'Phase 4B-lite'));
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 4B completed ` +
       `(vmfUpdated=${summary.phase4B?.vmfFieldsUpdated || 0}, vmfTasksCreated=${summary.phase4B?.vmfTasksCreated || 0})`
@@ -528,7 +568,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
         process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
         'To Do'
     ).trim()
-  }, () => {});
+  }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4c', 'Phase 4C'));
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 4C completed ` +
       `(mfTasksCreated=${summary.phase4C?.mfTasksCreated || 0}, mfWritebacksCompleted=${summary.phase4C?.mfWritebacksCompleted || 0})`
@@ -547,10 +587,11 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     rulesDriveFile: phase4RulesDriveFile,
     logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim(),
     phase4DListingsTable: listingsTable,
+    phase4DTestIpn: '',
     openaiApiKey: phase4OpenAiKey,
     openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
-  }, () => {});
+  }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4d', 'Phase 4D'));
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 4D completed ` +
       `(listingsEligible=${summary.phase4D?.listingsEligible || 0})`
@@ -573,10 +614,10 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
         process.env.OPENAI_PROMPT_CACHE_KEY ||
         'phase6_fitment_v1'
     ).trim(),
-    phase6TestIpns: String(stored.phase6TestIpns || process.env.PHASE6_TEST_IPNS || '').trim(),
-    phase6MaxIpns: Number(stored.phase6MaxIpns || process.env.PHASE6_MAX_IPNS || 0) || 0,
+    phase6TestIpns: '',
+    phase6MaxIpns: 0,
     sampleLimit: Number(stored.phase6SampleLimit || process.env.PHASE6_SAMPLE_LIMIT || 20) || 20
-  }, () => {});
+  }, buildPostImportProgressBridge('ebaysandbox_post_import_phase6', 'Phase 6'));
   emitInventoryAutoChainLog(`Post-import automation: Phase 6 completed (updated=${summary.phase6?.masterPartsUpdated || 0})`);
 
   emitStepProgress('ebaysandbox_post_import_phase72', 99, 'Running Phase 7.2 fitment image generation...');
@@ -586,12 +627,12 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
       stored.phase72MasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
     ).trim(),
     phase72DriveFolderId: String(stored.phase72DriveFolderId || process.env.PHASE72_DRIVE_FOLDER_ID || '').trim(),
-    phase72TestIpns: String(stored.phase72TestIpns || process.env.PHASE72_TEST_IPNS || '').trim(),
-    phase72MaxIpns: Number(stored.phase72MaxIpns || process.env.PHASE72_MAX_IPNS || 0) || 0,
+    phase72TestIpns: '',
+    phase72MaxIpns: 0,
     phase72ForceRegenerate:
       String(stored.phase72ForceRegenerate ?? process.env.PHASE72_FORCE_REGENERATE ?? 'false').trim().toLowerCase() === 'true',
     sampleLimit: Number(stored.phase72SampleLimit || process.env.PHASE72_SAMPLE_LIMIT || 20) || 20
-  }, () => {});
+  }, buildPostImportProgressBridge('ebaysandbox_post_import_phase72', 'Phase 7.2'));
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 7.2 completed ` +
       `(generated=${summary.phase72?.fitmentImagesGenerated || 0}, alreadyPresent=${summary.phase72?.fitmentImagesAlreadyPresent || 0})`
@@ -614,10 +655,10 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
         process.env.OPENAI_PROMPT_CACHE_KEY ||
         'phase74_title_description_v1'
     ).trim(),
-    phase74TestIpns: String(stored.phase74TestIpns || process.env.PHASE74_TEST_IPNS || '').trim(),
-    phase74MaxListings: Number(stored.phase74MaxListings || process.env.PHASE74_MAX_LISTINGS || 0) || 0,
+    phase74TestIpns: '',
+    phase74MaxListings: 0,
     sampleLimit: Number(stored.phase74SampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20
-  }, () => {});
+  }, buildPostImportProgressBridge('ebaysandbox_post_import_phase74', 'Phase 7.4'));
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 7.4 completed ` +
       `(titles=${summary.phase74?.titleGenerated || 0}, descriptions=${summary.phase74?.descriptionGenerated || 0})`

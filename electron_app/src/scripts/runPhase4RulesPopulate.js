@@ -10,6 +10,17 @@ const path = require('path');
 
 loadEnv();
 
+const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
+const LEGACY_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+const MASTER_LOAD_LOG_EVERY_ROWS = 20000;
+const LISTING_C_SPECIFICS_FIELD = 'Item Specifics - All C: values relevant to item';
+const EBAY_LISTING_IPN_FIELDS = [
+  'IPN (Interchange Part Number)',
+  'c: partshunter203 ebay MOTORS interchange part number',
+  'C: partshunter203 ebay MOTORS interchange part number',
+  'IPN'
+];
+
 function normalizeText(value) {
   return String(value || '').trim();
 }
@@ -19,6 +30,66 @@ function normalizeFieldToken(value) {
     .replace(/^C:\s*/i, '')
     .replace(/\s+/g, ' ')
     .toLowerCase();
+}
+
+function normalizeListingsTableName(value = '') {
+  const text = normalizeText(value);
+  if (!text) return DEFAULT_EBAY_LISTINGS_TABLE;
+  if (text.toLowerCase() === LEGACY_EBAY_LISTINGS_TABLE.toLowerCase()) {
+    return DEFAULT_EBAY_LISTINGS_TABLE;
+  }
+  return text;
+}
+
+function parsePrefixFromIpn(ipn) {
+  const match = normalizeText(ipn).toUpperCase().match(/^(\d{3})[\s.-]?/);
+  return match ? match[1] : '';
+}
+
+function parseJsonObject(value) {
+  if (!value && value !== 0) return null;
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  const text = normalizeText(value);
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch (_) {
+    return null;
+  }
+  return null;
+}
+
+function normalizeCSpecificKey(value = '') {
+  const text = normalizeText(value).replace(/\s+/g, ' ');
+  if (!text) return '';
+  const lower = text.toLowerCase();
+  if (lower.startsWith('c:')) return lower;
+  return `c: ${lower}`;
+}
+
+function parseListingCSpecificMap(fields = {}) {
+  const parsed = parseJsonObject(fields[LISTING_C_SPECIFICS_FIELD]);
+  const out = new Map();
+  if (!parsed) return out;
+  for (const [rawKey, rawValue] of Object.entries(parsed)) {
+    const key = normalizeCSpecificKey(rawKey);
+    const value = normalizeText(rawValue);
+    if (!key || !value) continue;
+    out.set(key, value);
+  }
+  return out;
+}
+
+function resolveListingIpnFromFields(fields = {}) {
+  for (const key of EBAY_LISTING_IPN_FIELDS) {
+    const direct = normalizeText(fields[key]).toUpperCase();
+    if (direct) return direct;
+  }
+  const cSpecificMap = parseListingCSpecificMap(fields);
+  return normalizeText(
+    cSpecificMap.get('c: partshunter203 ebay motors interchange part number')
+  ).toUpperCase();
 }
 
 function emitProgress(progressCallback, payload = {}) {
@@ -50,6 +121,16 @@ function parseArgs(argv = []) {
         process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
         'Fixed Item Specifics (Global Defaults)'
     ),
+    phase4DListingsTable: normalizeText(
+      getArg('--phase4d-listings-table') || process.env.PHASE4D_LISTINGS_TABLE || ''
+    ),
+    restrictToListingsPrefixIpns:
+      normalizeText(
+        getArg('--restrict-to-listing-prefix-ipns') ||
+          process.env.PHASE4_RESTRICT_TO_LISTING_PREFIX_IPNS ||
+          process.env.PHASE4B_RESTRICT_TO_LISTING_PREFIX_IPNS ||
+          'true'
+      ).toLowerCase() !== 'false',
     logicSheetName: normalizeText(getArg('--logic-sheet') || process.env.PHASE4_LOGIC_SHEET || 'Logic'),
     sampleLimit: Number(getArg('--sample-limit') || 30) || 30
   };
@@ -139,6 +220,43 @@ async function fetchAllRecordsWithFallback(service, tableNameOrId, selectFields 
   }
 }
 
+async function fetchAllRecordsWithFallbackAndProgress(
+  service,
+  tableNameOrId,
+  selectFields = [],
+  onProgress = () => {}
+) {
+  async function fetchPaged(fields = []) {
+    const records = [];
+    let offset = null;
+    let page = 0;
+    do {
+      const params = {};
+      if (offset) params.offset = offset;
+      if (fields.length > 0) params.fields = fields;
+      const data = await service.request('GET', `/${encodeURIComponent(tableNameOrId)}`, { params });
+      const batch = Array.isArray(data?.records) ? data.records : [];
+      records.push(...batch);
+      page += 1;
+      onProgress({
+        page,
+        loaded: records.length,
+        batchSize: batch.length,
+        hasMore: Boolean(data?.offset)
+      });
+      offset = data?.offset || null;
+    } while (offset);
+    return records;
+  }
+
+  try {
+    return await fetchPaged(selectFields);
+  } catch (error) {
+    if (error?.response?.status !== 422) throw error;
+    return fetchPaged([]);
+  }
+}
+
 function parseLogicWorksheet(ws, sheetName, ruleTypes = ['F']) {
   if (!ws) {
     throw new Error(`Rules sheet '${sheetName}' not found.`);
@@ -185,12 +303,17 @@ function parseLogicWorksheet(ws, sheetName, ruleTypes = ['F']) {
   };
 }
 
-async function patchTableRecords(itemService, tableId, updates = []) {
+async function patchTableRecords(itemService, tableId, updates = [], options = {}) {
   let updatedRecords = 0;
   const successfulRecordIds = [];
   const errors = [];
+  const onBatchComplete = typeof options.onBatchComplete === 'function' ? options.onBatchComplete : () => {};
+  const batches = chunkArray(updates, 10);
+  const totalBatches = batches.length;
+  let batchIndex = 0;
 
-  for (const batch of chunkArray(updates, 10)) {
+  for (const batch of batches) {
+    batchIndex += 1;
     try {
       const data = await itemService.request('PATCH', `/${encodeURIComponent(tableId)}`, {
         data: { records: batch, typecast: true }
@@ -200,8 +323,17 @@ async function patchTableRecords(itemService, tableId, updates = []) {
       rows.forEach(row => {
         if (row?.id) successfulRecordIds.push(String(row.id));
       });
+      onBatchComplete({
+        index: batchIndex,
+        total: totalBatches,
+        mode: 'batch',
+        requested: batch.length,
+        updated: rows.length,
+        errorsSoFar: errors.length
+      });
     } catch (batchError) {
       if (batchError?.response?.status !== 422) throw batchError;
+      let updatedInBatch = 0;
       for (const record of batch) {
         try {
           const single = await itemService.request('PATCH', `/${encodeURIComponent(tableId)}`, {
@@ -209,6 +341,7 @@ async function patchTableRecords(itemService, tableId, updates = []) {
           });
           const rows = Array.isArray(single?.records) ? single.records : [];
           updatedRecords += rows.length;
+          updatedInBatch += rows.length;
           rows.forEach(row => {
             if (row?.id) successfulRecordIds.push(String(row.id));
           });
@@ -216,6 +349,14 @@ async function patchTableRecords(itemService, tableId, updates = []) {
           errors.push(`${record?.id || 'unknown'} -> ${formatAirtableError(singleError)}`);
         }
       }
+      onBatchComplete({
+        index: batchIndex,
+        total: totalBatches,
+        mode: 'fallback_single',
+        requested: batch.length,
+        updated: updatedInBatch,
+        errorsSoFar: errors.length
+      });
     }
   }
 
@@ -273,6 +414,12 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
   const masterTable = normalizeText(
     process.env.AIRTABLE_MASTER_TABLE || stored.airtableMasterTable || 'Master Parts Table'
   );
+  const listingsTable = normalizeListingsTableName(
+    args.phase4DListingsTable ||
+      process.env.PHASE4D_LISTINGS_TABLE ||
+      stored.phase4DListingsTable ||
+      DEFAULT_EBAY_LISTINGS_TABLE
+  );
   const itemSpecificsBaseId = normalizeText(
     process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
       process.env.ITEM_SPECIFICS_BASE_ID ||
@@ -303,6 +450,13 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
   fixedRulesByPrefix = parsed.byPrefix;
   logicRowsScanned = parsed.scannedRows;
   rulesSource = `google_drive:${fileId}`;
+  emitProgress(progressCallback, {
+    stage: 'phase4rules_load_rules',
+    percent: 12,
+    message:
+      `Rules parsed from Logic sheet '${args.logicSheetName}': ` +
+      `prefixes=${fixedRulesByPrefix.size}, rows=${logicRowsScanned}, ruleTypes=${args.ruleTypes.join(',')}`
+  });
 
   const schemaService = new AirtableSchemaService({
     token: airtableToken,
@@ -317,12 +471,112 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     baseId: masterBaseId,
     masterTable
   });
+  const listingScopeByPrefix = new Map();
+  let listingScopeRowsScanned = 0;
+  let listingScopeIpns = 0;
+  if (args.restrictToListingsPrefixIpns) {
+    emitProgress(progressCallback, {
+      stage: 'phase4rules_scan_tables',
+      percent: 16,
+      message: `Loading listing-driven IPN scope from '${listingsTable}'...`
+    });
+    let scopeLoaded = false;
+    for (const service of [masterService, itemService]) {
+      try {
+        let lastListingScopeHeartbeatAt = Date.now();
+        const listingRows = await fetchAllRecordsWithFallbackAndProgress(
+          service,
+          listingsTable,
+          [...EBAY_LISTING_IPN_FIELDS, LISTING_C_SPECIFICS_FIELD],
+          state => {
+            const now = Date.now();
+            if (!state?.hasMore || now - lastListingScopeHeartbeatAt >= 800) {
+              lastListingScopeHeartbeatAt = now;
+              emitProgress(progressCallback, {
+                stage: 'phase4rules_scan_tables',
+                percent: 16,
+                message:
+                  `Loading listing-driven IPN scope from '${listingsTable}'... ` +
+                  `loaded=${Number(state?.loaded || 0)} rows (page ${Number(state?.page || 1)})`
+              });
+            }
+          }
+        );
+        listingScopeRowsScanned = listingRows.length;
+        for (const listingRow of listingRows) {
+          const listingFields = listingRow?.fields || {};
+          const ipn = resolveListingIpnFromFields(listingFields);
+          const prefix = parsePrefixFromIpn(ipn);
+          if (!ipn || !prefix) continue;
+          if (!listingScopeByPrefix.has(prefix)) listingScopeByPrefix.set(prefix, new Set());
+          listingScopeByPrefix.get(prefix).add(ipn);
+        }
+        listingScopeIpns = Array.from(listingScopeByPrefix.values()).reduce(
+          (sum, set) => sum + Number(set?.size || 0),
+          0
+        );
+        scopeLoaded = true;
+        break;
+      } catch (_) {
+        continue;
+      }
+    }
+    if (!scopeLoaded) {
+      throw new Error(
+        `Unable to build listing-driven IPN scope from '${listingsTable}'. ` +
+          `Ensure eBay listings table is accessible in configured Airtable bases.`
+      );
+    }
+    emitProgress(progressCallback, {
+      stage: 'phase4rules_scan_tables',
+      percent: 18,
+      message:
+        `Listing-driven IPN scope ready: prefixes=${listingScopeByPrefix.size}, ` +
+        `ipns=${listingScopeIpns}, rowsScanned=${listingScopeRowsScanned}`
+    });
+  }
+  emitProgress(progressCallback, {
+    stage: 'phase4rules_scan_tables',
+    percent: 18,
+    message: `Loading global defaults from '${args.globalDefaultsTable}'...`
+  });
   const globalDefaultsMap = await loadGlobalDefaultsMap(itemService, args.globalDefaultsTable);
+  emitProgress(progressCallback, {
+    stage: 'phase4rules_scan_tables',
+    percent: 19,
+    message: `Global defaults loaded: entries=${globalDefaultsMap.size}`
+  });
 
-  const masterRows = await fetchAllRecordsWithFallback(masterService, masterTable, ['IPN']);
+  emitProgress(progressCallback, {
+    stage: 'phase4rules_scan_tables',
+    percent: 19,
+    message: `Loading master IPN set from '${masterTable}'...`
+  });
+  let nextMasterRowsLogAt = MASTER_LOAD_LOG_EVERY_ROWS;
+  const masterRows = await fetchAllRecordsWithFallbackAndProgress(masterService, masterTable, ['IPN'], state => {
+    const loaded = Number(state?.loaded || 0);
+    const shouldEmit = !state?.hasMore || loaded >= nextMasterRowsLogAt;
+    if (shouldEmit) {
+      while (loaded >= nextMasterRowsLogAt) {
+        nextMasterRowsLogAt += MASTER_LOAD_LOG_EVERY_ROWS;
+      }
+      emitProgress(progressCallback, {
+        stage: 'phase4rules_scan_tables',
+        percent: 19,
+        message:
+          `Loading master IPN set from '${masterTable}'... ` +
+          `loaded=${loaded} rows (page ${Number(state?.page || 1)})`
+      });
+    }
+  });
   const masterIpnSet = new Set(
     masterRows.map(row => normalizeText(row?.fields?.IPN).toUpperCase()).filter(Boolean)
   );
+  emitProgress(progressCallback, {
+    stage: 'phase4rules_scan_tables',
+    percent: 20,
+    message: `Master IPN set ready: uniqueIpns=${masterIpnSet.size}`
+  });
 
   const tables = await schemaService.listTables();
   const totalRoutableTables = tables.filter(table => {
@@ -343,6 +597,11 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     authContext: args.authContext,
     rulesDriveFile: args.rulesDriveFile || '',
     globalDefaultsTable: args.globalDefaultsTable,
+    listingsTable,
+    restrictToListingsPrefixIpns: Boolean(args.restrictToListingsPrefixIpns),
+    listingsScopePrefixes: listingScopeByPrefix.size,
+    listingsScopeIpns: listingScopeIpns,
+    listingsScopeRowsScanned: listingScopeRowsScanned,
     globalDefaultsEntries: globalDefaultsMap.size,
     logicSheetName: args.logicSheetName,
     logicRowsScanned,
@@ -351,6 +610,8 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     skippedNoLogicPrefixSamples: [],
     rowsScanned: 0,
     rowsWithIPN: 0,
+    rowsInListingsScope: 0,
+    rowsSkippedNotInListingsScope: 0,
     masterPartsMissing: 0,
     fixedFieldsPlanned: 0,
     fixedFieldsUpdated: 0,
@@ -358,6 +619,7 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     globalDefaultCellsPlanned: 0,
     globalDefaultAppliedSamples: [],
     fieldsMissingInTableSchema: 0,
+    tablesSkippedNoListingsPrefixScope: 0,
     errors: [],
     perTable: []
   };
@@ -369,6 +631,7 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     const tableName = normalizeText(table?.name);
     const tableId = normalizeText(table?.id);
     const prefix = parsePrefixFromTableName(tableName);
+    const prefixListingScope = listingScopeByPrefix.get(prefix) || new Set();
     if (!prefix || !tableId) continue;
     processedRoutableTables += 1;
     if (
@@ -387,6 +650,18 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     }
 
     summary.tablesScanned += 1;
+    if (args.restrictToListingsPrefixIpns && prefixListingScope.size === 0) {
+      summary.tablesSkippedNoListingsPrefixScope += 1;
+      emitProgress(progressCallback, {
+        stage: 'phase4rules_scan_tables',
+        percent: Math.min(95, 35 + Math.floor((processedRoutableTables / Math.max(1, totalRoutableTables)) * 60)),
+        counts: summary,
+        message:
+          `Skipping table ${processedRoutableTables}/${totalRoutableTables}: ${tableName} ` +
+          `(prefix=${prefix}) -> no listing-scope IPNs`
+      });
+      continue;
+    }
     const prefixRules = fixedRulesByPrefix.get(prefix);
     if (!prefixRules || prefixRules.size === 0) {
       summary.tablesSkippedNoLogicPrefix += 1;
@@ -428,7 +703,29 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     if (applicableFields.size === 0) continue;
 
     const fetchFields = ['IPN', ...applicableFields.keys()];
-    const rows = await fetchAllRecordsWithFallback(itemService, tableId, fetchFields);
+    emitProgress(progressCallback, {
+      stage: 'phase4rules_scan_tables',
+      percent: Math.min(95, 35 + Math.floor((processedRoutableTables / Math.max(1, totalRoutableTables)) * 60)),
+      counts: summary,
+      message:
+        `Fetching rows for table ${processedRoutableTables}/${totalRoutableTables}: ${tableName} ` +
+        `(fields=${fetchFields.length}, prefix=${prefix})`
+    });
+    let lastTableFetchHeartbeatAt = Date.now();
+    const rows = await fetchAllRecordsWithFallbackAndProgress(itemService, tableId, fetchFields, state => {
+      const now = Date.now();
+      if (!state?.hasMore || now - lastTableFetchHeartbeatAt >= 900) {
+        lastTableFetchHeartbeatAt = now;
+        emitProgress(progressCallback, {
+          stage: 'phase4rules_scan_tables',
+          percent: Math.min(95, 35 + Math.floor((processedRoutableTables / Math.max(1, totalRoutableTables)) * 60)),
+          counts: summary,
+          message:
+            `Fetching rows for table ${processedRoutableTables}/${totalRoutableTables}: ${tableName} ` +
+            `loaded=${Number(state?.loaded || 0)} rows (page ${Number(state?.page || 1)})`
+        });
+      }
+    });
     summary.rowsScanned += rows.length;
 
     const updates = [];
@@ -437,14 +734,38 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     let tablePlannedCells = 0;
     let tableSkippedFilled = 0;
     let tableMasterMissing = 0;
+    let lastRowLoopHeartbeatAt = Date.now();
 
-    for (const row of rows) {
+    for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+      const row = rows[rowIndex];
+      const now = Date.now();
+      if (
+        rowIndex === 0 ||
+        rowIndex + 1 === rows.length ||
+        (rowIndex + 1) % 500 === 0 ||
+        now - lastRowLoopHeartbeatAt >= 6000
+      ) {
+        lastRowLoopHeartbeatAt = now;
+        emitProgress(progressCallback, {
+          stage: 'phase4rules_scan_tables',
+          percent: Math.min(95, 35 + Math.floor((processedRoutableTables / Math.max(1, totalRoutableTables)) * 60)),
+          counts: summary,
+          message:
+            `Scanning rows ${rowIndex + 1}/${rows.length} in ${tableName} ` +
+            `(plannedCells=${tablePlannedCells}, skippedFilled=${tableSkippedFilled}, masterMissing=${tableMasterMissing})`
+        });
+      }
       const fields = row?.fields || {};
       const ipn = normalizeText(fields.IPN).toUpperCase();
       if (!ipn) continue;
 
       summary.rowsWithIPN += 1;
       tableRowsWithIpn += 1;
+      if (args.restrictToListingsPrefixIpns && !prefixListingScope.has(ipn)) {
+        summary.rowsSkippedNotInListingsScope += 1;
+        continue;
+      }
+      summary.rowsInListingsScope += 1;
 
       if (!masterIpnSet.has(ipn)) {
         summary.masterPartsMissing += 1;
@@ -487,7 +808,25 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
 
     let updatedCells = 0;
     if (!args.dryRun && updates.length > 0) {
-      const writeResult = await patchTableRecords(itemService, tableId, updates);
+      emitProgress(progressCallback, {
+        stage: 'phase4rules_scan_tables',
+        percent: Math.min(95, 35 + Math.floor((processedRoutableTables / Math.max(1, totalRoutableTables)) * 60)),
+        counts: summary,
+        message:
+          `Writing updates for ${tableName}: records=${updates.length}, plannedCells=${tablePlannedCells}`
+      });
+      const writeResult = await patchTableRecords(itemService, tableId, updates, {
+        onBatchComplete: state => {
+          emitProgress(progressCallback, {
+            stage: 'phase4rules_scan_tables',
+            percent: Math.min(95, 35 + Math.floor((processedRoutableTables / Math.max(1, totalRoutableTables)) * 60)),
+            counts: summary,
+            message:
+              `Write batches ${tableName}: batch ${state?.index || 0}/${state?.total || 0} ` +
+              `(mode=${state?.mode || 'batch'}, requested=${state?.requested || 0}, errorsSoFar=${state?.errorsSoFar || 0})`
+          });
+        }
+      });
       writeResult.successfulRecordIds.forEach(recordId => {
         updatedCells += Number(cellCountByRecord.get(String(recordId)) || 0);
       });
@@ -516,6 +855,14 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
         fixedFieldsSkippedAlreadyFilled: tableSkippedFilled
       });
     }
+    emitProgress(progressCallback, {
+      stage: 'phase4rules_scan_tables',
+      percent: Math.min(95, 35 + Math.floor((processedRoutableTables / Math.max(1, totalRoutableTables)) * 60)),
+      counts: summary,
+      message:
+        `Completed table ${processedRoutableTables}/${totalRoutableTables}: ${tableName} ` +
+        `(rows=${rows.length}, rowsWithIPN=${tableRowsWithIpn}, plannedCells=${tablePlannedCells}, updatedCells=${updatedCells}, masterMissing=${tableMasterMissing}, skippedFilled=${tableSkippedFilled})`
+    });
   }
 
   summary.fieldsMissingInTableSchema = missingFieldSet.size;
@@ -531,7 +878,9 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     stage: 'completed',
     percent: 100,
     counts: summary,
-    message: `Phase 4 rules populate completed (${args.dryRun ? 'dry run' : 'write run'}).`
+    message:
+      `Phase 4 rules populate completed (${args.dryRun ? 'dry run' : 'write run'}). ` +
+      `${args.restrictToListingsPrefixIpns ? `Listing scope prefixes=${summary.listingsScopePrefixes || 0}, ipns=${summary.listingsScopeIpns || 0}, rowsInScope=${summary.rowsInListingsScope || 0}, scopeSkipped=${summary.rowsSkippedNotInListingsScope || 0}.` : ''}`
   });
   return summary;
 }
