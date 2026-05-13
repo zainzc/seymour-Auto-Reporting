@@ -17,7 +17,7 @@ loadEnv();
 const LOW_CONFIDENCE_THRESHOLD = 0.75;
 const DEFAULT_PHASE4B_DETERMINED_STATUS = 'Value Determined';
 const DEFAULT_PHASE4B_COMPLETED_STATUS = 'Completed / Closed';
-const MASTER_LOAD_LOG_EVERY_ROWS = 20000;
+const MASTER_LOAD_LOG_EVERY_ROWS = 5000;
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const LEGACY_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
 const LISTING_ITEM_SPECIFICS_FIELD = 'Item Specifics';
@@ -1711,33 +1711,54 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     percent: 18,
     message: 'Loading Master Parts records for AI context...'
   });
-  let nextMasterLoadLogAt = MASTER_LOAD_LOG_EVERY_ROWS;
-  const masterRows = await fetchAllRecordsWithFallbackAndProgress(
-    masterService,
-    masterTable,
-    [],
-    state => {
-      const loaded = Number(state?.loaded || 0);
-      const shouldEmit = !state?.hasMore || loaded >= nextMasterLoadLogAt;
-      if (shouldEmit) {
-        while (loaded >= nextMasterLoadLogAt) {
-          nextMasterLoadLogAt += MASTER_LOAD_LOG_EVERY_ROWS;
+  const preloadedMasterRows = Array.isArray(args.phase4SharedMasterRows)
+    ? args.phase4SharedMasterRows
+    : Array.isArray(args.preloadedMasterRows)
+      ? args.preloadedMasterRows
+      : null;
+  const preloadedMasterByIpn = args.phase4SharedMasterByIpn instanceof Map
+    ? args.phase4SharedMasterByIpn
+    : args.preloadedMasterByIpn instanceof Map
+      ? args.preloadedMasterByIpn
+      : null;
+  let masterRows = preloadedMasterRows;
+  if (!masterRows) {
+    let nextMasterLoadLogAt = MASTER_LOAD_LOG_EVERY_ROWS;
+    masterRows = await fetchAllRecordsWithFallbackAndProgress(
+      masterService,
+      masterTable,
+      [],
+      state => {
+        const loaded = Number(state?.loaded || 0);
+        const shouldEmit = !state?.hasMore || loaded >= nextMasterLoadLogAt;
+        if (shouldEmit) {
+          while (loaded >= nextMasterLoadLogAt) {
+            nextMasterLoadLogAt += MASTER_LOAD_LOG_EVERY_ROWS;
+          }
+          emitProgress(progressCallback, {
+            stage: 'phase4blite_load_master',
+            percent: 18,
+            message:
+              `Loading Master Parts records for AI context... ` +
+              `Loaded ${loaded} rows (page ${Number(state?.page || 1)}).`
+          });
         }
-        emitProgress(progressCallback, {
-          stage: 'phase4blite_load_master',
-          percent: 18,
-          message:
-            `Loading Master Parts records for AI context... ` +
-            `Loaded ${loaded} rows (page ${Number(state?.page || 1)}).`
-        });
       }
+    );
+  } else {
+    emitProgress(progressCallback, {
+      stage: 'phase4blite_load_master',
+      percent: 18,
+      message: `Using shared Master Parts context cache: rows=${masterRows.length}.`
+    });
+  }
+  const masterMap = preloadedMasterByIpn instanceof Map ? preloadedMasterByIpn : new Map();
+  if (!(preloadedMasterByIpn instanceof Map)) {
+    for (const row of masterRows) {
+      const ipn = normalizeIpn(row?.fields?.IPN);
+      if (!ipn || masterMap.has(ipn)) continue;
+      masterMap.set(ipn, row);
     }
-  );
-  const masterMap = new Map();
-  for (const row of masterRows) {
-    const ipn = normalizeIpn(row?.fields?.IPN);
-    if (!ipn || masterMap.has(ipn)) continue;
-    masterMap.set(ipn, row);
   }
 
   emitProgress(progressCallback, {
@@ -3238,33 +3259,54 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     percent: 16,
     message: 'Loading Master Parts records for Phase 4D context...'
   });
-  let nextMasterLoadLogAt = MASTER_LOAD_LOG_EVERY_ROWS;
-  const masterRows = await fetchAllRecordsWithFallbackAndProgress(
-    airtableService,
-    masterTable,
-    [],
-    state => {
-      const loaded = Number(state?.loaded || 0);
-      const shouldEmit = !state?.hasMore || loaded >= nextMasterLoadLogAt;
-      if (shouldEmit) {
-        while (loaded >= nextMasterLoadLogAt) {
-          nextMasterLoadLogAt += MASTER_LOAD_LOG_EVERY_ROWS;
+  const preloadedMasterRows = Array.isArray(args.phase4SharedMasterRows)
+    ? args.phase4SharedMasterRows
+    : Array.isArray(args.preloadedMasterRows)
+      ? args.preloadedMasterRows
+      : null;
+  const preloadedMasterByIpn = args.phase4SharedMasterByIpn instanceof Map
+    ? args.phase4SharedMasterByIpn
+    : args.preloadedMasterByIpn instanceof Map
+      ? args.preloadedMasterByIpn
+      : null;
+  let masterRows = preloadedMasterRows;
+  if (!masterRows) {
+    let nextMasterLoadLogAt = MASTER_LOAD_LOG_EVERY_ROWS;
+    masterRows = await fetchAllRecordsWithFallbackAndProgress(
+      airtableService,
+      masterTable,
+      [],
+      state => {
+        const loaded = Number(state?.loaded || 0);
+        const shouldEmit = !state?.hasMore || loaded >= nextMasterLoadLogAt;
+        if (shouldEmit) {
+          while (loaded >= nextMasterLoadLogAt) {
+            nextMasterLoadLogAt += MASTER_LOAD_LOG_EVERY_ROWS;
+          }
+          emitProgress(progressCallback, {
+            stage: 'phase4d_scan_listings',
+            percent: 16,
+            message:
+              `Loading Master Parts records for Phase 4D context... ` +
+              `Loaded ${loaded} rows (page ${Number(state?.page || 1)}).`
+          });
         }
-        emitProgress(progressCallback, {
-          stage: 'phase4d_scan_listings',
-          percent: 16,
-          message:
-            `Loading Master Parts records for Phase 4D context... ` +
-            `Loaded ${loaded} rows (page ${Number(state?.page || 1)}).`
-        });
       }
+    );
+  } else {
+    emitProgress(progressCallback, {
+      stage: 'phase4d_scan_listings',
+      percent: 16,
+      message: `Using shared Master Parts context cache: rows=${masterRows.length}.`
+    });
+  }
+  const masterByIpn = preloadedMasterByIpn instanceof Map ? preloadedMasterByIpn : new Map();
+  if (!(preloadedMasterByIpn instanceof Map)) {
+    for (const row of masterRows) {
+      const ipn = normalizeIpn(row?.fields?.IPN);
+      if (!ipn || masterByIpn.has(ipn)) continue;
+      masterByIpn.set(ipn, row);
     }
-  );
-  const masterByIpn = new Map();
-  for (const row of masterRows) {
-    const ipn = normalizeIpn(row?.fields?.IPN);
-    if (!ipn || masterByIpn.has(ipn)) continue;
-    masterByIpn.set(ipn, row);
   }
 
   emitProgress(progressCallback, {
@@ -3896,6 +3938,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   if (summary.errors.length > args.sampleLimit) {
     summary.errors = summary.errors.slice(0, args.sampleLimit);
   }
+  summary.totalWrites = Number(writesDone || 0);
   summary.aiWebSearchIpns = Array.from(aiWebSearchIpnSet);
   summary.aiWebSearchEvents = aiWebSearchEvents;
   emitProgress(progressCallback, {
@@ -3904,6 +3947,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     counts: summary,
     message:
       `Phase 4D completed (${args.dryRun ? 'dry run' : 'write run'}). ` +
+      `table='${effectiveListingsTableName}', writes=${summary.totalWrites || 0}. ` +
       `${args.restrictToListingsPrefixIpns ? `Listing scope prefixes=${summary.listingsScopePrefixes || 0}, ipns=${summary.listingsScopeIpns || 0}, inScope=${summary.listingsInScope || 0}, scopeSkipped=${summary.listingsSkippedNotInListingsScope || 0}. ` : ''}` +
       `eligible=${summary.listingsEligible || 0}, skippedByTestIpn=${summary.skippedByTestIpn || 0}, ` +
       `missingIpn=${summary.skippedMissingIpn || 0}, outOfScope=${summary.skippedOutOfScope || 0}, ` +

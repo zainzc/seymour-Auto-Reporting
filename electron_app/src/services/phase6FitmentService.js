@@ -18,6 +18,10 @@ function normalizeIpn(value) {
   return normalizeText(value).toUpperCase();
 }
 
+function normalizeTableKey(value) {
+  return normalizeText(value).toLowerCase();
+}
+
 function parseIpnList(value) {
   if (Array.isArray(value)) {
     return value.map(item => normalizeIpn(item)).filter(Boolean);
@@ -75,7 +79,8 @@ async function fetchAllRecordsWithProgress(
     startPercent = 0,
     endPercent = 100,
     messagePrefix = 'Loading records',
-    counts = null
+    counts = null,
+    logEveryRows = 0
   } = {}
 ) {
   const walk = async useSelectFields => {
@@ -83,6 +88,8 @@ async function fetchAllRecordsWithProgress(
     let offset = null;
     let page = 0;
     const seenOffsets = new Set();
+    const checkpoint = Math.max(0, Number(logEveryRows || 0) || 0);
+    let nextLogAt = checkpoint > 0 ? checkpoint : 0;
 
     do {
       const params = {};
@@ -101,12 +108,21 @@ async function fetchAllRecordsWithProgress(
         endPercent - 1,
         startPercent + Math.min(progressSpan - 1, Math.floor(page / 2) + 1)
       );
-      emitProgress(progressCallback, {
-        stage,
-        percent: computedPercent,
-        counts,
-        message: `${messagePrefix}... loaded=${records.length} (pages=${page})`
-      });
+      let shouldEmit = true;
+      if (checkpoint > 0) {
+        shouldEmit = !offset || records.length >= nextLogAt;
+      }
+      if (shouldEmit) {
+        while (checkpoint > 0 && records.length >= nextLogAt) {
+          nextLogAt += checkpoint;
+        }
+        emitProgress(progressCallback, {
+          stage,
+          percent: computedPercent,
+          counts,
+          message: `${messagePrefix}... loaded=${records.length} (pages=${page})`
+        });
+      }
 
       const nextOffset = data?.offset || null;
       if (nextOffset && seenOffsets.has(nextOffset)) {
@@ -297,19 +313,44 @@ async function runPhase6Fitment(options = {}, progressCallback = () => {}) {
     message: `Loading Master Parts records from '${masterTable}'...`
   });
 
-  const masterRows = await fetchAllRecordsWithProgress(airtableService, masterTable, ['IPN', MASTER_FITMENT_FIELD], {
-    progressCallback,
-    stage: 'phase6_load_master',
-    startPercent: 8,
-    endPercent: 20,
-    messagePrefix: `Loading Master Parts records from '${masterTable}'`,
-    counts: summary
-  });
-  const masterByIpn = new Map();
-  for (const row of masterRows) {
-    const ipn = normalizeIpn(row?.fields?.IPN);
-    if (!ipn || masterByIpn.has(ipn)) continue;
-    masterByIpn.set(ipn, row);
+  const preloadedMasterTable = normalizeTableKey(
+    options.phaseSharedMasterTable || options.preloadedMasterTable || ''
+  );
+  const usePreloadedMaster =
+    Array.isArray(options.phaseSharedMasterRows || options.preloadedMasterRows) &&
+    (!preloadedMasterTable || preloadedMasterTable === normalizeTableKey(masterTable));
+  const masterRows = usePreloadedMaster
+    ? (options.phaseSharedMasterRows || options.preloadedMasterRows)
+    : await fetchAllRecordsWithProgress(airtableService, masterTable, ['IPN', MASTER_FITMENT_FIELD], {
+        progressCallback,
+        stage: 'phase6_load_master',
+        startPercent: 8,
+        endPercent: 20,
+        messagePrefix: `Loading Master Parts records from '${masterTable}'`,
+        counts: summary,
+        logEveryRows: 5000
+      });
+  if (usePreloadedMaster) {
+    emitProgress(progressCallback, {
+      stage: 'phase6_load_master',
+      percent: 19,
+      counts: summary,
+      message: `Using shared Master Parts context cache: rows=${masterRows.length}.`
+    });
+  }
+  const preloadedMasterByIpn =
+    options.phaseSharedMasterByIpn instanceof Map ? options.phaseSharedMasterByIpn : null;
+  const masterByIpn =
+    preloadedMasterByIpn &&
+    (!preloadedMasterTable || preloadedMasterTable === normalizeTableKey(masterTable))
+      ? preloadedMasterByIpn
+      : new Map();
+  if (!(preloadedMasterByIpn instanceof Map)) {
+    for (const row of masterRows) {
+      const ipn = normalizeIpn(row?.fields?.IPN);
+      if (!ipn || masterByIpn.has(ipn)) continue;
+      masterByIpn.set(ipn, row);
+    }
   }
 
   emitProgress(progressCallback, {

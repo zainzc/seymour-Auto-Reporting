@@ -68,11 +68,20 @@ let dbReady = false;
 const LEGACY_EBAY_MOCK_TABLE = 'eBay Listings (API) (Mock)';
 const DEFAULT_EBAY_SANDBOX_TABLE = 'eBay Listings (API)';
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
+const DEFAULT_EBAY_FETCH_PAGING_MODE = 'first_page';
 
 function parseBoolean(value, defaultValue = false) {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') return value.toLowerCase() === 'true';
   return defaultValue;
+}
+
+function normalizeEbayFetchPagingMode(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (text === 'continue' || text === 'continue_from_last_page' || text === 'resume') {
+    return 'continue_from_last_page';
+  }
+  return DEFAULT_EBAY_FETCH_PAGING_MODE;
 }
 
 function resolveEbaySandboxTableName(...candidates) {
@@ -319,6 +328,68 @@ function emitInventoryAutoChainLog(text, level = 'info') {
   } catch (_) {}
 }
 
+const PHASE4_MASTER_LOAD_LOG_EVERY_ROWS = 5000;
+
+function normalizeMasterIpn(value) {
+  return normalizeText(value).toUpperCase();
+}
+
+async function buildPhase4SharedMasterContext(baseConfig = {}, hooks = {}) {
+  const cfg = baseConfig && typeof baseConfig === 'object' ? baseConfig : {};
+  const onProgress = typeof hooks?.onProgress === 'function' ? hooks.onProgress : () => {};
+
+  const airtableToken = normalizeText(cfg.airtableToken || process.env.AIRTABLE_TOKEN || '');
+  const masterBaseId = normalizeText(cfg.airtableBaseId || process.env.AIRTABLE_BASE_ID || '');
+  const masterTable = normalizeText(cfg.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table');
+  if (!airtableToken || !masterBaseId || !masterTable) {
+    return null;
+  }
+
+  const masterService = new AirtableService({
+    token: airtableToken,
+    baseId: masterBaseId,
+    masterTable
+  });
+
+  onProgress(`Loading shared Master Parts context from '${masterTable}'...`);
+  const masterRows = [];
+  let offset = null;
+  let page = 0;
+  let nextLogAt = PHASE4_MASTER_LOAD_LOG_EVERY_ROWS;
+  do {
+    const params = {};
+    if (offset) params.offset = offset;
+    const data = await masterService.request('GET', `/${encodeURIComponent(masterTable)}`, { params });
+    const batch = Array.isArray(data?.records) ? data.records : [];
+    masterRows.push(...batch);
+    page += 1;
+    offset = data?.offset || null;
+    if (!offset || masterRows.length >= nextLogAt) {
+      while (masterRows.length >= nextLogAt) {
+        nextLogAt += PHASE4_MASTER_LOAD_LOG_EVERY_ROWS;
+      }
+      onProgress(`Loading shared Master Parts context... loaded=${masterRows.length} rows (page ${page})`);
+    }
+  } while (offset);
+
+  const masterByIpn = new Map();
+  const masterIpnSet = new Set();
+  for (const row of masterRows) {
+    const ipn = normalizeMasterIpn(row?.fields?.IPN);
+    if (!ipn) continue;
+    masterIpnSet.add(ipn);
+    if (!masterByIpn.has(ipn)) masterByIpn.set(ipn, row);
+  }
+
+  onProgress(`Shared Master Parts context ready: rows=${masterRows.length}, uniqueIpns=${masterIpnSet.size}`);
+  return {
+    masterTable,
+    masterRows,
+    masterByIpn,
+    masterIpnSet
+  };
+}
+
 async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   const runtime = baseConfig && typeof baseConfig === 'object' ? baseConfig : {};
   const persisted = getInventoryConfig('phase2Config') || {};
@@ -493,6 +564,22 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     return summary;
   }
 
+  let sharedMasterContext = null;
+  emitStepProgress('ebaysandbox_post_import_phase4_master_context', 99, 'Preparing shared Master Parts context...');
+  try {
+    sharedMasterContext = await buildPhase4SharedMasterContext(chainBase, {
+      onProgress: message => {
+        emitStepProgress('ebaysandbox_post_import_phase4_master_context', 99, message);
+        emitInventoryAutoChainLog(`Post-import automation: Phase 4 shared master -> ${message}`);
+      }
+    });
+  } catch (error) {
+    emitInventoryAutoChainLog(
+      `Post-import automation: shared Master Parts context failed (${error?.message || error}); continuing with per-phase loading.`,
+      'error'
+    );
+  }
+
   emitStepProgress('ebaysandbox_post_import_phase4a', 99, 'Running Phase 4A...');
 
   const rulesDryRun =
@@ -511,7 +598,9 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
         process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
         'Fixed Item Specifics (Global Defaults)'
     ).trim(),
-    logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim()
+    logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim(),
+    phase4SharedMasterRows: sharedMasterContext?.masterRows,
+    phase4SharedMasterIpnSet: sharedMasterContext?.masterIpnSet
   }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4a', 'Phase 4A'));
   emitInventoryAutoChainLog(`Post-import automation: Phase 4A completed (updated=${summary.phase4A?.fixedFieldsUpdated || 0})`);
 
@@ -538,7 +627,9 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
       stored.phase4BClickupOpenStatus ||
         process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
         'To Do'
-    ).trim()
+    ).trim(),
+    phase4SharedMasterRows: sharedMasterContext?.masterRows,
+    phase4SharedMasterByIpn: sharedMasterContext?.masterByIpn
   }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4b', 'Phase 4B-lite'));
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 4B completed ` +
@@ -590,17 +681,32 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     phase4DTestIpn: '',
     openaiApiKey: phase4OpenAiKey,
     openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
-    openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
+    openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+    phase4SharedMasterRows: sharedMasterContext?.masterRows,
+    phase4SharedMasterByIpn: sharedMasterContext?.masterByIpn
   }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4d', 'Phase 4D'));
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 4D completed ` +
-      `(listingsEligible=${summary.phase4D?.listingsEligible || 0})`
+      `(table='${summary.phase4D?.listingsTable || listingsTable}', writes=${summary.phase4D?.totalWrites || 0}, listingsEligible=${summary.phase4D?.listingsEligible || 0})`
   );
+  if (Array.isArray(summary.phase4D?.sampleOutputs) && summary.phase4D.sampleOutputs.length > 0) {
+    summary.phase4D.sampleOutputs.slice(0, 10).forEach(line => {
+      emitInventoryAutoChainLog(`Post-import automation: Phase 4D write -> ${line}`);
+    });
+    if (summary.phase4D.sampleOutputs.length > 10) {
+      emitInventoryAutoChainLog(
+        `Post-import automation: Phase 4D write -> ${summary.phase4D.sampleOutputs.length - 10} more write sample(s) not shown.`
+      );
+    }
+  }
 
   emitStepProgress('ebaysandbox_post_import_phase6', 99, 'Running Phase 6 fitment extraction...');
   summary.phase6 = await runPhase6Fitment({
     ...chainBase,
     phase6ListingsTable: listingsTable,
+    phaseSharedMasterTable: sharedMasterContext?.masterTable,
+    phaseSharedMasterRows: sharedMasterContext?.masterRows,
+    phaseSharedMasterByIpn: sharedMasterContext?.masterByIpn,
     airtableMasterTable: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
     openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
@@ -623,6 +729,9 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   emitStepProgress('ebaysandbox_post_import_phase72', 99, 'Running Phase 7.2 fitment image generation...');
   summary.phase72 = await runPhase72FitmentImage({
     ...chainBase,
+    phaseSharedMasterTable: sharedMasterContext?.masterTable,
+    phaseSharedMasterRows: sharedMasterContext?.masterRows,
+    phaseSharedMasterByIpn: sharedMasterContext?.masterByIpn,
     phase72MasterTable: String(
       stored.phase72MasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
     ).trim(),
@@ -641,6 +750,9 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   emitStepProgress('ebaysandbox_post_import_phase74', 99, 'Running Phase 7.4 title/description generation...');
   summary.phase74 = await runPhase74TitleDescription({
     ...chainBase,
+    phaseSharedMasterTable: sharedMasterContext?.masterTable,
+    phaseSharedMasterRows: sharedMasterContext?.masterRows,
+    phaseSharedMasterByIpn: sharedMasterContext?.masterByIpn,
     phase74ListingsTable: listingsTable,
     airtableMasterTable: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
@@ -661,7 +773,9 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   }, buildPostImportProgressBridge('ebaysandbox_post_import_phase74', 'Phase 7.4'));
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 7.4 completed ` +
-      `(titles=${summary.phase74?.titleGenerated || 0}, descriptions=${summary.phase74?.descriptionGenerated || 0})`
+      `(titles=${summary.phase74?.titleGenerated || 0}, descriptions=${summary.phase74?.descriptionGenerated || 0}, ` +
+      `writesAttempted=${summary.phase74?.writesAttempted || 0}, writesSucceeded=${summary.phase74?.writesSucceeded || 0}, ` +
+      `writesFailed=${summary.phase74?.writeFailures || 0})`
   );
 
   emitStepProgress('ebaysandbox_post_import_complete', 100, 'Post-import automation completed.');
@@ -1569,8 +1683,8 @@ function buildPhase2WritebackConfig(overrides = {}) {
     clickupStatusNeedsReview: merged.clickupStatusNeedsReview,
     clickupStatusWritebackError: merged.clickupStatusWritebackError,
     categoryLinkFieldName: merged.categoryLinkFieldName,
-    pollIntervalMinutes: 1,
-    enabled: merged.phase2WritebackEnabled
+    pollIntervalMinutes: Number(merged.writebackPollIntervalMinutes || process.env.WRITEBACK_POLL_INTERVAL_MINUTES || 5) || 5,
+    enabled: true
   };
 }
 
@@ -1637,8 +1751,9 @@ ipcMain.handle('phase2-get-config', async () => {
     phase2AutoRunEnabled: Boolean(merged.phase2AutoRunEnabled),
     phase2AutoRunPollMinutes: Number(merged.phase2AutoRunPollMinutes || 3),
     phase2AutoRunCooldownMinutes: Number(merged.phase2AutoRunCooldownMinutes || 5),
-    phase2WritebackEnabled: Boolean(merged.phase2WritebackEnabled),
-    writebackPollIntervalMinutes: 1,
+    phase2WritebackEnabled: true,
+    writebackPollIntervalMinutes:
+      Number(merged.writebackPollIntervalMinutes || process.env.WRITEBACK_POLL_INTERVAL_MINUTES || 5) || 5,
     clickupResolvedCategoryFieldName: merged.clickupResolvedCategoryFieldName || 'Category Identifier Selection',
     clickupStatusDetermined: merged.clickupStatusDetermined || 'Category Determined',
     clickupStatusCompleted: merged.clickupStatusCompleted || 'Completed',
@@ -1685,6 +1800,13 @@ ipcMain.handle('phase2-get-config', async () => {
       stored.ebayMockTableName
     ),
     ebaySandboxFetchLimit: Number(stored.ebaySandboxFetchLimit || 200) || 200,
+    ebaySandboxFetchPagingMode: normalizeEbayFetchPagingMode(
+      stored.ebaySandboxFetchPagingMode || stored.ebaySandboxFetchMode || DEFAULT_EBAY_FETCH_PAGING_MODE
+    ),
+    ebaySandboxNextFetchPageByEnvironment:
+      stored.ebaySandboxNextFetchPageByEnvironment && typeof stored.ebaySandboxNextFetchPageByEnvironment === 'object'
+        ? stored.ebaySandboxNextFetchPageByEnvironment
+        : { sandbox: 1, production: 1 },
     ebaySandboxDryRun:
       typeof stored.ebaySandboxDryRun === 'boolean'
         ? stored.ebaySandboxDryRun
@@ -1740,6 +1862,13 @@ ipcMain.handle('phase2-get-config', async () => {
       ['auto', 'trading', 'inventory'].includes(String(stored.ebayListingsSourceApi || '').trim().toLowerCase())
         ? String(stored.ebayListingsSourceApi || '').trim().toLowerCase()
         : 'auto',
+    ebaySandboxFetchPagingMode: normalizeEbayFetchPagingMode(
+      stored.ebaySandboxFetchPagingMode || stored.ebaySandboxFetchMode || DEFAULT_EBAY_FETCH_PAGING_MODE
+    ),
+    ebaySandboxNextFetchPageByEnvironment:
+      stored.ebaySandboxNextFetchPageByEnvironment && typeof stored.ebaySandboxNextFetchPageByEnvironment === 'object'
+        ? stored.ebaySandboxNextFetchPageByEnvironment
+        : { sandbox: 1, production: 1 },
     phase5EbayClientId: activePhase5EbayCredentials.phase5EbayClientId,
     phase5EbayDevId: activePhase5EbayCredentials.phase5EbayDevId,
     phase5EbayClientSecret: activePhase5EbayCredentials.phase5EbayClientSecret,
@@ -2518,6 +2647,42 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
       message: `Starting Phase 4 pipeline (${phases.join(' -> ')})...`
     });
 
+    let sharedMasterContext = null;
+    if (run4A || run4B || run4D) {
+      event.sender.send('phase4pipeline:progress', {
+        stage: 'phase4pipeline_shared_master',
+        percent: mapProgress(2),
+        counts: null,
+        message: '[Shared] Preparing Master Parts cache for Phase 4 chain...'
+      });
+      try {
+        const sharedConfig = {
+          ...stored,
+          ...options,
+          airtableToken: String(options.airtableToken || stored.airtableToken || process.env.AIRTABLE_TOKEN || '').trim(),
+          airtableBaseId: String(options.airtableBaseId || stored.airtableBaseId || process.env.AIRTABLE_BASE_ID || '').trim(),
+          airtableMasterTable: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim()
+        };
+        sharedMasterContext = await buildPhase4SharedMasterContext(sharedConfig, {
+          onProgress: message => {
+            event.sender.send('phase4pipeline:progress', {
+              stage: 'phase4pipeline_shared_master',
+              percent: mapProgress(2),
+              counts: null,
+              message: `[Shared] ${message}`
+            });
+          }
+        });
+      } catch (error) {
+        event.sender.send('phase4pipeline:progress', {
+          stage: 'phase4pipeline_shared_master',
+          percent: mapProgress(2),
+          counts: null,
+          message: `[Shared] Master cache unavailable (${error?.message || error}); falling back to per-phase loading.`
+        });
+      }
+    }
+
     if (runMirror) {
       const mirrorOptions = {
         ...stored,
@@ -2573,7 +2738,9 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
             process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
             'Fixed Item Specifics (Global Defaults)'
         ).trim(),
-        logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim()
+        logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+        phase4SharedMasterRows: sharedMasterContext?.masterRows,
+        phase4SharedMasterIpnSet: sharedMasterContext?.masterIpnSet
       };
       const phase4ASummary = await runPhase4RulesPopulate(rulesOptions, progress => {
         event.sender.send('phase4pipeline:progress', {
@@ -2628,7 +2795,9 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
             stored.phase4BClickupOpenStatus ||
             process.env.PHASE4B_CLICKUP_OPEN_STATUS ||
             'To Do'
-        ).trim()
+        ).trim(),
+        phase4SharedMasterRows: sharedMasterContext?.masterRows,
+        phase4SharedMasterByIpn: sharedMasterContext?.masterByIpn
       };
       const phase4BSummary = await runPhase4BLite(bliteOptions, progress => {
         event.sender.send('phase4pipeline:progress', {
@@ -2723,7 +2892,9 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
         phase4DTestIpn: String(options.phase4DTestIpn || stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
         openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
         openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
-        openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
+        openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+        phase4SharedMasterRows: sharedMasterContext?.masterRows,
+        phase4SharedMasterByIpn: sharedMasterContext?.masterByIpn
       };
       const phase4DSummary = await runPhase4DListing(dOptions, progress => {
         event.sender.send('phase4pipeline:progress', {
@@ -3744,6 +3915,36 @@ ipcMain.handle('phase4combined:run', async (event, options = {}) => {
       message: 'Starting Phase 4 combined run (4A -> 4B-lite).'
     });
 
+    let sharedMasterContext = null;
+    try {
+      const sharedConfig = {
+        ...stored,
+        ...options,
+        airtableToken: String(options.airtableToken || stored.airtableToken || process.env.AIRTABLE_TOKEN || '').trim(),
+        airtableBaseId: String(options.airtableBaseId || stored.airtableBaseId || process.env.AIRTABLE_BASE_ID || '').trim(),
+        airtableMasterTable: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim()
+      };
+      sharedMasterContext = await buildPhase4SharedMasterContext(sharedConfig, {
+        onProgress: message => {
+          event.sender.send('phase4combined:progress', {
+            stage: 'phase4combined_shared_master',
+            percent: 2,
+            counts: null,
+            message: `[Shared] ${message}`
+          });
+        }
+      });
+    } catch (error) {
+      event.sender.send('phase4combined:progress', {
+        stage: 'phase4combined_shared_master',
+        percent: 2,
+        counts: null,
+        message: `[Shared] Master cache unavailable (${error?.message || error}); falling back to per-phase loading.`
+      });
+    }
+    rulesRunOptions.phase4SharedMasterRows = sharedMasterContext?.masterRows;
+    rulesRunOptions.phase4SharedMasterIpnSet = sharedMasterContext?.masterIpnSet;
+
     const phase4ASummary = await runPhase4RulesPopulate(rulesRunOptions, progress => {
       const innerPercent = Number(progress?.percent || 0);
       const mappedPercent = Math.max(1, Math.min(49, Math.floor((innerPercent / 100) * 49)));
@@ -3791,6 +3992,8 @@ ipcMain.handle('phase4combined:run', async (event, options = {}) => {
           'To Do'
       ).trim()
     };
+    bliteRunOptions.phase4SharedMasterRows = sharedMasterContext?.masterRows;
+    bliteRunOptions.phase4SharedMasterByIpn = sharedMasterContext?.masterByIpn;
 
     const phase4BSummary = await runPhase4BLite(bliteRunOptions, progress => {
       const innerPercent = Number(progress?.percent || 0);
@@ -3890,6 +4093,14 @@ ipcMain.handle('ebaymock:run', async (event, options = {}) => {
 
 ipcMain.handle('ebaysandbox:get-config', async () => {
   const stored = getInventoryConfig('phase2Config') || {};
+  const phase5EbayEnvironment = normalizeEbayEnvironment(
+    stored.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox'
+  );
+  const nextByEnv =
+    stored.ebaySandboxNextFetchPageByEnvironment && typeof stored.ebaySandboxNextFetchPageByEnvironment === 'object'
+      ? stored.ebaySandboxNextFetchPageByEnvironment
+      : { sandbox: 1, production: 1 };
+  const nextFetchPage = Number(nextByEnv[phase5EbayEnvironment] || 1) || 1;
   return {
     tableName: resolveEbaySandboxTableName(
       stored.ebaySandboxTableName,
@@ -3897,6 +4108,11 @@ ipcMain.handle('ebaysandbox:get-config', async () => {
       stored.ebayMockTableName
     ),
     fetchLimit: Number(stored.ebaySandboxFetchLimit || 200) || 200,
+    fetchPagingMode: normalizeEbayFetchPagingMode(
+      stored.ebaySandboxFetchPagingMode || stored.ebaySandboxFetchMode || DEFAULT_EBAY_FETCH_PAGING_MODE
+    ),
+    nextFetchPage,
+    nextFetchPageByEnvironment: nextByEnv,
     dryRun:
       typeof stored.ebaySandboxDryRun === 'boolean'
         ? stored.ebaySandboxDryRun
@@ -3924,7 +4140,14 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
         stored.phase5ListingsTable,
         stored.ebayMockTableName
       ),
-      ebaySandboxFetchLimit: Number(options.ebaySandboxFetchLimit || stored.ebaySandboxFetchLimit || 200) || 200
+      ebaySandboxFetchLimit: Number(options.ebaySandboxFetchLimit || stored.ebaySandboxFetchLimit || 200) || 200,
+      ebaySandboxFetchPagingMode: normalizeEbayFetchPagingMode(
+        options.ebaySandboxFetchPagingMode ||
+          options.ebaySandboxFetchMode ||
+          stored.ebaySandboxFetchPagingMode ||
+          stored.ebaySandboxFetchMode ||
+          DEFAULT_EBAY_FETCH_PAGING_MODE
+      )
     };
 
     const summary = await runEbaySandboxInventoryImport(runOptions, progress => {
@@ -4189,7 +4412,7 @@ function createWindow() {
       if (parseBoolean(writebackConfig.enabled, false)) {
         phase2WritebackPoller.start(writebackConfig);
         console.log(
-          `Phase2 write-back poller started (${Number(writebackConfig.pollIntervalMinutes) || 1} min interval)`
+          `Phase2 write-back poller started (${Number(writebackConfig.pollIntervalMinutes) || 5} min interval)`
         );
       }
       startPhase4WritebackPoller();

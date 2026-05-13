@@ -19,6 +19,10 @@ function normalizeIpn(value) {
   return normalizeText(value).toUpperCase();
 }
 
+function normalizeTableKey(value = '') {
+  return normalizeText(value).toLowerCase();
+}
+
 function emitProgress(progressCallback, payload = {}) {
   if (typeof progressCallback === 'function') {
     progressCallback(payload);
@@ -795,10 +799,38 @@ async function runPhase72FitmentImage(options = {}, progressCallback = () => {})
   });
 
   const selectFields = [MASTER_IPN_FIELD, MASTER_FITMENT_FIELD, MASTER_FITMENT_IMAGE_FIELD];
-  const rows =
-    testIpnSet.size > 0
-      ? await fetchMasterRowsByIpnSet(airtableService, masterTable, Array.from(testIpnSet), selectFields)
-      : await fetchAllRecordsWithFallback(airtableService, masterTable, selectFields);
+  const preloadedMasterTable = normalizeTableKey(
+    options.phaseSharedMasterTable || options.preloadedMasterTable || ''
+  );
+  const preloadedMasterRows = Array.isArray(options.phaseSharedMasterRows)
+    ? options.phaseSharedMasterRows
+    : Array.isArray(options.preloadedMasterRows)
+      ? options.preloadedMasterRows
+      : null;
+  const usePreloadedMaster = Boolean(
+    preloadedMasterRows && (!preloadedMasterTable || preloadedMasterTable === normalizeTableKey(masterTable))
+  );
+  let rows;
+  if (usePreloadedMaster) {
+    rows = preloadedMasterRows;
+    if (testIpnSet.size > 0) {
+      rows = rows.filter(row => {
+        const ipn = normalizeIpn(row?.fields?.[MASTER_IPN_FIELD]);
+        return ipn && testIpnSet.has(ipn);
+      });
+    }
+    emitProgress(progressCallback, {
+      stage: 'phase72_load_master',
+      percent: 12,
+      counts: summary,
+      message: `Using shared Master Parts context cache: rows=${rows.length}.`
+    });
+  } else {
+    rows =
+      testIpnSet.size > 0
+        ? await fetchMasterRowsByIpnSet(airtableService, masterTable, Array.from(testIpnSet), selectFields)
+        : await fetchAllRecordsWithFallback(airtableService, masterTable, selectFields);
+  }
   summary.masterPartsScanned = rows.length;
 
   const tables = await schemaService.listTables();

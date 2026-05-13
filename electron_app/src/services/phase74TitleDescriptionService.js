@@ -299,6 +299,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     skippedManualOverride: 0,
     skippedNoChange: 0,
     aiFailures: 0,
+    writesAttempted: 0,
+    writesSucceeded: 0,
     writeFailures: 0,
     samples: [],
     errors: []
@@ -371,15 +373,56 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   }
 
   const uniqueIpns = Array.from(new Set(neededIpns));
-  const masterRows =
-    uniqueIpns.length > 0
-      ? await fetchMasterRowsByIpnSet(airtableService, masterTable, uniqueIpns, [MASTER_IPN_FIELD, MASTER_FITMENT_FIELD])
-      : [];
+  const preloadedMasterTable = normalizeKey(options.phaseSharedMasterTable || options.preloadedMasterTable || '');
+  const preloadedMasterByIpn =
+    options.phaseSharedMasterByIpn instanceof Map
+      ? options.phaseSharedMasterByIpn
+      : options.preloadedMasterByIpn instanceof Map
+        ? options.preloadedMasterByIpn
+        : null;
+  const preloadedMasterRows = Array.isArray(options.phaseSharedMasterRows)
+    ? options.phaseSharedMasterRows
+    : Array.isArray(options.preloadedMasterRows)
+      ? options.preloadedMasterRows
+      : null;
+  const canUsePreloadedMaster =
+    (!preloadedMasterTable || preloadedMasterTable === normalizeKey(masterTable)) &&
+    (preloadedMasterByIpn instanceof Map || Array.isArray(preloadedMasterRows));
+
   const masterByIpn = new Map();
-  for (const row of masterRows) {
-    const ipn = normalizeIpn(row?.fields?.[MASTER_IPN_FIELD]);
-    if (!ipn || masterByIpn.has(ipn)) continue;
-    masterByIpn.set(ipn, row);
+  if (canUsePreloadedMaster && preloadedMasterByIpn instanceof Map) {
+    for (const ipn of uniqueIpns) {
+      const row = preloadedMasterByIpn.get(ipn);
+      if (row && !masterByIpn.has(ipn)) masterByIpn.set(ipn, row);
+    }
+    emitProgress(progressCallback, {
+      stage: 'phase74_prepare',
+      percent: 19,
+      counts: summary,
+      message: `Using shared Master Parts context cache for needed IPNs: requested=${uniqueIpns.length}, matched=${masterByIpn.size}`
+    });
+  } else if (canUsePreloadedMaster && Array.isArray(preloadedMasterRows)) {
+    for (const row of preloadedMasterRows) {
+      const ipn = normalizeIpn(row?.fields?.[MASTER_IPN_FIELD]);
+      if (!ipn || masterByIpn.has(ipn)) continue;
+      masterByIpn.set(ipn, row);
+    }
+    emitProgress(progressCallback, {
+      stage: 'phase74_prepare',
+      percent: 19,
+      counts: summary,
+      message: `Using shared Master Parts rows cache: rows=${preloadedMasterRows.length}, uniqueIpns=${masterByIpn.size}`
+    });
+  } else {
+    const masterRows =
+      uniqueIpns.length > 0
+        ? await fetchMasterRowsByIpnSet(airtableService, masterTable, uniqueIpns, [MASTER_IPN_FIELD, MASTER_FITMENT_FIELD])
+        : [];
+    for (const row of masterRows) {
+      const ipn = normalizeIpn(row?.fields?.[MASTER_IPN_FIELD]);
+      if (!ipn || masterByIpn.has(ipn)) continue;
+      masterByIpn.set(ipn, row);
+    }
   }
 
   const updates = [];
@@ -526,7 +569,11 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     message: `Writing ${updates.length} listing updates to Airtable...`
   });
 
-  for (const batch of chunkArray(updates, 10)) {
+  const writeBatches = chunkArray(updates, 10);
+  summary.writesAttempted = updates.length;
+  let writeBatchIndex = 0;
+  for (const batch of writeBatches) {
+    writeBatchIndex += 1;
     try {
       await airtableService.request('PATCH', `/${encodeURIComponent(listingsTable)}`, {
         data: {
@@ -534,12 +581,21 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
           typecast: true
         }
       });
+      summary.writesSucceeded += batch.length;
     } catch (error) {
       summary.writeFailures += batch.length;
       if (summary.errors.length < sampleLimit) {
         summary.errors.push(`write batch failed: ${error.message}`);
       }
     }
+    emitProgress(progressCallback, {
+      stage: 'phase74_write',
+      percent: Math.min(99, 94 + Math.floor((writeBatchIndex / Math.max(1, writeBatches.length)) * 5)),
+      counts: summary,
+      message:
+        `Writing listing updates to Airtable: batch ${writeBatchIndex}/${Math.max(1, writeBatches.length)} ` +
+        `(attempted=${summary.writesAttempted}, written=${summary.writesSucceeded}, failed=${summary.writeFailures})`
+    });
   }
 
   emitProgress(progressCallback, {
@@ -548,7 +604,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     counts: summary,
     message:
       `Phase 7.4 completed. Titles=${summary.titleGenerated}, Descriptions=${summary.descriptionGenerated}, ` +
-      `ManualSkipped=${summary.skippedManualOverride}, PublishedSkipped=${summary.skippedAlreadyPublished}, WritesFailed=${summary.writeFailures}.`
+      `ManualSkipped=${summary.skippedManualOverride}, PublishedSkipped=${summary.skippedAlreadyPublished}, ` +
+      `WritesAttempted=${summary.writesAttempted}, WritesSucceeded=${summary.writesSucceeded}, WritesFailed=${summary.writeFailures}.`
   });
 
   return summary;

@@ -331,16 +331,17 @@ function shouldSkipCSpecificField(fieldName = '') {
 
 function buildAspectsFromListing(fields = {}) {
   const aspects = {};
+  // Priority source: legacy C-specifics bundle from Phase 4 enrichment.
+  const legacySpecifics = parseLegacySpecificsText(fields['Item Specifics - All C: values relevant to item']);
+  for (const [name, value] of Object.entries(legacySpecifics)) {
+    mergeAspect(aspects, name, value);
+  }
+
   const itemSpecificsObject = parseJsonObject(fields['Item Specifics']);
   if (itemSpecificsObject) {
     for (const [name, value] of Object.entries(itemSpecificsObject)) {
       mergeAspect(aspects, name, value);
     }
-  }
-
-  const legacySpecifics = parseLegacySpecificsText(fields['Item Specifics - All C: values relevant to item']);
-  for (const [name, value] of Object.entries(legacySpecifics)) {
-    mergeAspect(aspects, name, value);
   }
 
   // Auto-include enriched Item Specifics columns from Airtable (`C:*`) into eBay aspects.
@@ -430,6 +431,40 @@ function escapeXml(value = '') {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+function buildTradingItemSpecificsXml(aspects = {}) {
+  if (!aspects || typeof aspects !== 'object') return '';
+  let body = '';
+  for (const [name, rawValues] of Object.entries(aspects)) {
+    const aspectName = normalizeText(name);
+    if (!aspectName) continue;
+    const values = Array.isArray(rawValues)
+      ? rawValues.map(value => normalizeText(value)).filter(Boolean)
+      : [normalizeText(rawValues)].filter(Boolean);
+    if (values.length === 0) continue;
+    body += '<NameValueList>';
+    body += `<Name>${escapeXml(aspectName)}</Name>`;
+    for (const value of values) {
+      body += `<Value>${escapeXml(value)}</Value>`;
+    }
+    body += '</NameValueList>';
+  }
+  return body ? `<ItemSpecifics>${body}</ItemSpecifics>` : '';
+}
+
+function buildTradingPictureDetailsXml(imageUrls = []) {
+  const urls = (Array.isArray(imageUrls) ? imageUrls : [])
+    .map(value => normalizeText(value))
+    .filter(Boolean)
+    .slice(0, 24);
+  if (urls.length === 0) return '';
+  let body = '<PictureDetails>';
+  for (const url of urls) {
+    body += `<PictureURL>${escapeXml(url)}</PictureURL>`;
+  }
+  body += '</PictureDetails>';
+  return body;
 }
 
 function extractXmlTagValue(xml = '', tagName = '') {
@@ -630,18 +665,22 @@ class Phase5EbayPublishService {
     const sku = normalizeText(prepared?.sku);
     const title = normalizeText(prepared?.payload?.product?.title);
     const description = normalizeText(prepared?.payload?.product?.description);
+    const itemSpecificsXml = buildTradingItemSpecificsXml(prepared?.payload?.product?.aspects || {});
+    const pictureDetailsXml = buildTradingPictureDetailsXml(prepared?.payload?.product?.imageUrls || []);
     if (!itemId) {
       throw new Error('Missing Item ID. Trading API revise requires Item ID for existing listing update.');
     }
-    if (!title && !description) {
+    if (!title && !description && !itemSpecificsXml && !pictureDetailsXml) {
       throw new Error(
-        `Missing publish content for SKU '${sku || 'unknown'}'. Populate 'Item Title' and/or 'Item Description' before publish.`
+        `Missing publish content for SKU '${sku || 'unknown'}'. Populate title, description, item specifics, and/or images before publish.`
       );
     }
 
     const itemLines = [`<ItemID>${escapeXml(itemId)}</ItemID>`];
     if (title) itemLines.push(`<Title>${escapeXml(title.slice(0, 80))}</Title>`);
     if (description) itemLines.push(`<Description>${escapeXml(description)}</Description>`);
+    if (itemSpecificsXml) itemLines.push(itemSpecificsXml);
+    if (pictureDetailsXml) itemLines.push(pictureDetailsXml);
 
     return (
       `<?xml version="1.0" encoding="utf-8"?>` +
@@ -658,18 +697,22 @@ class Phase5EbayPublishService {
     const sku = normalizeText(prepared?.sku);
     const title = normalizeText(prepared?.payload?.product?.title);
     const description = normalizeText(prepared?.payload?.product?.description);
+    const itemSpecificsXml = buildTradingItemSpecificsXml(prepared?.payload?.product?.aspects || {});
+    const pictureDetailsXml = buildTradingPictureDetailsXml(prepared?.payload?.product?.imageUrls || []);
     if (!itemId) {
       throw new Error('Missing Item ID. Trading API revise requires Item ID for existing listing update.');
     }
-    if (!title && !description) {
+    if (!title && !description && !itemSpecificsXml && !pictureDetailsXml) {
       throw new Error(
-        `Missing publish content for SKU '${sku || 'unknown'}'. Populate 'Item Title' and/or 'Item Description' before publish.`
+        `Missing publish content for SKU '${sku || 'unknown'}'. Populate title, description, item specifics, and/or images before publish.`
       );
     }
 
     const itemLines = [`<ItemID>${escapeXml(itemId)}</ItemID>`];
     if (title) itemLines.push(`<Title>${escapeXml(title.slice(0, 80))}</Title>`);
     if (description) itemLines.push(`<Description>${escapeXml(description)}</Description>`);
+    if (itemSpecificsXml) itemLines.push(itemSpecificsXml);
+    if (pictureDetailsXml) itemLines.push(pictureDetailsXml);
 
     return (
       `<?xml version="1.0" encoding="utf-8"?>` +

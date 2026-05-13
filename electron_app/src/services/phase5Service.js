@@ -536,6 +536,14 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
           summary.errors.push(`delete_reintroduced_failed record='${recordId}' identity='${identity}': ${detail}`);
         }
       }
+      emitProgress(progressCallback, {
+        stage: 'phase5_publish',
+        percent: Math.min(95, 25 + Math.floor(((i + 1) / Math.max(1, governanceEligible.length)) * 70)),
+        counts: summary,
+        message:
+          `Phase 5: Publishing ${i + 1}/${governanceEligible.length} ` +
+          `(success=${summary.publishedSuccess}, failed=${summary.publishedFailed}, logged=${summary.loggedToSheets}, removed=${summary.removedFromQueue})`
+      });
       continue;
     }
 
@@ -545,6 +553,14 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
       if (summary.sampleSkips.length < 20) {
         summary.sampleSkips.push(`skip=missing_sku record='${recordId}'`);
       }
+      emitProgress(progressCallback, {
+        stage: 'phase5_publish',
+        percent: Math.min(95, 25 + Math.floor(((i + 1) / Math.max(1, governanceEligible.length)) * 70)),
+        counts: summary,
+        message:
+          `Phase 5: Publishing ${i + 1}/${governanceEligible.length} ` +
+          `(success=${summary.publishedSuccess}, failed=${summary.publishedFailed}, logged=${summary.loggedToSheets}, removed=${summary.removedFromQueue})`
+      });
       continue;
     }
 
@@ -660,16 +676,14 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
       summary.errors.push(`publish_failed record='${recordId}': ${detail}`);
     }
 
-    if (i === 0 || (i + 1) % 25 === 0 || i + 1 === governanceEligible.length) {
-      emitProgress(progressCallback, {
-        stage: 'phase5_publish',
-        percent: Math.min(95, 25 + Math.floor(((i + 1) / Math.max(1, governanceEligible.length)) * 70)),
-        counts: summary,
-        message:
-          `Phase 5: Publishing ${i + 1}/${governanceEligible.length} ` +
-          `(success=${summary.publishedSuccess}, failed=${summary.publishedFailed}, logged=${summary.loggedToSheets}, removed=${summary.removedFromQueue})`
-      });
-    }
+    emitProgress(progressCallback, {
+      stage: 'phase5_publish',
+      percent: Math.min(95, 25 + Math.floor(((i + 1) / Math.max(1, governanceEligible.length)) * 70)),
+      counts: summary,
+      message:
+        `Phase 5: Publishing ${i + 1}/${governanceEligible.length} ` +
+        `(success=${summary.publishedSuccess}, failed=${summary.publishedFailed}, logged=${summary.loggedToSheets}, removed=${summary.removedFromQueue})`
+    });
   }
 
   if (summary.errors.length > 200) {

@@ -5,7 +5,7 @@ class Phase2WritebackPollerService {
     this.timer = null;
     this.running = false;
     this.inFlight = false;
-    this.intervalMinutes = 1;
+    this.intervalMinutes = 5;
     this.lastRunAt = null;
     this.lastSummary = null;
     this.lastError = null;
@@ -65,7 +65,7 @@ class Phase2WritebackPollerService {
     const intervalMinutes = Number(config.pollIntervalMinutes);
     this.intervalMinutes = Number.isFinite(intervalMinutes) && intervalMinutes > 0
       ? intervalMinutes
-      : 1;
+      : 5;
     this.currentConfig = {
       ...config,
       pollIntervalMinutes: this.intervalMinutes

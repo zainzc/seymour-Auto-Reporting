@@ -12,7 +12,7 @@ loadEnv();
 
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const LEGACY_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
-const MASTER_LOAD_LOG_EVERY_ROWS = 20000;
+const MASTER_LOAD_LOG_EVERY_ROWS = 5000;
 const LISTING_C_SPECIFICS_FIELD = 'Item Specifics - All C: values relevant to item';
 const EBAY_LISTING_IPN_FIELDS = [
   'IPN (Interchange Part Number)',
@@ -552,26 +552,55 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     percent: 19,
     message: `Loading master IPN set from '${masterTable}'...`
   });
-  let nextMasterRowsLogAt = MASTER_LOAD_LOG_EVERY_ROWS;
-  const masterRows = await fetchAllRecordsWithFallbackAndProgress(masterService, masterTable, ['IPN'], state => {
-    const loaded = Number(state?.loaded || 0);
-    const shouldEmit = !state?.hasMore || loaded >= nextMasterRowsLogAt;
-    if (shouldEmit) {
-      while (loaded >= nextMasterRowsLogAt) {
-        nextMasterRowsLogAt += MASTER_LOAD_LOG_EVERY_ROWS;
+  const preloadedMasterRows = Array.isArray(args.phase4SharedMasterRows)
+    ? args.phase4SharedMasterRows
+    : Array.isArray(args.preloadedMasterRows)
+      ? args.preloadedMasterRows
+      : null;
+  const preloadedMasterIpnSet = args.phase4SharedMasterIpnSet instanceof Set
+    ? args.phase4SharedMasterIpnSet
+    : args.preloadedMasterIpnSet instanceof Set
+      ? args.preloadedMasterIpnSet
+      : null;
+  let masterIpnSet;
+  if (preloadedMasterIpnSet instanceof Set) {
+    masterIpnSet = preloadedMasterIpnSet;
+    emitProgress(progressCallback, {
+      stage: 'phase4rules_scan_tables',
+      percent: 19,
+      message: `Using shared master IPN set cache: uniqueIpns=${masterIpnSet.size}`
+    });
+  } else if (Array.isArray(preloadedMasterRows)) {
+    masterIpnSet = new Set(
+      preloadedMasterRows.map(row => normalizeText(row?.fields?.IPN).toUpperCase()).filter(Boolean)
+    );
+    emitProgress(progressCallback, {
+      stage: 'phase4rules_scan_tables',
+      percent: 19,
+      message: `Using shared master rows cache: rows=${preloadedMasterRows.length}, uniqueIpns=${masterIpnSet.size}`
+    });
+  } else {
+    let nextMasterRowsLogAt = MASTER_LOAD_LOG_EVERY_ROWS;
+    const masterRows = await fetchAllRecordsWithFallbackAndProgress(masterService, masterTable, ['IPN'], state => {
+      const loaded = Number(state?.loaded || 0);
+      const shouldEmit = !state?.hasMore || loaded >= nextMasterRowsLogAt;
+      if (shouldEmit) {
+        while (loaded >= nextMasterRowsLogAt) {
+          nextMasterRowsLogAt += MASTER_LOAD_LOG_EVERY_ROWS;
+        }
+        emitProgress(progressCallback, {
+          stage: 'phase4rules_scan_tables',
+          percent: 19,
+          message:
+            `Loading master IPN set from '${masterTable}'... ` +
+            `loaded=${loaded} rows (page ${Number(state?.page || 1)})`
+        });
       }
-      emitProgress(progressCallback, {
-        stage: 'phase4rules_scan_tables',
-        percent: 19,
-        message:
-          `Loading master IPN set from '${masterTable}'... ` +
-          `loaded=${loaded} rows (page ${Number(state?.page || 1)})`
-      });
-    }
-  });
-  const masterIpnSet = new Set(
-    masterRows.map(row => normalizeText(row?.fields?.IPN).toUpperCase()).filter(Boolean)
-  );
+    });
+    masterIpnSet = new Set(
+      masterRows.map(row => normalizeText(row?.fields?.IPN).toUpperCase()).filter(Boolean)
+    );
+  }
   emitProgress(progressCallback, {
     stage: 'phase4rules_scan_tables',
     percent: 20,

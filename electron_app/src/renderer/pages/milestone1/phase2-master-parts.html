@@ -8,6 +8,7 @@
     :root {
       --bg: #eef3f9;
       --surface: #ffffff;
+      --section-tint: #eef5fd;
       --text: #152238;
       --muted: #5a6b85;
       --border: #d4deec;
@@ -124,11 +125,27 @@
       box-shadow: 0 8px 16px rgba(12, 37, 63, 0.06);
     }
 
+    .auto-phase-hidden {
+      display: none !important;
+    }
+
     .card-title {
       margin: 0 0 14px;
       font-size: 19px;
       color: #1b3557;
       letter-spacing: 0.2px;
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .card-head .card-title {
+      margin: 0;
     }
 
     .status-title {
@@ -196,11 +213,54 @@
       text-transform: uppercase;
     }
 
+    .setup-shell {
+      display: grid;
+      gap: 14px;
+    }
+
+    .setup-head-note {
+      margin: 0;
+      color: #547195;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .setup-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .setup-card {
+      border: 1px solid #d5e1f0;
+      border-radius: 12px;
+      background: var(--section-tint);
+      padding: 14px;
+      box-shadow: 0 2px 8px rgba(12, 37, 63, 0.04);
+    }
+
+    .setup-card-title {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.25px;
+      text-transform: uppercase;
+      color: #25466d;
+    }
+
+    .setup-card .picker-row {
+      align-items: stretch;
+    }
+
+    .setup-actions {
+      margin-top: 2px;
+    }
+
     .phase-panel {
       border: 1px solid #d5e1f0;
       border-radius: 12px;
       padding: 14px;
-      background: linear-gradient(180deg, #f9fcff 0%, #f4f8fd 100%);
+      background: var(--section-tint);
       box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
     }
 
@@ -214,6 +274,10 @@
       justify-content: space-between;
       gap: 10px;
       margin-bottom: 10px;
+    }
+
+    .phase3-panel-header {
+      justify-content: flex-start;
     }
 
     .phase-panel-title {
@@ -234,7 +298,104 @@
 
     .phase5-layout {
       display: grid;
+      gap: 16px;
+    }
+
+    .phase5-shell {
+      display: grid;
+      gap: 16px;
+    }
+
+    .phase5-command-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.25fr);
       gap: 14px;
+      align-items: stretch;
+    }
+
+    .phase5-side-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      height: 100%;
+    }
+
+    .phase5-side-stack .phase5-card {
+      flex: 1 1 0;
+    }
+
+    .phase5-card {
+      border: 1px solid #d5e1f0;
+      border-radius: 14px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.97) 0%, rgba(246, 250, 255, 0.98) 100%);
+      padding: 15px;
+      box-shadow: 0 10px 22px rgba(13, 35, 59, 0.06);
+    }
+
+    .phase5-card-hero {
+      background:
+        radial-gradient(circle at 92% 12%, rgba(11, 92, 171, 0.14), transparent 30%),
+        linear-gradient(135deg, #f9fcff 0%, #eef5fd 100%);
+    }
+
+    .phase5-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .phase5-eyebrow {
+      margin: 0 0 4px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.34px;
+      color: #597699;
+      text-transform: uppercase;
+    }
+
+    .phase5-panel-title {
+      margin: 0;
+      font-size: 17px;
+      font-weight: 800;
+      color: #1f456f;
+      letter-spacing: 0.12px;
+    }
+
+    .phase5-head-note {
+      margin: 6px 0 0;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #5c7493;
+      max-width: 520px;
+    }
+
+    .phase5-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid #c9d9ee;
+      background: rgba(255, 255, 255, 0.88);
+      color: #244d76;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.24px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .phase5-badge::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #0b5cab;
+      box-shadow: 0 0 0 3px rgba(11, 92, 171, 0.12);
     }
 
     .phase5-grid {
@@ -247,12 +408,37 @@
       grid-column: 1 / -1;
     }
 
-    .phase5-panel-title {
-      margin: 0 0 10px;
-      font-size: 15px;
-      font-weight: 800;
-      color: #1f456f;
-      letter-spacing: 0.15px;
+    .phase5-inline-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px dashed #c9d8eb;
+    }
+
+    .phase5-status-strip {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px dashed #c6d8ec;
+      background: #f8fbff;
+      color: #496584;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.45;
+    }
+
+    .phase5-substatus {
+      margin-top: 10px;
+      color: #6a7d96;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .phase5-credentials-grid textarea {
+      min-height: 88px;
     }
 
     .phase5-advanced {
@@ -289,6 +475,97 @@
       margin-top: 10px;
       padding-top: 10px;
       border-top: 1px dashed #c9d8eb;
+    }
+
+    .phase3-shell {
+      display: grid;
+      gap: 14px;
+    }
+
+    .phase3-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    .phase3-card {
+      border: 1px solid #d5e1f0;
+      border-radius: 12px;
+      background: var(--section-tint);
+      padding: 14px;
+      box-shadow: 0 2px 8px rgba(12, 37, 63, 0.04);
+    }
+
+    .phase3-card-title {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.25px;
+      text-transform: uppercase;
+      color: #25466d;
+    }
+
+    .phase3-readonly-note {
+      margin: -1px 0 9px;
+      font-size: 12px;
+      color: #55769a;
+      line-height: 1.45;
+    }
+
+    .phase3-status-line {
+      margin-top: 8px;
+      padding-top: 10px;
+      border-top: 1px dashed #c8d9ec;
+      color: #4d6687;
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+
+    .phase4-shell {
+      display: grid;
+      gap: 14px;
+    }
+
+    .phase4-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    .phase4-card {
+      border: 1px solid #d5e1f0;
+      border-radius: 12px;
+      background: var(--section-tint);
+      padding: 14px;
+      box-shadow: 0 2px 8px rgba(12, 37, 63, 0.04);
+    }
+
+    .phase4-card-title {
+      margin: 0 0 10px;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.25px;
+      text-transform: uppercase;
+      color: #25466d;
+    }
+
+    .phase4-status-stack {
+      display: grid;
+      gap: 8px;
+      margin-top: 4px;
+    }
+
+    .phase4-status-line {
+      margin: 0;
+      padding: 9px 10px;
+      border: 1px dashed #c6d8ec;
+      border-radius: 9px;
+      color: #4d6687;
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.45;
+      background: #f8fbff;
     }
 
     .panel-toggle-btn {
@@ -545,9 +822,13 @@
     @media (max-width: 900px) {
       .grid-2 { grid-template-columns: 1fr; }
       .grid-3 { grid-template-columns: 1fr; }
+      .setup-grid { grid-template-columns: 1fr; }
       .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .phase-panel-header { flex-wrap: wrap; }
+      .phase5-command-grid { grid-template-columns: 1fr; }
       .phase5-grid { grid-template-columns: 1fr; }
+      .phase3-grid { grid-template-columns: 1fr; }
+      .phase4-grid { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 680px) {
@@ -555,6 +836,7 @@
       .header-card { padding: 18px 14px; }
       h1 { font-size: 23px; }
       .card { padding: 15px; }
+      .card-head { align-items: flex-start; flex-wrap: wrap; }
       .btn { width: 100%; }
       .summary-grid { grid-template-columns: 1fr; }
     }
@@ -578,93 +860,97 @@
     </header>
 
     <section class="card">
-      <h2 class="card-title">1. Connect and Configure</h2>
-      <div class="grid-3">
-        <div>
-          <h3 class="section-title">Source (Google Sheets)</h3>
-          <div class="health-row">
-            <span id="health-source" class="health-pill warn">Source: Missing fields</span>
-          </div>
-          <div class="form-group">
-            <label for="sheet-id">Google Sheet ID</label>
-            <input id="sheet-id" type="text" placeholder="Spreadsheet ID">
-            <div class="hint">Use the same source sheet used by inventory export.</div>
-            <div id="err-sheet-id" class="field-error"></div>
-          </div>
-          <div class="form-group">
-            <label for="tab-name">Google Tab Name</label>
-            <input id="tab-name" type="text" placeholder="Worksheet tab name">
-            <div id="err-tab-name" class="field-error"></div>
-          </div>
-        </div>
-
-        <div>
-          <h3 class="section-title">Destination (Airtable)</h3>
-          <div class="health-row">
-            <span id="health-airtable" class="health-pill warn">Airtable: Missing fields</span>
-          </div>
-          <div class="form-group">
-            <label for="airtable-token">Airtable Token</label>
-            <input id="airtable-token" type="password" placeholder="pat...">
-            <div id="err-airtable-token" class="field-error"></div>
-          </div>
-          <div class="form-group">
-            <label for="airtable-base-id">Airtable Base ID</label>
-            <input id="airtable-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
-            <div class="picker-row">
-              <button class="btn btn-secondary" type="button" onclick="fetchAirtableBases()">Find Bases from Token</button>
-              <select id="airtable-base-picker">
-                <option value="">Select Airtable base...</option>
-              </select>
-            </div>
-            <div id="err-airtable-base-id" class="field-error"></div>
-          </div>
-        </div>
-
-        <div>
-          <h3 class="section-title">Tasks (ClickUp)</h3>
-          <div class="health-row">
-            <span id="health-clickup" class="health-pill warn">ClickUp: Missing fields</span>
-          </div>
-          <div class="form-group">
-            <label for="clickup-token">ClickUp Token</label>
-            <input id="clickup-token" type="password" placeholder="pk_...">
-            <div id="err-clickup-token" class="field-error"></div>
-          </div>
-          <div class="form-group">
-            <label for="clickup-list-id">ClickUp List ID</label>
-            <input id="clickup-list-id" type="text" placeholder="ClickUp list ID">
-            <div class="picker-row">
-              <button class="btn btn-secondary" type="button" onclick="fetchClickUpLists()">Find Lists from Token</button>
-              <select id="clickup-list-picker">
-                <option value="">Select ClickUp list...</option>
-              </select>
-            </div>
-            <div id="err-clickup-list-id" class="field-error"></div>
-          </div>
-        </div>
+      <div class="card-head">
+        <h2 class="card-title">1. Connect and Configure</h2>
+        <button class="btn btn-secondary" type="button" onclick="saveConfig()">Save Settings</button>
       </div>
-      <div class="btn-group" style="margin-top: 12px;">
-        <button class="btn btn-secondary" onclick="validateSetup()">Validate Setup</button>
-        <button class="btn btn-secondary" onclick="saveConfig()">Save Settings</button>
+      <div class="setup-shell">
+        <p class="setup-head-note">Add source, Airtable, and ClickUp credentials once. Then validate and save your configuration.</p>
+
+        <div class="setup-grid">
+          <div class="setup-card">
+            <h3 class="setup-card-title">Source (Google Sheets)</h3>
+            <div class="health-row">
+              <span id="health-source" class="health-pill warn">Source: Missing fields</span>
+            </div>
+            <div class="form-group">
+              <label for="sheet-id">Google Sheet ID</label>
+              <input id="sheet-id" type="text" placeholder="Spreadsheet ID">
+              <div class="hint">Use the same source sheet used by inventory export.</div>
+              <div id="err-sheet-id" class="field-error"></div>
+            </div>
+            <div class="form-group">
+              <label for="tab-name">Google Tab Name</label>
+              <input id="tab-name" type="text" placeholder="Worksheet tab name">
+              <div id="err-tab-name" class="field-error"></div>
+            </div>
+          </div>
+
+          <div class="setup-card">
+            <h3 class="setup-card-title">Destination (Airtable)</h3>
+            <div class="health-row">
+              <span id="health-airtable" class="health-pill warn">Airtable: Missing fields</span>
+            </div>
+            <div class="form-group">
+              <label for="airtable-token">Airtable Token</label>
+              <input id="airtable-token" type="password" placeholder="pat...">
+              <div id="err-airtable-token" class="field-error"></div>
+            </div>
+            <div class="form-group">
+              <label for="airtable-base-id">Airtable Base ID</label>
+              <input id="airtable-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
+              <div class="picker-row">
+                <button class="btn btn-secondary" type="button" onclick="fetchAirtableBases()">Find Bases from Token</button>
+                <select id="airtable-base-picker">
+                  <option value="">Select Airtable base...</option>
+                </select>
+              </div>
+              <div id="err-airtable-base-id" class="field-error"></div>
+            </div>
+          </div>
+
+          <div class="setup-card">
+            <h3 class="setup-card-title">Tasks (ClickUp)</h3>
+            <div class="health-row">
+              <span id="health-clickup" class="health-pill warn">ClickUp: Missing fields</span>
+            </div>
+            <div class="form-group">
+              <label for="clickup-token">ClickUp Token</label>
+              <input id="clickup-token" type="password" placeholder="pk_...">
+              <div id="err-clickup-token" class="field-error"></div>
+            </div>
+            <div class="form-group">
+              <label for="clickup-list-id">ClickUp List ID</label>
+              <input id="clickup-list-id" type="text" placeholder="ClickUp list ID">
+              <div class="picker-row">
+                <button class="btn btn-secondary" type="button" onclick="fetchClickUpLists()">Find Lists from Token</button>
+                <select id="clickup-list-picker">
+                  <option value="">Select ClickUp list...</option>
+                </select>
+              </div>
+              <div id="err-clickup-list-id" class="field-error"></div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </section>
 
     <section class="card">
-      <h2 class="card-title">2. Phase Operations</h2>
+      <div class="card-head">
+        <h2 class="card-title">2. Automation Setup</h2>
+        <button class="btn btn-secondary" type="button" onclick="saveConfig()">Save Settings</button>
+      </div>
 
       <div class="phase-panel">
-        <div class="phase-panel-header">
-          <h3 class="phase-panel-title">Phase 3 (ShipStation)</h3>
-          <button id="toggle-phase3-panel-btn" class="panel-toggle-btn" type="button" aria-expanded="true" onclick="togglePhasePanel('phase3-panel-content', 'toggle-phase3-panel-btn')">Collapse</button>
+        <div class="phase-panel-header phase3-panel-header">
+          <h3 class="phase-panel-title">ShipStation Sync</h3>
         </div>
         <div id="phase3-panel-content" class="phase-panel-content">
-          <div class="grid-2">
-            <div>
-              <h3 class="section-title">Credentials</h3>
-              <div class="health-row">
-                <span id="health-phase3" class="health-pill warn">Phase 3: Missing fields</span>
-              </div>
+          <div class="phase3-shell">
+            <div class="phase3-grid">
+              <div class="phase3-card">
+                <h3 class="phase3-card-title">Credentials</h3>
               <div class="form-group">
                 <label for="shipstation-api-key">ShipStation V1 API Key</label>
                 <input id="shipstation-api-key" type="password" placeholder="ShipStation API Key">
@@ -675,13 +961,13 @@
                 <input id="shipstation-api-secret" type="password" placeholder="ShipStation API Secret">
                 <div id="err-shipstation-api-secret" class="field-error"></div>
               </div>
-            </div>
-            <div>
-              <h3 class="section-title">Run Options</h3>
+              </div>
+              <div class="phase3-card">
+                <h3 class="phase3-card-title">Run Policy</h3>
               <div class="form-group">
                 <label for="shipstation-store-id">ShipStation Store ID</label>
                 <input id="shipstation-store-id" type="text" value="333796" readonly>
-                <div class="hint">Locked to Partshunter203 store (333796).</div>
+                <div class="phase3-readonly-note">Pinned to Partshunter203 store (333796).</div>
               </div>
               <div class="form-group">
                 <label for="phase3-lookback-days">Phase 3 Lookback Days</label>
@@ -689,10 +975,8 @@
                 <div id="err-phase3-lookback-days" class="field-error"></div>
               </div>
               <input id="item-specific-base-id" type="hidden">
-              <div class="btn-group">
-                <button id="run-phase3-btn" class="btn btn-secondary" onclick="runPhase3()">Run Phase 3</button>
+                <div class="phase3-status-line" id="phase3-status-text">ShipStation sync status: automated</div>
               </div>
-              <div class="hint" id="phase3-status-text">Phase 3 status: idle</div>
             </div>
           </div>
         </div>
@@ -700,70 +984,60 @@
 
       <div class="phase-panel">
         <div class="phase-panel-header">
-          <h3 class="phase-panel-title">Phase 4 (Item Specifics)</h3>
+          <h3 class="phase-panel-title">Item Specifics Automation</h3>
           <button id="toggle-phase4-panel-btn" class="panel-toggle-btn" type="button" aria-expanded="true" onclick="togglePhasePanel('phase4-panel-content', 'toggle-phase4-panel-btn')">Collapse</button>
         </div>
         <div id="phase4-panel-content" class="phase-panel-content">
-          <h3 class="section-title">Phase 4 Automation</h3>
-          <div class="grid-2">
-            <div>
-              <div class="form-group">
-                <label for="phase4-unified-item-specific-base-id">Item Specifics Base ID</label>
-                <input id="phase4-unified-item-specific-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
+          <div class="phase4-shell">
+            <div class="phase4-grid">
+              <div class="phase4-card">
+                <h3 class="phase4-card-title">Core Configuration</h3>
+                <div class="form-group">
+                  <label for="phase4-unified-item-specific-base-id">Item Specifics Base ID</label>
+                  <input id="phase4-unified-item-specific-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
+                </div>
+                <div class="form-group">
+                  <label for="phase4-unified-rules-drive-file">Rules File (Google Drive ID/URL)</label>
+                  <input id="phase4-unified-rules-drive-file" type="text" placeholder="Google Drive file ID or full URL">
+                </div>
+                <div class="form-group">
+                  <label for="phase4-unified-rules-logic-sheet">Rules Sheet Name</label>
+                  <input id="phase4-unified-rules-logic-sheet" type="text" value="Logic">
+                </div>
+                <div class="form-group">
+                  <label for="phase4-unified-openai-api-key">OpenAI API Key</label>
+                  <input id="phase4-unified-openai-api-key" type="password" placeholder="sk-...">
+                </div>
+                <div class="form-group">
+                  <label for="phase4-unified-openai-model">OpenAI Model</label>
+                  <input id="phase4-unified-openai-model" type="text" value="gpt-5.4-mini">
+                </div>
               </div>
-              <div class="form-group">
-                <label for="phase4-unified-rules-drive-file">Rules File (Google Drive ID/URL)</label>
-                <input id="phase4-unified-rules-drive-file" type="text" placeholder="Google Drive file ID or full URL">
+
+              <div class="phase4-card">
+                <h3 class="phase4-card-title">Routing and Task Defaults</h3>
+                <div class="form-group">
+                  <label for="phase4-unified-clickup-list-name">ClickUp List Name</label>
+                  <input id="phase4-unified-clickup-list-name" type="text" placeholder="Item Specifics Tasks">
+                </div>
+                <div class="form-group">
+                  <label for="phase4-unified-clickup-list-id">ClickUp List ID</label>
+                  <input id="phase4-unified-clickup-list-id" type="text" placeholder="901113356398">
+                </div>
+                <div class="form-group">
+                  <label for="phase4-unified-clickup-open-status">ClickUp Open Status</label>
+                  <input id="phase4-unified-clickup-open-status" type="text" value="To Do">
+                </div>
+                <div class="form-group">
+                  <label for="phase4-unified-listings-table">Listings Table Name</label>
+                  <input id="phase4-unified-listings-table" type="text" value="eBay Listings (API)">
+                </div>
+                <div class="phase4-status-stack">
+                  <p class="phase4-status-line" id="phase4-status-text-legacy">Automation status: idle</p>
+                  <p class="phase4-status-line" id="phase4-pipeline-status-text">Pipeline status: idle</p>
+                  <p class="hint">The pipeline runs all internal Phase 4 steps automatically using these saved inputs.</p>
+                </div>
               </div>
-              <div class="form-group">
-                <label for="phase4-unified-rules-logic-sheet">Rules Sheet Name</label>
-                <input id="phase4-unified-rules-logic-sheet" type="text" value="Logic">
-              </div>
-              <div class="form-group">
-                <label for="phase4-unified-openai-api-key">OpenAI API Key</label>
-                <input id="phase4-unified-openai-api-key" type="password" placeholder="sk-...">
-              </div>
-              <div class="form-group">
-                <label for="phase4-unified-openai-model">OpenAI Model</label>
-                <input id="phase4-unified-openai-model" type="text" value="gpt-5.4-mini">
-              </div>
-            </div>
-            <div>
-              <div class="form-group">
-                <label for="phase4-unified-clickup-list-name">ClickUp List Name</label>
-                <input id="phase4-unified-clickup-list-name" type="text" placeholder="Item Specifics Tasks">
-              </div>
-              <div class="form-group">
-                <label for="phase4-unified-clickup-list-id">ClickUp List ID</label>
-                <input id="phase4-unified-clickup-list-id" type="text" placeholder="901113356398">
-              </div>
-              <div class="form-group">
-                <label for="phase4-unified-clickup-open-status">ClickUp Open Status</label>
-                <input id="phase4-unified-clickup-open-status" type="text" value="To Do">
-              </div>
-              <div class="form-group">
-                <label for="phase4-unified-listings-table">Listings Table Name</label>
-                <input id="phase4-unified-listings-table" type="text" value="eBay Listings (API)">
-              </div>
-              <div class="form-group">
-                <label for="phase4-unified-test-ipn">Phase 4B Test IPN(s) (optional)</label>
-                <input id="phase4-unified-test-ipn" type="text" placeholder="e.g., 604-59029, 114-00780L">
-                <div class="hint">Comma/newline separated IPNs supported. Runs only those IPNs.</div>
-              </div>
-              <div class="form-group">
-                <label for="phase4-unified-test-ipn-4d">Phase 4D Test IPN(s) (optional)</label>
-                <input id="phase4-unified-test-ipn-4d" type="text" placeholder="e.g., 114-58944L, 128-53150BR">
-                <div class="hint">Comma/newline separated IPNs supported for Phase 4D filtering and logs.</div>
-              </div>
-              <div class="btn-group">
-                <button id="run-item-specific-sync-phase4-btn" class="btn btn-secondary" onclick="runItemSpecificSync()">Sync Item Specific Tables</button>
-                <button id="run-phase4blite-unified-btn" class="btn btn-secondary" onclick="runPhase4BLite()">Run Phase 4B-lite</button>
-                <button id="run-phase4d-unified-btn" class="btn btn-secondary" onclick="runPhase4D()">Run Phase 4D</button>
-                <button id="run-phase4-pipeline-btn" class="btn btn-primary" onclick="runPhase4Pipeline()">Run Complete Phase 4 Automation</button>
-              </div>
-              <div class="hint" id="phase4-status-text-legacy">Phase 4 status: idle</div>
-              <div class="hint" id="phase4-pipeline-status-text">Phase 4 pipeline status: idle</div>
-              <div class="hint">Runs full Phase 4 flow automatically in sequence using the inputs on this form.</div>
             </div>
           </div>
 
@@ -792,7 +1066,7 @@
               <div class="btn-group">
                 <button id="run-phase4-btn" class="btn btn-secondary" onclick="runPhase4()">Run Phase 4 Mirroring</button>
               </div>
-              <div class="hint" id="phase4-status-text">Phase 4 status: idle</div>
+              <div class="hint" id="phase4-status-text">Automation status: idle</div>
             </div>
           </div>
 
@@ -1005,95 +1279,76 @@
     </section>
 
     <section class="card">
-      <h2 class="card-title">Phase 5 (Approval Gate Publishing)</h2>
+      <div class="card-head">
+        <h2 class="card-title">eBay Publishing Automation</h2>
+        <button class="btn btn-secondary" type="button" onclick="saveConfig()">Save Settings</button>
+      </div>
       <div class="phase5-layout">
-        <div class="phase-panel">
-          <h3 class="phase5-panel-title">Publishing Setup</h3>
-          <div class="phase5-grid">
-            <div class="form-group">
+        <div class="phase5-shell">
+          <div class="phase5-card phase5-card-hero">
+            <div class="phase5-card-head">
+              <div>
+                <p class="phase5-eyebrow">Publishing Setup</p>
+                <h3 class="phase5-panel-title">Credentials and Publishing Controls</h3>
+                <p class="phase5-head-note">Fill credentials and settings once, then run publishing actions from the buttons below.</p>
+              </div>
+              <span class="phase5-badge">Trading API</span>
+            </div>
+
+            <div class="form-group full-width" style="display:none;">
               <label for="phase5-mode">Publishing Mode</label>
               <select id="phase5-mode">
-                <option value="A" selected>Option A - Approval Gate (explicit approval required)</option>
-                <option value="B">Option B - Scheduled Auto-Push</option>
+                <option value="A" selected>Manual Publish (approval required)</option>
+                <option value="B">Scheduled Auto-Push</option>
               </select>
-              <div class="hint">Use Option A for manual approval runs. Use Option B for scheduled runs.</div>
             </div>
-            <div class="form-group">
+            <div class="form-group" style="display:none;">
               <label for="phase5-listings-table">Listings Queue Table</label>
               <input id="phase5-listings-table" type="text" value="eBay Listings (API)">
             </div>
-            <div class="form-group">
+            <div class="form-group" style="display:none;">
               <label for="phase5-batches-table">Batches Table</label>
               <input id="phase5-batches-table" type="text" placeholder="Listing Batches">
             </div>
-            <div class="form-group">
+            <div class="form-group" style="display:none;">
               <label for="phase5-batch-status-field-name">Batch Status Field</label>
               <input id="phase5-batch-status-field-name" type="text" placeholder="Batch Status">
             </div>
-            <div class="form-group full-width">
+            <div class="form-group full-width" style="display:none;">
               <label for="phase5-batch-link-field-name">Listing Batch Link Field</label>
               <input id="phase5-batch-link-field-name" type="text" placeholder="Listing Batches">
             </div>
-          </div>
-        </div>
+            <div class="form-group" style="display:none;">
+              <label for="phase5-ebay-listings-source-api">Listings API Source</label>
+              <select id="phase5-ebay-listings-source-api">
+                <option value="trading" selected>Trading API (GetMyeBaySelling)</option>
+              </select>
+            </div>
+            <div class="form-group" style="display:none;">
+              <label for="phase5-ebay-sandbox-dry-run">Listings Import Dry Run</label>
+              <select id="phase5-ebay-sandbox-dry-run">
+                <option value="true">True (No Airtable Writes)</option>
+                <option value="false" selected>False (Upsert fetched inventory rows)</option>
+              </select>
+            </div>
+            <div class="form-group" style="display:none;">
+              <label for="phase5-autopush-enabled">Option B Auto-Push Enabled</label>
+              <select id="phase5-autopush-enabled">
+                <option value="false" selected>False</option>
+                <option value="true">True</option>
+              </select>
+            </div>
 
-        <div class="phase5-grid">
-          <div class="phase-panel">
-            <h3 class="phase5-panel-title">eBay Credentials</h3>
             <div class="phase5-grid">
               <div class="form-group">
                 <label for="phase5-ebay-environment">eBay Environment</label>
-                <select id="phase5-ebay-environment">
+                <select id="phase5-ebay-environment" onchange="switchEnvironmentEbayCredentials(this.value); updateRunButtonState();">
                   <option value="sandbox" selected>Sandbox</option>
                   <option value="production">Production</option>
                 </select>
               </div>
-              <div class="form-group">
-                <label for="phase5-ebay-listings-source-api">Listings API Source</label>
-                <select id="phase5-ebay-listings-source-api">
-                  <option value="auto" selected>Auto (Prod=Trading, Sandbox=Inventory)</option>
-                  <option value="trading">Trading API (GetMyeBaySelling)</option>
-                  <option value="inventory">Sell Inventory API</option>
-                </select>
-              </div>
-              <div class="form-group">
-                <label for="phase5-ebay-runame">eBay RuName</label>
-                <input id="phase5-ebay-runame" type="text" placeholder="RuName">
-              </div>
-              <div class="form-group">
-                <label for="phase5-ebay-client-id">eBay App ID (Client ID)</label>
-                <input id="phase5-ebay-client-id" type="text" placeholder="Client ID / App ID">
-              </div>
-              <div class="form-group">
-                <label for="phase5-ebay-dev-id">eBay Dev ID</label>
-                <input id="phase5-ebay-dev-id" type="text" placeholder="Dev ID">
-              </div>
               <div class="form-group full-width">
-                <label for="phase5-ebay-client-secret">eBay Cert ID (Client Secret)</label>
-                <input id="phase5-ebay-client-secret" type="password" placeholder="Client Secret / Cert ID">
-              </div>
-              <div class="form-group full-width">
-                <label for="phase5-ebay-refresh-token">eBay Refresh Token (Auto-Renew)</label>
-                <textarea id="phase5-ebay-refresh-token" placeholder="Paste eBay refresh token for auto access-token renewal"></textarea>
-                <div class="hint">With Refresh Token + Client ID + Cert ID, app auto-renews access token after ~2 hours.</div>
-              </div>
-              <div class="form-group full-width">
-                <label for="phase5-ebay-user-access-token">eBay User Access Token (IAF Token)</label>
-                <textarea id="phase5-ebay-user-access-token" placeholder="Paste the same user access token used in your working Trading API cURL (X-EBAY-API-IAF-TOKEN)"></textarea>
-                <div class="hint">Used directly for credential tests/import. If refresh token is invalid, this token can still work.</div>
-              </div>
-            </div>
-            <div class="btn-group" style="margin-top: 8px;">
-              <button id="phase5-test-ebay-creds-btn" class="btn btn-secondary" onclick="testPhase5EbayCredentials()">Test eBay Credentials</button>
-            </div>
-            <div class="hint">Credential test checks Inventory API auth. Listings import can use Trading API mode.</div>
-          </div>
-
-          <div class="phase-panel">
-            <h3 class="phase5-panel-title">eBay Listings Import</h3>
-            <div class="phase5-grid">
-              <div class="form-group full-width">
-                <label for="phase5-ebay-sandbox-table-name">Listings Import Table Name</label>
+                <label for="phase5-ebay-sandbox-table-name">Listings Table Name</label>
                 <input id="phase5-ebay-sandbox-table-name" type="text" value="eBay Listings (API)">
               </div>
               <div class="form-group">
@@ -1101,40 +1356,10 @@
                 <input id="phase5-ebay-sandbox-fetch-limit" type="number" min="1" step="1" value="200">
               </div>
               <div class="form-group">
-                <label for="phase5-ebay-sandbox-dry-run">Listings Import Dry Run</label>
-                <select id="phase5-ebay-sandbox-dry-run">
-                  <option value="true" selected>True (No Airtable Writes)</option>
-                  <option value="false">False (Upsert fetched inventory rows)</option>
-                </select>
-              </div>
-            </div>
-            <div class="btn-group" style="margin-top: 8px;">
-              <button id="run-ebay-sandbox-import-phase5-btn" class="btn btn-primary" onclick="runEbaySandboxImport()">Fetch eBay Listings</button>
-            </div>
-            <div class="hint">Auto mode uses Trading API for Production and Inventory API for Sandbox.</div>
-            <div class="hint" id="phase5-ebay-sandbox-status-text">eBay Listings Import status: idle</div>
-          </div>
-        </div>
-
-        <div class="phase5-grid">
-          <div class="phase-panel">
-            <h3 class="phase5-panel-title">Option A Actions</h3>
-            <div class="btn-group">
-              <button id="run-phase5-dry-run-btn" class="btn btn-secondary" onclick="runPhase5DryRun()">Dry Run Publish Approved</button>
-              <button id="run-phase5-btn" class="btn btn-primary" onclick="runPhase5()">Publish Approved</button>
-              <button id="phase5-create-batch-btn" class="btn btn-secondary" onclick="runPhase5CreateBatch()">Create Batch From Listings</button>
-            </div>
-            <div class="hint" id="phase5-status-text">Phase 5 status: idle</div>
-          </div>
-
-          <div class="phase-panel">
-            <h3 class="phase5-panel-title">Option B Schedule & Logs</h3>
-            <div class="phase5-grid">
-              <div class="form-group">
-                <label for="phase5-autopush-enabled">Option B Auto-Push Enabled</label>
-                <select id="phase5-autopush-enabled">
-                  <option value="false" selected>False</option>
-                  <option value="true">True</option>
+                <label for="phase5-ebay-sandbox-fetch-paging-mode">Listings Fetch Mode</label>
+                <select id="phase5-ebay-sandbox-fetch-paging-mode">
+                  <option value="first_page" selected>Start from first page</option>
+                  <option value="continue_from_last_page">Continue from last page</option>
                 </select>
               </div>
               <div class="form-group">
@@ -1153,12 +1378,52 @@
                 <input id="phase5-sheets-log-tab-name" type="text" value="Log">
               </div>
             </div>
-            <div class="btn-group" style="margin-top: 8px;">
-              <button id="phase5-start-autopush-btn" class="btn btn-secondary" onclick="startPhase5AutoPush()">Start Auto-Push</button>
-              <button id="phase5-stop-autopush-btn" class="btn btn-secondary" onclick="stopPhase5AutoPush()">Stop Auto-Push</button>
-              <button id="phase5-run-autopush-now-btn" class="btn btn-secondary" onclick="runPhase5AutoPushNow()">Run Auto-Push Now</button>
+
+            <div class="phase5-advanced">
+              <div class="phase5-panel-title" style="font-size:14px; margin-bottom:0;">Credentials and Tokens</div>
+              <div class="phase5-advanced-body">
+                <div class="phase5-grid phase5-credentials-grid">
+                  <div class="form-group">
+                    <label for="phase5-ebay-runame">eBay RuName</label>
+                    <input id="phase5-ebay-runame" type="text" placeholder="RuName">
+                  </div>
+                  <div class="form-group">
+                    <label for="phase5-ebay-client-id">eBay App ID (Client ID)</label>
+                    <input id="phase5-ebay-client-id" type="text" placeholder="Client ID / App ID">
+                  </div>
+                  <div class="form-group">
+                    <label for="phase5-ebay-dev-id">eBay Dev ID</label>
+                    <input id="phase5-ebay-dev-id" type="text" placeholder="Dev ID">
+                  </div>
+                  <div class="form-group">
+                    <label for="phase5-ebay-client-secret">eBay Cert ID (Client Secret)</label>
+                    <input id="phase5-ebay-client-secret" type="password" placeholder="Client Secret / Cert ID">
+                  </div>
+                  <div class="form-group full-width">
+                    <label for="phase5-ebay-refresh-token">eBay Refresh Token (Auto-Renew)</label>
+                    <textarea id="phase5-ebay-refresh-token" placeholder="Paste eBay refresh token for auto access-token renewal"></textarea>
+                    <div class="hint">With Refresh Token + Client ID + Cert ID, the app can renew access automatically after token expiry.</div>
+                  </div>
+                  <div class="form-group full-width" style="display:none;">
+                    <label for="phase5-ebay-user-access-token">eBay User Access Token (IAF Token)</label>
+                    <textarea id="phase5-ebay-user-access-token" placeholder="hidden"></textarea>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div class="hint" id="phase5-autopush-status-text">Option B schedule: idle</div>
+
+            <div class="phase5-inline-actions">
+              <button id="run-phase5-btn" class="btn btn-primary" onclick="document.getElementById('phase5-mode').value='A'; runPhase5();">Publish Approved</button>
+              <button id="run-ebay-sandbox-import-phase5-btn" class="btn btn-primary" onclick="runEbaySandboxImport()">Fetch eBay Listings</button>
+              <button id="phase5-start-autopush-btn" class="btn btn-primary" onclick="document.getElementById('phase5-mode').value='B'; document.getElementById('phase5-autopush-enabled').value='true'; startPhase5AutoPush();">Start Auto-Push</button>
+              <button id="phase5-stop-autopush-btn" class="btn btn-secondary" onclick="document.getElementById('phase5-mode').value='B'; document.getElementById('phase5-autopush-enabled').value='false'; stopPhase5AutoPush();">Stop Auto-Push</button>
+              <button id="phase5-run-autopush-now-btn" class="btn btn-secondary" style="display:none;" onclick="document.getElementById('phase5-mode').value='B'; document.getElementById('phase5-autopush-enabled').value='true'; runPhase5AutoPushNow();">Run Auto-Push Now</button>
+            </div>
+
+            <div class="phase5-substatus">Listings fetch is locked to Trading API for both Sandbox and Production.</div>
+            <div class="phase5-status-strip" id="phase5-status-text">Publishing status: idle</div>
+            <div class="phase5-status-strip" id="phase5-ebay-sandbox-status-text">eBay Listings Import status: idle</div>
+            <div class="phase5-status-strip" id="phase5-autopush-status-text">Auto-push schedule: idle</div>
             <div class="hint" id="phase5-batch-metrics-text" style="display:none;">Batch metrics: not loaded</div>
           </div>
         </div>
@@ -1320,7 +1585,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card auto-phase-hidden">
       <h2 class="card-title">Phase 6 (Fitment Extraction)</h2>
       <div class="grid-2">
         <div>
@@ -1348,7 +1613,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card auto-phase-hidden">
       <h2 class="card-title">Phase 7.2 (Fitment Image)</h2>
       <div class="grid-2">
         <div>
@@ -1376,7 +1641,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card auto-phase-hidden">
       <h2 class="card-title">Phase 7.4 (Title & Description)</h2>
       <div class="grid-2">
         <div>
@@ -1404,7 +1669,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card auto-phase-hidden">
       <h2 class="card-title">3. Run and Automation</h2>
       <div class="form-group">
         <label>
@@ -1437,6 +1702,7 @@
         <div id="progress-bar" class="progress-bar"></div>
       </div>
       <div class="status-title" id="progress-text" aria-live="polite">Waiting to run sync...</div>
+      <div id="run-status-progress" class="status-box" aria-live="polite"></div>
 
       <div class="summary-grid">
         <div class="summary-item"><div class="summary-label">Total Rows</div><div class="summary-value" id="sum-total">0</div></div>
@@ -1517,7 +1783,7 @@
     const DEFAULT_RESOLVED_FIELD = 'Category Identifier Selection';
     const DEFAULT_STATUS_DETERMINED = 'Category Determined';
     const DEFAULT_STATUS_COMPLETED = 'Completed';
-    const DEFAULT_WRITEBACK_INTERVAL_MINUTES = 1;
+    const DEFAULT_WRITEBACK_INTERVAL_MINUTES = 5;
     const DEFAULT_WRITEBACK_ENABLED = true;
     const DEFAULT_PHASE3_STORE_ID = 333796;
     const DEFAULT_PHASE3_LOOKBACK_DAYS = 90;
@@ -1555,6 +1821,7 @@
     const DEFAULT_PHASE5_BATCH_STATUS_FIELD = 'Batch Status';
     const DEFAULT_PHASE5_BATCH_APPROVED_VALUE = 'Approved';
     const DEFAULT_EBAY_SANDBOX_FETCH_LIMIT = 200;
+    const DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE = 'first_page';
     const EBAY_ENVIRONMENTS = ['sandbox', 'production'];
     const PHASE5_EBAY_CREDENTIAL_FIELD_IDS = [
       'phase5-ebay-client-id',
@@ -1563,6 +1830,13 @@
       'phase5-ebay-runame',
       'phase5-ebay-refresh-token',
       'phase5-ebay-user-access-token'
+    ];
+    const PHASE5_EBAY_ENVIRONMENT_UI_FIELD_IDS = [
+      'phase5-ebay-listings-source-api',
+      'phase5-ebay-sandbox-table-name',
+      'phase5-ebay-sandbox-fetch-limit',
+      'phase5-ebay-sandbox-fetch-paging-mode',
+      'phase5-ebay-sandbox-dry-run'
     ];
     let activePhase5EbayEnvironment = 'sandbox';
     let phase5EbayCredentialSets = {
@@ -1587,6 +1861,22 @@
         phase5EbayUserAccessTokenIssuedAt: ''
       }
     };
+    let phase5EbayUiStateSets = {
+      sandbox: {
+        ebayListingsSourceApi: 'trading',
+        ebaySandboxTableName: DEFAULT_EBAY_SANDBOX_TABLE_NAME,
+        ebaySandboxFetchLimit: DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
+        ebaySandboxFetchPagingMode: DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE,
+        ebaySandboxDryRun: false
+      },
+      production: {
+        ebayListingsSourceApi: 'trading',
+        ebaySandboxTableName: DEFAULT_EBAY_SANDBOX_TABLE_NAME,
+        ebaySandboxFetchLimit: DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
+        ebaySandboxFetchPagingMode: DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE,
+        ebaySandboxDryRun: false
+      }
+    };
 
     function normalizeEbayEnvironmentValue(value) {
       return String(value || '').trim().toLowerCase() === 'production' ? 'production' : 'sandbox';
@@ -1599,9 +1889,9 @@
         phase5EbayClientSecret: String(raw.phase5EbayClientSecret || '').trim(),
         phase5EbayRuName: String(raw.phase5EbayRuName || '').trim(),
         phase5EbayRefreshToken: String(raw.phase5EbayRefreshToken || '').trim(),
-        phase5EbayUserAccessToken: String(raw.phase5EbayUserAccessToken || '').trim(),
+        phase5EbayUserAccessToken: '',
         phase5EbayRefreshScope: String(raw.phase5EbayRefreshScope || '').trim(),
-        phase5EbayUserAccessTokenIssuedAt: String(raw.phase5EbayUserAccessTokenIssuedAt || '').trim()
+        phase5EbayUserAccessTokenIssuedAt: ''
       };
     }
 
@@ -1619,10 +1909,87 @@
         'phase5EbayClientSecret',
         'phase5EbayRuName',
         'phase5EbayRefreshToken',
-        'phase5EbayUserAccessToken',
-        'phase5EbayRefreshScope',
-        'phase5EbayUserAccessTokenIssuedAt'
+        'phase5EbayRefreshScope'
       ].some(key => Boolean(String(set?.[key] || '').trim()));
+    }
+
+    function normalizeEbaySourceApiValue(value) {
+      return 'trading';
+    }
+
+    function normalizeEbayFetchPagingMode(value) {
+      const text = String(value || '').trim().toLowerCase();
+      if (text === 'continue_from_last_page' || text === 'continue' || text === 'resume') {
+        return 'continue_from_last_page';
+      }
+      return DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE;
+    }
+
+    function normalizeEbayUiState(raw = {}) {
+      return {
+        ebayListingsSourceApi: normalizeEbaySourceApiValue(raw.ebayListingsSourceApi || 'auto'),
+        ebaySandboxTableName: normalizeEbaySandboxTableName(raw.ebaySandboxTableName || DEFAULT_EBAY_SANDBOX_TABLE_NAME),
+        ebaySandboxFetchLimit:
+          Number(raw.ebaySandboxFetchLimit || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT) || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
+        ebaySandboxFetchPagingMode: normalizeEbayFetchPagingMode(
+          raw.ebaySandboxFetchPagingMode || raw.ebaySandboxFetchMode || DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE
+        ),
+        ebaySandboxDryRun: false
+      };
+    }
+
+    function normalizeEbayUiStateSets(input = {}) {
+      return {
+        sandbox: normalizeEbayUiState(input?.sandbox || {}),
+        production: normalizeEbayUiState(input?.production || {})
+      };
+    }
+
+    function readEbayEnvironmentUiStateFromForm() {
+      return normalizeEbayUiState({
+        ebayListingsSourceApi: 'trading',
+        ebaySandboxTableName: document.getElementById('phase5-ebay-sandbox-table-name')?.value || DEFAULT_EBAY_SANDBOX_TABLE_NAME,
+        ebaySandboxFetchLimit: document.getElementById('phase5-ebay-sandbox-fetch-limit')?.value || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
+        ebaySandboxFetchPagingMode:
+          document.getElementById('phase5-ebay-sandbox-fetch-paging-mode')?.value || DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE,
+        ebaySandboxDryRun: false
+      });
+    }
+
+    function syncPhase5QueueTableFromImportTable() {
+      const importTableEl = document.getElementById('phase5-ebay-sandbox-table-name');
+      const queueTableEl = document.getElementById('phase5-listings-table');
+      if (!importTableEl || !queueTableEl) return;
+      queueTableEl.value = normalizeEbaySandboxTableName(importTableEl.value || DEFAULT_EBAY_SANDBOX_TABLE_NAME);
+    }
+
+    function writeEbayEnvironmentUiStateToForm(state = {}) {
+      const normalized = normalizeEbayUiState(state);
+      const sourceApiEl = document.getElementById('phase5-ebay-listings-source-api');
+      const tableNameEl = document.getElementById('phase5-ebay-sandbox-table-name');
+      const fetchLimitEl = document.getElementById('phase5-ebay-sandbox-fetch-limit');
+      const fetchModeEl = document.getElementById('phase5-ebay-sandbox-fetch-paging-mode');
+      const dryRunEl = document.getElementById('phase5-ebay-sandbox-dry-run');
+      if (sourceApiEl) sourceApiEl.value = normalized.ebayListingsSourceApi;
+      if (tableNameEl) tableNameEl.value = normalized.ebaySandboxTableName;
+      if (fetchLimitEl) fetchLimitEl.value = String(normalized.ebaySandboxFetchLimit);
+      if (fetchModeEl) fetchModeEl.value = normalized.ebaySandboxFetchPagingMode;
+      if (dryRunEl) dryRunEl.value = normalized.ebaySandboxDryRun ? 'true' : 'false';
+      syncEbaySandboxControls({
+        tableName: normalized.ebaySandboxTableName,
+        fetchLimit: normalized.ebaySandboxFetchLimit,
+        fetchPagingMode: normalized.ebaySandboxFetchPagingMode,
+        dryRun: normalized.ebaySandboxDryRun
+      });
+      syncPhase5QueueTableFromImportTable();
+    }
+
+    function saveCurrentEnvironmentEbayUiState(environment = activePhase5EbayEnvironment) {
+      const env = normalizeEbayEnvironmentValue(environment);
+      phase5EbayUiStateSets[env] = {
+        ...phase5EbayUiStateSets[env],
+        ...readEbayEnvironmentUiStateFromForm()
+      };
     }
 
     function readEbayCredentialFieldsFromForm() {
@@ -1632,7 +1999,7 @@
         phase5EbayClientSecret: document.getElementById('phase5-ebay-client-secret').value.trim(),
         phase5EbayRuName: document.getElementById('phase5-ebay-runame').value.trim(),
         phase5EbayRefreshToken: document.getElementById('phase5-ebay-refresh-token').value.trim(),
-        phase5EbayUserAccessToken: document.getElementById('phase5-ebay-user-access-token').value.trim()
+        phase5EbayUserAccessToken: ''
       });
     }
 
@@ -1643,7 +2010,8 @@
       document.getElementById('phase5-ebay-client-secret').value = normalized.phase5EbayClientSecret;
       document.getElementById('phase5-ebay-runame').value = normalized.phase5EbayRuName;
       document.getElementById('phase5-ebay-refresh-token').value = normalized.phase5EbayRefreshToken;
-      document.getElementById('phase5-ebay-user-access-token').value = normalized.phase5EbayUserAccessToken;
+      const userAccessTokenEl = document.getElementById('phase5-ebay-user-access-token');
+      if (userAccessTokenEl) userAccessTokenEl.value = '';
     }
 
     function saveCurrentEnvironmentEbayCredentials(environment = activePhase5EbayEnvironment) {
@@ -1658,6 +2026,9 @@
       const env = normalizeEbayEnvironmentValue(environment);
       const nextSet = phase5EbayCredentialSets[env] || normalizeEbayCredentialSet({});
       writeEbayCredentialFieldsToForm(nextSet);
+      writeEbayEnvironmentUiStateToForm(
+        phase5EbayUiStateSets[env] || normalizeEbayUiState({})
+      );
       const envEl = document.getElementById('phase5-ebay-environment');
       if (envEl) envEl.value = env;
       activePhase5EbayEnvironment = env;
@@ -1666,6 +2037,7 @@
     function switchEnvironmentEbayCredentials(nextEnvironment = 'sandbox') {
       const next = normalizeEbayEnvironmentValue(nextEnvironment);
       saveCurrentEnvironmentEbayCredentials(activePhase5EbayEnvironment);
+      saveCurrentEnvironmentEbayUiState(activePhase5EbayEnvironment);
       applyEnvironmentEbayCredentials(next);
     }
 
@@ -1690,6 +2062,20 @@
       if (hasAnyEbayCredentialValue(legacySet) && !hasAnyEbayCredentialValue(phase5EbayCredentialSets[configEnvironment])) {
         phase5EbayCredentialSets[configEnvironment] = legacySet;
       }
+
+      phase5EbayUiStateSets = normalizeEbayUiStateSets(
+        config.phase5EbayUiStateSets || {
+          [configEnvironment]: {
+            ebayListingsSourceApi: 'trading',
+            ebaySandboxTableName:
+              config.ebaySandboxTableName || config.phase5ListingsTable || DEFAULT_EBAY_SANDBOX_TABLE_NAME,
+            ebaySandboxFetchLimit: config.ebaySandboxFetchLimit || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
+            ebaySandboxFetchPagingMode:
+              config.ebaySandboxFetchPagingMode || config.ebaySandboxFetchMode || DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE,
+            ebaySandboxDryRun: config.ebaySandboxDryRun === false ? false : true
+          }
+        }
+      );
 
       applyEnvironmentEbayCredentials(configEnvironment);
     }
@@ -1770,6 +2156,13 @@
       completed: 'Phase 5 completed',
       error: 'Phase 5 failed'
     };
+    const PHASE5_STAGE_PERCENT_FALLBACKS = {
+      phase5_load_schema: 5,
+      phase5_load_queue: 15,
+      phase5_publish: 55,
+      completed: 100,
+      error: 100
+    };
     const PHASE6_STAGE_LABELS = {
       phase6_load_master: 'Phase 6: Loading Master Parts',
       phase6_scan_listings: 'Phase 6: Scanning listing HTML',
@@ -1816,6 +2209,10 @@
       ebaysandbox_auth: 'eBay Listings: Authenticating',
       ebaysandbox_fetch_items: 'eBay Listings: Fetching items',
       ebaysandbox_fetch_offers: 'eBay Listings: Fetching offers',
+      ebaylisting_getitem_fetch: 'eBay Listings: Fetching GetItem details',
+      ebaylisting_ack_warning: 'eBay Listings: API warning',
+      ebaylisting_getitem_warning: 'eBay Listings: GetItem warning',
+      ebaylisting_getitem_error: 'eBay Listings: GetItem warning',
       ebaysandbox_prepare_table: 'eBay Listings: Preparing Airtable table',
       ebaysandbox_import_rows: 'eBay Listings: Importing rows',
       ebaysandbox_post_import: 'eBay Listings: Post-import automation',
@@ -1836,12 +2233,42 @@
       completed: 'eBay Listings: Completed',
       error: 'eBay Listings: Failed'
     };
+    const EBAY_SANDBOX_STAGE_PERCENT_FALLBACKS = {
+      ebaysandbox_auth: 5,
+      ebaysandbox_fetch_items: 18,
+      ebaysandbox_fetch_offers: 28,
+      ebaylisting_getitem_fetch: 42,
+      ebaylisting_ack_warning: 35,
+      ebaylisting_getitem_warning: 60,
+      ebaylisting_getitem_error: 60,
+      ebaysandbox_prepare_table: 40,
+      ebaysandbox_import_rows: 55,
+      ebaysandbox_post_import: 62,
+      ebaysandbox_post_import_start: 65,
+      ebaysandbox_post_import_batch: 68,
+      ebaysandbox_post_import_phase4a: 72,
+      ebaysandbox_post_import_phase4b: 76,
+      ebaysandbox_post_import_phase4c: 80,
+      ebaysandbox_post_import_phase4d: 84,
+      ebaysandbox_post_import_phase6: 88,
+      ebaysandbox_post_import_phase72: 92,
+      ebaysandbox_post_import_phase74: 96,
+      ebaysandbox_post_import_complete: 100,
+      ebaysandbox_post_import_blocked: 100,
+      ebaysandbox_post_import_failed: 100,
+      ebaysandbox_post_import_skipped_no_writes: 100,
+      ebaysandbox_post_import_skipped_no_candidates: 100,
+      completed: 100,
+      error: 100
+    };
+
+    let progressListenersAttached = false;
 
     window.addEventListener('load', async () => {
       await loadPersistedActivityLogs();
       setHealthLoadingState();
-      await loadConfig();
       attachProgressListener();
+      await loadConfig();
       attachPickerListeners();
       attachFieldListeners();
       updateHealthBadges();
@@ -1858,6 +2285,31 @@
       if (state === 'Error') pill.classList.add('error');
       pill.textContent = state;
       detailEl.textContent = detail || detailEl.textContent;
+    }
+
+    function inferProgressPercentFromMessage(message = '', min = 20, max = 95) {
+      const text = String(message || '');
+      const match = text.match(/(\d+)\s*\/\s*(\d+)/);
+      if (!match) return 0;
+      const current = Number(match[1] || 0);
+      const total = Number(match[2] || 0);
+      if (!Number.isFinite(current) || !Number.isFinite(total) || total <= 0) return 0;
+      const ratio = Math.max(0, Math.min(1, current / total));
+      return Math.round(min + ratio * (max - min));
+    }
+
+    function resolveProgressPercent(payload = {}, stageFallbacks = {}, messageMin = 20, messageMax = 95) {
+      const rawPercent = Number(payload?.percent);
+      if (Number.isFinite(rawPercent) && rawPercent > 0) {
+        return Math.max(0, Math.min(100, rawPercent));
+      }
+      const stage = String(payload?.stage || '').trim();
+      if (stage && Object.prototype.hasOwnProperty.call(stageFallbacks, stage)) {
+        return Number(stageFallbacks[stage]) || 0;
+      }
+      const messagePercent = inferProgressPercentFromMessage(payload?.message || '', messageMin, messageMax);
+      if (messagePercent > 0) return messagePercent;
+      return 0;
     }
 
     function renderLogs() {
@@ -2000,6 +2452,13 @@
       return valid;
     }
 
+    function hasAirtableCoreConfigured() {
+      return Boolean(
+        document.getElementById('airtable-token')?.value.trim() &&
+        document.getElementById('airtable-base-id')?.value.trim()
+      );
+    }
+
     function setHealthPill(id, okText, warnText, isOk) {
       const el = document.getElementById(id);
       el.className = `health-pill ${isOk ? 'ok' : 'warn'}`;
@@ -2107,24 +2566,19 @@
         Boolean(document.getElementById('phase5-ebay-client-secret').value.trim()) &&
         Boolean(document.getElementById('phase5-ebay-runame').value.trim());
       const hasPhase5EbayRefreshToken = Boolean(document.getElementById('phase5-ebay-refresh-token')?.value?.trim());
-      const hasPhase5EbayUserAccessToken = Boolean(document.getElementById('phase5-ebay-user-access-token')?.value?.trim());
       const hasPhase5EbaySandboxAuth =
-        hasPhase5EbayUserAccessToken ||
-        (
-          hasPhase5EbayRefreshToken &&
-          Boolean(document.getElementById('phase5-ebay-client-id').value.trim()) &&
-          Boolean(document.getElementById('phase5-ebay-client-secret').value.trim())
-        ) ||
         (
           Boolean(document.getElementById('phase5-ebay-client-id').value.trim()) &&
           Boolean(document.getElementById('phase5-ebay-client-secret').value.trim())
-        );
+        ) &&
+        hasPhase5EbayRefreshToken;
       const ebayEnvironment = normalizeEbayEnvironmentValue(document.getElementById('phase5-ebay-environment')?.value || 'sandbox');
       const requiresAirtableForEbayImport = ebayEnvironment !== 'production';
-      const isPhase5OptionB = (document.getElementById('phase5-mode')?.value || 'A').toUpperCase() === 'B';
       const hasPhase72DriveFolder = Boolean(document.getElementById('phase72-drive-folder-id').value.trim());
       runBtn.disabled = busy || !validateForm(false);
-      runPhase3Btn.disabled = busy || !validatePhase3Form(false);
+      if (runPhase3Btn) {
+        runPhase3Btn.disabled = busy || !validatePhase3Form(false);
+      }
       runPhase4Btn.disabled = busy || !hasItemSpecificBaseId;
       runPhase4RulesBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile;
       if (runPhase4BLiteBtn) {
@@ -2155,10 +2609,10 @@
         runPhase6Btn.disabled = busy || !hasAirtableCore || !hasOpenAiKey;
       }
       if (runPhase5DryRunBtn) {
-        runPhase5DryRunBtn.disabled = busy || !hasAirtableCore || isPhase5OptionB;
+        runPhase5DryRunBtn.disabled = busy || !hasAirtableCore;
       }
       if (runPhase5Btn) {
-        runPhase5Btn.disabled = busy || !hasAirtableCore || isPhase5OptionB;
+        runPhase5Btn.disabled = busy || !hasAirtableCore;
       }
       if (phase5CreateBatchBtn) {
         phase5CreateBatchBtn.disabled = busy || !hasAirtableCore;
@@ -2167,13 +2621,13 @@
         phase5TestEbayCredsBtn.disabled = busy;
       }
       if (phase5StartAutoPushBtn) {
-        phase5StartAutoPushBtn.disabled = busy || !hasAirtableCore || !isPhase5OptionB;
+        phase5StartAutoPushBtn.disabled = busy || !hasAirtableCore;
       }
       if (phase5StopAutoPushBtn) {
-        phase5StopAutoPushBtn.disabled = busy || !hasAirtableCore || !isPhase5OptionB;
+        phase5StopAutoPushBtn.disabled = busy || !hasAirtableCore;
       }
       if (phase5RunAutoPushNowBtn) {
-        phase5RunAutoPushNowBtn.disabled = busy || !hasAirtableCore || !isPhase5OptionB;
+        phase5RunAutoPushNowBtn.disabled = busy || !hasAirtableCore;
       }
       if (runPhase5EbaySandboxImportBtn) {
         const hasTableName = Boolean(getEbaySandboxControls().primaryTableEl?.value?.trim());
@@ -2237,8 +2691,6 @@
         'phase4-unified-clickup-list-id',
         'phase4-unified-clickup-open-status',
         'phase4-unified-listings-table',
-        'phase4-unified-test-ipn',
-        'phase4-unified-test-ipn-4d',
         'phase4-unified-dry-run',
         'openai-api-key',
         'openai-model',
@@ -2325,6 +2777,26 @@
           if (PHASE5_EBAY_CREDENTIAL_FIELD_IDS.includes(id)) {
             saveCurrentEnvironmentEbayCredentials(activePhase5EbayEnvironment);
           }
+          if (PHASE5_EBAY_ENVIRONMENT_UI_FIELD_IDS.includes(id)) {
+            saveCurrentEnvironmentEbayUiState(activePhase5EbayEnvironment);
+            if (id === 'phase5-ebay-sandbox-table-name') {
+              syncPhase5QueueTableFromImportTable();
+            }
+          }
+          clearFieldError(id);
+          updateHealthBadges();
+          updateRunButtonState();
+        });
+        el.addEventListener('change', () => {
+          if (PHASE5_EBAY_CREDENTIAL_FIELD_IDS.includes(id)) {
+            saveCurrentEnvironmentEbayCredentials(activePhase5EbayEnvironment);
+          }
+          if (PHASE5_EBAY_ENVIRONMENT_UI_FIELD_IDS.includes(id)) {
+            saveCurrentEnvironmentEbayUiState(activePhase5EbayEnvironment);
+            if (id === 'phase5-ebay-sandbox-table-name') {
+              syncPhase5QueueTableFromImportTable();
+            }
+          }
           clearFieldError(id);
           updateHealthBadges();
           updateRunButtonState();
@@ -2334,6 +2806,10 @@
       const ebayEnvironmentEl = document.getElementById('phase5-ebay-environment');
       if (ebayEnvironmentEl) {
         ebayEnvironmentEl.addEventListener('change', () => {
+          switchEnvironmentEbayCredentials(ebayEnvironmentEl.value);
+          updateRunButtonState();
+        });
+        ebayEnvironmentEl.addEventListener('input', () => {
           switchEnvironmentEbayCredentials(ebayEnvironmentEl.value);
           updateRunButtonState();
         });
@@ -2405,7 +2881,7 @@
 
     function formatPhase5ProgressText(payload = {}) {
       const stage = String(payload.stage || '').trim();
-      const percent = Number(payload.percent || 0);
+      const percent = resolveProgressPercent(payload, PHASE5_STAGE_PERCENT_FALLBACKS, 30, 95);
       const label = PHASE5_STAGE_LABELS[stage] || 'Phase 5 running';
       const message = String(payload.message || '').trim();
       if (message) return `${label} (${percent}%): ${message}`;
@@ -2468,7 +2944,7 @@
 
     function formatEbaySandboxProgressText(payload = {}) {
       const stage = String(payload.stage || '').trim();
-      const percent = Number(payload.percent || 0);
+      const percent = resolveProgressPercent(payload, EBAY_SANDBOX_STAGE_PERCENT_FALLBACKS, 25, 98);
       const label = EBAY_SANDBOX_STAGE_LABELS[stage] || 'eBay listings import running';
       const message = String(payload.message || '').trim();
       if (message) return `${label} (${percent}%): ${message}`;
@@ -2480,10 +2956,13 @@
       const legacyTableEl = document.getElementById('ebay-sandbox-table-name');
       const phase5FetchLimitEl = document.getElementById('phase5-ebay-sandbox-fetch-limit');
       const legacyFetchLimitEl = document.getElementById('ebay-sandbox-fetch-limit');
+      const phase5FetchModeEl = document.getElementById('phase5-ebay-sandbox-fetch-paging-mode');
+      const legacyFetchModeEl = document.getElementById('ebay-sandbox-fetch-paging-mode');
       const phase5DryRunEl = document.getElementById('phase5-ebay-sandbox-dry-run');
       const legacyDryRunEl = document.getElementById('ebay-sandbox-dry-run');
       const primaryTableEl = phase5TableEl || legacyTableEl;
       const primaryFetchLimitEl = phase5FetchLimitEl || legacyFetchLimitEl;
+      const primaryFetchModeEl = phase5FetchModeEl || legacyFetchModeEl;
       const primaryDryRunEl = phase5DryRunEl || legacyDryRunEl;
       const statusEls = [
         document.getElementById('phase5-ebay-sandbox-status-text'),
@@ -2495,10 +2974,13 @@
         legacyTableEl,
         phase5FetchLimitEl,
         legacyFetchLimitEl,
+        phase5FetchModeEl,
+        legacyFetchModeEl,
         phase5DryRunEl,
         legacyDryRunEl,
         primaryTableEl,
         primaryFetchLimitEl,
+        primaryFetchModeEl,
         primaryDryRunEl,
         statusEls
       };
@@ -2520,7 +3002,7 @@
         : text;
     }
 
-    function syncEbaySandboxControls({ tableName, fetchLimit, dryRun }) {
+    function syncEbaySandboxControls({ tableName, fetchLimit, fetchPagingMode, dryRun }) {
       const controls = getEbaySandboxControls();
       if (typeof tableName === 'string' && tableName.trim()) {
         const normalizedTable = normalizeEbaySandboxTableName(tableName);
@@ -2531,6 +3013,11 @@
         const normalizedLimit = String(Number(fetchLimit));
         if (controls.phase5FetchLimitEl) controls.phase5FetchLimitEl.value = normalizedLimit;
         if (controls.legacyFetchLimitEl) controls.legacyFetchLimitEl.value = normalizedLimit;
+      }
+      if (typeof fetchPagingMode === 'string') {
+        const normalizedMode = normalizeEbayFetchPagingMode(fetchPagingMode);
+        if (controls.phase5FetchModeEl) controls.phase5FetchModeEl.value = normalizedMode;
+        if (controls.legacyFetchModeEl) controls.legacyFetchModeEl.value = normalizedMode;
       }
       if (typeof dryRun === 'boolean') {
         const normalizedDryRun = dryRun ? 'true' : 'false';
@@ -2716,17 +3203,7 @@
         document.getElementById('phase5-live-compare-api-key').value = config.phase5LiveCompareApiKey || '';
         document.getElementById('phase5-test-batch-record-ids').value = config.phase5TestBatchRecordIds || '';
         hydrateEbayCredentialSetsFromConfig(config);
-        document.getElementById('phase5-ebay-listings-source-api').value =
-          ['auto', 'trading', 'inventory'].includes(String(config.ebayListingsSourceApi || '').toLowerCase())
-            ? String(config.ebayListingsSourceApi || '').toLowerCase()
-            : 'auto';
-        document.getElementById('phase5-ebay-sandbox-table-name').value =
-          normalizeEbaySandboxTableName(config.ebaySandboxTableName || config.phase5ListingsTable || config.ebayMockTableName || DEFAULT_EBAY_SANDBOX_TABLE_NAME);
-        document.getElementById('phase5-ebay-sandbox-fetch-limit').value = String(
-          Number(config.ebaySandboxFetchLimit || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT) || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT
-        );
-        document.getElementById('phase5-ebay-sandbox-dry-run').value =
-          config.ebaySandboxDryRun === false ? 'false' : 'true';
+        syncPhase5QueueTableFromImportTable();
         document.getElementById('phase5-autopush-enabled').value =
           String(config.phase5AutoPushEnabled ?? DEFAULT_PHASE5_AUTOPUSH_ENABLED).toLowerCase() === 'true' ? 'true' : 'false';
         document.getElementById('phase5-autopush-cron').value = config.phase5AutoPushCron || DEFAULT_PHASE5_AUTOPUSH_CRON;
@@ -2792,11 +3269,19 @@
         document.getElementById('ebay-sandbox-fetch-limit').value = String(
           Number(config.ebaySandboxFetchLimit || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT) || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT
         );
+        if (document.getElementById('ebay-sandbox-fetch-paging-mode')) {
+          document.getElementById('ebay-sandbox-fetch-paging-mode').value = normalizeEbayFetchPagingMode(
+            config.ebaySandboxFetchPagingMode || config.ebaySandboxFetchMode || DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE
+          );
+        }
         document.getElementById('ebay-sandbox-dry-run').value =
           config.ebaySandboxDryRun === false ? 'false' : 'true';
         syncEbaySandboxControls({
           tableName: normalizeEbaySandboxTableName(config.ebaySandboxTableName || config.phase5ListingsTable || config.ebayMockTableName || DEFAULT_EBAY_SANDBOX_TABLE_NAME),
           fetchLimit: Number(config.ebaySandboxFetchLimit || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT) || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
+          fetchPagingMode: normalizeEbayFetchPagingMode(
+            config.ebaySandboxFetchPagingMode || config.ebaySandboxFetchMode || DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE
+          ),
           dryRun: config.ebaySandboxDryRun === false ? false : true
         });
 
@@ -2811,7 +3296,7 @@
             const phase4StatusText = document.getElementById('phase4-status-text');
             if (phase4Config.lastMirrorRunAt) {
               const status = phase4Config.lastRunStatus || 'unknown';
-              phase4StatusText.textContent = `Phase 4 status: ${status}, last run: ${new Date(phase4Config.lastMirrorRunAt).toLocaleString()}`;
+              phase4StatusText.textContent = `Automation status: ${status}, last run: ${new Date(phase4Config.lastMirrorRunAt).toLocaleString()}`;
             }
           }
         }
@@ -2984,6 +3469,20 @@
                 phase5Config.phase5EbayEnvironment || document.getElementById('phase5-ebay-environment').value || 'sandbox',
               phase5EbayCredentialSets:
                 phase5Config.phase5EbayCredentialSets || phase5EbayCredentialSets,
+              phase5EbayUiStateSets:
+                phase5Config.phase5EbayUiStateSets || phase5EbayUiStateSets,
+              ebayListingsSourceApi: 'trading',
+              ebaySandboxTableName:
+                phase5Config.ebaySandboxTableName || document.getElementById('phase5-ebay-sandbox-table-name').value || DEFAULT_EBAY_SANDBOX_TABLE_NAME,
+              ebaySandboxFetchLimit:
+                phase5Config.ebaySandboxFetchLimit || document.getElementById('phase5-ebay-sandbox-fetch-limit').value || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
+              ebaySandboxFetchPagingMode:
+                phase5Config.ebaySandboxFetchPagingMode ||
+                phase5Config.ebaySandboxFetchMode ||
+                document.getElementById('phase5-ebay-sandbox-fetch-paging-mode').value ||
+                DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE,
+              ebaySandboxDryRun:
+                phase5Config.ebaySandboxDryRun === false ? false : true,
               phase5EbayClientId: phase5Config.phase5EbayClientId || '',
               phase5EbayDevId: phase5Config.phase5EbayDevId || '',
               phase5EbayClientSecret: phase5Config.phase5EbayClientSecret || '',
@@ -2993,45 +3492,7 @@
               phase5EbayRefreshScope: phase5Config.phase5EbayRefreshScope || '',
               phase5EbayUserAccessTokenIssuedAt: phase5Config.phase5EbayUserAccessTokenIssuedAt || ''
             });
-            document.getElementById('phase5-ebay-listings-source-api').value =
-              ['auto', 'trading', 'inventory'].includes(
-                String(
-                  phase5Config.ebayListingsSourceApi || document.getElementById('phase5-ebay-listings-source-api').value || ''
-                ).toLowerCase()
-              )
-                ? String(
-                    phase5Config.ebayListingsSourceApi || document.getElementById('phase5-ebay-listings-source-api').value || 'auto'
-                  ).toLowerCase()
-                : 'auto';
-            document.getElementById('phase5-ebay-sandbox-table-name').value =
-              normalizeEbaySandboxTableName(
-                phase5Config.ebaySandboxTableName ||
-                document.getElementById('phase5-ebay-sandbox-table-name').value ||
-                document.getElementById('phase5-listings-table').value ||
-                DEFAULT_EBAY_SANDBOX_TABLE_NAME
-              );
-            document.getElementById('phase5-ebay-sandbox-fetch-limit').value = String(
-              Number(phase5Config.ebaySandboxFetchLimit || document.getElementById('phase5-ebay-sandbox-fetch-limit').value || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT) ||
-                DEFAULT_EBAY_SANDBOX_FETCH_LIMIT
-            );
-            document.getElementById('phase5-ebay-sandbox-dry-run').value =
-              phase5Config.ebaySandboxDryRun === false ? 'false' : 'true';
-            syncEbaySandboxControls({
-              tableName:
-                normalizeEbaySandboxTableName(
-                  phase5Config.ebaySandboxTableName ||
-                  document.getElementById('phase5-ebay-sandbox-table-name').value ||
-                  document.getElementById('phase5-listings-table').value ||
-                  DEFAULT_EBAY_SANDBOX_TABLE_NAME
-                ),
-              fetchLimit:
-                Number(
-                  phase5Config.ebaySandboxFetchLimit ||
-                  document.getElementById('phase5-ebay-sandbox-fetch-limit').value ||
-                  DEFAULT_EBAY_SANDBOX_FETCH_LIMIT
-                ) || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
-              dryRun: phase5Config.ebaySandboxDryRun === false ? false : true
-            });
+            syncPhase5QueueTableFromImportTable();
             document.getElementById('phase5-autopush-enabled').value =
               String(phase5Config.phase5AutoPushEnabled ?? document.getElementById('phase5-autopush-enabled').value ?? 'false')
                 .toLowerCase() === 'true'
@@ -3057,7 +3518,7 @@
             if (phase5Config.phase5AutoPushStatus && typeof phase5Config.phase5AutoPushStatus === 'object') {
               const st = phase5Config.phase5AutoPushStatus;
               document.getElementById('phase5-autopush-status-text').textContent =
-                `Option B schedule: ${st.active ? 'active' : 'inactive'}${st.running ? ' (running)' : ''}, cron='${st.cronExpression || DEFAULT_PHASE5_AUTOPUSH_CRON}'`;
+                `Auto-push schedule: ${st.active ? 'active' : 'inactive'}${st.running ? ' (running)' : ''}, cron='${st.cronExpression || DEFAULT_PHASE5_AUTOPUSH_CRON}'`;
             }
           }
         }
@@ -3120,6 +3581,9 @@
               fetchLimit:
                 Number(sandboxConfig.fetchLimit || controls.primaryFetchLimitEl?.value || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT) ||
                 DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
+              fetchPagingMode: normalizeEbayFetchPagingMode(
+                sandboxConfig.fetchPagingMode || sandboxConfig.fetchMode || controls.primaryFetchModeEl?.value
+              ),
               dryRun: sandboxConfig.dryRun === false ? false : true
             });
           }
@@ -3304,10 +3768,14 @@
       document.getElementById('phase4-unified-listings-table').value =
         document.getElementById('phase4d-listings-table').value.trim() ||
         DEFAULT_PHASE4D_LISTINGS_TABLE;
-      document.getElementById('phase4-unified-test-ipn').value =
-        document.getElementById('phase4b-test-ipn').value.trim();
-      document.getElementById('phase4-unified-test-ipn-4d').value =
-        document.getElementById('phase4d-test-ipn').value.trim();
+      const phase4UnifiedTestIpnEl = document.getElementById('phase4-unified-test-ipn');
+      if (phase4UnifiedTestIpnEl) {
+        phase4UnifiedTestIpnEl.value = document.getElementById('phase4b-test-ipn').value.trim();
+      }
+      const phase4UnifiedTestIpn4dEl = document.getElementById('phase4-unified-test-ipn-4d');
+      if (phase4UnifiedTestIpn4dEl) {
+        phase4UnifiedTestIpn4dEl.value = document.getElementById('phase4d-test-ipn').value.trim();
+      }
       const unifiedDryRunEl = document.getElementById('phase4-unified-dry-run');
       if (unifiedDryRunEl) unifiedDryRunEl.value = 'false';
     }
@@ -3435,7 +3903,9 @@
       const phase5EbayEnvironment = normalizeEbayEnvironmentValue(
         document.getElementById('phase5-ebay-environment').value
       );
+      syncPhase5QueueTableFromImportTable();
       saveCurrentEnvironmentEbayCredentials(activePhase5EbayEnvironment);
+      saveCurrentEnvironmentEbayUiState(activePhase5EbayEnvironment);
       if (activePhase5EbayEnvironment !== phase5EbayEnvironment) {
         activePhase5EbayEnvironment = phase5EbayEnvironment;
       }
@@ -3499,7 +3969,7 @@
           document.getElementById('phase4c-clickup-open-status').value.trim() ||
           DEFAULT_PHASE4C_CLICKUP_OPEN_STATUS,
         phase5ListingsTable:
-          document.getElementById('phase5-listings-table').value.trim() || DEFAULT_PHASE5_LISTINGS_TABLE,
+          normalizeEbaySandboxTableName(document.getElementById('phase5-listings-table').value.trim()) || DEFAULT_PHASE5_LISTINGS_TABLE,
         phase5Mode:
           document.getElementById('phase5-mode').value.trim().toUpperCase() === 'B' ? 'B' : 'A',
         phase5AutoPushEnabled:
@@ -3572,10 +4042,8 @@
           document.getElementById('phase5-test-batch-record-ids').value.trim(),
         phase5EbayEnvironment,
         phase5EbayCredentialSets: normalizeEbayCredentialSets(phase5EbayCredentialSets),
-        ebayListingsSourceApi:
-          ['auto', 'trading', 'inventory'].includes(document.getElementById('phase5-ebay-listings-source-api').value.trim().toLowerCase())
-            ? document.getElementById('phase5-ebay-listings-source-api').value.trim().toLowerCase()
-            : 'auto',
+        phase5EbayUiStateSets: normalizeEbayUiStateSets(phase5EbayUiStateSets),
+        ebayListingsSourceApi: 'trading',
         phase5EbayClientId: activePhase5EbayCredentials.phase5EbayClientId || '',
         phase5EbayDevId: activePhase5EbayCredentials.phase5EbayDevId || '',
         phase5EbayClientSecret: activePhase5EbayCredentials.phase5EbayClientSecret || '',
@@ -3623,8 +4091,13 @@
           Number(document.getElementById('phase5-ebay-sandbox-fetch-limit').value.trim()) ||
           Number(document.getElementById('ebay-sandbox-fetch-limit').value.trim()) ||
           DEFAULT_EBAY_SANDBOX_FETCH_LIMIT,
-        ebaySandboxDryRun:
-          document.getElementById('phase5-ebay-sandbox-dry-run').value === 'true'
+        ebaySandboxFetchPagingMode:
+          normalizeEbayFetchPagingMode(
+            document.getElementById('phase5-ebay-sandbox-fetch-paging-mode')?.value ||
+            document.getElementById('ebay-sandbox-fetch-paging-mode')?.value ||
+            DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE
+          ),
+        ebaySandboxDryRun: false
       };
     }
 
@@ -3772,6 +4245,8 @@
     }
 
     function attachProgressListener() {
+      if (progressListenersAttached) return;
+      progressListenersAttached = true;
       window.phase2API.onProgress((event, payload) => {
         if (!payload) return;
         const percent = Number(payload.percent || 0);
@@ -3794,7 +4269,7 @@
           document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
           document.getElementById('progress-text').textContent = formatPhase3ProgressText(payload);
           const statusText = document.getElementById('phase3-status-text');
-          statusText.textContent = `Phase 3 status: ${formatPhase3ProgressText(payload)}`;
+          statusText.textContent = `ShipStation sync status: ${formatPhase3ProgressText(payload)}`;
 
           if (payload.counts) {
             renderPhase3Summary(payload.counts);
@@ -3814,7 +4289,7 @@
           const progressText = formatPhase4ProgressText(payload);
           document.getElementById('progress-text').textContent = progressText;
           const statusText = document.getElementById('phase4-status-text');
-          statusText.textContent = `Phase 4 status: ${progressText}`;
+          statusText.textContent = `Automation status: ${progressText}`;
 
           if (payload.counts) {
             renderPhase4Summary(payload.counts);
@@ -3898,14 +4373,18 @@
       if (window.phase5API && typeof window.phase5API.onProgress === 'function') {
         window.phase5API.onProgress((event, payload) => {
           if (!payload) return;
-          const percent = Number(payload.percent || 0);
+          const percent = resolveProgressPercent(payload, PHASE5_STAGE_PERCENT_FALLBACKS, 30, 95);
           document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
           document.getElementById('progress-text').textContent = formatPhase5ProgressText(payload);
           const statusText = document.getElementById('phase5-status-text');
           if (statusText) {
-            statusText.textContent = `Phase 5 status: ${formatPhase5ProgressText(payload)}`;
+            statusText.textContent = `Publishing status: ${formatPhase5ProgressText(payload)}`;
           }
-          if (payload.stage) {
+          const hasProgressDetail =
+            Boolean(String(payload.message || '').trim()) ||
+            Boolean(payload.stage) ||
+            Boolean(payload.counts);
+          if (hasProgressDetail) {
             const level = payload.stage === 'error' ? 'error' : 'info';
             logLine(`Phase5 progress: ${formatPhase5ProgressText(payload)}`, level);
           }
@@ -3997,11 +4476,11 @@
           document.getElementById('progress-text').textContent = formatPhase4PipelineProgressText(payload);
           const statusText = document.getElementById('phase4-pipeline-status-text');
           if (statusText) {
-            statusText.textContent = `Phase 4 pipeline status: ${formatPhase4PipelineProgressText(payload)}`;
+            statusText.textContent = `Pipeline status: ${formatPhase4PipelineProgressText(payload)}`;
           }
           const message = String(payload.message || '').trim();
           if (message.startsWith('[Mirror]')) {
-            document.getElementById('phase4-status-text').textContent = `Phase 4 status: ${message}`;
+            document.getElementById('phase4-status-text').textContent = `Automation status: ${message}`;
           } else if (message.startsWith('[4A]')) {
             document.getElementById('phase4-rules-status-text').textContent = `Phase 4A status: ${message}`;
           } else if (message.startsWith('[4B]')) {
@@ -4037,11 +4516,15 @@
       if (window.ebaySandboxImportAPI && typeof window.ebaySandboxImportAPI.onProgress === 'function') {
         window.ebaySandboxImportAPI.onProgress((event, payload) => {
           if (!payload) return;
-          const percent = Number(payload.percent || 0);
+          const percent = resolveProgressPercent(payload, EBAY_SANDBOX_STAGE_PERCENT_FALLBACKS, 25, 98);
           document.getElementById('progress-bar').style.width = `${Math.max(0, Math.min(100, percent))}%`;
           document.getElementById('progress-text').textContent = formatEbaySandboxProgressText(payload);
           setEbaySandboxStatusText(`eBay Listings Import status: ${formatEbaySandboxProgressText(payload)}`);
-          if (payload.stage) {
+          const hasProgressDetail =
+            Boolean(String(payload.message || '').trim()) ||
+            Boolean(payload.stage) ||
+            Boolean(payload.counts);
+          if (hasProgressDetail) {
             const level = payload.stage === 'error' ? 'error' : 'info';
             logLine(`eBaySandbox progress: ${formatEbaySandboxProgressText(payload)}`, level);
           }
@@ -4139,7 +4622,7 @@
       updateRunButtonState();
       setRunState('Running', 'Phase 3 is in progress...');
       showStatus('run-status', 'info', 'Phase 3 run started...');
-      document.getElementById('phase3-status-text').textContent = 'Phase 3 status: running...';
+      document.getElementById('phase3-status-text').textContent = 'ShipStation sync status: running...';
       logLine('Starting Phase 3 pipeline.');
 
       try {
@@ -4152,7 +4635,7 @@
           setRunState('Success', 'Phase 3 completed successfully.');
           showStatus('run-status', 'success', 'Phase 3 completed.');
           document.getElementById('phase3-status-text').textContent =
-            `Phase 3 status: completed. Updated ${result.summary?.ipnsUpdated || 0} IPNs.`;
+            `ShipStation sync status: completed. Updated ${result.summary?.ipnsUpdated || 0} IPNs.`;
           logLine(
             `Phase 3 completed. Updated=${result.summary?.ipnsUpdated || 0}, AlreadyFilled=${result.summary?.ipnsSkippedAlreadyFilled || 0}, UnmappedSKU=${result.summary?.skusUnmappedInPowerlink || 0}`
           );
@@ -4178,7 +4661,7 @@
       } catch (err) {
         setRunState('Error', `Phase 3 failed: ${err.message}`);
         showStatus('run-status', 'error', `Phase 3 failed: ${err.message}`);
-        document.getElementById('phase3-status-text').textContent = `Phase 3 status: failed (${err.message})`;
+        document.getElementById('phase3-status-text').textContent = `ShipStation sync status: failed (${err.message})`;
         logLine(`Phase 3 failed: ${err.message}`, 'error');
       } finally {
         isPhase3Running = false;
@@ -4401,7 +4884,7 @@
       updateRunButtonState();
       setRunState('Running', 'Phase 4 mirroring is in progress...');
       showStatus('run-status', 'info', 'Phase 4 mirroring started...');
-      document.getElementById('phase4-status-text').textContent = 'Phase 4 status: running...';
+      document.getElementById('phase4-status-text').textContent = 'Automation status: running...';
       logLine('Starting Phase 4 mirroring run.');
 
       try {
@@ -4419,7 +4902,7 @@
           setRunState('Success', 'Phase 4 completed successfully.');
           showStatus('run-status', 'success', `Phase 4 completed (${mode}). Created=${created}, Planned=${planned}, Existing=${existing}.`);
           document.getElementById('phase4-status-text').textContent =
-            `Phase 4 status: completed (${mode}). Created ${created}, Planned ${planned}, Existing ${existing}.`;
+            `Automation status: completed (${mode}). Created ${created}, Planned ${planned}, Existing ${existing}.`;
           logLine(
             `Phase 4 completed. Mode=${mode}, Scanned=${summary.masterRecordsScanned || 0}, Eligible=${summary.masterRecordsEligible || 0}, RoutingFailures=${summary.routingFailures || 0}, TablesTouched=${summary.tablesTouched || 0}, Planned=${planned}, Created=${created}, Existing=${existing}`
           );
@@ -4441,7 +4924,7 @@
       } catch (err) {
         setRunState('Error', `Phase 4 failed: ${err.message}`);
         showStatus('run-status', 'error', `Phase 4 failed: ${err.message}`);
-        document.getElementById('phase4-status-text').textContent = `Phase 4 status: failed (${err.message})`;
+        document.getElementById('phase4-status-text').textContent = `Automation status: failed (${err.message})`;
         logLine(`Phase 4 failed: ${err.message}`, 'error');
       } finally {
         isPhase4Running = false;
@@ -4488,7 +4971,7 @@
       showStatus('run-status', 'info', 'Phase 4 pipeline started...');
       document.getElementById('progress-bar').style.width = '1%';
       document.getElementById('progress-text').textContent = 'Phase 4 pipeline: starting...';
-      document.getElementById('phase4-pipeline-status-text').textContent = 'Phase 4 pipeline status: running...';
+      document.getElementById('phase4-pipeline-status-text').textContent = 'Pipeline status: running...';
       logLine('Starting Phase 4 pipeline run.');
 
       try {
@@ -4501,7 +4984,7 @@
         const summary = result.summary || {};
         setRunState('Success', 'Phase 4 pipeline completed successfully.');
         showStatus('run-status', 'success', 'Phase 4 pipeline completed.');
-        document.getElementById('phase4-pipeline-status-text').textContent = 'Phase 4 pipeline status: completed.';
+        document.getElementById('phase4-pipeline-status-text').textContent = 'Pipeline status: completed.';
         logLine(
           `Phase 4 pipeline completed. ` +
           `Mirror=${summary.mirror ? 'yes' : 'no'}, 4A=${summary.phase4A ? 'yes' : 'no'}, 4B=${summary.phase4B ? 'yes' : 'no'}, 4C=${summary.phase4C ? 'yes' : 'no'}, 4D=${summary.phase4D ? 'yes' : 'no'}`
@@ -4509,7 +4992,7 @@
       } catch (err) {
         setRunState('Error', `Phase 4 pipeline failed: ${err.message}`);
         showStatus('run-status', 'error', `Phase 4 pipeline failed: ${err.message}`);
-        document.getElementById('phase4-pipeline-status-text').textContent = `Phase 4 pipeline status: failed (${err.message})`;
+        document.getElementById('phase4-pipeline-status-text').textContent = `Pipeline status: failed (${err.message})`;
         logLine(`Phase 4 pipeline failed: ${err.message}`, 'error');
       } finally {
         isPhase4PipelineRunning = false;
@@ -4857,13 +5340,18 @@
         showStatus(
           'run-status',
           'success',
-          `Phase 4D completed (${mode}). FsV=${summary.fsvFieldsUpdated || 0}, V1=${summary.v1FieldsUpdated || 0}, V2=${summary.v2FieldsUpdated || 0}, VB=${summary.vbFieldsUpdated || 0}.`
+          `Phase 4D completed (${mode}). Table=${summary.listingsTable || listingsTable}, Writes=${summary.totalWrites || 0}, FsV=${summary.fsvFieldsUpdated || 0}, V1=${summary.v1FieldsUpdated || 0}, V2=${summary.v2FieldsUpdated || 0}, VB=${summary.vbFieldsUpdated || 0}.`
         );
         document.getElementById('phase4d-status-text').textContent =
-          `Phase 4D status: completed (${mode}). FsV ${summary.fsvFieldsUpdated || 0}, V1 ${summary.v1FieldsUpdated || 0}, V2 ${summary.v2FieldsUpdated || 0}, VB ${summary.vbFieldsUpdated || 0}.`;
+          `Phase 4D status: completed (${mode}). Table ${summary.listingsTable || listingsTable}, Writes ${summary.totalWrites || 0}, FsV ${summary.fsvFieldsUpdated || 0}, V1 ${summary.v1FieldsUpdated || 0}, V2 ${summary.v2FieldsUpdated || 0}, VB ${summary.vbFieldsUpdated || 0}.`;
         logLine(
-          `Phase 4D completed. Mode=${mode}, ListingsScanned=${summary.listingsScanned || 0}, ListingsEligible=${summary.listingsEligible || 0}, SkippedAlreadyPublished=${summary.skippedAlreadyPublished || 0}, SkippedByTestIpn=${summary.skippedByTestIpn || 0}, SkippedMissingIpn=${summary.skippedMissingIpn || 0}, SkippedOutOfScope=${summary.skippedOutOfScope || 0}, SkippedNoPrefixRules=${summary.skippedNoPrefixRules || 0}, MasterPartsMissing=${summary.masterPartsMissing || 0}, ListingFieldsCreated=${summary.listingFieldsCreated || 0}, FsVEvaluated=${summary.fsvFieldsEvaluated || 0}, FsVUpdated=${summary.fsvFieldsUpdated || 0}, FsVDNA=${summary.fsvDNAWritten || 0}, V1Evaluated=${summary.v1FieldsEvaluated || 0}, V1Updated=${summary.v1FieldsUpdated || 0}, V1DNA=${summary.v1DNAWritten || 0}, V2Evaluated=${summary.v2FieldsEvaluated || 0}, V2Updated=${summary.v2FieldsUpdated || 0}, V2DNA=${summary.v2DNAWritten || 0}, V2DNASkippedOverwrite=${summary.v2DNASkippedOverwrite || 0}, VBEvaluated=${summary.vbFieldsEvaluated || 0}, VBUpdated=${summary.vbFieldsUpdated || 0}, VBLowConfidenceLeftBlank=${summary.vbLowConfidenceLeftBlank || 0}, AIWebSearchUsed=${summary.aiWebSearchUsed || 0}, ManualOverrideSkipped=${summary.manualOverrideSkipped || 0}`
+          `Phase 4D completed. Mode=${mode}, Table=${summary.listingsTable || listingsTable}, TotalWrites=${summary.totalWrites || 0}, ListingsScanned=${summary.listingsScanned || 0}, ListingsEligible=${summary.listingsEligible || 0}, SkippedAlreadyPublished=${summary.skippedAlreadyPublished || 0}, SkippedByTestIpn=${summary.skippedByTestIpn || 0}, SkippedMissingIpn=${summary.skippedMissingIpn || 0}, SkippedOutOfScope=${summary.skippedOutOfScope || 0}, SkippedNoPrefixRules=${summary.skippedNoPrefixRules || 0}, MasterPartsMissing=${summary.masterPartsMissing || 0}, ListingFieldsCreated=${summary.listingFieldsCreated || 0}, FsVEvaluated=${summary.fsvFieldsEvaluated || 0}, FsVUpdated=${summary.fsvFieldsUpdated || 0}, FsVDNA=${summary.fsvDNAWritten || 0}, V1Evaluated=${summary.v1FieldsEvaluated || 0}, V1Updated=${summary.v1FieldsUpdated || 0}, V1DNA=${summary.v1DNAWritten || 0}, V2Evaluated=${summary.v2FieldsEvaluated || 0}, V2Updated=${summary.v2FieldsUpdated || 0}, V2DNA=${summary.v2DNAWritten || 0}, V2DNASkippedOverwrite=${summary.v2DNASkippedOverwrite || 0}, VBEvaluated=${summary.vbFieldsEvaluated || 0}, VBUpdated=${summary.vbFieldsUpdated || 0}, VBLowConfidenceLeftBlank=${summary.vbLowConfidenceLeftBlank || 0}, AIWebSearchUsed=${summary.aiWebSearchUsed || 0}, ManualOverrideSkipped=${summary.manualOverrideSkipped || 0}`
         );
+        if (Number(summary.totalWrites || 0) === 0) {
+          logLine(
+            `Phase4D: No writes were applied to table='${summary.listingsTable || listingsTable}'. Check eligibility/skip counters above for reasons.`
+          );
+        }
         if (Array.isArray(summary.sampleSkips) && summary.sampleSkips.length > 0) {
           summary.sampleSkips.forEach(line => logLine(`Phase4D: ${line}`));
         }
@@ -4983,9 +5471,10 @@
         showStatus('run-status', 'error', `Phase 5 ${dryRun ? 'dry run' : 'publish'} function is unavailable.`);
         return;
       }
-      if (!validateForm(true)) {
+      if (!hasAirtableCoreConfigured()) {
         setRunState('Error', 'Airtable settings are required for Phase 5.');
         showStatus('run-status', 'error', 'Please complete Airtable token/base fields first.');
+        logLine('Phase 5 blocked: Airtable token/base is missing.', 'error');
         return;
       }
       const selectedMode = (document.getElementById('phase5-mode')?.value || 'A').toUpperCase();
@@ -5001,12 +5490,19 @@
       const publishMode = (document.getElementById('phase5-mode')?.value || 'A').toUpperCase() === 'B' ? 'Option B' : 'Option A';
       setRunState('Running', `Phase 5 (${modeLabel}) is in progress...`);
       showStatus('run-status', 'info', `Phase 5 ${modeLabel} started (${publishMode})...`);
-      document.getElementById('phase5-status-text').textContent = `Phase 5 status: running (${modeLabel}, ${publishMode})...`;
+      document.getElementById('progress-bar').style.width = '12%';
+      document.getElementById('progress-text').textContent = `Phase 5: running (${modeLabel}, ${publishMode})...`;
+      document.getElementById('phase5-status-text').textContent = `Publishing status: running (${modeLabel}, ${publishMode})...`;
       logLine(`Starting Phase 5 ${modeLabel}. Mode=${publishMode}.`);
+      const phase5Heartbeat = setInterval(() => {
+        if (!isPhase5Running) return;
+        logLine(`Phase 5 still running (${modeLabel}, ${publishMode})... waiting for API response.`, 'info', false);
+      }, 15000);
 
       try {
         const config = collectConfigFromForm();
         if (!dryRun && typeof window.phase5API.testPublishLogConfig === 'function') {
+          logLine('Phase 5: validating Sheets publish log configuration...');
           const logCheck = await window.phase5API.testPublishLogConfig(config);
           if (!logCheck?.success) {
             throw new Error(logCheck?.message || 'Phase 5 Sheets publish log configuration is invalid.');
@@ -5014,8 +5510,11 @@
           if (!logCheck?.result?.enabled) {
             throw new Error('Phase 5 Sheets publish log is disabled. Enable it before Phase 5 write run.');
           }
+          logLine('Phase 5: Sheets publish log configuration is valid.');
         }
+        logLine('Phase 5: saving latest configuration...');
         await window.phase2API.saveConfig(config);
+        logLine('Phase 5: configuration saved. Starting publish call...');
         const result = dryRun
           ? await window.phase5API.dryRunPublishApproved(config)
           : await window.phase5API.publishApproved(config);
@@ -5029,8 +5528,11 @@
           'success',
           `Phase 5 completed (${modeLabel}, ${summary.modeLabel || publishMode}). Eligible=${summary.approvedFound || 0}, Published=${summary.publishedSuccess || 0}, Failed=${summary.publishedFailed || 0}, Removed=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedMissingSKU=${summary.skippedMissingSku || summary.skippedMissingItemId || 0}.`
         );
+        document.getElementById('progress-bar').style.width = '100%';
+        document.getElementById('progress-text').textContent =
+          `Phase 5 completed (${modeLabel}). Published=${summary.publishedSuccess || 0}, Failed=${summary.publishedFailed || 0}.`;
         document.getElementById('phase5-status-text').textContent =
-          `Phase 5 status: completed (${modeLabel}, ${summary.modeLabel || publishMode}). Eligible ${summary.approvedFound || 0}, Published ${summary.publishedSuccess || 0}, Failed ${summary.publishedFailed || 0}, Removed ${summary.removedFromQueue || 0}.`;
+          `Publishing status: completed (${modeLabel}, ${summary.modeLabel || publishMode}). Eligible ${summary.approvedFound || 0}, Published ${summary.publishedSuccess || 0}, Failed ${summary.publishedFailed || 0}, Removed ${summary.removedFromQueue || 0}.`;
         logLine(
           `Phase 5 completed. RunMode=${modeLabel}, PublishMode=${summary.modeLabel || publishMode}, Table=${summary.listingsTable || ''}, ApprovalField=${summary.approvalField || ''}, GroupField=${summary.groupField || ''}, GroupValue=${summary.groupValue || ''}, EligibleFound=${summary.approvedFound || 0}, PublishedSuccess=${summary.publishedSuccess || 0}, PublishedFailed=${summary.publishedFailed || 0}, RemovedFromQueue=${summary.removedFromQueue || 0}, SkippedNotApproved=${summary.skippedNotApproved || 0}, SkippedMissingSKU=${summary.skippedMissingSku || summary.skippedMissingItemId || 0}, SkippedAlreadyPublished=${summary.skippedAlreadyPublished || 0}`
         );
@@ -5046,9 +5548,12 @@
       } catch (err) {
         setRunState('Error', `Phase 5 failed: ${err.message}`);
         showStatus('run-status', 'error', `Phase 5 failed: ${err.message}`);
-        document.getElementById('phase5-status-text').textContent = `Phase 5 status: failed (${err.message})`;
+        document.getElementById('progress-bar').style.width = '100%';
+        document.getElementById('progress-text').textContent = `Phase 5 failed: ${err.message}`;
+        document.getElementById('phase5-status-text').textContent = `Publishing status: failed (${err.message})`;
         logLine(`Phase 5 failed: ${err.message}`, 'error');
       } finally {
+        clearInterval(phase5Heartbeat);
         isPhase5Running = false;
         updateRunButtonState();
       }
@@ -5068,9 +5573,10 @@
         showStatus('run-status', 'error', 'Phase 5 create batch API is unavailable.');
         return;
       }
-      if (!validateForm(true)) {
+      if (!hasAirtableCoreConfigured()) {
         setRunState('Error', 'Airtable settings are required for Phase 5.');
         showStatus('run-status', 'error', 'Please complete Airtable token/base fields first.');
+        logLine('Phase 5 batch creation blocked: Airtable token/base is missing.', 'error');
         return;
       }
 
@@ -5080,7 +5586,7 @@
       showStatus('run-status', 'info', 'Phase 5 batch creation started...');
       document.getElementById('progress-bar').style.width = '8%';
       document.getElementById('progress-text').textContent = 'Phase 5: Creating batches from pending listings...';
-      document.getElementById('phase5-status-text').textContent = 'Phase 5 status: creating batch from pending listings...';
+      document.getElementById('phase5-status-text').textContent = 'Publishing status: creating batch from pending listings...';
       logLine('Starting Phase 5 batch creation from pending listings.');
 
       try {
@@ -5116,7 +5622,7 @@
           showStatus('run-status', 'success', result.message || 'No listings available for batch creation.');
           document.getElementById('progress-bar').style.width = '100%';
           document.getElementById('progress-text').textContent = 'Phase 5: No batch created (no eligible unbatched listings).';
-          document.getElementById('phase5-status-text').textContent = 'Phase 5 status: no listings available for batch creation.';
+          document.getElementById('phase5-status-text').textContent = 'Publishing status: no listings available for batch creation.';
           logLine(`Phase 5 batch creation skipped: ${result.message || 'No candidates'}.`);
           return;
         }
@@ -5125,7 +5631,7 @@
         showStatus('run-status', 'success', `Batch creation completed. Batches=${batchesCreated}, FirstBatch=${created || 'n/a'}, Linked=${linked}, Status=${status}.`);
         document.getElementById('progress-bar').style.width = '100%';
         document.getElementById('progress-text').textContent = `Phase 5: Batch creation completed. Batches=${batchesCreated}, Linked=${linked}, Failed=${failed}.`;
-        document.getElementById('phase5-status-text').textContent = `Phase 5 status: created ${batchesCreated} batch(es), linked ${linked} listing(s), status ${status}.`;
+        document.getElementById('phase5-status-text').textContent = `Publishing status: created ${batchesCreated} batch(es), linked ${linked} listing(s), status ${status}.`;
         logLine(`Phase 5 batch creation completed. BatchesCreated=${batchesCreated}, FirstBatchId=${created || ''}, Attempted=${attempted}, LinkedRecords=${linked}, FailedRecords=${failed}, Status=${status}.`);
         if (Array.isArray(result.createdBatches) && result.createdBatches.length > 0) {
           const preview = result.createdBatches.slice(0, 10);
@@ -5141,7 +5647,7 @@
         showStatus('run-status', 'error', `Phase 5 batch creation failed: ${err.message}`);
         document.getElementById('progress-bar').style.width = '100%';
         document.getElementById('progress-text').textContent = `Phase 5: Batch creation failed (${err.message})`;
-        document.getElementById('phase5-status-text').textContent = `Phase 5 status: batch creation failed (${err.message})`;
+        document.getElementById('phase5-status-text').textContent = `Publishing status: batch creation failed (${err.message})`;
         logLine(`Phase 5 batch creation failed: ${err.message}`, 'error');
       } finally {
         isPhase5Running = false;
@@ -5235,7 +5741,7 @@
         if (!result?.success) throw new Error(result?.message || 'Failed to start Option B auto-push schedule.');
         const st = result.status || {};
         document.getElementById('phase5-autopush-status-text').textContent =
-          `Option B schedule: active${st.running ? ' (running)' : ''}, cron='${st.cronExpression || DEFAULT_PHASE5_AUTOPUSH_CRON}'`;
+          `Auto-push schedule: active${st.running ? ' (running)' : ''}, cron='${st.cronExpression || DEFAULT_PHASE5_AUTOPUSH_CRON}'`;
         showStatus('run-status', 'success', 'Phase 5 Option B auto-push schedule started.');
         logLine(`Phase5 OptionB schedule started. cron='${st.cronExpression || DEFAULT_PHASE5_AUTOPUSH_CRON}' timezone='${st.timezone || ''}'`);
       } catch (err) {
@@ -5256,7 +5762,7 @@
         if (!result?.success) throw new Error(result?.message || 'Failed to stop Option B auto-push schedule.');
         const st = result.status || {};
         document.getElementById('phase5-autopush-status-text').textContent =
-          `Option B schedule: ${st.active ? 'active' : 'inactive'}${st.running ? ' (running)' : ''}`;
+          `Auto-push schedule: ${st.active ? 'active' : 'inactive'}${st.running ? ' (running)' : ''}`;
         showStatus('run-status', 'success', 'Phase 5 Option B auto-push schedule stopped.');
         logLine('Phase5 OptionB schedule stopped.');
       } catch (err) {
@@ -5317,10 +5823,9 @@
       const clientId = document.getElementById('phase5-ebay-client-id')?.value.trim() || '';
       const clientSecret = document.getElementById('phase5-ebay-client-secret')?.value.trim() || '';
       const refreshToken = document.getElementById('phase5-ebay-refresh-token')?.value.trim() || '';
-      const userAccessToken = document.getElementById('phase5-ebay-user-access-token')?.value.trim() || '';
       const hasClientCredentials = Boolean(clientId && clientSecret);
-      if (!userAccessToken && !refreshToken && !hasClientCredentials) {
-        showStatus('run-status', 'error', 'Provide eBay User Access Token, eBay Refresh Token, or App ID + Cert ID.');
+      if (!refreshToken || !hasClientCredentials) {
+        showStatus('run-status', 'error', 'Provide eBay Refresh Token plus App ID and Cert ID.');
         return;
       }
       try {
@@ -5424,6 +5929,9 @@
       const controls = getEbaySandboxControls();
       const tableName = normalizeEbaySandboxTableName(controls.primaryTableEl?.value?.trim() || '');
       const fetchLimit = Number(controls.primaryFetchLimitEl?.value?.trim()) || DEFAULT_EBAY_SANDBOX_FETCH_LIMIT;
+      const fetchPagingMode = normalizeEbayFetchPagingMode(
+        controls.primaryFetchModeEl?.value || DEFAULT_EBAY_SANDBOX_FETCH_PAGING_MODE
+      );
       const dryRun = controls.primaryDryRunEl?.value === 'true';
       const ebayEnvironment = normalizeEbayEnvironmentValue(
         document.getElementById('phase5-ebay-environment')?.value || 'sandbox'
@@ -5432,15 +5940,14 @@
       const clientId = document.getElementById('phase5-ebay-client-id')?.value.trim() || '';
       const clientSecret = document.getElementById('phase5-ebay-client-secret')?.value.trim() || '';
       const refreshToken = document.getElementById('phase5-ebay-refresh-token')?.value.trim() || '';
-      const userAccessToken = document.getElementById('phase5-ebay-user-access-token')?.value.trim() || '';
       if (requiresAirtable && !tableName) {
         if (controls.phase5TableEl) setFieldError('phase5-ebay-sandbox-table-name', 'Airtable table name is required.');
         if (controls.legacyTableEl) setFieldError('ebay-sandbox-table-name', 'Airtable table name is required.');
         showStatus('run-status', 'error', 'Enter table name before running eBay Listings import.');
         return;
       }
-      if (!userAccessToken && !refreshToken && (!clientId || !clientSecret)) {
-        showStatus('run-status', 'error', 'Provide eBay User Access Token, eBay Refresh Token, or App ID + Cert ID.');
+      if (!refreshToken || !clientId || !clientSecret) {
+        showStatus('run-status', 'error', 'Provide eBay Refresh Token plus App ID and Cert ID.');
         return;
       }
       if (
@@ -5456,9 +5963,9 @@
       updateRunButtonState();
       setRunState('Running', 'eBay listings import is in progress...');
       showStatus('run-status', 'info', 'eBay listings import started...');
-      syncEbaySandboxControls({ tableName, fetchLimit, dryRun });
+      syncEbaySandboxControls({ tableName, fetchLimit, fetchPagingMode, dryRun });
       setEbaySandboxStatusText('eBay Listings Import status: running...');
-      logLine(`Starting eBay listings import (limit=${fetchLimit}).`);
+      logLine(`Starting eBay listings import (limit=${fetchLimit}, fetchMode=${fetchPagingMode}).`);
 
       try {
         const config = collectConfigFromForm();
@@ -5481,10 +5988,10 @@
           `eBay listings import completed (${mode}, ${apiLabel}). Items=${summary.inventoryItemsFetched || 0}, Offers=${summary.offersFetched || 0}, Deep=${summary.deepListingsFetched || 0}, GetItemFailed=${summary.failedGetItemCount || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}.`
         );
         setEbaySandboxStatusText(
-          `eBay Listings Import status: completed (${mode}, ${apiLabel}). Items ${summary.inventoryItemsFetched || 0}, Written ${summary.recordsWritten || 0}, Planned ${summary.recordsPlanned || 0}.`
+          `eBay Listings Import status: completed (${mode}, ${apiLabel}). Items ${summary.inventoryItemsFetched || 0}, Written ${summary.recordsWritten || 0}, Planned ${summary.recordsPlanned || 0}, NextPage ${summary.fetchNextPage || 1}.`
         );
         logLine(
-          `eBay listings import completed. Mode=${mode}, API=${apiLabel}, Env=${summary.environment || ''}, Table=${summary.tableName || ''}, Items=${summary.inventoryItemsFetched || 0}, Offers=${summary.offersFetched || 0}, Deep=${summary.deepListingsFetched || 0}, GetItemFailed=${summary.failedGetItemCount || 0}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}, Skipped=${summary.skippedInvalidRows || 0}`
+          `eBay listings import completed. Mode=${mode}, API=${apiLabel}, Env=${summary.environment || ''}, Table=${summary.tableName || ''}, Items=${summary.inventoryItemsFetched || 0}, Offers=${summary.offersFetched || 0}, Deep=${summary.deepListingsFetched || 0}, GetItemFailed=${summary.failedGetItemCount || 0}, FetchMode=${summary.fetchPagingMode || fetchPagingMode}, StartPage=${summary.fetchStartPage || 1}, LastPage=${summary.fetchLastPage || 0}, NextPage=${summary.fetchNextPage || 1}, Written=${summary.recordsWritten || 0}, Planned=${summary.recordsPlanned || 0}, Skipped=${summary.skippedInvalidRows || 0}`
         );
         if (Array.isArray(summary.errors) && summary.errors.length > 0) {
           summary.errors.forEach(err => logLine(`eBaySandbox: ${err}`, 'error'));
@@ -5528,9 +6035,18 @@
 
     function showStatus(id, type, message) {
       const el = document.getElementById(id);
+      if (!el) return;
       el.className = `status-box ${type}`;
       el.textContent = message;
       el.style.display = 'block';
+      if (id === 'run-status') {
+        const mirror = document.getElementById('run-status-progress');
+        if (mirror) {
+          mirror.className = `status-box ${type}`;
+          mirror.textContent = message;
+          mirror.style.display = 'block';
+        }
+      }
     }
   </script>
 </body>

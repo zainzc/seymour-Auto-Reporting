@@ -11,6 +11,7 @@ loadEnv();
 const DEFAULT_TABLE_NAME = 'eBay Listings (API)';
 const DEFAULT_FETCH_LIMIT = 200;
 const DEFAULT_PAGE_SIZE = 100;
+const DEFAULT_FETCH_PAGING_MODE = 'first_page';
 const BATCH_SIZE = 10;
 const USER_ACCESS_TOKEN_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const PRIMARY_KEY_FIELD = 'SKU';
@@ -222,6 +223,24 @@ function normalizeDestinationMode(value, sourceEnvironment = 'sandbox') {
     return mode;
   }
   return normalizeEnvironment(sourceEnvironment) === 'production' ? 'sandbox' : 'airtable';
+}
+
+function normalizeFetchPagingMode(value = '') {
+  const text = normalizeText(value).toLowerCase();
+  if (text === 'continue' || text === 'continue_from_last_page' || text === 'resume') {
+    return 'continue_from_last_page';
+  }
+  return DEFAULT_FETCH_PAGING_MODE;
+}
+
+function getNextFetchPageStateMap(runOptions = {}) {
+  const raw = runOptions.ebaySandboxNextFetchPageByEnvironment;
+  if (!raw || typeof raw !== 'object') {
+    return { sandbox: 1, production: 1 };
+  }
+  const sandbox = Math.max(1, toPositiveInteger(raw.sandbox, 1, 1, 1000000));
+  const production = Math.max(1, toPositiveInteger(raw.production, 1, 1, 1000000));
+  return { sandbox, production };
 }
 
 function toNumber(value, fallback = 0, min = 0, max = Number.MAX_SAFE_INTEGER) {
@@ -1620,6 +1639,12 @@ async function runEbayListingSync(options = {}, progressCallback = () => {}) {
   const pageRetryAttempts = Math.max(1, Number(runOptions.pageRetryAttempts || 3) || 3);
   const getItemConcurrency = Math.max(1, Number(runOptions.getItemConcurrency || 3) || 3);
   const maxBulkListings = Math.max(0, Number(runOptions.maxBulkListings || 0) || 0);
+  const fetchPagingMode = normalizeFetchPagingMode(runOptions.ebaySandboxFetchPagingMode || runOptions.ebaySandboxFetchMode);
+  const nextFetchPageState = getNextFetchPageStateMap(runOptions);
+  const startPage =
+    fetchPagingMode === 'continue_from_last_page'
+      ? Math.max(1, toPositiveInteger(nextFetchPageState[environment], 1, 1, 1000000))
+      : 1;
 
   if (!userAccessToken && !refreshToken) {
     throw new Error('runEbayListingSync requires eBay user access token or refresh token.');
@@ -1656,14 +1681,17 @@ async function runEbayListingSync(options = {}, progressCallback = () => {}) {
 
   const tradingApiUrl = getTradingApiUrl(environment);
   const bulkListings = [];
-  let pageNumber = 1;
-  let totalPages = 1;
+  let pageNumber = startPage;
+  let totalPages = Math.max(1, startPage);
+  let lastFetchedPage = 0;
 
   emitProgress(progressCallback, {
     stage: 'ebaylisting_bulk_fetch',
     percent: 8,
     counts: null,
-    message: `Fetching eBay listings in bulk via GetMyeBaySelling (${environment})...`
+    message:
+      `Fetching eBay listings in bulk via GetMyeBaySelling (${environment}) ` +
+      `(mode=${fetchPagingMode}, startPage=${startPage})...`
   });
 
   while (pageNumber <= totalPages && (maxBulkListings <= 0 || bulkListings.length < maxBulkListings)) {
@@ -1697,7 +1725,13 @@ async function runEbayListingSync(options = {}, progressCallback = () => {}) {
           throw ackError;
         }
         if (normalizeText(ack).toLowerCase() === 'warning') {
-          console.warn(`[runEbayListingSync] GetMyeBaySelling page ${pageNumber} returned Ack=Warning`);
+          const warningMessage = `[runEbayListingSync] GetMyeBaySelling page ${pageNumber} returned Ack=Warning`;
+          console.warn(warningMessage);
+          emitProgress(progressCallback, {
+            stage: 'ebaylisting_ack_warning',
+            percent: Math.min(45, 18 + Math.floor((pageNumber / Math.max(1, totalPages || 1)) * 20)),
+            message: warningMessage
+          });
         }
         lastError = null;
         break;
@@ -1740,6 +1774,7 @@ async function runEbayListingSync(options = {}, progressCallback = () => {}) {
     if (pageParsed.totalPages > 0) {
       totalPages = pageParsed.totalPages;
     }
+    lastFetchedPage = pageNumber;
     const remaining = maxBulkListings > 0 ? Math.max(0, maxBulkListings - bulkListings.length) : pageParsed.listings.length;
     bulkListings.push(...(maxBulkListings > 0 ? pageParsed.listings.slice(0, remaining) : pageParsed.listings));
     emitProgress(progressCallback, {
@@ -1756,6 +1791,23 @@ async function runEbayListingSync(options = {}, progressCallback = () => {}) {
       break;
     }
     pageNumber += 1;
+  }
+
+  const nextPageAfterRun =
+    lastFetchedPage > 0
+      ? (lastFetchedPage >= Math.max(1, totalPages) ? 1 : lastFetchedPage + 1)
+      : startPage;
+
+  if (fetchPagingMode === 'continue_from_last_page') {
+    const storedConfig = getInventoryConfig('phase2Config') || {};
+    const currentMap = getNextFetchPageStateMap(storedConfig);
+    saveInventoryConfig('phase2Config', {
+      ...storedConfig,
+      ebaySandboxNextFetchPageByEnvironment: {
+        ...currentMap,
+        [environment]: nextPageAfterRun
+      }
+    });
   }
 
   const deepListings = [];
@@ -1808,12 +1860,24 @@ async function runEbayListingSync(options = {}, progressCallback = () => {}) {
           throw ackError;
         }
         if (normalizeText(ack).toLowerCase() === 'warning') {
-          console.warn(`[runEbayListingSync] GetItem ItemID=${ebayItemId} returned Ack=Warning`);
+          const warningMessage = `[runEbayListingSync] GetItem ItemID=${ebayItemId} returned Ack=Warning`;
+          console.warn(warningMessage);
+          emitProgress(progressCallback, {
+            stage: 'ebaylisting_getitem_warning',
+            percent: Math.min(98, 58 + Math.floor((completedCount / Math.max(1, itemIds.length)) * 40)),
+            message: warningMessage
+          });
         }
         deepListings.push(parseDeepListingFromGetItemResponse(responseXml));
       } catch (error) {
         failedGetItemIds.push(ebayItemId);
-        console.warn(`[runEbayListingSync] GetItem failed for ItemID=${ebayItemId}: ${normalizeText(error?.message || error)}`);
+        const errorMessage = `[runEbayListingSync] GetItem failed for ItemID=${ebayItemId}: ${normalizeText(error?.message || error)}`;
+        console.warn(errorMessage);
+        emitProgress(progressCallback, {
+          stage: 'ebaylisting_getitem_error',
+          percent: Math.min(98, 58 + Math.floor((completedCount / Math.max(1, itemIds.length)) * 40)),
+          message: errorMessage
+        });
       } finally {
         completedCount += 1;
         if (completedCount === 1 || completedCount % 25 === 0 || completedCount === itemIds.length) {
@@ -1846,7 +1910,12 @@ async function runEbayListingSync(options = {}, progressCallback = () => {}) {
     summary: {
       totalBulkListings: bulkListings.length,
       totalDeepListingsFetched: deepListings.length,
-      failedGetItemCount: failedGetItemIds.length
+      failedGetItemCount: failedGetItemIds.length,
+      fetchPagingMode,
+      startPage,
+      lastFetchedPage,
+      totalPages: Math.max(1, totalPages),
+      nextPage: nextPageAfterRun
     }
   };
 
@@ -2760,6 +2829,11 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
     pageSize,
     sourceApi,
     sourceLabel,
+    fetchPagingMode: normalizeFetchPagingMode(runOptions.ebaySandboxFetchPagingMode || runOptions.ebaySandboxFetchMode),
+    fetchStartPage: 1,
+    fetchLastPage: 0,
+    fetchTotalPages: 1,
+    fetchNextPage: 1,
     destinationMode,
     tradingSiteId,
     tradingPagesFetched: 0,
@@ -2858,6 +2932,13 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
           Number(listingSyncResult?.summary?.totalDeepListingsFetched || inventoryItems.length) || inventoryItems.length;
         summary.failedGetItemCount =
           Number(listingSyncResult?.summary?.failedGetItemCount || 0) || 0;
+        summary.fetchPagingMode = normalizeFetchPagingMode(
+          listingSyncResult?.summary?.fetchPagingMode || runOptions.ebaySandboxFetchPagingMode
+        );
+        summary.fetchStartPage = Number(listingSyncResult?.summary?.startPage || 1) || 1;
+        summary.fetchLastPage = Number(listingSyncResult?.summary?.lastFetchedPage || 0) || 0;
+        summary.fetchTotalPages = Number(listingSyncResult?.summary?.totalPages || 1) || 1;
+        summary.fetchNextPage = Number(listingSyncResult?.summary?.nextPage || summary.fetchStartPage || 1) || 1;
         summary.offersFetched = offersBySku.size;
         emitProgress(progressCallback, {
           stage: 'ebaysandbox_fetch_offers',
@@ -2865,7 +2946,8 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
           counts: summary,
           message:
             `Fetched deep listing details via GetItem. Deep=${summary.deepListingsFetched || 0}, ` +
-            `Failed=${summary.failedGetItemCount || 0}.`
+            `Failed=${summary.failedGetItemCount || 0}, ` +
+            `PageStart=${summary.fetchStartPage || 1}, PageLast=${summary.fetchLastPage || 0}, NextPage=${summary.fetchNextPage || 1}.`
         });
       } else {
         const tradingResult = await fetchTradingActiveListings(
@@ -2935,6 +3017,13 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
           Number(listingSyncResult?.summary?.totalDeepListingsFetched || inventoryItems.length) || inventoryItems.length;
         summary.failedGetItemCount =
           Number(listingSyncResult?.summary?.failedGetItemCount || 0) || 0;
+        summary.fetchPagingMode = normalizeFetchPagingMode(
+          listingSyncResult?.summary?.fetchPagingMode || runOptions.ebaySandboxFetchPagingMode
+        );
+        summary.fetchStartPage = Number(listingSyncResult?.summary?.startPage || 1) || 1;
+        summary.fetchLastPage = Number(listingSyncResult?.summary?.lastFetchedPage || 0) || 0;
+        summary.fetchTotalPages = Number(listingSyncResult?.summary?.totalPages || 1) || 1;
+        summary.fetchNextPage = Number(listingSyncResult?.summary?.nextPage || summary.fetchStartPage || 1) || 1;
         summary.offersFetched = offersBySku.size;
         emitProgress(progressCallback, {
           stage: 'ebaysandbox_fetch_offers',
@@ -2942,7 +3031,8 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
           counts: summary,
           message:
             `Fetched deep listing details via GetItem. Deep=${summary.deepListingsFetched || 0}, ` +
-            `Failed=${summary.failedGetItemCount || 0}.`
+            `Failed=${summary.failedGetItemCount || 0}, ` +
+            `PageStart=${summary.fetchStartPage || 1}, PageLast=${summary.fetchLastPage || 0}, NextPage=${summary.fetchNextPage || 1}.`
         });
       } else {
         const tradingResult = await fetchTradingActiveListings(
@@ -3176,7 +3266,10 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
     stage: 'completed',
     percent: 100,
     counts: summary,
-    message: `eBay ${environment} inventory import completed (${dryRun ? 'dry run' : 'write run'}).`
+    message:
+      `eBay ${environment} inventory import completed (${dryRun ? 'dry run' : 'write run'}). ` +
+      `FetchMode=${summary.fetchPagingMode || 'first_page'}, StartPage=${summary.fetchStartPage || 1}, ` +
+      `LastPage=${summary.fetchLastPage || 0}, NextPage=${summary.fetchNextPage || 1}.`
   });
   return summary;
 }
