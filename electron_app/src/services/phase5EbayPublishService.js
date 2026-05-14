@@ -555,7 +555,7 @@ class Phase5EbayPublishService {
       typeof config.allowProductionPublish !== 'undefined'
         ? config.allowProductionPublish
         : process.env.PHASE5_ALLOW_PRODUCTION_PUBLISH,
-      false
+      true
     );
     this.timeoutMs = Math.max(5000, Number(config.timeoutMs || process.env.EBAY_PUBLISH_TIMEOUT_MS || 30000) || 30000);
     this.maxAttempts = Math.max(1, Number(config.maxAttempts || process.env.EBAY_PUBLISH_MAX_ATTEMPTS || 2) || 2);
@@ -939,12 +939,6 @@ class Phase5EbayPublishService {
           payloadXml: tradingXml
         }
       };
-    }
-
-    if (this.ebayEnvironment === 'production' && !this.allowProductionPublish) {
-      throw new Error(
-        'Direct Phase 5 production publish is disabled. Set phase5AllowProductionPublish=true (or PHASE5_ALLOW_PRODUCTION_PUBLISH=true) to enable.'
-      );
     }
 
     const resolved = await this.ensureUserAccessToken();
