@@ -128,6 +128,30 @@ class Phase5PublishLogService {
     }
     return map;
   }
+
+  async fetchPublishedState() {
+    const rows = await this.fetchLogRows();
+    const identities = new Set();
+    const payloadHashes = new Set();
+    if (!Array.isArray(rows) || rows.length <= 1) {
+      return { identities: [], payloadHashes: [] };
+    }
+
+    for (let i = 1; i < rows.length; i += 1) {
+      const row = rows[i] || [];
+      const itemId = normalizeText(row[4]);
+      const ipn = normalizeText(row[2]).toUpperCase();
+      const payloadHash = normalizeText(row[13]);
+      if (itemId) identities.add(`ITEM:${itemId}`);
+      if (ipn) identities.add(`IPN:${ipn}`);
+      if (payloadHash) payloadHashes.add(payloadHash);
+    }
+
+    return {
+      identities: Array.from(identities),
+      payloadHashes: Array.from(payloadHashes)
+    };
+  }
 }
 
 module.exports = {

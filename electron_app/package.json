@@ -22,10 +22,7 @@
     "phase72-fitment-image": "node src/scripts/runPhase72FitmentImage.js",
     "phase74-title-description": "node src/scripts/runPhase74TitleDescription.js",
     "ebay-mock-import": "node src/scripts/runEbayMockImport.js",
-    "ebay-mock-import:execute": "node src/scripts/runEbayMockImport.js --execute",
-    "cleanup-master-duplicate-ipns": "node src/scripts/cleanupDuplicateMasterIpns.js",
-    "cleanup-clickup-duplicate-tasks": "node src/scripts/cleanupDuplicateClickupTasks.js",
-    "cleanup-clickup-duplicate-tasks:execute": "node src/scripts/cleanupDuplicateClickupTasks.js --execute"
+    "ebay-mock-import:execute": "node src/scripts/runEbayMockImport.js --execute"
   },
   "keywords": [],
   "author": "hp",

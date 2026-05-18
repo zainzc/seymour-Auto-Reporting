@@ -4,6 +4,7 @@ const AirtableService = require('../services/airtableService');
 const AirtableSchemaService = require('../services/airtableSchemaService');
 const { getInventoryConfig, saveInventoryConfig } = require('../config/configStore');
 const { asIdentitySet, isPublishedIdentity } = require('../services/phase5IdentityService');
+const { Phase5PublishLogService } = require('../services/phase5PublishLogService');
 const { buildListingPayloadHash, parseCsvList } = require('../services/phase5GovernanceService');
 
 loadEnv();
@@ -3140,11 +3141,30 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
       ? hasFieldByNormalizedName(ensure.existingFields, payloadHashFieldName)
       : false;
     const existingPayloadHashByRecordKey = new Map();
-    const publishedIdentitySet = asIdentitySet(runOptions.phase5PublishedIdentities || []);
+    let publishedIdentityValues = Array.isArray(runOptions.phase5PublishedIdentities)
+      ? runOptions.phase5PublishedIdentities
+      : [];
+    let publishedPayloadHashValues = Array.isArray(runOptions.phase5PublishedPayloadHashes)
+      ? runOptions.phase5PublishedPayloadHashes
+      : [];
+    if (publishedIdentityValues.length === 0 && publishedPayloadHashValues.length === 0) {
+      try {
+        const logService = new Phase5PublishLogService({
+          enabled: runOptions.phase5SheetsLogEnabled ?? 'false',
+          spreadsheetId: runOptions.phase5SheetsLogSpreadsheetId || '',
+          tabName: runOptions.phase5SheetsLogTabName || 'Log',
+          authContext: runOptions.phase5SheetsLogAuthContext || 'inventory'
+        });
+        if (logService.isConfigured()) {
+          const state = await logService.fetchPublishedState();
+          publishedIdentityValues = Array.isArray(state?.identities) ? state.identities : [];
+          publishedPayloadHashValues = Array.isArray(state?.payloadHashes) ? state.payloadHashes : [];
+        }
+      } catch (_) {}
+    }
+    const publishedIdentitySet = asIdentitySet(publishedIdentityValues);
     const publishedPayloadHashSet = new Set(
-      (Array.isArray(runOptions.phase5PublishedPayloadHashes) ? runOptions.phase5PublishedPayloadHashes : [])
-        .map(value => normalizeText(value))
-        .filter(Boolean)
+      publishedPayloadHashValues.map(value => normalizeText(value)).filter(Boolean)
     );
     const payloadHashFields = parseCsvList(runOptions.phase5PayloadHashFields || '');
 

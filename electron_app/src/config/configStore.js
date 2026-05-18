@@ -35,21 +35,6 @@ function clearWebhookConfig() {
 }
 
 /* ---------------------------
-   SELECTED TABLES CONFIG
----------------------------- */
-function saveSelectedTables(tables) {
-  store.set('selectedTables', tables);
-}
-
-function getSelectedTables() {
-  return store.get('selectedTables') || [];
-}
-
-function clearSelectedTables() {
-  store.delete('selectedTables');
-}
-
-/* ---------------------------
    REPORTING CONFIG
 ---------------------------- */
 function saveReportingConfig(key, value) {
@@ -86,9 +71,6 @@ module.exports = {
   saveWebhookConfig,
   getWebhookConfig,
   clearWebhookConfig,
-  saveSelectedTables,
-  getSelectedTables,
-  clearSelectedTables,
   saveReportingConfig,
   getReportingConfig,
   clearReportingConfig,

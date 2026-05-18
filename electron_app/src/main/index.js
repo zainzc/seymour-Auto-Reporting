@@ -1,11 +1,8 @@
-﻿const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const { loadEnv } = require('../config/loadEnv');
 loadEnv();
 
-const config = require('../config/env');
-
-const { getUsers, syncUsers, getAllTables, syncTables } = require('../services/userService');
 const {
   saveDbConfig,
   getDbConfig,
@@ -13,9 +10,6 @@ const {
   saveWebhookConfig,
   getWebhookConfig,
   clearWebhookConfig,
-  saveSelectedTables,
-  getSelectedTables,
-  clearSelectedTables,
   saveReportingConfig,
   getReportingConfig,
   saveInventoryConfig,
@@ -61,7 +55,6 @@ const phase2WritebackPoller = require('../services/phase2WritebackPollerService'
 const phase2AutoRunService = require('../services/phase2AutoRunService');
 
 let mainWindow;
-let autoSyncInterval = null;
 let phase4WritebackInterval = null;
 let isPhase4WritebackPollerRunning = false;
 let dbReady = false;
@@ -69,6 +62,71 @@ const LEGACY_EBAY_MOCK_TABLE = 'eBay Listings (API) (Mock)';
 const DEFAULT_EBAY_SANDBOX_TABLE = 'eBay Listings (API)';
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const DEFAULT_EBAY_FETCH_PAGING_MODE = 'first_page';
+const DEFAULT_PHASE74_TITLE_RULES_PROMPT = [
+  'eBay Title Rules Prompt',
+  'Master Instructions - Follow Exactly',
+  '1) Required title structure:',
+  '[YEAR RANGE] [MAKE] [MODEL] [PART] [SIDE] [KEY DETAIL] OEM',
+  '2) Title constraints:',
+  '- Title length must be 65 to 80 characters.',
+  '- Title must end with OEM.',
+  '- OEM must appear once only, and only at the end.',
+  '- Keep title clean, natural, and human-readable.',
+  '- No keyword stuffing.',
+  '3) Never change or remove:',
+  '- Year must remain present after processing.',
+  '- Make must not be changed.',
+  '- Model must not be changed.',
+  '4) Year handling:',
+  '- Convert 2-digit ranges to 4-digit ranges (05-07 => 2005-2007, 13-19 => 2013-2019).',
+  '- If year is missing, do not guess. Leave unchanged or flag for review in reasoningSummary.',
+  '5) Title cleaning:',
+  '- Remove SKU/stock numbers (especially suffix-like IDs).',
+  '- Remove OEM Part text and Used Auto text.',
+  '- Remove extra uses of Part.',
+  '- Keep exactly one OEM at end.',
+  '6) Side standardization (mandatory):',
+  '- Driver side => Driver Left LH',
+  '- Passenger side => Passenger Right RH',
+  '7) SEO part name replacements (mandatory when applicable):',
+  '- Accelerator Parts => Gas Pedal or Accelerator Pedal',
+  '- Anti-Lock Brake Part => ABS Module or ABS Pump or Hydraulic Unit',
+  '- Inside Mirror => Rear View Mirror',
+  '- Throttle Valve Assembly => Throttle Body',
+  '- Fuel Vapor Canister => EVAP Charcoal Canister',
+  '- Audio Equipment Radio => Radio',
+  '- Chassis ECM (590) => choose best single fit: ECM or ECU or PCM',
+  '- Never stack duplicate synonyms.',
+  '8) Extra optimization:',
+  '- Optionally add Tested or OEM Tested when relevant.',
+  '- Keep wording readable and non-spammy.',
+  '9) No duplicate titles (hard rule):',
+  '- Title must be unique against provided existingTitles.',
+  '- If duplicate, apply controlled variation only.',
+  '- Never alter year/make/model for uniqueness.',
+  '10) Length control:',
+  '- If too long, trim extra descriptors.',
+  '- If too short, add relevant detail like Tested, Assembly, or Unit.',
+  '11) Final checks before output:',
+  '- Year present or flagged.',
+  '- Make unchanged.',
+  '- Model unchanged.',
+  '- No SKU/junk text.',
+  '- Side format standardized if side exists.',
+  '- SEO replacements applied where relevant.',
+  '- Ends with OEM once only.',
+  '- 65-80 chars.',
+  '- Clean/readable.',
+  '- Unique against existingTitles.'
+].join('\n');
+
+function resolvePhase74TitleRulesPrompt(...candidates) {
+  for (const candidate of candidates) {
+    const value = String(candidate || '').trim();
+    if (value) return value;
+  }
+  return DEFAULT_PHASE74_TITLE_RULES_PROMPT;
+}
 
 function parseBoolean(value, defaultValue = false) {
   if (typeof value === 'boolean') return value;
@@ -112,6 +170,50 @@ function normalizeEbayEnvironment(value) {
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function buildPhase5PublishLogService(config = {}) {
+  return new Phase5PublishLogService({
+    enabled: config.phase5SheetsLogEnabled ?? process.env.PHASE5_SHEETS_LOG_ENABLED ?? 'false',
+    spreadsheetId: config.phase5SheetsLogSpreadsheetId || process.env.PHASE5_SHEETS_LOG_SPREADSHEET_ID || '',
+    tabName: config.phase5SheetsLogTabName || process.env.PHASE5_SHEETS_LOG_TAB || 'Log',
+    authContext: config.phase5SheetsLogAuthContext || process.env.PHASE5_SHEETS_LOG_AUTH_CONTEXT || 'inventory'
+  });
+}
+
+async function attachPhase5PublishedState(config = {}, contextLabel = 'phase5') {
+  const publishLogService = buildPhase5PublishLogService(config);
+  if (!publishLogService.isConfigured()) {
+    return {
+      ...config,
+      phase5PublishedIdentities: [],
+      phase5PublishedPayloadHashes: []
+    };
+  }
+  try {
+    const state = await publishLogService.fetchPublishedState();
+    return {
+      ...config,
+      phase5PublishedIdentities: Array.isArray(state?.identities) ? state.identities : [],
+      phase5PublishedPayloadHashes: Array.isArray(state?.payloadHashes) ? state.payloadHashes : []
+    };
+  } catch (error) {
+    console.warn(
+      `[${contextLabel}] Failed to load published state from Phase 5 Sheets log: ${error?.message || error}`
+    );
+    return {
+      ...config,
+      phase5PublishedIdentities: [],
+      phase5PublishedPayloadHashes: []
+    };
+  }
+}
+
+function stripPhase5LocalPublishedCache(config = {}) {
+  const next = { ...(config || {}) };
+  delete next.phase5PublishedIdentities;
+  delete next.phase5PublishedPayloadHashes;
+  return next;
 }
 
 function normalizeEbayCredentialSet(raw = {}) {
@@ -534,7 +636,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   const resolvedAirtableBaseId = firstNonEmpty(runtime.airtableBaseId, persisted.airtableBaseId, process.env.AIRTABLE_BASE_ID);
   const resolvedItemSpecificsBaseId = firstNonEmpty(runtime.itemSpecificsBaseId, persisted.itemSpecificsBaseId);
   const resolvedClickupToken = firstNonEmpty(runtime.clickupToken, persisted.clickupToken, process.env.CLICKUP_TOKEN);
-  const chainBase = {
+  const chainBaseBase = {
     ...stored,
     airtableToken: resolvedAirtableToken,
     airtableBaseId: resolvedAirtableBaseId,
@@ -545,6 +647,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     phase4CClickupListId: phase4CListId,
     phase4RulesDriveFile
   };
+  const chainBase = await attachPhase5PublishedState(chainBaseBase, 'post-import');
   const missingPhase4Config = [];
   if (!resolvedAirtableToken) missingPhase4Config.push('airtableToken');
   if (!resolvedAirtableBaseId) missingPhase4Config.push('airtableBaseId');
@@ -757,6 +860,10 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     airtableMasterTable: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
     openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
+      stored.phase74TitleRulesPrompt,
+      process.env.PHASE74_TITLE_RULES_PROMPT
+    ),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
     phase74PromptCacheEnabled:
       String(stored.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
@@ -797,33 +904,8 @@ function loadSetup() {
   mainWindow.loadFile(path.join(__dirname, '../renderer/pages/shared/setup.html'));
 }
 
-function loadWebhook() {
-  mainWindow.loadFile(path.join(__dirname, '../renderer/pages/shared/webhook.html'));
-}
-
 function loadDashboard() {
   mainWindow.loadFile(path.join(__dirname, '../renderer/pages/main-dashboard.html'));
-}
-
-/* ---------------------------
-   AUTO SYNC (SAFE)
----------------------------- */
-function startAutoSync() {
-  if (autoSyncInterval) clearInterval(autoSyncInterval);
-
-  const webhook = getWebhookConfig();
-  const selectedTables = getSelectedTables();
-
-  if (!webhook || selectedTables.length === 0) return;
-
-  autoSyncInterval = setInterval(async () => {
-    try {
-      await syncTables(selectedTables);
-      console.log(`âœ… Auto-synced ${selectedTables.length} tables: ${selectedTables.join(', ')}`);
-    } catch (err) {
-      console.error('âŒ Auto-sync failed:', err.message);
-    }
-  }, 5 * 60 * 1000);
 }
 
 /* ---------------------------
@@ -856,8 +938,8 @@ ipcMain.handle('test-windows-auth', async (_, config) => {
   try {
     const sql = require('mssql/msnodesqlv8');
     
-    console.log(`ðŸ” Testing Windows Auth connection to ${config.server}...`);
-    console.log(`ðŸ’¾ Database: ${config.database}`);
+    console.log(`🔐 Testing Windows Auth connection to ${config.server}...`);
+    console.log(`💾 Database: ${config.database}`);
     
     const poolConfig = {
       connectionString: `Driver={ODBC Driver 18 for SQL Server};Server=${config.server};Database=${config.database};Trusted_Connection=yes;TrustServerCertificate=yes;Connection Timeout=30;`,
@@ -872,35 +954,35 @@ ipcMain.handle('test-windows-auth', async (_, config) => {
     
     const pool = new sql.ConnectionPool(poolConfig);
     pool.on('error', err => {
-      console.error('âŒ Pool error:', err.message);
+      console.error('❌ Pool error:', err.message);
     });
     
-    console.log('â³ Connecting...');
+    console.log('⏳ Connecting...');
     await pool.connect();
-    console.log('âœ… Connected! Testing query...');
+    console.log('✅ Connected! Testing query...');
     
     const result = await pool.request().query('SELECT @@VERSION as version');
-    console.log('âœ… Query successful');
+    console.log('✅ Query successful');
     
     await pool.close();
     
     return { success: true, message: 'Connection successful!' };
   } catch (err) {
-    console.error('âŒ Raw error:', err);
-    console.error('âŒ Error type:', typeof err);
-    console.error('âŒ Error constructor:', err?.constructor?.name);
+    console.error('❌ Raw error:', err);
+    console.error('❌ Error type:', typeof err);
+    console.error('❌ Error constructor:', err?.constructor?.name);
     
     let errorMsg = 'Unknown error';
     
     if (err?.originalError) {
-      console.error('âŒ Original error:', err.originalError);
+      console.error('❌ Original error:', err.originalError);
       errorMsg = String(err.originalError);
     } else if (err?.message && err.message !== '[object Object]') {
       errorMsg = String(err.message);
     } else if (typeof err === 'string') {
       errorMsg = err;
     } else {
-      console.error('âŒ Error properties:', {
+      console.error('❌ Error properties:', {
         code: err?.code,
         state: err?.state,
         sqlState: err?.sqlState,
@@ -913,7 +995,7 @@ ipcMain.handle('test-windows-auth', async (_, config) => {
       }
     }
     
-    console.error('âŒ Final error message:', errorMsg);
+    console.error('❌ Final error message:', errorMsg);
     return { success: false, message: errorMsg };
   }
 });
@@ -925,9 +1007,9 @@ ipcMain.handle('test-db-connection', async (_, config) => {
     // Use server name exactly as provided (SSMS uses just "STR" without port)
     let serverName = config.server.trim();
     
-    console.log(`ðŸ” Testing connection to ${serverName}...`);
-    console.log(`ðŸ‘¤ User: ${config.user}`);
-    console.log(`ðŸ’¾ Database: ${config.database}`);
+    console.log(`🔐 Testing connection to ${serverName}...`);
+    console.log(`👤 User: ${config.user}`);
+    console.log(`💾 Database: ${config.database}`);
     
     const poolConfig = {
       connectionString: `Driver={ODBC Driver 18 for SQL Server};Server=${serverName};Database=${config.database};Uid=${config.user};Pwd=${config.password};Encrypt=yes;TrustServerCertificate=yes;Connection Timeout=30;`,
@@ -942,30 +1024,30 @@ ipcMain.handle('test-db-connection', async (_, config) => {
     
     const pool = new sql.ConnectionPool(poolConfig);
     pool.on('error', err => {
-      console.error('âŒ Pool error:', err.message);
+      console.error('❌ Pool error:', err.message);
     });
     
-    console.log('â³ Connecting...');
+    console.log('⏳ Connecting...');
     await pool.connect();
-    console.log('âœ… Connected! Testing query...');
+    console.log('✅ Connected! Testing query...');
     
     const result = await pool.request().query('SELECT @@VERSION as version');
-    console.log('âœ… Query successful');
+    console.log('✅ Query successful');
     
     await pool.close();
     
     return { success: true, message: 'Connection successful!' };
   } catch (err) {
-    console.error('âŒ Raw error:', err);
-    console.error('âŒ Error type:', typeof err);
-    console.error('âŒ Error constructor:', err?.constructor?.name);
+    console.error('❌ Raw error:', err);
+    console.error('❌ Error type:', typeof err);
+    console.error('❌ Error constructor:', err?.constructor?.name);
     
     // Try to extract the real error message
     let errorMsg = 'Unknown error';
     
     // Check if there's an underlying ODBC error
     if (err?.originalError) {
-      console.error('âŒ Original error:', err.originalError);
+      console.error('❌ Original error:', err.originalError);
       errorMsg = String(err.originalError);
     } else if (err?.message && err.message !== '[object Object]') {
       errorMsg = String(err.message);
@@ -973,7 +1055,7 @@ ipcMain.handle('test-db-connection', async (_, config) => {
       errorMsg = err;
     } else {
       // Try to extract info from the error object itself
-      console.error('âŒ Error properties:', {
+      console.error('❌ Error properties:', {
         code: err?.code,
         state: err?.state,
         sqlState: err?.sqlState,
@@ -986,7 +1068,7 @@ ipcMain.handle('test-db-connection', async (_, config) => {
       }
     }
     
-    console.error('âŒ Final error message:', errorMsg);
+    console.error('❌ Final error message:', errorMsg);
     return { success: false, message: errorMsg };
   }
 });
@@ -995,7 +1077,6 @@ ipcMain.handle('save-webhook', async (_, url) => {
   if (!url) return { success: false, message: 'Webhook required' };
 
   saveWebhookConfig(url);
-  // startAutoSync(); // Removed: Only sync when user clicks button
 
   return { success: true, message: 'Webhook saved successfully!' };
 });
@@ -1004,94 +1085,10 @@ ipcMain.handle('get-webhook-config', async () => {
   return getWebhookConfig();
 });
 
-ipcMain.handle('get-users', async () => {
-  if (!dbReady) throw new Error('DB not ready');
-  return await getUsers();
-});
-
-ipcMain.handle('get-tables', async () => {
-  if (!dbReady) throw new Error('DB not ready');
-  return await getAllTables();
-});
-
-ipcMain.handle('execute-query', async (_, query, limit) => {
-  if (!dbReady) throw new Error('DB not ready');
-  
-  // Validate it's a SELECT query
-  const trimmedQuery = query.trim().toLowerCase();
-  if (!trimmedQuery.startsWith('select')) {
-    throw new Error('Only SELECT queries are allowed');
-  }
-  
-  const pool = require('../services/db').getDB();
-  
-  // Apply limit if not "all"
-  let finalQuery = query;
-  let limited = false;
-  
-  if (limit && limit !== 'all') {
-    const limitNum = parseInt(limit);
-    // Check if query already has TOP or LIMIT clause
-    if (!trimmedQuery.includes(' top ') && !trimmedQuery.includes(' limit ')) {
-      // For SQL Server, inject TOP after SELECT
-      finalQuery = query.replace(/select\s+/i, `SELECT TOP ${limitNum} `);
-      limited = true;
-    }
-  }
-  
-  const result = await pool.request().query(finalQuery);
-  
-  return {
-    rows: result.recordset,
-    rowCount: result.recordset.length,
-    limited: limited
-  };
-});
-
-ipcMain.handle('sync-users', async () => {
-  if (!dbReady) throw new Error('DB not ready');
-  if (!getWebhookConfig()) throw new Error('Webhook not configured');
-
-  const users = await getUsers();
-  await syncUsers(users);
-
-  return { success: true, count: users.length };
-});
-
-ipcMain.handle('sync-tables', async (_, tableNames) => {
-  if (!dbReady) throw new Error('DB not ready');
-  
-  // Check if webhook is configured
-  if (!getWebhookConfig()) {
-    return { 
-      success: false, 
-      needsWebhook: true,
-      message: 'Webhook not configured. Would you like to configure it now?' 
-    };
-  }
-  
-  if (!Array.isArray(tableNames) || tableNames.length === 0) {
-    throw new Error('Select at least one table');
-  }
-
-  // Save selected tables
-  saveSelectedTables(tableNames);
-  
-  // Removed auto-sync - only manual sync on button click
-  // startAutoSync();
-  
-  await syncTables(tableNames);
-
-  return { success: true, count: tableNames.length };
-});
-
 ipcMain.handle('reset-config', async () => {
-  if (autoSyncInterval) clearInterval(autoSyncInterval);
-
   dbReady = false;
   clearDbConfig();
   clearWebhookConfig();
-  clearSelectedTables();
 
   return { success: true };
 });
@@ -1180,7 +1177,7 @@ ipcMain.handle('reporting-save-schedule', async (_, scheduleConfig) => {
         spreadsheetId: scheduleConfig.spreadsheetId
       });
       
-      console.log(`âœ… Successfully verified access to sheet: ${response.data.properties.title}`);
+      console.log(`✅ Successfully verified access to sheet: ${response.data.properties.title}`);
       
       // Check if RAW tab exists
       const sheetNames = response.data.sheets.map(s => s.properties.title);
@@ -1191,7 +1188,7 @@ ipcMain.handle('reporting-save-schedule', async (_, scheduleConfig) => {
         };
       }
       
-      console.log('âœ… RAW tab found');
+      console.log('✅ RAW tab found');
       
     } catch (err) {
       return {
@@ -1781,6 +1778,10 @@ ipcMain.handle('phase2-get-config', async () => {
     testMaxTables: 0,
     openaiApiKey: stored.openaiApiKey || '',
     openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano',
+    phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
+      stored.phase74TitleRulesPrompt,
+      process.env.PHASE74_TITLE_RULES_PROMPT
+    ),
     openaiBaseUrl: stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '',
     phase4BClickupOpenStatus:
       stored.phase4BClickupOpenStatus || process.env.PHASE4B_CLICKUP_OPEN_STATUS || 'To Do',
@@ -1844,7 +1845,6 @@ ipcMain.handle('phase2-get-config', async () => {
     phase5SheetsLogSpreadsheetId: String(stored.phase5SheetsLogSpreadsheetId || '').trim(),
     phase5SheetsLogTabName: String(stored.phase5SheetsLogTabName || 'Log').trim(),
     phase5SheetsLogAuthContext: String(stored.phase5SheetsLogAuthContext || 'inventory').trim(),
-    phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : [],
     phase5LiveCompareEnabled:
       String(stored.phase5LiveCompareEnabled ?? 'false').trim().toLowerCase() === 'true',
     phase5LiveCompareApiUrl: String(stored.phase5LiveCompareApiUrl || '').trim(),
@@ -1886,7 +1886,7 @@ ipcMain.handle('phase2-save-config', async (_, configPayload = {}) => {
   const existing = getInventoryConfig('phase2Config') || {};
   const merged = normalizeAndAttachEbayCredentials(existing, configPayload);
 
-  saveInventoryConfig('phase2Config', merged);
+  saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache(merged));
   return { success: true, message: 'Phase 2 configuration saved.' };
 });
 
@@ -2093,7 +2093,7 @@ ipcMain.handle('phase2-validate-airtable-config', async (_, payload = {}) => {
 ipcMain.handle('phase2-run', async (event, options = {}) => {
   try {
     const stored = getInventoryConfig('phase2Config') || {};
-    const runOptions = {
+    const runOptionsBase = {
       ...stored,
       ...options
     };
@@ -2345,7 +2345,7 @@ ipcMain.handle('phase4blite:run', async (event, options = {}) => {
           ? stored.phase4BLiteDryRun
           : true;
 
-    const runOptions = {
+    const runOptionsBase = {
       ...stored,
       ...options,
       dryRun,
@@ -2382,6 +2382,7 @@ ipcMain.handle('phase4blite:run', async (event, options = {}) => {
           'To Do'
       ).trim()
     };
+    const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase4blite:run');
 
     const summary = await runPhase4BLite(runOptions, progress => {
       event.sender.send('phase4blite:progress', progress);
@@ -2550,7 +2551,7 @@ ipcMain.handle('phase4d:run', async (event, options = {}) => {
         : typeof stored.phase4DDryRun === 'boolean'
           ? stored.phase4DDryRun
           : true;
-    const runOptions = {
+    const runOptionsBase = {
       ...stored,
       ...options,
       dryRun,
@@ -2579,6 +2580,7 @@ ipcMain.handle('phase4d:run', async (event, options = {}) => {
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
     };
 
+    const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase4d:run');
     event.sender.send('phase4d:progress', {
       stage: 'phase4d_load_rules',
       percent: 1,
@@ -2761,7 +2763,7 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
           : typeof stored.phase4BLiteDryRun === 'boolean'
             ? stored.phase4BLiteDryRun
             : true;
-      const bliteOptions = {
+      const bliteOptionsBase = {
         ...stored,
         ...options,
         dryRun: bliteDryRun,
@@ -2799,6 +2801,7 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
         phase4SharedMasterRows: sharedMasterContext?.masterRows,
         phase4SharedMasterByIpn: sharedMasterContext?.masterByIpn
       };
+      const bliteOptions = await attachPhase5PublishedState(bliteOptionsBase, 'phase4pipeline:4b');
       const phase4BSummary = await runPhase4BLite(bliteOptions, progress => {
         event.sender.send('phase4pipeline:progress', {
           ...progress,
@@ -2868,7 +2871,7 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
           : typeof stored.phase4DDryRun === 'boolean'
             ? stored.phase4DDryRun
             : true;
-      const dOptions = {
+      const dOptionsBase = {
         ...stored,
         ...options,
         dryRun: dDryRun,
@@ -2896,6 +2899,7 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
         phase4SharedMasterRows: sharedMasterContext?.masterRows,
         phase4SharedMasterByIpn: sharedMasterContext?.masterByIpn
       };
+      const dOptions = await attachPhase5PublishedState(dOptionsBase, 'phase4pipeline:4d');
       const phase4DSummary = await runPhase4DListing(dOptions, progress => {
         event.sender.send('phase4pipeline:progress', {
           ...progress,
@@ -3109,6 +3113,10 @@ ipcMain.handle('phase74:get-config', async () => {
     promptCacheKey: String(
       stored.phase74PromptCacheKey || process.env.PHASE74_PROMPT_CACHE_KEY || process.env.OPENAI_PROMPT_CACHE_KEY || 'phase74_title_description_v1'
     ).trim(),
+    titleRulesPrompt: resolvePhase74TitleRulesPrompt(
+      stored.phase74TitleRulesPrompt,
+      process.env.PHASE74_TITLE_RULES_PROMPT
+    ),
     testIpns: String(stored.phase74TestIpns || process.env.PHASE74_TEST_IPNS || '').trim(),
     maxListings: Number(stored.phase74MaxListings || process.env.PHASE74_MAX_LISTINGS || 0) || 0,
     sampleLimit: Number(stored.phase74SampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20
@@ -3118,7 +3126,7 @@ ipcMain.handle('phase74:get-config', async () => {
 ipcMain.handle('phase74:run', async (event, options = {}) => {
   try {
     const stored = getInventoryConfig('phase2Config') || {};
-    const runOptions = {
+    const runOptionsBase = {
       ...stored,
       ...options,
       phase74ListingsTable: resolveListingsTableName(
@@ -3134,6 +3142,11 @@ ipcMain.handle('phase74:run', async (event, options = {}) => {
       ).trim(),
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
       openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+      phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
+        options.phase74TitleRulesPrompt,
+        stored.phase74TitleRulesPrompt,
+        process.env.PHASE74_TITLE_RULES_PROMPT
+      ),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase74PromptCacheEnabled:
         String(options.phase74PromptCacheEnabled ?? stored.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true')
@@ -3154,6 +3167,7 @@ ipcMain.handle('phase74:run', async (event, options = {}) => {
       ) || 0,
       sampleLimit: Number(options.sampleLimit || stored.phase74SampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20
     };
+    const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase74:run');
 
     event.sender.send('phase74:progress', {
       stage: 'phase74_prepare',
@@ -3250,7 +3264,6 @@ ipcMain.handle('phase5:get-config', async () => {
     phase5LiveCompareApiUrl: String(stored.phase5LiveCompareApiUrl || '').trim(),
     phase5LiveCompareApiKey: String(stored.phase5LiveCompareApiKey || '').trim(),
     phase5TestBatchRecordIds: String(stored.phase5TestBatchRecordIds || '').trim(),
-    phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : [],
     listingsTableName: String(
       stored.phase5ListingsTable || stored.ebaySandboxTableName || 'eBay Listings (API)'
     ).trim(),
@@ -3471,7 +3484,7 @@ ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
       throw new Error('Phase 5 Option B is scheduled auto-push. Use Start Auto-Push or Run Auto-Push Now.');
     }
     stopPhase5AutoPushSchedule();
-    const runOptions = {
+    const runOptionsBase = {
       ...stored,
       ...options,
       dryRun: false,
@@ -3491,10 +3504,9 @@ ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
       phase5EbayClientSecret: String(
         options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
       ).trim(),
-      phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
-      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : [],
-      phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : []
+      phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim()
     };
+    const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase5:publishApproved');
 
     event.sender.send('phase5:progress', {
       stage: 'phase5_load_schema',
@@ -3521,19 +3533,9 @@ ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
       phase5EbayClientId: runOptions.phase5EbayClientId,
       phase5EbayDevId: runOptions.phase5EbayDevId,
       phase5EbayClientSecret: runOptions.phase5EbayClientSecret,
-      phase5EbayRuName: runOptions.phase5EbayRuName,
-      phase5PublishedIdentities: Array.isArray(summary?.phase5PublishedIdentities)
-        ? summary.phase5PublishedIdentities
-        : Array.isArray(stored.phase5PublishedIdentities)
-          ? stored.phase5PublishedIdentities
-          : [],
-      phase5PublishedPayloadHashes: Array.isArray(summary?.phase5PublishedPayloadHashes)
-        ? summary.phase5PublishedPayloadHashes
-        : Array.isArray(stored.phase5PublishedPayloadHashes)
-          ? stored.phase5PublishedPayloadHashes
-          : []
+      phase5EbayRuName: runOptions.phase5EbayRuName
     };
-    saveInventoryConfig('phase2Config', merged);
+    saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache(merged));
 
     return {
       success: true,
@@ -3562,7 +3564,7 @@ ipcMain.handle('phase5:dryRunPublishApproved', async (event, options = {}) => {
       throw new Error('Phase 5 Option B is scheduled auto-push. Use Run Auto-Push Now for deterministic eligibility checks.');
     }
     stopPhase5AutoPushSchedule();
-    const runOptions = {
+    const runOptionsBase = {
       ...stored,
       ...options,
       dryRun: true,
@@ -3582,10 +3584,9 @@ ipcMain.handle('phase5:dryRunPublishApproved', async (event, options = {}) => {
       phase5EbayClientSecret: String(
         options.phase5EbayClientSecret || stored.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || ''
       ).trim(),
-      phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
-      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : [],
-      phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : []
+      phase5EbayRuName: String(options.phase5EbayRuName || stored.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim()
     };
+    const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase5:dryRunPublishApproved');
 
     event.sender.send('phase5:progress', {
       stage: 'phase5_load_schema',
@@ -3620,7 +3621,7 @@ ipcMain.handle('phase5:dryRunPublishApproved', async (event, options = {}) => {
 ipcMain.handle('phase5:startAutoPush', async (event, options = {}) => {
   try {
     const stored = getInventoryConfig('phase2Config') || {};
-    const runOptions = {
+    const runOptionsBase = {
       ...stored,
       ...options,
       dryRun: false,
@@ -3649,10 +3650,9 @@ ipcMain.handle('phase5:startAutoPush', async (event, options = {}) => {
       phase5ApprovalFieldName: String(options.phase5ApprovalFieldName || stored.phase5ApprovalFieldName || '').trim(),
       phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
       phase5GroupValue: String(options.phase5GroupValue || stored.phase5GroupValue || '').trim(),
-      phase5SchemaCsvPath: String(options.phase5SchemaCsvPath || stored.phase5SchemaCsvPath || '').trim(),
-      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : [],
-      phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : []
+      phase5SchemaCsvPath: String(options.phase5SchemaCsvPath || stored.phase5SchemaCsvPath || '').trim()
     };
+    const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase5:startAutoPush');
 
     const execute = async ({ trigger }) => {
       try {
@@ -3665,7 +3665,8 @@ ipcMain.handle('phase5:startAutoPush', async (event, options = {}) => {
           });
         }
       } catch (_) {}
-      const summary = await runPhase5PublishApproved(runOptions, progress => {
+      const runOptionsForTick = await attachPhase5PublishedState(runOptionsBase, 'phase5:startAutoPush:tick');
+      const summary = await runPhase5PublishApproved(runOptionsForTick, progress => {
         try {
           if (event?.sender && !event.sender.isDestroyed()) {
             event.sender.send('phase5:progress', progress);
@@ -3677,33 +3678,23 @@ ipcMain.handle('phase5:startAutoPush', async (event, options = {}) => {
         ...options,
         phase5Mode: 'B',
         phase5AutoPushEnabled: true,
-        phase5AutoPushCron: runOptions.phase5AutoPushCron,
-        phase5AutoPushTimezone: runOptions.phase5AutoPushTimezone,
-        phase5AutoPushEligibilityFieldName: runOptions.phase5AutoPushEligibilityFieldName,
-        phase5AutoPushEligibilityValues: runOptions.phase5AutoPushEligibilityValues,
-        phase5EbayEnvironment: runOptions.phase5EbayEnvironment,
-        phase5EbayClientId: runOptions.phase5EbayClientId,
-        phase5EbayDevId: runOptions.phase5EbayDevId,
-        phase5EbayClientSecret: runOptions.phase5EbayClientSecret,
-        phase5EbayRuName: runOptions.phase5EbayRuName,
-        phase5ListingsTable: runOptions.phase5ListingsTable,
-        phase5ApprovalFieldName: runOptions.phase5ApprovalFieldName,
-        phase5GroupFieldName: runOptions.phase5GroupFieldName,
-        phase5GroupValue: runOptions.phase5GroupValue,
-        phase5SchemaCsvPath: runOptions.phase5SchemaCsvPath,
-        phase5AutoPushActive: true,
-        phase5PublishedIdentities: Array.isArray(summary?.phase5PublishedIdentities)
-          ? summary.phase5PublishedIdentities
-          : Array.isArray(stored.phase5PublishedIdentities)
-            ? stored.phase5PublishedIdentities
-            : [],
-        phase5PublishedPayloadHashes: Array.isArray(summary?.phase5PublishedPayloadHashes)
-          ? summary.phase5PublishedPayloadHashes
-          : Array.isArray(stored.phase5PublishedPayloadHashes)
-            ? stored.phase5PublishedPayloadHashes
-            : []
+        phase5AutoPushCron: runOptionsBase.phase5AutoPushCron,
+        phase5AutoPushTimezone: runOptionsBase.phase5AutoPushTimezone,
+        phase5AutoPushEligibilityFieldName: runOptionsBase.phase5AutoPushEligibilityFieldName,
+        phase5AutoPushEligibilityValues: runOptionsBase.phase5AutoPushEligibilityValues,
+        phase5EbayEnvironment: runOptionsBase.phase5EbayEnvironment,
+        phase5EbayClientId: runOptionsBase.phase5EbayClientId,
+        phase5EbayDevId: runOptionsBase.phase5EbayDevId,
+        phase5EbayClientSecret: runOptionsBase.phase5EbayClientSecret,
+        phase5EbayRuName: runOptionsBase.phase5EbayRuName,
+        phase5ListingsTable: runOptionsBase.phase5ListingsTable,
+        phase5ApprovalFieldName: runOptionsBase.phase5ApprovalFieldName,
+        phase5GroupFieldName: runOptionsBase.phase5GroupFieldName,
+        phase5GroupValue: runOptionsBase.phase5GroupValue,
+        phase5SchemaCsvPath: runOptionsBase.phase5SchemaCsvPath,
+        phase5AutoPushActive: true
       };
-      saveInventoryConfig('phase2Config', merged);
+      saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache(merged));
       return { success: true, summary };
     };
 
@@ -3715,7 +3706,7 @@ ipcMain.handle('phase5:startAutoPush', async (event, options = {}) => {
       execute
     );
 
-    saveInventoryConfig('phase2Config', {
+    saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
       ...stored,
       ...options,
       phase5Mode: 'B',
@@ -3730,7 +3721,7 @@ ipcMain.handle('phase5:startAutoPush', async (event, options = {}) => {
       phase5EbayDevId: runOptions.phase5EbayDevId,
       phase5EbayClientSecret: runOptions.phase5EbayClientSecret,
       phase5EbayRuName: runOptions.phase5EbayRuName
-    });
+    }));
 
     return { success: true, status };
   } catch (error) {
@@ -3742,10 +3733,10 @@ ipcMain.handle('phase5:stopAutoPush', async () => {
   try {
     stopPhase5AutoPushSchedule();
     const stored = getInventoryConfig('phase2Config') || {};
-    saveInventoryConfig('phase2Config', {
+    saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
       ...stored,
       phase5AutoPushActive: false
-    });
+    }));
     return { success: true, status: getPhase5AutoPushScheduleStatus() };
   } catch (error) {
     return { success: false, message: formatDetailedErrorMessage(error) };
@@ -3782,7 +3773,7 @@ ipcMain.handle('phase5:testEbayCredentials', async (_, options = {}) => {
       });
       delete result.userAccessToken;
     }
-    saveInventoryConfig('phase2Config', toSave);
+    saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache(toSave));
     return {
       success: true,
       result
@@ -3798,7 +3789,7 @@ ipcMain.handle('phase5:testEbayCredentials', async (_, options = {}) => {
 ipcMain.handle('phase5:runAutoPushNow', async (event, options = {}) => {
   try {
     const stored = getInventoryConfig('phase2Config') || {};
-    const runOptions = {
+    const runOptionsBase = {
       ...stored,
       ...options,
       dryRun: false,
@@ -3825,16 +3816,15 @@ ipcMain.handle('phase5:runAutoPushNow', async (event, options = {}) => {
       phase5ApprovalFieldName: String(options.phase5ApprovalFieldName || stored.phase5ApprovalFieldName || '').trim(),
       phase5GroupFieldName: String(options.phase5GroupFieldName || stored.phase5GroupFieldName || '').trim(),
       phase5GroupValue: String(options.phase5GroupValue || stored.phase5GroupValue || '').trim(),
-      phase5SchemaCsvPath: String(options.phase5SchemaCsvPath || stored.phase5SchemaCsvPath || '').trim(),
-      phase5PublishedIdentities: Array.isArray(stored.phase5PublishedIdentities) ? stored.phase5PublishedIdentities : [],
-      phase5PublishedPayloadHashes: Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : []
+      phase5SchemaCsvPath: String(options.phase5SchemaCsvPath || stored.phase5SchemaCsvPath || '').trim()
     };
+    const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase5:runAutoPushNow');
 
     const result = await runPhase5AutoPushNow(async () => {
       const summary = await runPhase5PublishApproved(runOptions, progress => {
         event.sender.send('phase5:progress', progress);
       });
-      saveInventoryConfig('phase2Config', {
+      saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
         ...stored,
         ...options,
         phase5Mode: 'B',
@@ -3843,18 +3833,8 @@ ipcMain.handle('phase5:runAutoPushNow', async (event, options = {}) => {
         phase5EbayClientId: runOptions.phase5EbayClientId,
         phase5EbayDevId: runOptions.phase5EbayDevId,
         phase5EbayClientSecret: runOptions.phase5EbayClientSecret,
-        phase5EbayRuName: runOptions.phase5EbayRuName,
-        phase5PublishedIdentities: Array.isArray(summary?.phase5PublishedIdentities)
-          ? summary.phase5PublishedIdentities
-          : Array.isArray(stored.phase5PublishedIdentities)
-            ? stored.phase5PublishedIdentities
-            : [],
-        phase5PublishedPayloadHashes: Array.isArray(summary?.phase5PublishedPayloadHashes)
-          ? summary.phase5PublishedPayloadHashes
-          : Array.isArray(stored.phase5PublishedPayloadHashes)
-            ? stored.phase5PublishedPayloadHashes
-            : []
-      });
+        phase5EbayRuName: runOptions.phase5EbayRuName
+      }));
       return { success: true, summary };
     });
 
@@ -3956,7 +3936,7 @@ ipcMain.handle('phase4combined:run', async (event, options = {}) => {
       });
     });
 
-    const bliteRunOptions = {
+    const bliteRunOptionsBase = {
       ...stored,
       ...options,
       dryRun: bliteDryRun,
@@ -3992,8 +3972,9 @@ ipcMain.handle('phase4combined:run', async (event, options = {}) => {
           'To Do'
       ).trim()
     };
-    bliteRunOptions.phase4SharedMasterRows = sharedMasterContext?.masterRows;
-    bliteRunOptions.phase4SharedMasterByIpn = sharedMasterContext?.masterByIpn;
+    bliteRunOptionsBase.phase4SharedMasterRows = sharedMasterContext?.masterRows;
+    bliteRunOptionsBase.phase4SharedMasterByIpn = sharedMasterContext?.masterByIpn;
+    const bliteRunOptions = await attachPhase5PublishedState(bliteRunOptionsBase, 'phase4combined:4b');
 
     const phase4BSummary = await runPhase4BLite(bliteRunOptions, progress => {
       const innerPercent = Number(progress?.percent || 0);
@@ -4058,7 +4039,7 @@ ipcMain.handle('ebaymock:run', async (event, options = {}) => {
         : typeof stored.ebayMockDryRun === 'boolean'
           ? stored.ebayMockDryRun
           : true;
-    const runOptions = {
+    const runOptionsBase = {
       ...stored,
       ...options,
       dryRun,
@@ -4067,6 +4048,7 @@ ipcMain.handle('ebaymock:run', async (event, options = {}) => {
         options.ebayMockTableName || stored.ebayMockTableName || 'eBay Listings (API) (Mock)'
       ).trim()
     };
+    const runOptions = await attachPhase5PublishedState(runOptionsBase, 'ebaymock:run');
 
     const summary = await runEbayMockImport(runOptions, progress => {
       event.sender.send('ebaymock:progress', progress);
@@ -4129,7 +4111,7 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
         : typeof stored.ebaySandboxDryRun === 'boolean'
           ? stored.ebaySandboxDryRun
           : true;
-    const runOptions = {
+    const runOptionsBase = {
       ...stored,
       ...options,
       dryRun,
@@ -4149,6 +4131,7 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
           DEFAULT_EBAY_FETCH_PAGING_MODE
       )
     };
+    const runOptions = await attachPhase5PublishedState(runOptionsBase, 'ebaysandbox:run');
 
     const summary = await runEbaySandboxInventoryImport(runOptions, progress => {
       event.sender.send('ebaysandbox:progress', progress);
@@ -4304,7 +4287,7 @@ function createWindow() {
     webhook: !!webhook
   });
 
-  // ðŸš¦ STRICT ROUTING - Show page immediately
+  // 🚦 STRICT ROUTING - Show page immediately
   if (!dbConfig) {
     return loadSetup();
   }
@@ -4326,8 +4309,7 @@ function createWindow() {
         await initDb();
       }
       dbReady = true;
-      // startAutoSync(); // Removed: Only sync on manual button click
-      console.log('âœ… DB ready');
+      console.log('✅ DB ready');
       
       // Resume any active reporting schedules
       resumeSchedule();
@@ -4343,7 +4325,7 @@ function createWindow() {
           String(storedPhase2.phase5AutoPushEnabled ?? 'false').trim().toLowerCase() === 'true' &&
           String(storedPhase2.phase5AutoPushActive ?? 'false').trim().toLowerCase() === 'true';
         if (shouldResumePhase5AutoPush) {
-          const runOptions = {
+          const runOptionsBase = {
             ...storedPhase2,
             dryRun: false,
             phase5Mode: 'B',
@@ -4363,14 +4345,9 @@ function createWindow() {
             phase5EbayClientId: String(storedPhase2.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '').trim(),
             phase5EbayDevId: String(storedPhase2.phase5EbayDevId || process.env.EBAY_DEV_ID || '').trim(),
             phase5EbayClientSecret: String(storedPhase2.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '').trim(),
-            phase5EbayRuName: String(storedPhase2.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim(),
-            phase5PublishedIdentities: Array.isArray(storedPhase2.phase5PublishedIdentities)
-              ? storedPhase2.phase5PublishedIdentities
-              : [],
-            phase5PublishedPayloadHashes: Array.isArray(storedPhase2.phase5PublishedPayloadHashes)
-              ? storedPhase2.phase5PublishedPayloadHashes
-              : []
+            phase5EbayRuName: String(storedPhase2.phase5EbayRuName || process.env.EBAY_RUNAME || '').trim()
           };
+          const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase5:resumeAutoPush');
           startPhase5AutoPushSchedule(
             {
               cronExpression: String(storedPhase2.phase5AutoPushCron || '0 * * * *').trim(),
@@ -4383,22 +4360,12 @@ function createWindow() {
                 }
               });
               const fresh = getInventoryConfig('phase2Config') || {};
-              saveInventoryConfig('phase2Config', {
+              saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
                 ...fresh,
                 phase5Mode: 'B',
                 phase5AutoPushEnabled: true,
-                phase5AutoPushActive: true,
-                phase5PublishedIdentities: Array.isArray(summary?.phase5PublishedIdentities)
-                  ? summary.phase5PublishedIdentities
-                  : Array.isArray(fresh.phase5PublishedIdentities)
-                    ? fresh.phase5PublishedIdentities
-                    : [],
-                phase5PublishedPayloadHashes: Array.isArray(summary?.phase5PublishedPayloadHashes)
-                  ? summary.phase5PublishedPayloadHashes
-                  : Array.isArray(fresh.phase5PublishedPayloadHashes)
-                    ? fresh.phase5PublishedPayloadHashes
-                    : []
-              });
+                phase5AutoPushActive: true
+              }));
               return { success: true, summary };
             }
           );
@@ -4418,7 +4385,7 @@ function createWindow() {
       startPhase4WritebackPoller();
       console.log('Phase4 writeback poller started (1 min interval)');
     } catch (err) {
-      console.error('âŒ DB init failed:', err.message);
+      console.error('❌ DB init failed:', err.message);
       dbReady = false;
     }
   });

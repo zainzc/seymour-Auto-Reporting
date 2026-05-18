@@ -350,12 +350,16 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
     ...options
   };
   const stored = loadPhaseConfigFromStore();
+  const effective = {
+    ...stored,
+    ...args
+  };
 
   const csvPath = normalizeText(args.csvPath || path.resolve(process.cwd(), '..', 'Ebay Listing Example.csv'));
   const tableName = normalizeText(args.tableName || DEFAULT_TABLE_NAME);
   const dryRun = Boolean(args.dryRun);
-  const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
-  const airtableBaseId = normalizeText(process.env.AIRTABLE_BASE_ID || stored.airtableBaseId);
+  const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || effective.airtableToken);
+  const airtableBaseId = normalizeText(process.env.AIRTABLE_BASE_ID || effective.airtableBaseId);
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!airtableBaseId) throw new Error('Missing AIRTABLE_BASE_ID.');
@@ -423,7 +427,7 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
   );
   summary.tableCreated = Boolean(ensureResult.tableId);
   summary.fieldsCreated = Array.isArray(ensureResult.createdFields) ? ensureResult.createdFields.length : 0;
-  const payloadHashFieldName = normalizeText(stored.phase5PayloadHashFieldName || process.env.PHASE5_PAYLOAD_HASH_FIELD || 'Payload Hash');
+  const payloadHashFieldName = normalizeText(effective.phase5PayloadHashFieldName || process.env.PHASE5_PAYLOAD_HASH_FIELD || 'Payload Hash');
   const hasPayloadHashField = payloadHashFieldName && ensureResult?.existingFields?.has(payloadHashFieldName);
   const hasLegacyPrimaryField = ensureResult?.existingFields?.has(LEGACY_PRIMARY_KEY_FIELD);
 
@@ -431,36 +435,49 @@ async function runEbayMockImport(options = {}, progressCallback = () => {}) {
   const batch = [];
   const batchRowKeys = new Set();
   const existingPayloadHashByRecordKey = new Map();
-  const publishedIdentitySet = asIdentitySet(stored.phase5PublishedIdentities || []);
+  let publishedIdentityValues = Array.isArray(effective.phase5PublishedIdentities)
+    ? effective.phase5PublishedIdentities
+    : [];
+  let publishedPayloadHashValues = Array.isArray(effective.phase5PublishedPayloadHashes)
+    ? effective.phase5PublishedPayloadHashes
+    : [];
   const publishedPayloadHashSet = new Set(
-    (Array.isArray(stored.phase5PublishedPayloadHashes) ? stored.phase5PublishedPayloadHashes : [])
-      .map(value => normalizeText(value))
-      .filter(Boolean)
+    publishedPayloadHashValues.map(value => normalizeText(value)).filter(Boolean)
   );
-  const payloadHashFields = parseCsvList(stored.phase5PayloadHashFields || '');
+  const payloadHashFields = parseCsvList(effective.phase5PayloadHashFields || '');
   const liveCompareContext = {
     enabled:
-      String(stored.phase5LiveCompareEnabled ?? process.env.PHASE5_LIVE_COMPARE_ENABLED ?? 'false')
+      String(effective.phase5LiveCompareEnabled ?? process.env.PHASE5_LIVE_COMPARE_ENABLED ?? 'false')
         .trim()
         .toLowerCase() === 'true',
-    apiUrl: normalizeText(stored.phase5LiveCompareApiUrl || process.env.PHASE5_LIVE_COMPARE_API_URL || ''),
-    apiKey: normalizeText(stored.phase5LiveCompareApiKey || process.env.PHASE5_LIVE_COMPARE_API_KEY || ''),
+    apiUrl: normalizeText(effective.phase5LiveCompareApiUrl || process.env.PHASE5_LIVE_COMPARE_API_URL || ''),
+    apiKey: normalizeText(effective.phase5LiveCompareApiKey || process.env.PHASE5_LIVE_COMPARE_API_KEY || ''),
     cache: new Map(),
     client: axios.create({ timeout: 20000 })
   };
   let latestLoggedHashByItemId = new Map();
   try {
     const logService = new Phase5PublishLogService({
-      enabled: stored.phase5SheetsLogEnabled ?? 'false',
-      spreadsheetId: stored.phase5SheetsLogSpreadsheetId || '',
-      tabName: stored.phase5SheetsLogTabName || 'Log',
-      authContext: stored.phase5SheetsLogAuthContext || 'inventory'
+      enabled: effective.phase5SheetsLogEnabled ?? 'false',
+      spreadsheetId: effective.phase5SheetsLogSpreadsheetId || '',
+      tabName: effective.phase5SheetsLogTabName || 'Log',
+      authContext: effective.phase5SheetsLogAuthContext || 'inventory'
     });
     if (logService.isConfigured()) {
       latestLoggedHashByItemId = await logService.fetchLatestHashesByItemId();
+      if (publishedIdentityValues.length === 0 && publishedPayloadHashValues.length === 0) {
+        const state = await logService.fetchPublishedState();
+        publishedIdentityValues = Array.isArray(state?.identities) ? state.identities : [];
+        publishedPayloadHashValues = Array.isArray(state?.payloadHashes) ? state.payloadHashes : [];
+      }
     }
   } catch (_) {
     latestLoggedHashByItemId = new Map();
+  }
+  const publishedIdentitySet = asIdentitySet(publishedIdentityValues);
+  for (const hash of publishedPayloadHashValues) {
+    const normalized = normalizeText(hash);
+    if (normalized) publishedPayloadHashSet.add(normalized);
   }
   try {
     if (hasPayloadHashField) {

@@ -215,6 +215,13 @@ function setCSpecificMapValue(targetMap = new Map(), fieldName = '', fieldValue 
   return targetMap;
 }
 
+function clearCSpecificMapValue(targetMap = new Map(), fieldName = '') {
+  const key = normalizeCSpecificKey(fieldName);
+  if (!key) return targetMap;
+  targetMap.delete(key);
+  return targetMap;
+}
+
 function stringifyCSpecificMap(map = new Map()) {
   const out = {};
   for (const [, entry] of map.entries()) {
@@ -3533,18 +3540,23 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       if (ruleType === 'FSV') {
         summary.fsvFieldsEvaluated += 1;
         const sourceValue = resolveFsVMasterValue(fieldName, master?.fields || {});
-        const nextValue = sourceValue || 'Does Not Apply';
-        const canWrite =
-          !currentValue ||
+        const nextValue = sourceValue;
+        const shouldClearExistingDna =
+          !sourceValue &&
+          currentValue &&
           currentValue.toLowerCase() === 'does not apply';
+        const canWrite = sourceValue
+          ? (!currentValue || currentValue.toLowerCase() === 'does not apply')
+          : shouldClearExistingDna;
         if (!canWrite || currentValue === nextValue) continue;
         if (args.dryRun) continue;
         if (!args.dryRun) {
-          const nextCSpecificMap = setCSpecificMapValue(
-            cloneCSpecificMap(listingCSpecificMap),
-            fieldName,
-            nextValue
-          );
+          const nextCSpecificMap = cloneCSpecificMap(listingCSpecificMap);
+          if (nextValue) {
+            setCSpecificMapValue(nextCSpecificMap, fieldName, nextValue);
+          } else {
+            clearCSpecificMapValue(nextCSpecificMap, fieldName);
+          }
           const serializedSpecifics = stringifyCSpecificMap(nextCSpecificMap);
           const writeResult = await patchTableRecords(
             airtableService,
@@ -3563,7 +3575,6 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         }
         summary.fsvFieldsUpdated += 1;
         writesDone += 1;
-        if (nextValue === 'Does Not Apply') summary.fsvDNAWritten += 1;
         if (summary.sampleOutputs.length < args.sampleLimit) {
           summary.sampleOutputs.push(`[FsV] record='${recordKey}' ipn='${ipn}' field='${fieldName}' value='${nextValue}'`);
         }

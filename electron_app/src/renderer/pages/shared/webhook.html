@@ -182,12 +182,12 @@
     <div id="statusMsg" class="status"></div>
 
     <button id="webhookSubmitBtn" class="btn-primary" onclick="testAndSaveWebhook()">Test & Save Webhook</button>
-    <button class="btn-secondary" onclick="goBackToAutoSync()">Back to AutoSync</button>
+    <button class="btn-secondary" onclick="goBackToDashboard()">Back to Dashboard</button>
   </div>
 
   <script>
-    function goBackToAutoSync() {
-      window.location.href = '../seymour-autosync/index.html';
+    function goBackToDashboard() {
+      window.location.href = '../main-dashboard.html';
     }
 
     async function testAndSaveWebhook() {
@@ -241,7 +241,7 @@
           const res = await window.api.saveWebhook(url);
 
           if (res.success) {
-            window.location.replace('../seymour-autosync/index.html');
+            window.location.replace('../main-dashboard.html');
           } else {
             statusMsg.style.background = 'var(--error-bg)';
             statusMsg.style.color = 'var(--error-text)';

@@ -818,7 +818,7 @@
   }
 
   function goBack() {
-    window.location.href = '../seymour-autosync/index.html';
+    window.location.href = '../main-dashboard.html';
   }
 
   // OAuth2 Functions
@@ -950,22 +950,6 @@ let isDisconnecting = false;
   function goToMainDashboard() {
     window.location.href = '../main-dashboard.html';
   }
-
-  // Secret developer access to AutoSync dashboard
-  let clickCount = 0;
-  let clickTimer = null;
-  document.getElementById('app-title').addEventListener('click', () => {
-    clickCount++;
-    if (clickCount === 5) {
-      window.location.href = '../seymour-autosync/index.html';
-      clickCount = 0;
-    }
-    // Reset counter after 2 seconds of no clicks
-    clearTimeout(clickTimer);
-    clickTimer = setTimeout(() => {
-      clickCount = 0;
-    }, 2000);
-  });
 
 </script>
 

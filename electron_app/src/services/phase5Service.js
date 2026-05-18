@@ -24,10 +24,6 @@ function parseIdentitySet(values = []) {
   return new Set((Array.isArray(values) ? values : []).map(value => normalizeText(value)).filter(Boolean));
 }
 
-function parseHashSet(values = []) {
-  return new Set((Array.isArray(values) ? values : []).map(value => normalizeText(value)).filter(Boolean));
-}
-
 function normalizePhase5Mode(value) {
   const text = normalizeText(value).toLowerCase();
   if (
@@ -499,8 +495,6 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
   }
 
   const publishedIdentitySet = parseIdentitySet(options.phase5PublishedIdentities || []);
-  const newPublishedIdentitySet = parseIdentitySet(options.phase5PublishedIdentities || []);
-  const newPublishedHashSet = parseHashSet(options.phase5PublishedPayloadHashes || []);
   const publishRunId = normalizeText(options.phase5PublishRunId || new Date().toISOString().replace(/[^\d]/g, '').slice(0, 14));
 
   emitProgress(progressCallback, {
@@ -635,12 +629,6 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
           await airtableService.deleteRecord(schema.tableId, recordId);
           summary.removedFromQueue += 1;
 
-          if (identity) {
-            newPublishedIdentitySet.add(identity);
-          }
-          if (payloadHash) {
-            newPublishedHashSet.add(payloadHash);
-          }
         } catch (appendError) {
           summary.loggingPending += 1;
           const appendDetail =
@@ -691,9 +679,7 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
   }
 
   const result = {
-    ...summary,
-    phase5PublishedIdentities: Array.from(newPublishedIdentitySet),
-    phase5PublishedPayloadHashes: Array.from(newPublishedHashSet)
+    ...summary
   };
 
   emitProgress(progressCallback, {

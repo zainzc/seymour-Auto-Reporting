@@ -7,12 +7,6 @@ contextBridge.exposeInMainWorld('api', {
   saveWebhook: (url) => ipcRenderer.invoke('save-webhook', url),
   getWebhookConfig: () => ipcRenderer.invoke('get-webhook-config'),
 
-  getUsers: () => ipcRenderer.invoke('get-users'),
-  getTables: () => ipcRenderer.invoke('get-tables'),
-  syncUsers: () => ipcRenderer.invoke('sync-users'),
-  syncTables: (tableNames) => ipcRenderer.invoke('sync-tables', tableNames),
-  executeQuery: (query, limit) => ipcRenderer.invoke('execute-query', query, limit),
-
   resetConfig: () => ipcRenderer.invoke('reset-config')
 });
 

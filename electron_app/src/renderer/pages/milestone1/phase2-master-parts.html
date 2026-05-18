@@ -1012,6 +1012,25 @@
                   <label for="phase4-unified-openai-model">OpenAI Model</label>
                   <input id="phase4-unified-openai-model" type="text" value="gpt-5.4-mini">
                 </div>
+                <div class="form-group">
+                  <label for="phase4-unified-title-rules-prompt">Title Generation Prompt (Phase 7.4)</label>
+                  <textarea
+                    id="phase4-unified-title-rules-prompt"
+                    placeholder="Paste custom title rules prompt here. Leave blank to use default built-in rules."
+                    rows="7"
+                  ></textarea>
+                  <div class="hint">This prompt is editable from UI and used by Phase 7.4 title generation.</div>
+                  <div class="btn-group" style="margin-top:8px;">
+                    <button
+                      id="phase4-update-title-prompt-btn"
+                      class="btn btn-secondary"
+                      type="button"
+                      onclick="updatePhase74TitlePrompt()"
+                    >
+                      Update Prompt
+                    </button>
+                  </div>
+                </div>
               </div>
 
               <div class="phase4-card">
@@ -2697,6 +2716,7 @@
         'phase4-unified-rules-logic-sheet',
         'phase4-unified-openai-api-key',
         'phase4-unified-openai-model',
+        'phase4-unified-title-rules-prompt',
         'phase4-unified-clickup-list-name',
         'phase4-unified-clickup-list-id',
         'phase4-unified-clickup-open-status',
@@ -3263,6 +3283,8 @@
           Number(config.phase72MaxIpns || DEFAULT_PHASE72_MAX_IPNS) || DEFAULT_PHASE72_MAX_IPNS
         );
         document.getElementById('phase72-drive-folder-id').value = config.phase72DriveFolderId || '';
+        document.getElementById('phase4-unified-title-rules-prompt').value =
+          config.phase74TitleRulesPrompt || '';
         document.getElementById('phase74-listings-table').value =
           normalizeListingsTableName(config.phase74ListingsTable, DEFAULT_PHASE74_LISTINGS_TABLE);
         document.getElementById('phase74-test-ipns').value = config.phase74TestIpns || '';
@@ -3569,6 +3591,8 @@
               Number(phase74Config.maxListings || document.getElementById('phase74-max-listings').value || DEFAULT_PHASE74_MAX_LISTINGS) ||
                 DEFAULT_PHASE74_MAX_LISTINGS
             );
+            document.getElementById('phase4-unified-title-rules-prompt').value =
+              phase74Config.titleRulesPrompt || document.getElementById('phase4-unified-title-rules-prompt').value;
           }
         }
         if (window.ebayMockImportAPI && typeof window.ebayMockImportAPI.getConfig === 'function') {
@@ -3962,6 +3986,8 @@
         testMaxTables: 0,
         openaiApiKey: document.getElementById('openai-api-key').value.trim(),
         openaiModel: document.getElementById('openai-model').value.trim() || DEFAULT_OPENAI_MODEL,
+        phase74TitleRulesPrompt:
+          document.getElementById('phase4-unified-title-rules-prompt').value.trim(),
         phase4BClickupListName:
           document.getElementById('phase4b-clickup-list-name').value.trim(),
         phase4BClickupListId:
@@ -4251,6 +4277,30 @@
         setRunState('Error', `Failed to save settings: ${err.message}`);
         showStatus('run-status', 'error', `Failed to save settings: ${err.message}`);
         logLine(`Failed to save settings: ${err.message}`, 'error');
+      }
+    }
+
+    async function updatePhase74TitlePrompt() {
+      try {
+        const promptEl = document.getElementById('phase4-unified-title-rules-prompt');
+        const prompt = promptEl ? promptEl.value.trim() : '';
+        if (!prompt) {
+          showStatus('run-status', 'error', 'Title prompt cannot be empty.');
+          return;
+        }
+        const result = await window.phase2API.saveConfig({
+          phase74TitleRulesPrompt: prompt
+        });
+        if (!result?.success) {
+          throw new Error(result?.message || 'Failed to update title prompt.');
+        }
+        setRunState('Success', 'Title prompt updated.');
+        showStatus('run-status', 'success', 'Title generation prompt updated. Phase 7.4 will use this prompt.');
+        logLine('Phase 7.4 title generation prompt updated from UI.');
+      } catch (err) {
+        setRunState('Error', `Failed to update title prompt: ${err.message}`);
+        showStatus('run-status', 'error', `Failed to update title prompt: ${err.message}`);
+        logLine(`Failed to update title prompt: ${err.message}`, 'error');
       }
     }
 
@@ -4852,12 +4902,12 @@
         showStatus(
           'run-status',
           'success',
-          `Phase 7.4 completed. Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, ManualSkipped=${summary.skippedManualOverride || 0}, PublishedSkipped=${summary.skippedAlreadyPublished || 0}, WritesFailed=${summary.writeFailures || 0}.`
+          `Phase 7.4 completed. Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, AlreadyEnrichedSkipped=${summary.skippedAlreadyEnriched || 0}, ManualSkipped=${summary.skippedManualOverride || 0}, PublishedSkipped=${summary.skippedAlreadyPublished || 0}, WritesFailed=${summary.writeFailures || 0}.`
         );
         document.getElementById('phase74-status-text').textContent =
           `Phase 7.4 status: completed. Titles ${summary.titleGenerated || 0}, Descriptions ${summary.descriptionGenerated || 0}.`;
         logLine(
-          `Phase 7.4 completed. ListingsScanned=${summary.listingsScanned || 0}, Eligible=${summary.listingsEligible || 0}, PublishedSkipped=${summary.skippedAlreadyPublished || 0}, MasterMatched=${summary.masterMatched || 0}, MasterMissing=${summary.masterMissing || 0}, FieldsCreated=${summary.listingFieldsCreated || 0}, Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, ShortDesc=${summary.shortDescriptionWritten || 0}, ManualSkipped=${summary.skippedManualOverride || 0}, SkippedNoChange=${summary.skippedNoChange || 0}, AIFailures=${summary.aiFailures || 0}, WriteFailures=${summary.writeFailures || 0}, TestIpnsCount=${summary.testIpnsCount || 0}, MaxListings=${summary.maxListings || 0}`
+          `Phase 7.4 completed. ListingsScanned=${summary.listingsScanned || 0}, Eligible=${summary.listingsEligible || 0}, AlreadyEnrichedSkipped=${summary.skippedAlreadyEnriched || 0}, PublishedSkipped=${summary.skippedAlreadyPublished || 0}, MasterMatched=${summary.masterMatched || 0}, MasterMissing=${summary.masterMissing || 0}, FieldsCreated=${summary.listingFieldsCreated || 0}, Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, ShortDesc=${summary.shortDescriptionWritten || 0}, ManualSkipped=${summary.skippedManualOverride || 0}, SkippedNoChange=${summary.skippedNoChange || 0}, AIFailures=${summary.aiFailures || 0}, WriteFailures=${summary.writeFailures || 0}, TestIpnsCount=${summary.testIpnsCount || 0}, MaxListings=${summary.maxListings || 0}`
         );
         if (Array.isArray(summary.samples) && summary.samples.length > 0) {
           summary.samples.forEach(line => logLine(`Phase7.4: ${line}`));

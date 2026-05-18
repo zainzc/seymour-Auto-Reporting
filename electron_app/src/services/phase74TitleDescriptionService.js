@@ -203,6 +203,54 @@ function parseBoolean(value, defaultValue = false) {
   return defaultValue;
 }
 
+function normalizeTitleForKey(value) {
+  return normalizeText(value).replace(/\s+/g, ' ').toLowerCase();
+}
+
+function ensureSingleOemAtEnd(value) {
+  let title = normalizeText(value).replace(/\bOEM\b/gi, '').replace(/\s+/g, ' ').trim();
+  if (!title) return '';
+  title = title.replace(/[,\-:/|]+$/, '').trim();
+  return `${title} OEM`;
+}
+
+function enforceTitleLength(value, min = 65, max = 80) {
+  let title = ensureSingleOemAtEnd(value);
+  if (!title) return '';
+  if (title.length > max) {
+    const suffix = ' OEM';
+    const keep = Math.max(1, max - suffix.length);
+    const core = title.slice(0, keep).replace(/[,\-:/| ]+$/, '').trim();
+    title = `${core}${suffix}`;
+  }
+  if (title.length < min) {
+    const fillers = [' Assembly', ' Unit', ' Tested'];
+    for (const filler of fillers) {
+      const next = ensureSingleOemAtEnd(title.replace(/\s+OEM$/i, '') + filler);
+      if (next.length >= min && next.length <= max) {
+        title = next;
+        break;
+      }
+    }
+  }
+  return title;
+}
+
+function makeTitleUnique(candidate, usedTitleKeys = new Set(), min = 65, max = 80) {
+  const base = enforceTitleLength(candidate, min, max);
+  if (!base) return '';
+  const baseKey = normalizeTitleForKey(base);
+  if (!baseKey || !usedTitleKeys.has(baseKey)) return base;
+
+  const descriptors = [' Assembly', ' Unit', ' w/ Motor', ' Tested'];
+  for (const descriptor of descriptors) {
+    const variant = enforceTitleLength(base.replace(/\s+OEM$/i, '') + descriptor, min, max);
+    const key = normalizeTitleForKey(variant);
+    if (variant && key && !usedTitleKeys.has(key)) return variant;
+  }
+  return base;
+}
+
 function isManualOverrideForField(listingFields = {}, fieldName = '') {
   return isManualOverrideFromGovernance(listingFields, fieldName);
 }
@@ -243,6 +291,9 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   const masterTable = normalizeText(options.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || DEFAULT_MASTER_TABLE);
   const openaiApiKey = normalizeText(options.openaiApiKey || process.env.OPENAI_API_KEY || '');
   const openaiModel = normalizeText(options.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini');
+  const phase74TitleRulesPrompt = normalizeText(
+    options.phase74TitleRulesPrompt || process.env.PHASE74_TITLE_RULES_PROMPT || ''
+  );
   const openaiBaseUrl = normalizeText(options.openaiBaseUrl || process.env.OPENAI_BASE_URL || '');
   const promptCacheEnabled =
     normalizeText(options.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true').toLowerCase() !==
@@ -296,6 +347,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     titleGenerated: 0,
     descriptionGenerated: 0,
     shortDescriptionWritten: 0,
+    skippedAlreadyEnriched: 0,
     skippedManualOverride: 0,
     skippedNoChange: 0,
     aiFailures: 0,
@@ -363,12 +415,54 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   const listingRows = await fetchAllRecordsWithFallback(airtableService, listingsTable, Array.from(new Set(selectFields)));
   summary.listingsScanned = listingRows.length;
   const publishedIdentitySet = asIdentitySet(options.phase5PublishedIdentities || []);
+  const titleMinLength = 65;
+  const titleMaxLength = 80;
+  const usedTitleKeys = new Set();
+  const usedTitles = [];
 
-  const neededIpns = [];
   for (const row of listingRows) {
-    const ipn = normalizeIpn(row?.fields?.[LISTING_IPN_FIELD]);
+    const fields = row?.fields || {};
+    const existingOutputTitle = normalizeText(fields[LISTING_OUTPUT_TITLE_FIELD]);
+    if (existingOutputTitle) {
+      const key = normalizeTitleForKey(existingOutputTitle);
+      if (key) usedTitleKeys.add(key);
+      usedTitles.push(existingOutputTitle);
+      continue;
+    }
+    const existingLegacyTitle = normalizeText(fields[LISTING_LEGACY_TITLE_FIELD]);
+    if (existingLegacyTitle) {
+      const key = normalizeTitleForKey(existingLegacyTitle);
+      if (key) usedTitleKeys.add(key);
+      usedTitles.push(existingLegacyTitle);
+    }
+  }
+
+  const rowsForGeneration = [];
+  for (const row of listingRows) {
+    const fields = row?.fields || {};
+    const ipn = normalizeIpn(fields[LISTING_IPN_FIELD]);
     if (!ipn) continue;
     if (testIpnSet.size > 0 && !testIpnSet.has(ipn)) continue;
+    if (isPublishedIdentity(fields, publishedIdentitySet)) {
+      summary.skippedAlreadyPublished += 1;
+      continue;
+    }
+
+    const existingTitle = normalizeText(fields[LISTING_OUTPUT_TITLE_FIELD]);
+    const existingDescription = normalizeText(fields[LISTING_OUTPUT_DESCRIPTION_FIELD]);
+    if (existingTitle && existingDescription) {
+      summary.skippedAlreadyEnriched += 1;
+      continue;
+    }
+
+    rowsForGeneration.push(row);
+  }
+  summary.listingsEligible = rowsForGeneration.length;
+
+  const neededIpns = [];
+  for (const row of rowsForGeneration) {
+    const ipn = normalizeIpn(row?.fields?.[LISTING_IPN_FIELD]);
+    if (!ipn) continue;
     neededIpns.push(ipn);
   }
 
@@ -431,18 +525,10 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   let processedEligible = 0;
   let lastProgressAt = Date.now();
 
-  for (let i = 0; i < listingRows.length; i += 1) {
-    const row = listingRows[i];
+  for (let i = 0; i < rowsForGeneration.length; i += 1) {
+    const row = rowsForGeneration[i];
     const fields = row?.fields || {};
     const ipn = normalizeIpn(fields[LISTING_IPN_FIELD]);
-    if (!ipn) continue;
-    if (testIpnSet.size > 0 && !testIpnSet.has(ipn)) continue;
-    if (isPublishedIdentity(fields, publishedIdentitySet)) {
-      summary.skippedAlreadyPublished += 1;
-      continue;
-    }
-
-    summary.listingsEligible += 1;
     processedEligible += 1;
     if (maxListings > 0 && processedEligible > maxListings) break;
 
@@ -460,9 +546,9 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
 
     emitProgress(progressCallback, {
       stage: 'phase74_generate',
-      percent: Math.min(88, 20 + Math.floor(((i + 1) / Math.max(1, listingRows.length)) * 68)),
+      percent: Math.min(88, 20 + Math.floor(((i + 1) / Math.max(1, rowsForGeneration.length)) * 68)),
       counts: summary,
-      message: `Generating title/description for listing ${i + 1}/${listingRows.length} (IPN '${ipn}')...`
+      message: `Generating title/description for listing ${i + 1}/${rowsForGeneration.length} (IPN '${ipn}')...`
     });
 
     let generated;
@@ -475,9 +561,12 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         conditionNote: normalizeText(fields['Condition Note']),
         itemSpecifics,
         partFitment: normalizeText(master?.fields?.[MASTER_FITMENT_FIELD]),
+        currentLegacyTitle: normalizeText(getFieldValueByName(fields, LISTING_LEGACY_TITLE_FIELD)),
         currentTitle:
           normalizeText(getFieldValueByName(fields, LISTING_OUTPUT_TITLE_FIELD)) ||
-          normalizeText(getFieldValueByName(fields, LISTING_LEGACY_TITLE_FIELD))
+          normalizeText(getFieldValueByName(fields, LISTING_LEGACY_TITLE_FIELD)),
+        existingTitles: usedTitles.slice(-250),
+        phase74TitleRulesPrompt
       });
     } catch (error) {
       summary.aiFailures += 1;
@@ -487,7 +576,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       continue;
     }
 
-    const nextTitle = normalizeText(generated?.generatedTitle);
+    const aiTitle = normalizeText(generated?.generatedTitle);
+    const nextTitle = makeTitleUnique(aiTitle, usedTitleKeys, titleMinLength, titleMaxLength);
     const nextDescription = normalizeText(generated?.generatedDescription);
     const nextShortDescription = normalizeText(generated?.shortDescription);
 
@@ -512,6 +602,9 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     if (!titleManualOverride && nextTitle && nextTitle !== existingTitleNew) {
       writeFields[LISTING_OUTPUT_TITLE_FIELD] = nextTitle;
       summary.titleGenerated += 1;
+      const titleKey = normalizeTitleForKey(nextTitle);
+      if (titleKey) usedTitleKeys.add(titleKey);
+      usedTitles.push(nextTitle);
     } else if (titleManualOverride) {
       summary.skippedManualOverride += 1;
     }
@@ -548,16 +641,17 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     }
 
     const now = Date.now();
-    if (i === 0 || i + 1 === listingRows.length || now - lastProgressAt >= 10000) {
+    if (i === 0 || i + 1 === rowsForGeneration.length || now - lastProgressAt >= 10000) {
       lastProgressAt = now;
       emitProgress(progressCallback, {
         stage: 'phase74_generate',
-        percent: Math.min(92, 20 + Math.floor(((i + 1) / Math.max(1, listingRows.length)) * 72)),
+        percent: Math.min(92, 20 + Math.floor(((i + 1) / Math.max(1, rowsForGeneration.length)) * 72)),
         counts: summary,
         message:
-          `Phase 7.4 progress ${i + 1}/${listingRows.length}: eligible=${summary.listingsEligible}, ` +
+          `Phase 7.4 progress ${i + 1}/${rowsForGeneration.length}: eligible=${summary.listingsEligible}, ` +
           `matched=${summary.masterMatched}, titles=${summary.titleGenerated}, descriptions=${summary.descriptionGenerated}, ` +
-          `manualSkipped=${summary.skippedManualOverride}, publishedSkipped=${summary.skippedAlreadyPublished}, pendingWrites=${updates.length}`
+          `alreadyEnrichedSkipped=${summary.skippedAlreadyEnriched}, manualSkipped=${summary.skippedManualOverride}, ` +
+          `publishedSkipped=${summary.skippedAlreadyPublished}, pendingWrites=${updates.length}`
       });
     }
   }
@@ -604,7 +698,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     counts: summary,
     message:
       `Phase 7.4 completed. Titles=${summary.titleGenerated}, Descriptions=${summary.descriptionGenerated}, ` +
-      `ManualSkipped=${summary.skippedManualOverride}, PublishedSkipped=${summary.skippedAlreadyPublished}, ` +
+      `AlreadyEnrichedSkipped=${summary.skippedAlreadyEnriched}, ManualSkipped=${summary.skippedManualOverride}, ` +
+      `PublishedSkipped=${summary.skippedAlreadyPublished}, ` +
       `WritesAttempted=${summary.writesAttempted}, WritesSucceeded=${summary.writesSucceeded}, WritesFailed=${summary.writeFailures}.`
   });
 

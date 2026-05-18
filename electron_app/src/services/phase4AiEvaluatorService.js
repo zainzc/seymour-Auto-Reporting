@@ -51,6 +51,18 @@ function parseIpnSet(value) {
   );
 }
 
+function normalizeTextArray(values = [], maxItems = 500) {
+  if (!Array.isArray(values)) return [];
+  const out = [];
+  for (const value of values) {
+    const text = normalizeText(value);
+    if (!text) continue;
+    out.push(text);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
 class Phase4AiEvaluatorService {
   static sharedFieldResolutionCache = new Map();
 
@@ -1061,6 +1073,9 @@ class Phase4AiEvaluatorService {
   }
 
   async generateTitleAndDescription(payload = {}) {
+    const customTitlePrompt = normalizeText(
+      payload.phase74TitleRulesPrompt || payload.customTitlePrompt || process.env.PHASE74_TITLE_RULES_PROMPT || ''
+    );
     const promptInput = {
       ipn: normalizeText(payload.ipn),
       categoryContext: payload.categoryContext || {},
@@ -1069,8 +1084,72 @@ class Phase4AiEvaluatorService {
       conditionNote: normalizeText(payload.conditionNote),
       itemSpecifics: payload.itemSpecifics || {},
       partFitment: normalizeText(payload.partFitment),
-      currentTitle: normalizeText(payload.currentTitle)
+      currentTitle: normalizeText(payload.currentTitle),
+      currentLegacyTitle: normalizeText(payload.currentLegacyTitle),
+      existingTitles: normalizeTextArray(payload.existingTitles),
+      requiredTitleLength: { min: 65, max: 80 }
     };
+
+    const defaultTitleRulesPrompt = [
+      'eBay Title Rules Prompt',
+      'Master Instructions - Follow Exactly',
+      '1) Required title structure:',
+      '[YEAR RANGE] [MAKE] [MODEL] [PART] [SIDE] [KEY DETAIL] OEM',
+      '2) Title constraints:',
+      '- Title length must be 65 to 80 characters.',
+      '- Title must end with OEM.',
+      '- OEM must appear once only, and only at the end.',
+      '- Keep title clean, natural, and human-readable.',
+      '- No keyword stuffing.',
+      '3) Never change or remove:',
+      '- Year must remain present after processing.',
+      '- Make must not be changed.',
+      '- Model must not be changed.',
+      '4) Year handling:',
+      '- Convert 2-digit ranges to 4-digit ranges (05-07 => 2005-2007, 13-19 => 2013-2019).',
+      '- If year is missing, do not guess. Leave unchanged or flag for review in reasoningSummary.',
+      '5) Title cleaning:',
+      '- Remove SKU/stock numbers (especially suffix-like IDs).',
+      '- Remove OEM Part text and Used Auto text.',
+      '- Remove extra uses of Part.',
+      '- Keep exactly one OEM at end.',
+      '6) Side standardization (mandatory):',
+      '- Driver side => Driver Left LH',
+      '- Passenger side => Passenger Right RH',
+      '7) SEO part name replacements (mandatory when applicable):',
+      '- Accelerator Parts => Gas Pedal or Accelerator Pedal',
+      '- Anti-Lock Brake Part => ABS Module or ABS Pump or Hydraulic Unit',
+      '- Inside Mirror => Rear View Mirror',
+      '- Throttle Valve Assembly => Throttle Body',
+      '- Fuel Vapor Canister => EVAP Charcoal Canister',
+      '- Audio Equipment Radio => Radio',
+      '- Chassis ECM (590) => choose best single fit: ECM or ECU or PCM',
+      '- Never stack duplicate synonyms.',
+      '8) Extra optimization:',
+      '- Optionally add Tested or OEM Tested when relevant.',
+      '- Keep wording readable and non-spammy.',
+      '9) No duplicate titles (hard rule):',
+      '- Title must be unique against provided existingTitles.',
+      '- If duplicate, apply controlled variation only:',
+      '  * use approved part wording swap (for example ABS Pump <-> ABS Module)',
+      '  * add/remove one small descriptor (for example w/ Motor, Assembly, Unit)',
+      '  * slightly reposition one descriptor',
+      '- Never alter year/make/model for uniqueness.',
+      '10) Length control:',
+      '- If too long, trim extra descriptors.',
+      '- If too short, add relevant detail like Tested, Assembly, or Unit.',
+      '11) Final checks before output:',
+      '- Year present or flagged.',
+      '- Make unchanged.',
+      '- Model unchanged.',
+      '- No SKU/junk text.',
+      '- Side format standardized if side exists.',
+      '- SEO replacements applied where relevant.',
+      '- Ends with OEM once only.',
+      '- 65-80 chars.',
+      '- Clean/readable.',
+      '- Unique against existingTitles.'
+    ].join('\n');
 
     const requestBody = {
       model: this.model,
@@ -1079,25 +1158,35 @@ class Phase4AiEvaluatorService {
       messages: [
         {
           role: 'system',
-          content:
-            'Return only JSON. Generate an optimized eBay title and buyer-visible description from structured listing data. Do not invent facts. Do not include HTML. Keep output concise and practical.'
+          content: [
+            'Return only valid JSON.',
+            'Generate an optimized eBay title and buyer-visible description from provided structured listing data.',
+            'Do not invent facts or compatibility claims.',
+            'Do not include HTML.',
+            'Description must still be generated even when some optional item specifics are blank.'
+          ].join(' ')
         },
         {
           role: 'user',
           content: JSON.stringify({
-            task: 'phase74_title_description_generation',
+            task: 'phase74_title_description_generation_v2',
+            titleRulesPrompt: customTitlePrompt || defaultTitleRulesPrompt,
             requirements: [
-              'Use provided listing item specifics and conditions/options.',
+              'Use Item Specifics - All C values and itemSpecifics as the primary title/description evidence.',
               'Use fitment only as supporting context when present.',
-              'Do not include unsupported claims.',
-              'Avoid noisy keyword stuffing.',
-              'Description should remain readable even when some optional specifics are missing.'
+              'Keep description practical and buyer-readable.',
+              'If a strict rule cannot be fully satisfied due to missing source data, explain briefly in reasoningSummary.'
             ],
             expectedOutput: {
               generatedTitle: 'string',
               generatedDescription: 'string',
               shortDescription: 'string_optional',
-              reasoningSummary: 'string_short'
+              reasoningSummary: 'string_short',
+              validation: {
+                titleLength: 'number',
+                uniqueAgainstProvidedTitles: 'boolean',
+                endsWithOemOnce: 'boolean'
+              }
             },
             input: promptInput
           })
@@ -1138,9 +1227,13 @@ class Phase4AiEvaluatorService {
       response?.data?.choices?.[0]?.message?.content || ''
     ).trim();
     const parsed = extractJsonObject(content) || {};
+    const generatedTitle = normalizeText(parsed.generatedTitle || parsed.title || parsed.optimizedTitle);
+    const generatedDescription = normalizeText(
+      parsed.generatedDescription || parsed.description || parsed.aiDescription
+    );
     return {
-      generatedTitle: normalizeText(parsed.generatedTitle),
-      generatedDescription: normalizeText(parsed.generatedDescription),
+      generatedTitle,
+      generatedDescription,
       shortDescription: normalizeText(parsed.shortDescription),
       reasoningSummary: normalizeText(parsed.reasoningSummary)
     };
