@@ -1780,6 +1780,24 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
       getReportingConfig('workOrdersSheetName') ||
       DEFAULT_WORK_ORDERS_SHEET_NAME
     ).trim() || DEFAULT_WORK_ORDERS_SHEET_NAME;
+    const driveFolderId = String(
+      options.googleDriveFolderId ||
+      getReportingConfig('workOrdersDriveFolderId') ||
+      process.env.GOOGLE_DRIVE_IMAGE_FOLDER_ID ||
+      ''
+    ).trim();
+    const driveServiceAccountKeyPath = String(
+      options.googleDriveServiceAccountKeyPath ||
+      getReportingConfig('workOrdersDriveServiceAccountKeyPath') ||
+      process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_PATH ||
+      ''
+    ).trim();
+    const imageUploadFallback = String(
+      options.imageUploadFallback ||
+      getReportingConfig('workOrdersImageUploadFallback') ||
+      process.env.IMAGE_UPLOAD_FALLBACK ||
+      'blank'
+    ).trim();
 
     if (!spreadsheetId) {
       return {
@@ -1792,11 +1810,17 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
     const summary = await runWorkOrdersSync({
       authClient,
       spreadsheetId,
-      sheetName
+      sheetName,
+      driveFolderId,
+      driveServiceAccountKeyPath,
+      imageUploadFallback
     });
 
     saveReportingConfig('workOrdersSpreadsheetId', spreadsheetId);
     saveReportingConfig('workOrdersSheetName', sheetName);
+    saveReportingConfig('workOrdersDriveFolderId', driveFolderId);
+    saveReportingConfig('workOrdersDriveServiceAccountKeyPath', driveServiceAccountKeyPath);
+    saveReportingConfig('workOrdersImageUploadFallback', imageUploadFallback);
 
     return {
       success: true,
@@ -1849,6 +1873,24 @@ ipcMain.handle('workorders-save-schedule', async (_, scheduleConfig = {}) => {
     const sheetName = String(
       scheduleConfig.sheetName || getReportingConfig('workOrdersSheetName') || DEFAULT_WORK_ORDERS_SHEET_NAME
     ).trim() || DEFAULT_WORK_ORDERS_SHEET_NAME;
+    const driveFolderId = String(
+      scheduleConfig.googleDriveFolderId ||
+      getReportingConfig('workOrdersDriveFolderId') ||
+      process.env.GOOGLE_DRIVE_IMAGE_FOLDER_ID ||
+      ''
+    ).trim();
+    const driveServiceAccountKeyPath = String(
+      scheduleConfig.googleDriveServiceAccountKeyPath ||
+      getReportingConfig('workOrdersDriveServiceAccountKeyPath') ||
+      process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_PATH ||
+      ''
+    ).trim();
+    const imageUploadFallback = String(
+      scheduleConfig.imageUploadFallback ||
+      getReportingConfig('workOrdersImageUploadFallback') ||
+      process.env.IMAGE_UPLOAD_FALLBACK ||
+      'blank'
+    ).trim();
 
     try {
       const { google } = require('googleapis');
@@ -1869,11 +1911,17 @@ ipcMain.handle('workorders-save-schedule', async (_, scheduleConfig = {}) => {
       frequency,
       endDate: scheduleConfig.endDate || null,
       spreadsheetId,
-      sheetName
+      sheetName,
+      driveFolderId,
+      driveServiceAccountKeyPath,
+      imageUploadFallback
     };
 
     saveReportingConfig('workOrdersSpreadsheetId', spreadsheetId);
     saveReportingConfig('workOrdersSheetName', sheetName);
+    saveReportingConfig('workOrdersDriveFolderId', driveFolderId);
+    saveReportingConfig('workOrdersDriveServiceAccountKeyPath', driveServiceAccountKeyPath);
+    saveReportingConfig('workOrdersImageUploadFallback', imageUploadFallback);
     startWorkOrdersSchedule(configToSave);
 
     return {
@@ -1909,6 +1957,10 @@ ipcMain.handle('workorders-get-schedule', async () => {
 
 ipcMain.handle('workorders-get-sheet-id', async () => {
   return getReportingConfig('workOrdersSpreadsheetId') || null;
+});
+
+ipcMain.handle('workorders-get-drive-folder-id', async () => {
+  return getReportingConfig('workOrdersDriveFolderId') || process.env.GOOGLE_DRIVE_IMAGE_FOLDER_ID || null;
 });
 
 ipcMain.handle('workorders-get-logs', async (_, limit) => {

@@ -106,7 +106,10 @@ async function executeWorkOrdersScheduledJob(config) {
     const summary = await runWorkOrdersSync({
       authClient,
       spreadsheetId: config.spreadsheetId,
-      sheetName: config.sheetName || DEFAULT_WORK_ORDERS_SHEET_NAME
+      sheetName: config.sheetName || DEFAULT_WORK_ORDERS_SHEET_NAME,
+      driveFolderId: config.driveFolderId || '',
+      driveServiceAccountKeyPath: config.driveServiceAccountKeyPath || '',
+      imageUploadFallback: config.imageUploadFallback || ''
     });
 
     const updatedSchedule = getReportingConfig('workOrdersActiveSchedule') || {};

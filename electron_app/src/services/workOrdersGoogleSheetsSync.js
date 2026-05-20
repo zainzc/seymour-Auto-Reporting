@@ -2,6 +2,8 @@ const { google } = require('googleapis');
 const { fetchWorkOrderRows } = require('./workOrdersPowerlinkService');
 const {
   convertPartPicturesToDriveLinks,
+  setDriveImageRuntimeConfig,
+  getDriveConfigStatus,
   resetRunStats,
   getRunStats
 } = require('./googleDriveImageService');
@@ -202,7 +204,14 @@ async function syncWorkOrdersRowsToSheet({ authClient, spreadsheetId, latestRows
   };
 }
 
-async function runWorkOrdersSync({ authClient, spreadsheetId, sheetName = DEFAULT_WORK_ORDERS_SHEET_NAME }) {
+async function runWorkOrdersSync({
+  authClient,
+  spreadsheetId,
+  sheetName = DEFAULT_WORK_ORDERS_SHEET_NAME,
+  driveFolderId = '',
+  driveServiceAccountKeyPath = '',
+  imageUploadFallback = ''
+}) {
   const summary = {
     fetched: 0,
     inserted: 0,
@@ -228,6 +237,17 @@ async function runWorkOrdersSync({ authClient, spreadsheetId, sheetName = DEFAUL
   }
 
   console.log('[WorkOrders] Image upload started');
+  setDriveImageRuntimeConfig({
+    driveFolderId,
+    serviceAccountKeyPath: driveServiceAccountKeyPath,
+    fallback: imageUploadFallback
+  });
+  const driveConfigStatus = getDriveConfigStatus();
+  if (!driveConfigStatus.ok) {
+    const warning = `Drive image upload disabled: ${driveConfigStatus.message}`;
+    summary.errors.push(warning);
+    console.warn(`[WorkOrders] ${warning}`);
+  }
   resetRunStats();
   for (const row of rows) {
     const source = row['Part Pictures'];

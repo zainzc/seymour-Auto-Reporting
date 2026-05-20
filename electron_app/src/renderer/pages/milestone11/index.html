@@ -546,6 +546,14 @@
         <div class="info-text">Hover over the ? icon above for detailed instructions.</div>
       </div>
 
+      <div class="form-group" id="drive-folder-group" style="display: none;">
+        <label>
+          Google Drive Folder ID <span style="color: var(--danger);">*</span>
+        </label>
+        <input type="text" id="google-drive-folder-id" placeholder="e.g., 1AbCdEfGhIJkLmNoPqRsTuVwXyZ" style="font-family: Consolas, monospace;" />
+        <div class="info-text">Required for Work Orders image upload to Drive.</div>
+      </div>
+
       <div class="form-group">
         <label>Destination</label>
         <select id="destination-label" disabled>
@@ -594,6 +602,7 @@
     applyDataTypeUI();
     await loadCurrentSchedule();
     await loadSavedSheetId();
+    await loadSavedDriveFolderId();
     setDefaultDates();
   });
 
@@ -620,6 +629,7 @@
     applyDataTypeUI();
     loadCurrentSchedule();
     loadSavedSheetId();
+    loadSavedDriveFolderId();
   }
 
   function getScheduleApi() {
@@ -635,16 +645,19 @@
     const exportBtn = document.getElementById('btn-export');
     const destinationSelect = document.getElementById('destination-label');
     const destinationInfo = document.getElementById('destination-info');
+    const driveFolderGroup = document.getElementById('drive-folder-group');
 
     if (currentDataType === 'workorders') {
       manualDateGroup.style.display = 'none';
       manualSalespersonGroup.style.display = 'none';
+      driveFolderGroup.style.display = 'block';
       exportBtn.textContent = 'Run Work Orders Sync Now';
       destinationSelect.innerHTML = '<option>Google Sheets - Work Orders Tab (Auto-managed)</option>';
       destinationInfo.textContent = 'Data syncs active Work Orders and Check Part Quotes into Work Orders tab.';
     } else {
       manualDateGroup.style.display = 'block';
       manualSalespersonGroup.style.display = 'block';
+      driveFolderGroup.style.display = 'none';
       exportBtn.textContent = 'Export Now to .xls';
       destinationSelect.innerHTML = '<option>Google Sheets - RAW Tab (Fixed)</option>';
       destinationInfo.textContent = 'Data will overwrite the RAW tab only.';
@@ -751,9 +764,14 @@
     const btn = document.getElementById('btn-export');
     const status = document.getElementById('manual-status');
     const spreadsheetId = document.getElementById('spreadsheet-id').value.trim();
+    const googleDriveFolderId = document.getElementById('google-drive-folder-id').value.trim();
 
     if (!spreadsheetId) {
       showStatus(status, 'error', 'Google Sheet ID is required for Work Orders sync');
+      return;
+    }
+    if (!googleDriveFolderId) {
+      showStatus(status, 'error', 'Google Drive Folder ID is required for Work Orders image upload');
       return;
     }
 
@@ -762,7 +780,7 @@
     showStatus(status, 'info', 'Running Work Orders sync...');
 
     try {
-      const result = await window.workOrdersAPI.runNow({ spreadsheetId });
+      const result = await window.workOrdersAPI.runNow({ spreadsheetId, googleDriveFolderId });
       if (result.success) {
         const summary = result.summary || {};
         showStatus(
@@ -788,9 +806,14 @@
     const endDate = document.getElementById('schedule-end-date').value;
     const weekStartDay = document.getElementById('week-start-day').value;
     const spreadsheetId = document.getElementById('spreadsheet-id').value.trim();
+    const googleDriveFolderId = document.getElementById('google-drive-folder-id').value.trim();
 
     if (!spreadsheetId) {
       showStatus(status, 'error', 'Google Sheet ID is required');
+      return;
+    }
+    if (currentDataType === 'workorders' && !googleDriveFolderId) {
+      showStatus(status, 'error', 'Google Drive Folder ID is required for Work Orders');
       return;
     }
 
@@ -805,6 +828,8 @@
       };
       if (currentDataType === 'invoices') {
         payload.weekStartDay = frequency === 'weekly' ? parseInt(weekStartDay) : null;
+      } else {
+        payload.googleDriveFolderId = googleDriveFolderId;
       }
 
       const result = await api.saveSchedule(payload);
@@ -896,6 +921,7 @@
           <strong>Frequency:</strong> ${freqText}<br>
           ${schedule.weekStartDay ? `<strong>Week Starts:</strong> ${getDayName(schedule.weekStartDay)}<br>` : ''}
           ${schedule.sheetName ? `<strong>Sheet Tab:</strong> ${schedule.sheetName}<br>` : ''}
+          ${schedule.driveFolderId ? `<strong>Drive Folder ID:</strong> ${schedule.driveFolderId.substring(0, 20)}...<br>` : ''}
           ${schedule.endDate ? `<strong>Ends:</strong> ${schedule.endDate}<br>` : ''}
           ${schedule.spreadsheetId ? `<strong>Sheet ID:</strong> ${schedule.spreadsheetId.substring(0, 20)}...<br>` : ''}
           <strong>Last Run:</strong> ${schedule.lastRun || 'Never'}
@@ -905,6 +931,9 @@
         // Pre-fill the spreadsheet ID field if available
         if (schedule.spreadsheetId) {
           document.getElementById('spreadsheet-id').value = schedule.spreadsheetId;
+        }
+        if (schedule.driveFolderId) {
+          document.getElementById('google-drive-folder-id').value = schedule.driveFolderId;
         }
       } else {
         document.getElementById('current-schedule').style.display = 'none';
@@ -926,6 +955,16 @@
       document.getElementById('spreadsheet-id').value = savedId || '';
     } catch (err) {
       console.error('Failed to load saved sheet ID:', err);
+    }
+  }
+
+  async function loadSavedDriveFolderId() {
+    if (currentDataType !== 'workorders') return;
+    try {
+      const savedId = await window.workOrdersAPI.getSavedDriveFolderId();
+      document.getElementById('google-drive-folder-id').value = savedId || '';
+    } catch (err) {
+      console.error('Failed to load saved drive folder ID:', err);
     }
   }
 

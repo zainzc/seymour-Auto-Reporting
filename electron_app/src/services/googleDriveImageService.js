@@ -2,16 +2,18 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 
-const DRIVE_FOLDER_ID = process.env.GOOGLE_DRIVE_IMAGE_FOLDER_ID || '';
-const SERVICE_ACCOUNT_KEY_PATH = process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_PATH || '';
 const CACHE_PATH = process.env.GOOGLE_DRIVE_IMAGE_CACHE_PATH || 'data/image-upload-cache.json';
-const FALLBACK = (process.env.IMAGE_UPLOAD_FALLBACK || 'blank').toLowerCase() === 'internal_path'
-  ? 'internal_path'
-  : 'blank';
-const DRIVE_SCOPE = process.env.GOOGLE_DRIVE_SCOPE || 'https://www.googleapis.com/auth/drive.file';
+const DEFAULT_DRIVE_SCOPE = process.env.GOOGLE_DRIVE_SCOPE || 'https://www.googleapis.com/auth/drive.file';
 
 let cache = null;
 let driveClientPromise = null;
+let loggedConfigErrorForRun = false;
+let runtimeConfig = {
+  driveFolderId: '',
+  serviceAccountKeyPath: '',
+  fallback: '',
+  scope: ''
+};
 let runStats = {
   uploaded: 0,
   cached: 0,
@@ -19,9 +21,52 @@ let runStats = {
   failed: 0
 };
 
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function resolveFallbackMode() {
+  const configured = normalizeText(runtimeConfig.fallback || process.env.IMAGE_UPLOAD_FALLBACK || '').toLowerCase();
+  return configured === 'internal_path' ? 'internal_path' : 'blank';
+}
+
+function resolveConfig() {
+  return {
+    driveFolderId: normalizeText(runtimeConfig.driveFolderId || process.env.GOOGLE_DRIVE_IMAGE_FOLDER_ID || ''),
+    serviceAccountKeyPath: normalizeText(
+      runtimeConfig.serviceAccountKeyPath || process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_PATH || ''
+    ),
+    scope: normalizeText(runtimeConfig.scope || DEFAULT_DRIVE_SCOPE || 'https://www.googleapis.com/auth/drive.file'),
+    fallback: resolveFallbackMode()
+  };
+}
+
+function getDriveConfigStatus() {
+  const cfg = resolveConfig();
+  if (!cfg.driveFolderId) {
+    return { ok: false, message: 'Missing GOOGLE_DRIVE_IMAGE_FOLDER_ID' };
+  }
+  if (!cfg.serviceAccountKeyPath) {
+    return { ok: false, message: 'Missing GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_PATH' };
+  }
+  return { ok: true, message: '', config: cfg };
+}
+
 function ensureConfig() {
-  if (!DRIVE_FOLDER_ID) throw new Error('Missing GOOGLE_DRIVE_IMAGE_FOLDER_ID');
-  if (!SERVICE_ACCOUNT_KEY_PATH) throw new Error('Missing GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_PATH');
+  const status = getDriveConfigStatus();
+  if (!status.ok) throw new Error(status.message);
+  return status.config;
+}
+
+function setDriveImageRuntimeConfig(nextConfig = {}) {
+  runtimeConfig = {
+    ...runtimeConfig,
+    driveFolderId: normalizeText(nextConfig.driveFolderId || runtimeConfig.driveFolderId || ''),
+    serviceAccountKeyPath: normalizeText(nextConfig.serviceAccountKeyPath || runtimeConfig.serviceAccountKeyPath || ''),
+    fallback: normalizeText(nextConfig.fallback || runtimeConfig.fallback || ''),
+    scope: normalizeText(nextConfig.scope || runtimeConfig.scope || '')
+  };
+  driveClientPromise = null;
 }
 
 function ensureCacheDir() {
@@ -70,13 +115,13 @@ function getMimeType(localPath) {
 }
 
 async function getDriveClient() {
-  ensureConfig();
+  const cfg = ensureConfig();
   if (driveClientPromise) return driveClientPromise;
 
   driveClientPromise = (async () => {
     const auth = new google.auth.GoogleAuth({
-      keyFile: SERVICE_ACCOUNT_KEY_PATH,
-      scopes: [DRIVE_SCOPE]
+      keyFile: cfg.serviceAccountKeyPath,
+      scopes: [cfg.scope]
     });
     const authClient = await auth.getClient();
     return google.drive({ version: 'v3', auth: authClient });
@@ -101,11 +146,12 @@ function getPublicDriveUrl(fileId) {
 }
 
 async function uploadFileToDrive(localPath) {
+  const cfg = ensureConfig();
   const drive = await getDriveClient();
   const created = await drive.files.create({
     requestBody: {
       name: path.basename(localPath),
-      parents: [DRIVE_FOLDER_ID]
+      parents: [cfg.driveFolderId]
     },
     media: {
       mimeType: getMimeType(localPath),
@@ -133,6 +179,7 @@ function resetRunStats() {
     missing: 0,
     failed: 0
   };
+  loggedConfigErrorForRun = false;
 }
 
 function getRunStats() {
@@ -153,10 +200,19 @@ async function uploadImageIfNeeded(localPath) {
   if (!fs.existsSync(normalizedPath)) {
     runStats.missing += 1;
     console.warn(`[WorkOrders][Drive] Image file not found/inaccessible: ${normalizedPath}`);
-    return FALLBACK === 'internal_path' ? normalizedPath : null;
+    return resolveFallbackMode() === 'internal_path' ? normalizedPath : null;
   }
 
   try {
+    const cfgStatus = getDriveConfigStatus();
+    if (!cfgStatus.ok) {
+      runStats.failed += 1;
+      if (!loggedConfigErrorForRun) {
+        loggedConfigErrorForRun = true;
+        console.error(`[WorkOrders][Drive] Upload skipped: ${cfgStatus.message}`);
+      }
+      return resolveFallbackMode() === 'internal_path' ? normalizedPath : null;
+    }
     console.log(`[WorkOrders][Drive] Uploading image: ${normalizedPath}`);
     const uploaded = await uploadFileToDrive(normalizedPath);
     cache[normalizedPath] = {
@@ -173,7 +229,7 @@ async function uploadImageIfNeeded(localPath) {
   } catch (error) {
     runStats.failed += 1;
     console.error(`[WorkOrders][Drive] Upload failed for ${normalizedPath}: ${error.message}`);
-    return FALLBACK === 'internal_path' ? normalizedPath : null;
+    return resolveFallbackMode() === 'internal_path' ? normalizedPath : null;
   }
 }
 
@@ -212,6 +268,8 @@ module.exports = {
   getPublicDriveUrl,
   loadCache,
   saveCache,
+  setDriveImageRuntimeConfig,
+  getDriveConfigStatus,
   resetRunStats,
   getRunStats
 };
