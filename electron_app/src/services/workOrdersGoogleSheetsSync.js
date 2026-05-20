@@ -208,6 +208,7 @@ async function runWorkOrdersSync({
   authClient,
   spreadsheetId,
   sheetName = DEFAULT_WORK_ORDERS_SHEET_NAME,
+  driveAuthClient = null,
   driveFolderId = '',
   driveServiceAccountKeyPath = '',
   imageUploadFallback = ''
@@ -238,6 +239,7 @@ async function runWorkOrdersSync({
 
   console.log('[WorkOrders] Image upload started');
   setDriveImageRuntimeConfig({
+    authClient: driveAuthClient || null,
     driveFolderId,
     serviceAccountKeyPath: driveServiceAccountKeyPath,
     fallback: imageUploadFallback

@@ -10,6 +10,7 @@ let driveClientPromise = null;
 let loggedConfigErrorForRun = false;
 let runtimeConfig = {
   driveFolderId: '',
+  authClient: null,
   serviceAccountKeyPath: '',
   fallback: '',
   scope: ''
@@ -33,6 +34,7 @@ function resolveFallbackMode() {
 function resolveConfig() {
   return {
     driveFolderId: normalizeText(runtimeConfig.driveFolderId || process.env.GOOGLE_DRIVE_IMAGE_FOLDER_ID || ''),
+    authClient: runtimeConfig.authClient || null,
     serviceAccountKeyPath: normalizeText(
       runtimeConfig.serviceAccountKeyPath || process.env.GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_PATH || ''
     ),
@@ -46,8 +48,8 @@ function getDriveConfigStatus() {
   if (!cfg.driveFolderId) {
     return { ok: false, message: 'Missing GOOGLE_DRIVE_IMAGE_FOLDER_ID' };
   }
-  if (!cfg.serviceAccountKeyPath) {
-    return { ok: false, message: 'Missing GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_PATH' };
+  if (!cfg.authClient && !cfg.serviceAccountKeyPath) {
+    return { ok: false, message: 'Missing Google Drive auth client for Work Orders image upload' };
   }
   return { ok: true, message: '', config: cfg };
 }
@@ -62,6 +64,7 @@ function setDriveImageRuntimeConfig(nextConfig = {}) {
   runtimeConfig = {
     ...runtimeConfig,
     driveFolderId: normalizeText(nextConfig.driveFolderId || runtimeConfig.driveFolderId || ''),
+    authClient: nextConfig.authClient || runtimeConfig.authClient || null,
     serviceAccountKeyPath: normalizeText(nextConfig.serviceAccountKeyPath || runtimeConfig.serviceAccountKeyPath || ''),
     fallback: normalizeText(nextConfig.fallback || runtimeConfig.fallback || ''),
     scope: normalizeText(nextConfig.scope || runtimeConfig.scope || '')
@@ -119,6 +122,9 @@ async function getDriveClient() {
   if (driveClientPromise) return driveClientPromise;
 
   driveClientPromise = (async () => {
+    if (cfg.authClient) {
+      return google.drive({ version: 'v3', auth: cfg.authClient });
+    }
     const auth = new google.auth.GoogleAuth({
       keyFile: cfg.serviceAccountKeyPath,
       scopes: [cfg.scope]

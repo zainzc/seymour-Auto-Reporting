@@ -1807,8 +1807,15 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
     }
 
     const authClient = await oauth2Service.getAuthenticatedClient('reporting');
+    let driveAuthClient = null;
+    try {
+      driveAuthClient = await oauth2Service.getAuthenticatedClient('inventory');
+    } catch (_) {
+      driveAuthClient = await oauth2Service.getAuthenticatedClient('reporting');
+    }
     const summary = await runWorkOrdersSync({
       authClient,
+      driveAuthClient,
       spreadsheetId,
       sheetName,
       driveFolderId,

@@ -103,8 +103,15 @@ async function executeWorkOrdersScheduledJob(config) {
 
   try {
     const authClient = await oauth2Service.getAuthenticatedClient('reporting');
+    let driveAuthClient = null;
+    try {
+      driveAuthClient = await oauth2Service.getAuthenticatedClient('inventory');
+    } catch (_) {
+      driveAuthClient = authClient;
+    }
     const summary = await runWorkOrdersSync({
       authClient,
+      driveAuthClient,
       spreadsheetId: config.spreadsheetId,
       sheetName: config.sheetName || DEFAULT_WORK_ORDERS_SHEET_NAME,
       driveFolderId: config.driveFolderId || '',
