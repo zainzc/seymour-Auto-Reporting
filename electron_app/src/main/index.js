@@ -1142,14 +1142,21 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
       };
       summary.batchCompletionGuard.passes.push(passSummary);
 
+      const fitmentImageParityAcceptable =
+        passSummary.before.missingFitment > 0 &&
+        passSummary.before.missingFitment === passSummary.before.missingFitmentImage &&
+        passSummary.before.missingTitleDescription === 0;
       const nothingMissing =
         passSummary.before.missingFitment === 0 &&
         passSummary.before.missingFitmentImage === 0 &&
         passSummary.before.missingTitleDescription === 0;
-      if (nothingMissing) {
+      if (nothingMissing || fitmentImageParityAcceptable) {
         summary.batchCompletionGuard.resolved = true;
+        summary.batchCompletionGuard.acceptedByFitmentImageParity = Boolean(fitmentImageParityAcceptable);
         emitInventoryAutoChainLog(
-          `Post-import automation: batch completeness guard resolved before retry pass ${pass}.`
+          fitmentImageParityAcceptable
+            ? `Post-import automation: batch completeness guard accepted by fitment/image parity before retry pass ${pass}.`
+            : `Post-import automation: batch completeness guard resolved before retry pass ${pass}.`
         );
         break;
       }
@@ -1270,13 +1277,28 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
       missingListingRowsIpns: finalGaps.missingListingRowsIpns.slice(0, 200),
       missingMasterRowsIpns: finalGaps.missingMasterRowsIpns.slice(0, 200)
     };
-    summary.batchCompletionGuard.resolved =
-      finalGaps.missingFitmentIpns.length === 0 &&
-      finalGaps.missingFitmentImageIpns.length === 0 &&
+    const fitmentImageParityAcceptable =
+      finalGaps.missingFitmentIpns.length > 0 &&
+      finalGaps.missingFitmentIpns.length === finalGaps.missingFitmentImageIpns.length &&
       finalGaps.missingTitleDescriptionIpns.length === 0;
+    summary.batchCompletionGuard.acceptedByFitmentImageParity = Boolean(fitmentImageParityAcceptable);
+    summary.batchCompletionGuard.resolved =
+      (
+        finalGaps.missingFitmentIpns.length === 0 &&
+        finalGaps.missingFitmentImageIpns.length === 0 &&
+        finalGaps.missingTitleDescriptionIpns.length === 0
+      ) ||
+      fitmentImageParityAcceptable;
 
     if (summary.batchCompletionGuard.resolved) {
-      emitInventoryAutoChainLog('Post-import automation: batch completeness guard resolved all missing outputs.');
+      if (fitmentImageParityAcceptable) {
+        emitInventoryAutoChainLog(
+          `Post-import automation: batch completeness guard accepted by fitment/image parity ` +
+            `(fitment=${finalGaps.missingFitmentIpns.length}, image=${finalGaps.missingFitmentImageIpns.length}, titleDesc=${finalGaps.missingTitleDescriptionIpns.length}).`
+        );
+      } else {
+        emitInventoryAutoChainLog('Post-import automation: batch completeness guard resolved all missing outputs.');
+      }
     } else {
       emitInventoryAutoChainLog(
         `Post-import automation: batch completeness guard finished with unresolved items ` +

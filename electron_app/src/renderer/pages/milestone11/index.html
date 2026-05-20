@@ -162,39 +162,6 @@
       cursor: not-allowed;
     }
 
-    .mode-selector {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-
-    .mode-btn {
-      padding: 11px 12px;
-      background: #edf4fd;
-      border: 1px solid #c7d8ed;
-      border-radius: 10px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 700;
-      color: #2a4c74;
-      transition: background 0.14s ease, border-color 0.14s ease;
-    }
-
-    .mode-btn.active {
-      background: #dcedff;
-      border-color: #8fb4dd;
-      color: #163f6d;
-    }
-
-    .mode-content {
-      display: none;
-    }
-
-    .mode-content.active {
-      display: block;
-    }
-
     .form-group {
       margin-bottom: 14px;
     }
@@ -412,7 +379,6 @@
     }
 
     @media (max-width: 700px) {
-      .mode-selector,
       .date-range,
       .schedule-controls {
         grid-template-columns: 1fr;
@@ -458,47 +424,8 @@
   </div>
 
   <div class="card" id="mode-card">
-    <h3>Execution Mode</h3>
-    <div class="mode-selector">
-      <button class="mode-btn active" id="btn-manual" onclick="selectMode('manual')">
-        Manual Export (Excel)
-      </button>
-      <button class="mode-btn" id="btn-scheduled" onclick="selectMode('scheduled')">
-        Scheduled Download (Google Sheets)
-      </button>
-    </div>
-
-    <div class="mode-content active" id="manual-mode">
-      <div class="form-group" id="manual-date-group">
-        <label>Date Range</label>
-        <div class="date-range">
-          <div>
-            <input type="date" id="manual-date-from" />
-            <div class="info-text">From Date</div>
-          </div>
-          <div>
-            <input type="date" id="manual-date-to" />
-            <div class="info-text">To Date</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="form-group" id="manual-salesperson-group">
-        <label>Salesperson</label>
-        <select id="manual-salesperson">
-          <option value="ALL">ALL</option>
-        </select>
-        <div class="info-text">Filter by salesperson (default: ALL)</div>
-      </div>
-
-      <button class="action-btn" id="btn-export" onclick="runManualAction()">
-        Export Now to .xls
-      </button>
-
-      <div class="status-box hidden" id="manual-status"></div>
-    </div>
-
-    <div class="mode-content" id="scheduled-mode">
+    <h3>Scheduled Download (Google Sheets)</h3>
+    <div id="scheduled-mode">
       <div class="form-group">
         <label>Schedule Frequency</label>
         <select id="schedule-frequency" onchange="updateScheduleInfo()">
@@ -580,11 +507,10 @@
   </div>
 </div>
 
-<script>
+  <script>
     console.log('Reporting script loaded');
     console.log('window.oauth2API:', window.oauth2API);
   let currentDataType = 'invoices';
-  let currentMode = 'manual';
   const statusHideTimers = new Map();
   const WORK_ORDERS_SCHEDULE_OPTIONS = [
     { value: 'every_1_minute', label: 'Every 1 Minute' },
@@ -598,29 +524,11 @@
 
   // Initialize
   window.addEventListener('load', async () => {
-    await loadSalespeople();
     applyDataTypeUI();
     await loadCurrentSchedule();
     await loadSavedSheetId();
     await loadSavedDriveFolderId();
-    setDefaultDates();
   });
-
-  function setDefaultDates() {
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    const lastMonth = new Date(today);
-    lastMonth.setMonth(lastMonth.getMonth() - 1);
-
-    document.getElementById('manual-date-from').value = formatDate(lastMonth);
-    document.getElementById('manual-date-to').value = formatDate(yesterday);
-  }
-
-  function formatDate(date) {
-    return date.toISOString().split('T')[0];
-  }
 
   function selectDataType(type) {
     if (type !== 'invoices' && type !== 'workorders') return;
@@ -640,25 +548,16 @@
     document.getElementById('btn-invoices').classList.toggle('active', currentDataType === 'invoices');
     document.getElementById('btn-workorders').classList.toggle('active', currentDataType === 'workorders');
 
-    const manualDateGroup = document.getElementById('manual-date-group');
-    const manualSalespersonGroup = document.getElementById('manual-salesperson-group');
-    const exportBtn = document.getElementById('btn-export');
     const destinationSelect = document.getElementById('destination-label');
     const destinationInfo = document.getElementById('destination-info');
     const driveFolderGroup = document.getElementById('drive-folder-group');
 
     if (currentDataType === 'workorders') {
-      manualDateGroup.style.display = 'none';
-      manualSalespersonGroup.style.display = 'none';
       driveFolderGroup.style.display = 'block';
-      exportBtn.textContent = 'Run Work Orders Sync Now';
       destinationSelect.innerHTML = '<option>Google Sheets - Work Orders Tab (Auto-managed)</option>';
       destinationInfo.textContent = 'Data syncs active Work Orders and Check Part Quotes into Work Orders tab.';
     } else {
-      manualDateGroup.style.display = 'block';
-      manualSalespersonGroup.style.display = 'block';
       driveFolderGroup.style.display = 'none';
-      exportBtn.textContent = 'Export Now to .xls';
       destinationSelect.innerHTML = '<option>Google Sheets - RAW Tab (Fixed)</option>';
       destinationInfo.textContent = 'Data will overwrite the RAW tab only.';
     }
@@ -683,120 +582,6 @@
     select.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join('');
     const stillValid = options.some(opt => opt.value === currentValue);
     select.value = stillValid ? currentValue : options[0].value;
-  }
-
-  function selectMode(mode) {
-    currentMode = mode;
-
-    // Update mode buttons
-    document.getElementById('btn-manual').classList.toggle('active', mode === 'manual');
-    document.getElementById('btn-scheduled').classList.toggle('active', mode === 'scheduled');
-
-    // Update mode content
-    document.getElementById('manual-mode').classList.toggle('active', mode === 'manual');
-    document.getElementById('scheduled-mode').classList.toggle('active', mode === 'scheduled');
-  }
-
-  async function loadSalespeople() {
-    if (currentDataType !== 'invoices') return;
-    try {
-      const salespeople = await window.reportingAPI.getSalespeople();
-      const select = document.getElementById('manual-salesperson');
-      
-      salespeople.forEach(sp => {
-        const option = document.createElement('option');
-        option.value = sp;
-        option.textContent = sp;
-        select.appendChild(option);
-      });
-    } catch (err) {
-      console.error('Failed to load salespeople:', err);
-    }
-  }
-
-  async function runManualAction() {
-    if (currentDataType === 'workorders') {
-      await runWorkOrdersManualSync();
-      return;
-    }
-    await exportToExcel();
-  }
-
-  async function exportToExcel() {
-    const btn = document.getElementById('btn-export');
-    const status = document.getElementById('manual-status');
-
-    const dateFrom = document.getElementById('manual-date-from').value;
-    const dateTo = document.getElementById('manual-date-to').value;
-    const salesperson = document.getElementById('manual-salesperson').value;
-
-    if (!dateFrom || !dateTo) {
-      showStatus(status, 'error', 'Please select date range');
-      return;
-    }
-
-    btn.disabled = true;
-    btn.innerHTML = '<span class="loading">Exporting</span>';
-    showStatus(status, 'info', 'Generating Excel file...');
-
-    try {
-      const result = await window.reportingAPI.exportToExcel({
-        dataType: currentDataType,
-        dateFrom,
-        dateTo,
-        salesperson
-      });
-
-      if (result.success) {
-        showStatus(status, 'success', result.message);
-      } else {
-        showStatus(status, 'error', result.message);
-      }
-    } catch (err) {
-      showStatus(status, 'error', `Export failed: ${err.message}`);
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = 'Export Now to .xls';
-    }
-  }
-
-  async function runWorkOrdersManualSync() {
-    const btn = document.getElementById('btn-export');
-    const status = document.getElementById('manual-status');
-    const spreadsheetId = document.getElementById('spreadsheet-id').value.trim();
-    const googleDriveFolderId = document.getElementById('google-drive-folder-id').value.trim();
-
-    if (!spreadsheetId) {
-      showStatus(status, 'error', 'Google Sheet ID is required for Work Orders sync');
-      return;
-    }
-    if (!googleDriveFolderId) {
-      showStatus(status, 'error', 'Google Drive Folder ID is required for Work Orders image upload');
-      return;
-    }
-
-    btn.disabled = true;
-    btn.innerHTML = '<span class="loading">Syncing</span>';
-    showStatus(status, 'info', 'Running Work Orders sync...');
-
-    try {
-      const result = await window.workOrdersAPI.runNow({ spreadsheetId, googleDriveFolderId });
-      if (result.success) {
-        const summary = result.summary || {};
-        showStatus(
-          status,
-          'success',
-          `Sync complete. Fetched=${summary.fetched || 0}, Inserted=${summary.inserted || 0}, Updated=${summary.updated || 0}, Removed=${summary.removed || 0}`
-        );
-      } else {
-        showStatus(status, 'error', result.message || 'Work Orders sync failed');
-      }
-    } catch (err) {
-      showStatus(status, 'error', `Sync failed: ${err.message}`);
-    } finally {
-      btn.disabled = false;
-      btn.innerHTML = 'Run Work Orders Sync Now';
-    }
   }
 
   async function saveSchedule() {
@@ -991,7 +776,6 @@
   }
 
   function clearAllStatuses() {
-    hideStatus(document.getElementById('manual-status'));
     hideStatus(document.getElementById('scheduled-status'));
   }
 
