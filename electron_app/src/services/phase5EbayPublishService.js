@@ -373,14 +373,23 @@ function buildAspectsFromListing(fields = {}) {
 }
 
 function buildPackageWeightAndSize(fields = {}) {
-  const length = parseNumberValue(firstNonEmptyField(fields, ['Package Length']));
-  const width = parseNumberValue(firstNonEmptyField(fields, ['Package Width']));
-  const height = parseNumberValue(firstNonEmptyField(fields, ['Package Height']));
+  const length = parseNumberValue(
+    firstNonEmptyField(fields, ['Package Length (ShipStation)', 'Package Length'])
+  );
+  const width = parseNumberValue(
+    firstNonEmptyField(fields, ['Package Width (ShipStation)', 'Package Width'])
+  );
+  const height = parseNumberValue(
+    firstNonEmptyField(fields, ['Package Height (ShipStation)', 'Package Height'])
+  );
   const dimensionUnit = normalizeDimensionUnit(
     firstNonEmptyField(fields, ['Package Dimension Unit', 'Dimensions Unit', 'Dimension Unit'])
   );
-  const weightValue = parseNumberValue(firstNonEmptyField(fields, ['Package Weight']));
-  const weightUnit = normalizeWeightUnit(firstNonEmptyField(fields, ['Package Weight Unit']));
+  const weightValue = parseNumberValue(
+    firstNonEmptyField(fields, ['Package Weight (ShipStation)', 'Package Weight'])
+  );
+  // Business rule: listing revise payload always uses pounds.
+  const weightUnit = 'POUND';
 
   const output = {};
   if (Number.isFinite(length) && Number.isFinite(width) && Number.isFinite(height)) {
@@ -465,6 +474,49 @@ function buildTradingPictureDetailsXml(imageUrls = []) {
   }
   body += '</PictureDetails>';
   return body;
+}
+
+function buildTradingShippingPackageDetailsXml(packageWeightAndSize = null) {
+  const dimensions = packageWeightAndSize?.dimensions || {};
+  const weight = packageWeightAndSize?.weight || {};
+  const length = parseNumberValue(dimensions.length);
+  const width = parseNumberValue(dimensions.width);
+  const height = parseNumberValue(dimensions.height);
+  const weightValue = parseNumberValue(weight.value);
+
+  const hasDims = Number.isFinite(length) && Number.isFinite(width) && Number.isFinite(height);
+  const hasWeight = Number.isFinite(weightValue);
+  if (!hasDims && !hasWeight) return '';
+
+  const measurementUnit = 'English';
+  const dimXmlUnit = 'inches';
+
+  let weightMajor = null;
+  let weightMinor = null;
+  let majorUnit = 'lbs';
+  let minorUnit = 'oz';
+  if (hasWeight) {
+    const totalLbs = weightValue;
+    weightMajor = Math.floor(totalLbs);
+    weightMinor = Math.round((totalLbs - weightMajor) * 16);
+    if (weightMinor >= 16) {
+      weightMajor += 1;
+      weightMinor = 0;
+    }
+  }
+
+  const lines = ['<ShippingPackageDetails>', `<MeasurementUnit>${measurementUnit}</MeasurementUnit>`];
+  if (hasDims) {
+    lines.push(`<PackageLength unit="${dimXmlUnit}">${Number(length.toFixed(3))}</PackageLength>`);
+    lines.push(`<PackageWidth unit="${dimXmlUnit}">${Number(width.toFixed(3))}</PackageWidth>`);
+    lines.push(`<PackageDepth unit="${dimXmlUnit}">${Number(height.toFixed(3))}</PackageDepth>`);
+  }
+  if (hasWeight) {
+    lines.push(`<WeightMajor unit="${majorUnit}">${weightMajor}</WeightMajor>`);
+    lines.push(`<WeightMinor unit="${minorUnit}">${weightMinor}</WeightMinor>`);
+  }
+  lines.push('</ShippingPackageDetails>');
+  return lines.join('');
 }
 
 function extractXmlTagValue(xml = '', tagName = '') {
@@ -667,12 +719,13 @@ class Phase5EbayPublishService {
     const description = normalizeText(prepared?.payload?.product?.description);
     const itemSpecificsXml = buildTradingItemSpecificsXml(prepared?.payload?.product?.aspects || {});
     const pictureDetailsXml = buildTradingPictureDetailsXml(prepared?.payload?.product?.imageUrls || []);
+    const shippingPackageDetailsXml = buildTradingShippingPackageDetailsXml(prepared?.payload?.packageWeightAndSize || null);
     if (!itemId) {
       throw new Error('Missing Item ID. Trading API revise requires Item ID for existing listing update.');
     }
-    if (!title && !description && !itemSpecificsXml && !pictureDetailsXml) {
+    if (!title && !description && !itemSpecificsXml && !pictureDetailsXml && !shippingPackageDetailsXml) {
       throw new Error(
-        `Missing publish content for SKU '${sku || 'unknown'}'. Populate title, description, item specifics, and/or images before publish.`
+        `Missing publish content for SKU '${sku || 'unknown'}'. Populate title, description, item specifics, images, and/or package details before publish.`
       );
     }
 
@@ -681,6 +734,7 @@ class Phase5EbayPublishService {
     if (description) itemLines.push(`<Description>${escapeXml(description)}</Description>`);
     if (itemSpecificsXml) itemLines.push(itemSpecificsXml);
     if (pictureDetailsXml) itemLines.push(pictureDetailsXml);
+    if (shippingPackageDetailsXml) itemLines.push(shippingPackageDetailsXml);
 
     return (
       `<?xml version="1.0" encoding="utf-8"?>` +
@@ -699,12 +753,13 @@ class Phase5EbayPublishService {
     const description = normalizeText(prepared?.payload?.product?.description);
     const itemSpecificsXml = buildTradingItemSpecificsXml(prepared?.payload?.product?.aspects || {});
     const pictureDetailsXml = buildTradingPictureDetailsXml(prepared?.payload?.product?.imageUrls || []);
+    const shippingPackageDetailsXml = buildTradingShippingPackageDetailsXml(prepared?.payload?.packageWeightAndSize || null);
     if (!itemId) {
       throw new Error('Missing Item ID. Trading API revise requires Item ID for existing listing update.');
     }
-    if (!title && !description && !itemSpecificsXml && !pictureDetailsXml) {
+    if (!title && !description && !itemSpecificsXml && !pictureDetailsXml && !shippingPackageDetailsXml) {
       throw new Error(
-        `Missing publish content for SKU '${sku || 'unknown'}'. Populate title, description, item specifics, and/or images before publish.`
+        `Missing publish content for SKU '${sku || 'unknown'}'. Populate title, description, item specifics, images, and/or package details before publish.`
       );
     }
 
@@ -713,6 +768,7 @@ class Phase5EbayPublishService {
     if (description) itemLines.push(`<Description>${escapeXml(description)}</Description>`);
     if (itemSpecificsXml) itemLines.push(itemSpecificsXml);
     if (pictureDetailsXml) itemLines.push(pictureDetailsXml);
+    if (shippingPackageDetailsXml) itemLines.push(shippingPackageDetailsXml);
 
     return (
       `<?xml version="1.0" encoding="utf-8"?>` +

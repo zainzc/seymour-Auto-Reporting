@@ -448,7 +448,7 @@
       <div class="data-type-btn disabled" id="btn-quotes">
         Quotes
       </div>
-      <div class="data-type-btn disabled" id="btn-workorders">
+      <div class="data-type-btn" id="btn-workorders" onclick="selectDataType('workorders')">
         Work Orders
       </div>
       <div class="data-type-btn disabled" id="btn-inventory">
@@ -469,7 +469,7 @@
     </div>
 
     <div class="mode-content active" id="manual-mode">
-      <div class="form-group">
+      <div class="form-group" id="manual-date-group">
         <label>Date Range</label>
         <div class="date-range">
           <div>
@@ -483,7 +483,7 @@
         </div>
       </div>
 
-      <div class="form-group">
+      <div class="form-group" id="manual-salesperson-group">
         <label>Salesperson</label>
         <select id="manual-salesperson">
           <option value="ALL">ALL</option>
@@ -491,7 +491,7 @@
         <div class="info-text">Filter by salesperson (default: ALL)</div>
       </div>
 
-      <button class="action-btn" id="btn-export" onclick="exportToExcel()">
+      <button class="action-btn" id="btn-export" onclick="runManualAction()">
         Export Now to .xls
       </button>
 
@@ -548,10 +548,10 @@
 
       <div class="form-group">
         <label>Destination</label>
-        <select disabled>
+        <select id="destination-label" disabled>
           <option>Google Sheets - RAW Tab (Fixed)</option>
         </select>
-        <div class="info-text">Data will overwrite the RAW tab only.</div>
+        <div class="info-text" id="destination-info">Data will overwrite the RAW tab only.</div>
       </div>
 
       <div class="schedule-controls">
@@ -577,10 +577,21 @@
     console.log('window.oauth2API:', window.oauth2API);
   let currentDataType = 'invoices';
   let currentMode = 'manual';
+  const statusHideTimers = new Map();
+  const WORK_ORDERS_SCHEDULE_OPTIONS = [
+    { value: 'every_1_minute', label: 'Every 1 Minute' },
+    { value: 'every_3_minutes', label: 'Every 3 Minutes' },
+    { value: 'every_5_minutes', label: 'Every 5 Minutes' }
+  ];
+  const INVOICE_SCHEDULE_OPTIONS = [
+    { value: 'nightly', label: 'Nightly (Previous Day)' },
+    { value: 'weekly', label: 'Weekly (Last Completed Week)' }
+  ];
 
   // Initialize
   window.addEventListener('load', async () => {
     await loadSalespeople();
+    applyDataTypeUI();
     await loadCurrentSchedule();
     await loadSavedSheetId();
     setDefaultDates();
@@ -603,8 +614,62 @@
   }
 
   function selectDataType(type) {
-    if (type !== 'invoices') return; // Only invoices enabled
+    if (type !== 'invoices' && type !== 'workorders') return;
     currentDataType = type;
+    clearAllStatuses();
+    applyDataTypeUI();
+    loadCurrentSchedule();
+    loadSavedSheetId();
+  }
+
+  function getScheduleApi() {
+    return currentDataType === 'workorders' ? window.workOrdersAPI : window.reportingAPI;
+  }
+
+  function applyDataTypeUI() {
+    document.getElementById('btn-invoices').classList.toggle('active', currentDataType === 'invoices');
+    document.getElementById('btn-workorders').classList.toggle('active', currentDataType === 'workorders');
+
+    const manualDateGroup = document.getElementById('manual-date-group');
+    const manualSalespersonGroup = document.getElementById('manual-salesperson-group');
+    const exportBtn = document.getElementById('btn-export');
+    const destinationSelect = document.getElementById('destination-label');
+    const destinationInfo = document.getElementById('destination-info');
+
+    if (currentDataType === 'workorders') {
+      manualDateGroup.style.display = 'none';
+      manualSalespersonGroup.style.display = 'none';
+      exportBtn.textContent = 'Run Work Orders Sync Now';
+      destinationSelect.innerHTML = '<option>Google Sheets - Work Orders Tab (Auto-managed)</option>';
+      destinationInfo.textContent = 'Data syncs active Work Orders and Check Part Quotes into Work Orders tab.';
+    } else {
+      manualDateGroup.style.display = 'block';
+      manualSalespersonGroup.style.display = 'block';
+      exportBtn.textContent = 'Export Now to .xls';
+      destinationSelect.innerHTML = '<option>Google Sheets - RAW Tab (Fixed)</option>';
+      destinationInfo.textContent = 'Data will overwrite the RAW tab only.';
+    }
+
+    rebuildScheduleFrequencyOptions();
+    updateScheduleInfo();
+    const scheduleTitle = document.querySelector('#current-schedule h4');
+    if (scheduleTitle) {
+      scheduleTitle.textContent = currentDataType === 'workorders'
+        ? 'Current Schedule (Work Orders)'
+        : 'Current Schedule (Invoices)';
+    }
+  }
+
+  function rebuildScheduleFrequencyOptions() {
+    const select = document.getElementById('schedule-frequency');
+    const currentValue = select.value;
+    const options = currentDataType === 'workorders'
+      ? WORK_ORDERS_SCHEDULE_OPTIONS
+      : INVOICE_SCHEDULE_OPTIONS;
+
+    select.innerHTML = options.map(opt => `<option value="${opt.value}">${opt.label}</option>`).join('');
+    const stillValid = options.some(opt => opt.value === currentValue);
+    select.value = stillValid ? currentValue : options[0].value;
   }
 
   function selectMode(mode) {
@@ -620,6 +685,7 @@
   }
 
   async function loadSalespeople() {
+    if (currentDataType !== 'invoices') return;
     try {
       const salespeople = await window.reportingAPI.getSalespeople();
       const select = document.getElementById('manual-salesperson');
@@ -633,6 +699,14 @@
     } catch (err) {
       console.error('Failed to load salespeople:', err);
     }
+  }
+
+  async function runManualAction() {
+    if (currentDataType === 'workorders') {
+      await runWorkOrdersManualSync();
+      return;
+    }
+    await exportToExcel();
   }
 
   async function exportToExcel() {
@@ -673,8 +747,43 @@
     }
   }
 
+  async function runWorkOrdersManualSync() {
+    const btn = document.getElementById('btn-export');
+    const status = document.getElementById('manual-status');
+    const spreadsheetId = document.getElementById('spreadsheet-id').value.trim();
+
+    if (!spreadsheetId) {
+      showStatus(status, 'error', 'Google Sheet ID is required for Work Orders sync');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="loading">Syncing</span>';
+    showStatus(status, 'info', 'Running Work Orders sync...');
+
+    try {
+      const result = await window.workOrdersAPI.runNow({ spreadsheetId });
+      if (result.success) {
+        const summary = result.summary || {};
+        showStatus(
+          status,
+          'success',
+          `Sync complete. Fetched=${summary.fetched || 0}, Inserted=${summary.inserted || 0}, Updated=${summary.updated || 0}, Removed=${summary.removed || 0}`
+        );
+      } else {
+        showStatus(status, 'error', result.message || 'Work Orders sync failed');
+      }
+    } catch (err) {
+      showStatus(status, 'error', `Sync failed: ${err.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = 'Run Work Orders Sync Now';
+    }
+  }
+
   async function saveSchedule() {
     const status = document.getElementById('scheduled-status');
+    const api = getScheduleApi();
     const frequency = document.getElementById('schedule-frequency').value;
     const endDate = document.getElementById('schedule-end-date').value;
     const weekStartDay = document.getElementById('week-start-day').value;
@@ -688,13 +797,17 @@
     showStatus(status, 'info', 'Saving schedule...');
 
     try {
-      const result = await window.reportingAPI.saveSchedule({
+      const payload = {
         dataType: currentDataType,
         frequency,
-        weekStartDay: frequency === 'weekly' ? parseInt(weekStartDay) : null,
         endDate: endDate || null,
         spreadsheetId
-      });
+      };
+      if (currentDataType === 'invoices') {
+        payload.weekStartDay = frequency === 'weekly' ? parseInt(weekStartDay) : null;
+      }
+
+      const result = await api.saveSchedule(payload);
 
       if (result.success) {
         showStatus(status, 'success', result.message);
@@ -709,13 +822,14 @@
 
   async function cancelSchedule() {
     const status = document.getElementById('scheduled-status');
+    const api = getScheduleApi();
     
     if (!confirm('Are you sure you want to cancel the active schedule?')) {
       return;
     }
 
     try {
-      const result = await window.reportingAPI.cancelSchedule();
+      const result = await api.cancelSchedule();
       
       if (result.success) {
         showStatus(status, 'success', result.message);
@@ -749,10 +863,11 @@
 
   async function testScheduleNow() {
     const status = document.getElementById('scheduled-status');
+    const api = getScheduleApi();
     showStatus(status, 'info', 'Testing schedule... this may take a moment');
 
     try {
-      const result = await window.reportingAPI.testSchedule();
+      const result = await api.testSchedule();
       
       if (result.success) {
         showStatus(status, 'success', result.message);
@@ -767,13 +882,20 @@
 
   async function loadCurrentSchedule() {
     try {
-      const schedule = await window.reportingAPI.getCurrentSchedule();
+      const schedule = await getScheduleApi().getCurrentSchedule();
       
       if (schedule && schedule.active) {
+        const frequencySelect = document.getElementById('schedule-frequency');
+        if ([...frequencySelect.options].some(opt => opt.value === schedule.frequency)) {
+          frequencySelect.value = schedule.frequency;
+        }
+        updateScheduleInfo();
         const details = document.getElementById('schedule-details');
+        const freqText = getFrequencyLabel(schedule.frequency);
         details.innerHTML = `
-          <strong>Frequency:</strong> ${schedule.frequency}<br>
+          <strong>Frequency:</strong> ${freqText}<br>
           ${schedule.weekStartDay ? `<strong>Week Starts:</strong> ${getDayName(schedule.weekStartDay)}<br>` : ''}
+          ${schedule.sheetName ? `<strong>Sheet Tab:</strong> ${schedule.sheetName}<br>` : ''}
           ${schedule.endDate ? `<strong>Ends:</strong> ${schedule.endDate}<br>` : ''}
           ${schedule.spreadsheetId ? `<strong>Sheet ID:</strong> ${schedule.spreadsheetId.substring(0, 20)}...<br>` : ''}
           <strong>Last Run:</strong> ${schedule.lastRun || 'Never'}
@@ -784,6 +906,8 @@
         if (schedule.spreadsheetId) {
           document.getElementById('spreadsheet-id').value = schedule.spreadsheetId;
         }
+      } else {
+        document.getElementById('current-schedule').style.display = 'none';
       }
     } catch (err) {
       console.error('Failed to load schedule:', err);
@@ -793,15 +917,13 @@
   function updateScheduleInfo() {
     const frequency = document.getElementById('schedule-frequency').value;
     const weekStartGroup = document.getElementById('week-start-group');
-    weekStartGroup.style.display = frequency === 'weekly' ? 'block' : 'none';
+    weekStartGroup.style.display = currentDataType === 'invoices' && frequency === 'weekly' ? 'block' : 'none';
   }
 
   async function loadSavedSheetId() {
     try {
-      const savedId = await window.reportingAPI.getSavedSheetId();
-      if (savedId) {
-        document.getElementById('spreadsheet-id').value = savedId;
-      }
+      const savedId = await getScheduleApi().getSavedSheetId();
+      document.getElementById('spreadsheet-id').value = savedId || '';
     } catch (err) {
       console.error('Failed to load saved sheet ID:', err);
     }
@@ -812,9 +934,45 @@
     return days[day];
   }
 
+  function getFrequencyLabel(value) {
+    const all = [...INVOICE_SCHEDULE_OPTIONS, ...WORK_ORDERS_SCHEDULE_OPTIONS];
+    const match = all.find(v => v.value === value);
+    return match ? match.label : value;
+  }
+
+  function hideStatus(element) {
+    if (!element) return;
+    const timer = statusHideTimers.get(element.id);
+    if (timer) {
+      clearTimeout(timer);
+      statusHideTimers.delete(element.id);
+    }
+    element.className = 'status-box hidden';
+    element.textContent = '';
+  }
+
+  function clearAllStatuses() {
+    hideStatus(document.getElementById('manual-status'));
+    hideStatus(document.getElementById('scheduled-status'));
+  }
+
   function showStatus(element, type, message) {
+    if (!element) return;
+    const existingTimer = statusHideTimers.get(element.id);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      statusHideTimers.delete(element.id);
+    }
     element.className = `status-box ${type}`;
     element.textContent = message;
+
+    if (type === 'success' || type === 'error') {
+      const hideAfterMs = 6000;
+      const timer = setTimeout(() => {
+        hideStatus(element);
+      }, hideAfterMs);
+      statusHideTimers.set(element.id, timer);
+    }
   }
 
   function goBack() {

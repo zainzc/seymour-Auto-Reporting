@@ -20,6 +20,7 @@ const DEFAULT_PHASE4B_COMPLETED_STATUS = 'Completed / Closed';
 const MASTER_LOAD_LOG_EVERY_ROWS = 5000;
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const LEGACY_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+const DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE = 'Fixed Item Specifics (Global Defaults)';
 const LISTING_ITEM_SPECIFICS_FIELD = 'Item Specifics';
 const LISTING_C_SPECIFICS_FIELD = 'Item Specifics - All C: values relevant to item';
 const EBAY_LISTING_TITLE_FIELD = 'Title';
@@ -52,6 +53,10 @@ const EBAY_LISTING_DESCRIPTION_FIELDS = [
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function normalizeFieldKey(value = '') {
+  return normalizeText(value).replace(/\s+/g, ' ').toLowerCase();
 }
 
 function normalizePromptContextValue(value) {
@@ -181,6 +186,93 @@ function parseListingCSpecificMap(fields = {}) {
   return out;
 }
 
+function normalizeItemSpecificNameFromFieldName(fieldName = '') {
+  const text = normalizeText(fieldName);
+  if (!text) return '';
+  return normalizeText(text.replace(/^c:\s*/i, ''));
+}
+
+function parseListingItemSpecificsMap(fields = {}) {
+  const parsed = parseJsonObject(getFieldValueByName(fields, LISTING_ITEM_SPECIFICS_FIELD));
+  const out = new Map();
+  if (!parsed || typeof parsed !== 'object') return out;
+
+  for (const [rawKey, rawValue] of Object.entries(parsed)) {
+    const key = normalizeFieldKey(rawKey);
+    if (!key) continue;
+    const values = toCSpecificValueArray(rawValue);
+    if (values.length === 0) continue;
+    out.set(key, {
+      originalKey: normalizeText(rawKey),
+      values
+    });
+  }
+  return out;
+}
+
+function cloneItemSpecificsMap(source = new Map()) {
+  const out = new Map();
+  for (const [key, entry] of source.entries()) {
+    out.set(key, {
+      originalKey: normalizeText(entry?.originalKey || '') || key,
+      values: toCSpecificValueArray(entry?.values || [])
+    });
+  }
+  return out;
+}
+
+function getItemSpecificValueByFieldName(itemSpecificsMap = null, fieldName = '') {
+  if (!(itemSpecificsMap instanceof Map)) return '';
+  const name = normalizeItemSpecificNameFromFieldName(fieldName);
+  if (!name) return '';
+  const key = normalizeFieldKey(name);
+  const entry = itemSpecificsMap.get(key);
+  if (!entry?.values?.length) return '';
+  return normalizeText(entry.values[0]);
+}
+
+function upsertItemSpecificValue(itemSpecificsMap = new Map(), fieldName = '', fieldValue = '') {
+  const name = normalizeItemSpecificNameFromFieldName(fieldName);
+  const value = normalizeText(fieldValue);
+  if (!name || !value || !(itemSpecificsMap instanceof Map)) return false;
+  const key = normalizeFieldKey(name);
+  const existing = itemSpecificsMap.get(key);
+  const existingFirst = normalizeText(existing?.values?.[0] || '');
+  if (existingFirst === value) return false;
+  itemSpecificsMap.set(key, {
+    originalKey: normalizeText(existing?.originalKey || name) || name,
+    values: [value]
+  });
+  return true;
+}
+
+function removeItemSpecificValue(itemSpecificsMap = new Map(), fieldName = '') {
+  if (!(itemSpecificsMap instanceof Map)) return false;
+  const name = normalizeItemSpecificNameFromFieldName(fieldName);
+  if (!name) return false;
+  const key = normalizeFieldKey(name);
+  if (!itemSpecificsMap.has(key)) return false;
+  itemSpecificsMap.delete(key);
+  return true;
+}
+
+function stringifyItemSpecificsMap(map = new Map()) {
+  const out = {};
+  for (const [, entry] of map.entries()) {
+    const key = normalizeText(entry?.originalKey || '');
+    if (!key) continue;
+    const values = toCSpecificValueArray(entry?.values || []);
+    if (values.length === 0) continue;
+    out[key] = values;
+  }
+  if (Object.keys(out).length === 0) return '';
+  try {
+    return JSON.stringify(out);
+  } catch (_) {
+    return '';
+  }
+}
+
 function getListingCSpecificValue(fields = {}, cSpecificMap = null, fieldName = '') {
   const key = normalizeCSpecificKey(fieldName);
   if (key && cSpecificMap instanceof Map) {
@@ -220,6 +312,16 @@ function clearCSpecificMapValue(targetMap = new Map(), fieldName = '') {
   if (!key) return targetMap;
   targetMap.delete(key);
   return targetMap;
+}
+
+function cSpecificMapHasField(targetMap = new Map(), fieldName = '') {
+  const key = normalizeCSpecificKey(fieldName);
+  if (!key || !(targetMap instanceof Map)) return false;
+  return targetMap.has(key);
+}
+
+function isDoesNotApply(value = '') {
+  return normalizeText(value).toLowerCase() === 'does not apply';
 }
 
 function stringifyCSpecificMap(map = new Map()) {
@@ -564,6 +666,11 @@ function parseArgs(argv = []) {
         process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
         ''
     ),
+    globalDefaultsTable: normalizeText(
+      getArg('--global-defaults-table') ||
+        process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+        DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE
+    ),
     logicSheetName: normalizeText(getArg('--logic-sheet') || process.env.PHASE4_LOGIC_SHEET || 'Logic'),
     sampleLimit: Number(getArg('--sample-limit') || 20) || 20,
     aiConcurrency: Math.max(
@@ -621,6 +728,87 @@ function parseArgs(argv = []) {
           'true'
       ).toLowerCase() !== 'false'
   };
+}
+
+function isGlobalFixedRuleLabel(ruleValue) {
+  const rule = normalizeText(ruleValue).toLowerCase();
+  if (!rule) return false;
+  return rule === 'f' || (rule.includes('(f)') && rule.includes('fixed')) || rule.includes('fixed');
+}
+
+function normalizeGlobalPrefix(prefixValue = '') {
+  const raw = normalizeText(prefixValue).toUpperCase();
+  if (!raw) return 'ALL';
+  if (raw === 'ALL' || raw === '*') return 'ALL';
+  const match = raw.match(/^(\d{3})$/);
+  return match ? match[1] : raw;
+}
+
+async function loadGlobalDefaultsRuleSet(itemService, tableName) {
+  const rows = await fetchAllRecordsWithFallback(itemService, tableName, []);
+  const all = new Map();
+  const byPrefix = new Map();
+  let scannedRows = 0;
+  let loadedRules = 0;
+
+  for (const row of rows) {
+    scannedRows += 1;
+    const fields = row?.fields || {};
+    if (!isGlobalFixedRuleLabel(fields['Rule'])) continue;
+
+    const itemSpecificName = normalizeText(
+      firstNonEmptyField(fields, [
+        'Item Specific (eBay Download Only)',
+        'Item Specific(eBay Download Only)',
+        'Item Specific'
+      ])
+    );
+    const fixedValue = normalizeText(fields['(F) Value']);
+    if (!itemSpecificName || !fixedValue) continue;
+
+    const prefix = normalizeGlobalPrefix(fields['IPN Prefix']);
+    const ruleKey = normalizeCSpecificKey(itemSpecificName);
+    if (!ruleKey) continue;
+
+    const bucket = prefix === 'ALL'
+      ? all
+      : (() => {
+          if (!byPrefix.has(prefix)) byPrefix.set(prefix, new Map());
+          return byPrefix.get(prefix);
+        })();
+
+    if (!bucket.has(ruleKey)) {
+      bucket.set(ruleKey, {
+        fieldName: itemSpecificName,
+        value: fixedValue
+      });
+      loadedRules += 1;
+    }
+  }
+
+  return {
+    all,
+    byPrefix,
+    scannedRows,
+    loadedRules
+  };
+}
+
+function resolveGlobalDefaultsForPrefix(ruleSet, listingPrefix = '') {
+  const out = new Map();
+  const prefix = normalizeGlobalPrefix(listingPrefix);
+  const all = ruleSet?.all instanceof Map ? ruleSet.all : new Map();
+  const byPrefix = ruleSet?.byPrefix instanceof Map ? ruleSet.byPrefix : new Map();
+
+  for (const [key, payload] of all.entries()) {
+    out.set(key, payload);
+  }
+  if (prefix !== 'ALL' && byPrefix.has(prefix)) {
+    for (const [key, payload] of byPrefix.get(prefix).entries()) {
+      out.set(key, payload);
+    }
+  }
+  return out;
 }
 
 function loadPhaseConfigFromStore() {
@@ -3194,6 +3382,11 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
 
   const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
   const masterBaseId = normalizeText(process.env.AIRTABLE_BASE_ID || stored.airtableBaseId);
+  const itemSpecificsBaseId = normalizeText(
+    process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
+      process.env.ITEM_SPECIFICS_BASE_ID ||
+      stored.itemSpecificsBaseId
+  );
   const masterTable = normalizeText(
     process.env.AIRTABLE_MASTER_TABLE || stored.airtableMasterTable || 'Master Parts Table'
   );
@@ -3206,11 +3399,21 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
   const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
+  const globalDefaultsTable = normalizeText(
+    args.phase4GlobalDefaultsTable ||
+      args.globalDefaultsTable ||
+      stored.phase4GlobalDefaultsTable ||
+      process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+      DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE
+  );
   const requestedIpnSet = parseIpnSet(args.phase4DTestIpn);
   const requestedIpnLabel = requestedIpnSet.size > 0 ? Array.from(requestedIpnSet).join(', ') : '';
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!masterBaseId) throw new Error('Missing AIRTABLE_BASE_ID.');
+  if (!itemSpecificsBaseId) {
+    throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID) for global defaults enforcement.');
+  }
   if (!args.rulesDriveFile) throw new Error('Missing rules drive file. Provide --rules-drive-file=<FILE_ID_OR_URL>.');
   if (!openaiApiKey) throw new Error('Missing OpenAI API key for Phase 4D.');
 
@@ -3233,6 +3436,10 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     token: airtableToken,
     baseId: masterBaseId
   });
+  const itemSpecificsService = new AirtableService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
   const aiService = new Phase4AiEvaluatorService({
     apiKey: openaiApiKey,
     model: openaiModel,
@@ -3249,6 +3456,20 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       process.env.PHASE4D_DEBUG_PROMPT_IPN ||
       process.env.PHASE4B_DEBUG_PROMPT_IPN ||
       ''
+  });
+
+  emitProgress(progressCallback, {
+    stage: 'phase4d_load_rules',
+    percent: 12,
+    message: `Loading global defaults from '${globalDefaultsTable}'...`
+  });
+  const globalDefaultsRuleSet = await loadGlobalDefaultsRuleSet(itemSpecificsService, globalDefaultsTable);
+  emitProgress(progressCallback, {
+    stage: 'phase4d_load_rules',
+    percent: 13,
+    message:
+      `Global defaults loaded: rules=${globalDefaultsRuleSet.loadedRules}, rows=${globalDefaultsRuleSet.scannedRows}, ` +
+      `allRules=${globalDefaultsRuleSet.all.size}, prefixGroups=${globalDefaultsRuleSet.byPrefix.size}`
   });
 
   const tables = await schemaService.listTables();
@@ -3410,6 +3631,13 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     skippedNoPrefixRules: 0,
     masterPartsMissing: 0,
     listingFieldsCreated: 0,
+    globalDefaultsTable,
+    globalDefaultsRulesLoaded: Number(globalDefaultsRuleSet.loadedRules || 0),
+    globalDefaultsRowsScanned: Number(globalDefaultsRuleSet.scannedRows || 0),
+    globalDefaultsFieldsEvaluated: 0,
+    globalDefaultsFieldsUpdated: 0,
+    globalDefaultsRowsUpdated: 0,
+    globalDefaultsLockedFieldsSkipped: 0,
     fsvFieldsEvaluated: 0,
     fsvFieldsUpdated: 0,
     fsvDNAWritten: 0,
@@ -3442,6 +3670,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   const aiWebSearchIpnSet = new Set();
   const aiWebSearchEvents = [];
   const cSpecificMapByRecordId = new Map();
+  const itemSpecificsMapByRecordId = new Map();
   const listingFieldsByRecordId = new Map();
   const pushSkipSample = message => {
     if (!message) return;
@@ -3455,8 +3684,11 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     const listingFields = row?.fields || {};
     const recordId = normalizeText(row?.id);
     let listingCSpecificMap = parseListingCSpecificMap(listingFields);
+    let listingItemSpecificsMap = parseListingItemSpecificsMap(listingFields);
+    const globalLockedFieldKeys = new Set();
     listingFieldsByRecordId.set(recordId, listingFields);
     cSpecificMapByRecordId.set(recordId, listingCSpecificMap);
+    itemSpecificsMapByRecordId.set(recordId, listingItemSpecificsMap);
     const recordKey = firstNonEmptyField(listingFields, [
       EBAY_LISTING_RECORD_KEY_FIELD,
       'Item ID',
@@ -3465,6 +3697,78 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       'Record Key'
     ]) || recordId;
     const ipn = resolveListingIpnFromCSpecifics(listingFields, listingCSpecificMap);
+    if (requestedIpnSet.size > 0) {
+      if (!ipn || !requestedIpnSet.has(ipn)) {
+        summary.skippedByTestIpn += 1;
+        continue;
+      }
+    }
+    const listingPrefix = parsePrefixFromIpn(ipn);
+    const applicableGlobalDefaults = resolveGlobalDefaultsForPrefix(globalDefaultsRuleSet, listingPrefix);
+    if (applicableGlobalDefaults.size > 0) {
+      const nextCSpecificMap = cloneCSpecificMap(listingCSpecificMap);
+      const nextItemSpecificsMap = cloneItemSpecificsMap(listingItemSpecificsMap);
+      let globalFieldsUpdatedInRow = 0;
+      let itemSpecificsChanged = false;
+
+      for (const [, rule] of applicableGlobalDefaults.entries()) {
+        const fieldName = normalizeText(rule?.fieldName || '');
+        const fixedValue = normalizeText(rule?.value || '');
+        if (!fieldName || !fixedValue) continue;
+        globalLockedFieldKeys.add(normalizeCSpecificKey(fieldName));
+        summary.globalDefaultsFieldsEvaluated += 1;
+
+        const currentCValue = getListingCSpecificValue(listingFields, nextCSpecificMap, fieldName);
+        const currentItemSpecificValue = getItemSpecificValueByFieldName(nextItemSpecificsMap, fieldName);
+        const effectiveCurrentValue = currentItemSpecificValue || currentCValue;
+        if (effectiveCurrentValue === fixedValue) continue;
+
+        setCSpecificMapValue(nextCSpecificMap, fieldName, fixedValue);
+        const changed = upsertItemSpecificValue(nextItemSpecificsMap, fieldName, fixedValue);
+        itemSpecificsChanged = itemSpecificsChanged || changed;
+        globalFieldsUpdatedInRow += 1;
+      }
+
+      if (globalFieldsUpdatedInRow > 0) {
+        if (!args.dryRun) {
+          const serializedSpecifics = stringifyCSpecificMap(nextCSpecificMap);
+          const updateFields = {};
+          if (itemSpecificsChanged) {
+            updateFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
+          }
+          if (Object.keys(updateFields).length === 0) {
+            continue;
+          }
+          const writeResult = await patchTableRecords(
+            airtableService,
+            effectiveListingsTableId,
+            [{ id: recordId, fields: updateFields }]
+          );
+          if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
+            if (summary.errors.length < args.sampleLimit) {
+              summary.errors.push(
+                `Global defaults write failed record='${recordKey}' updatedFields=${globalFieldsUpdatedInRow}`
+              );
+            }
+          } else {
+            listingCSpecificMap = nextCSpecificMap;
+            listingItemSpecificsMap = nextItemSpecificsMap;
+            cSpecificMapByRecordId.set(recordId, listingCSpecificMap);
+            itemSpecificsMapByRecordId.set(recordId, listingItemSpecificsMap);
+            listingFields[LISTING_C_SPECIFICS_FIELD] = serializedSpecifics;
+            if (itemSpecificsChanged) {
+              listingFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
+            }
+            summary.globalDefaultsFieldsUpdated += globalFieldsUpdatedInRow;
+            summary.globalDefaultsRowsUpdated += 1;
+            writesDone += 1;
+          }
+        } else {
+          summary.globalDefaultsFieldsUpdated += globalFieldsUpdatedInRow;
+        }
+      }
+    }
+
     if (!ipn) {
       summary.skippedMissingIpn += 1;
       const availableFields = Object.keys(listingFields || {})
@@ -3475,10 +3779,6 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       pushSkipSample(
         `skip=missing_ipn record='${recordKey || recordId}' fields='${availableFields || 'none'}'`
       );
-      continue;
-    }
-    if (requestedIpnSet.size > 0 && !requestedIpnSet.has(ipn)) {
-      summary.skippedByTestIpn += 1;
       continue;
     }
     if (args.restrictToListingsPrefixIpns) {
@@ -3493,6 +3793,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       }
       summary.listingsInScope += 1;
     }
+
     if (isPublishedIdentity(listingFields, publishedIdentitySet)) {
       summary.skippedAlreadyPublished += 1;
       pushSkipSample(`skip=already_published record='${recordKey || recordId}' ipn='${ipn}'`);
@@ -3529,9 +3830,15 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     const ruleFieldNames = Array.from(prefixRules.keys());
 
     for (const fieldName of ruleFieldNames) {
+      if (globalLockedFieldKeys.has(normalizeCSpecificKey(fieldName))) {
+        summary.globalDefaultsLockedFieldsSkipped += 1;
+        continue;
+      }
       const ruleMeta = prefixRules.get(fieldName) || {};
       const ruleType = normalizeText(ruleMeta.ruleType).toUpperCase();
       const currentValue = getListingCSpecificValue(listingFields, listingCSpecificMap, fieldName);
+      const currentItemSpecificValue = getItemSpecificValueByFieldName(listingItemSpecificsMap, fieldName);
+      const effectiveCurrentValue = currentItemSpecificValue || currentValue;
       if (isManualOverrideForField(listingFields, fieldName)) {
         summary.manualOverrideSkipped += 1;
         continue;
@@ -3543,25 +3850,37 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         const nextValue = sourceValue;
         const shouldClearExistingDna =
           !sourceValue &&
-          currentValue &&
-          currentValue.toLowerCase() === 'does not apply';
+          effectiveCurrentValue &&
+          isDoesNotApply(effectiveCurrentValue);
         const canWrite = sourceValue
-          ? (!currentValue || currentValue.toLowerCase() === 'does not apply')
+          ? (!effectiveCurrentValue || isDoesNotApply(effectiveCurrentValue))
           : shouldClearExistingDna;
-        if (!canWrite || currentValue === nextValue) continue;
+        if (!canWrite || effectiveCurrentValue === nextValue) continue;
         if (args.dryRun) continue;
         if (!args.dryRun) {
           const nextCSpecificMap = cloneCSpecificMap(listingCSpecificMap);
+          const hadFieldBeforeWrite = cSpecificMapHasField(nextCSpecificMap, fieldName);
+          const nextItemSpecificsMap = cloneItemSpecificsMap(listingItemSpecificsMap);
+          let itemSpecificsChanged = false;
           if (nextValue) {
             setCSpecificMapValue(nextCSpecificMap, fieldName, nextValue);
+            itemSpecificsChanged = upsertItemSpecificValue(nextItemSpecificsMap, fieldName, nextValue);
           } else {
             clearCSpecificMapValue(nextCSpecificMap, fieldName);
+            itemSpecificsChanged = removeItemSpecificValue(nextItemSpecificsMap, fieldName);
           }
           const serializedSpecifics = stringifyCSpecificMap(nextCSpecificMap);
+          const updateFields = {};
+          if (itemSpecificsChanged) {
+            updateFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
+          }
+          if (Object.keys(updateFields).length === 0) {
+            continue;
+          }
           const writeResult = await patchTableRecords(
             airtableService,
             effectiveListingsTableId,
-            [{ id: recordId, fields: { [LISTING_C_SPECIFICS_FIELD]: serializedSpecifics } }]
+            [{ id: recordId, fields: updateFields }]
           );
           if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
             if (summary.errors.length < args.sampleLimit) {
@@ -3570,10 +3889,21 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
             continue;
           }
           listingCSpecificMap = nextCSpecificMap;
+          listingItemSpecificsMap = nextItemSpecificsMap;
           cSpecificMapByRecordId.set(recordId, listingCSpecificMap);
+          itemSpecificsMapByRecordId.set(recordId, listingItemSpecificsMap);
           listingFields[LISTING_C_SPECIFICS_FIELD] = serializedSpecifics;
+          if (itemSpecificsChanged) {
+            listingFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
+          }
+          if (nextValue && !hadFieldBeforeWrite) {
+            summary.listingFieldsCreated += 1;
+          }
         }
         summary.fsvFieldsUpdated += 1;
+        if (isDoesNotApply(nextValue)) {
+          summary.fsvDNAWritten += 1;
+        }
         writesDone += 1;
         if (summary.sampleOutputs.length < args.sampleLimit) {
           summary.sampleOutputs.push(`[FsV] record='${recordKey}' ipn='${ipn}' field='${fieldName}' value='${nextValue}'`);
@@ -3583,17 +3913,17 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
 
       if (ruleType === 'V1') {
         summary.v1FieldsEvaluated += 1;
-        if (currentValue && currentValue.toLowerCase() !== 'does not apply') continue;
+        if (effectiveCurrentValue && !isDoesNotApply(effectiveCurrentValue)) continue;
       } else if (ruleType === 'V2') {
         summary.v2FieldsEvaluated += 1;
-        if (currentValue && currentValue.toLowerCase() === 'does not apply') {
+        if (effectiveCurrentValue && isDoesNotApply(effectiveCurrentValue)) {
           summary.v2DNASkippedOverwrite += 1;
           continue;
         }
-        if (currentValue) continue;
+        if (effectiveCurrentValue) continue;
       } else if (ruleType === 'VB') {
         summary.vbFieldsEvaluated += 1;
-        if (currentValue) continue;
+        if (effectiveCurrentValue) continue;
       } else {
         continue;
       }
@@ -3605,7 +3935,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         prefix,
         fieldName,
         ruleType,
-        currentValue,
+        currentValue: effectiveCurrentValue,
         masterPartsData: buildAiMasterContext(master?.fields || {}),
         allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
         listingTitle: compactText(
@@ -3754,16 +4084,28 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
 
       const listingFields = listingFieldsByRecordId.get(candidate.recordId) || {};
       const currentMap = cSpecificMapByRecordId.get(candidate.recordId) || parseListingCSpecificMap(listingFields);
+      const currentItemSpecificsMap =
+        itemSpecificsMapByRecordId.get(candidate.recordId) || parseListingItemSpecificsMap(listingFields);
+      const hadFieldBeforeWrite = cSpecificMapHasField(currentMap, candidate.fieldName);
       const nextCSpecificMap = setCSpecificMapValue(
         cloneCSpecificMap(currentMap),
         candidate.fieldName,
         nextValue
       );
       const serializedSpecifics = stringifyCSpecificMap(nextCSpecificMap);
+      const nextItemSpecificsMap = cloneItemSpecificsMap(currentItemSpecificsMap);
+      const itemSpecificsChanged = upsertItemSpecificValue(nextItemSpecificsMap, candidate.fieldName, nextValue);
+      const updateFields = {};
+      if (itemSpecificsChanged) {
+        updateFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
+      }
+      if (Object.keys(updateFields).length === 0) {
+        continue;
+      }
       const writeResult = await patchTableRecords(
         airtableService,
         effectiveListingsTableId,
-        [{ id: candidate.recordId, fields: { [LISTING_C_SPECIFICS_FIELD]: serializedSpecifics } }]
+        [{ id: candidate.recordId, fields: updateFields }]
       );
       if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
         if (summary.errors.length < args.sampleLimit) {
@@ -3776,13 +4118,22 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
 
       if (candidate.ruleType === 'V1') {
         summary.v1FieldsUpdated += 1;
+        if (isDoesNotApply(nextValue)) summary.v1DNAWritten += 1;
       } else if (candidate.ruleType === 'V2') {
         summary.v2FieldsUpdated += 1;
+        if (isDoesNotApply(nextValue)) summary.v2DNAWritten += 1;
       } else if (candidate.ruleType === 'VB') {
         summary.vbFieldsUpdated += 1;
       }
+      if (!hadFieldBeforeWrite) {
+        summary.listingFieldsCreated += 1;
+      }
       cSpecificMapByRecordId.set(candidate.recordId, nextCSpecificMap);
+      itemSpecificsMapByRecordId.set(candidate.recordId, nextItemSpecificsMap);
       listingFields[LISTING_C_SPECIFICS_FIELD] = serializedSpecifics;
+      if (itemSpecificsChanged) {
+        listingFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
+      }
       writesDone += 1;
       if (summary.sampleOutputs.length < args.sampleLimit) {
         summary.sampleOutputs.push(
@@ -3894,16 +4245,28 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         }
         const listingFields = listingFieldsByRecordId.get(candidate.recordId) || {};
         const currentMap = cSpecificMapByRecordId.get(candidate.recordId) || parseListingCSpecificMap(listingFields);
+        const currentItemSpecificsMap =
+          itemSpecificsMapByRecordId.get(candidate.recordId) || parseListingItemSpecificsMap(listingFields);
+        const hadFieldBeforeWrite = cSpecificMapHasField(currentMap, candidate.fieldName);
         const nextCSpecificMap = setCSpecificMapValue(
           cloneCSpecificMap(currentMap),
           candidate.fieldName,
           nextValue
         );
         const serializedSpecifics = stringifyCSpecificMap(nextCSpecificMap);
+        const nextItemSpecificsMap = cloneItemSpecificsMap(currentItemSpecificsMap);
+        const itemSpecificsChanged = upsertItemSpecificValue(nextItemSpecificsMap, candidate.fieldName, nextValue);
+        const updateFields = {};
+        if (itemSpecificsChanged) {
+          updateFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
+        }
+        if (Object.keys(updateFields).length === 0) {
+          continue;
+        }
         const writeResult = await patchTableRecords(
           airtableService,
           effectiveListingsTableId,
-          [{ id: candidate.recordId, fields: { [LISTING_C_SPECIFICS_FIELD]: serializedSpecifics } }]
+          [{ id: candidate.recordId, fields: updateFields }]
         );
         if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
           if (summary.errors.length < args.sampleLimit) {
@@ -3920,13 +4283,22 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         }
         if (candidate.ruleType === 'V1') {
           summary.v1FieldsUpdated += 1;
+          if (isDoesNotApply(nextValue)) summary.v1DNAWritten += 1;
         } else if (candidate.ruleType === 'V2') {
           summary.v2FieldsUpdated += 1;
+          if (isDoesNotApply(nextValue)) summary.v2DNAWritten += 1;
         } else if (candidate.ruleType === 'VB') {
           summary.vbFieldsUpdated += 1;
         }
+        if (!hadFieldBeforeWrite) {
+          summary.listingFieldsCreated += 1;
+        }
         cSpecificMapByRecordId.set(candidate.recordId, nextCSpecificMap);
+        itemSpecificsMapByRecordId.set(candidate.recordId, nextItemSpecificsMap);
         listingFields[LISTING_C_SPECIFICS_FIELD] = serializedSpecifics;
+        if (itemSpecificsChanged) {
+          listingFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
+        }
         writesDone += 1;
         if (summary.sampleOutputs.length < args.sampleLimit) {
           summary.sampleOutputs.push(

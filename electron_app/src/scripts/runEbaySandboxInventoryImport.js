@@ -39,10 +39,10 @@ const UPSERT_FIELDS = [
   'Full listing description HTML',
   'SEO Keywords',
   'Promoted Rate',
-  'Package Length',
-  'Package Width',
-  'Package Height',
-  'Package Weight',
+  'Package Length (ShipStation)',
+  'Package Width (ShipStation)',
+  'Package Height (ShipStation)',
+  'Package Weight (ShipStation)',
   'Package Weight Unit',
   'Condition',
   'Condition ID',
@@ -822,7 +822,6 @@ function buildGetItemRequestXml(ebayItemId = '') {
     '<IncludeItemSpecifics>true</IncludeItemSpecifics>' +
     '<IncludeItemCompatibilityList>true</IncludeItemCompatibilityList>' +
     '<IncludeWatchCount>true</IncludeWatchCount>' +
-    '<IncludeDescription>true</IncludeDescription>' +
     '</GetItemRequest>'
   );
 }
@@ -849,6 +848,8 @@ function parseDeepListingFromGetItemResponse(responseXml = '') {
   const pictureDetailsBlock = extractTagBlocks(itemBlock, 'PictureDetails')[0] || '';
   const itemSpecificsBlock = extractTagBlocks(itemBlock, 'ItemSpecifics')[0] || '';
   const shippingPackageDetailsBlock = extractTagBlocks(itemBlock, 'ShippingPackageDetails')[0] || '';
+  const weightMajorBlock = extractTagBlocks(shippingPackageDetailsBlock, 'WeightMajor')[0] || '';
+  const weightMinorBlock = extractTagBlocks(shippingPackageDetailsBlock, 'WeightMinor')[0] || '';
   const returnPolicyBlock = extractTagBlocks(itemBlock, 'ReturnPolicy')[0] || '';
   const sellerProfilesBlock = extractTagBlocks(itemBlock, 'SellerProfiles')[0] || '';
 
@@ -875,7 +876,9 @@ function parseDeepListingFromGetItemResponse(responseXml = '') {
       packageLength: normalizeText(extractTagValue(shippingPackageDetailsBlock, 'PackageLength')),
       packageWidth: normalizeText(extractTagValue(shippingPackageDetailsBlock, 'PackageWidth')),
       weightMajor: normalizeText(extractTagValue(shippingPackageDetailsBlock, 'WeightMajor')),
+      weightMajorUnit: normalizeText(extractTagAttribute(weightMajorBlock, 'WeightMajor', 'unit')),
       weightMinor: normalizeText(extractTagValue(shippingPackageDetailsBlock, 'WeightMinor')),
+      weightMinorUnit: normalizeText(extractTagAttribute(weightMinorBlock, 'WeightMinor', 'unit')),
       shippingIrregular: normalizeText(extractTagValue(shippingPackageDetailsBlock, 'ShippingIrregular')),
       packageType: normalizeText(extractTagValue(shippingPackageDetailsBlock, 'ShippingPackage'))
     },
@@ -1160,6 +1163,75 @@ function hasTradingErrorCode(responseXml = '', targetCodes = []) {
   return false;
 }
 
+function buildShippingPackageDetailsXmlFragment(item = {}) {
+  const deep = item?.rawDeepListing && typeof item.rawDeepListing === 'object' ? item.rawDeepListing : {};
+  const shipping = deep?.shippingPackageDetails && typeof deep.shippingPackageDetails === 'object'
+    ? deep.shippingPackageDetails
+    : {};
+  const dims = item?.packageWeightAndSize?.dimensions && typeof item.packageWeightAndSize.dimensions === 'object'
+    ? item.packageWeightAndSize.dimensions
+    : {};
+  const weight = item?.packageWeightAndSize?.weight && typeof item.packageWeightAndSize.weight === 'object'
+    ? item.packageWeightAndSize.weight
+    : {};
+
+  const length = normalizeText(shipping.packageLength || dims.length || '');
+  const width = normalizeText(shipping.packageWidth || dims.width || '');
+  const depth = normalizeText(shipping.packageDepth || dims.height || '');
+  const packageType = normalizeText(shipping.packageType || '');
+  const shippingIrregular = normalizeText(shipping.shippingIrregular || '');
+  let weightMajor = normalizeText(shipping.weightMajor || '');
+  let weightMinor = normalizeText(shipping.weightMinor || '');
+
+  if (!weightMajor && !weightMinor) {
+    const rawWeightValue = Number(weight.value);
+    const rawWeightUnit = normalizeText(weight.unit || '').toLowerCase();
+    if (Number.isFinite(rawWeightValue) && rawWeightValue >= 0) {
+      let totalLbs = rawWeightValue;
+      if (rawWeightUnit === 'oz' || rawWeightUnit === 'ounce' || rawWeightUnit === 'ounces') {
+        totalLbs = rawWeightValue / 16;
+      }
+      const lbs = Math.floor(totalLbs);
+      const oz = Math.round((totalLbs - lbs) * 16);
+      if (oz >= 16) {
+        weightMajor = String(lbs + 1);
+        weightMinor = '0';
+      } else {
+        weightMajor = String(lbs);
+        weightMinor = String(oz);
+      }
+    }
+  }
+
+  const hasAny =
+    Boolean(length) ||
+    Boolean(width) ||
+    Boolean(depth) ||
+    Boolean(weightMajor) ||
+    Boolean(weightMinor) ||
+    Boolean(packageType) ||
+    Boolean(shippingIrregular);
+  if (!hasAny) return '';
+
+  let xml = '<ShippingPackageDetails><MeasurementUnit>English</MeasurementUnit>';
+  if (length) xml += `<PackageLength unit="inches">${escapeXml(length)}</PackageLength>`;
+  if (width) xml += `<PackageWidth unit="inches">${escapeXml(width)}</PackageWidth>`;
+  if (depth) xml += `<PackageDepth unit="inches">${escapeXml(depth)}</PackageDepth>`;
+  if (weightMajor) xml += `<WeightMajor unit="lbs">${escapeXml(weightMajor)}</WeightMajor>`;
+  if (weightMinor) xml += `<WeightMinor unit="oz">${escapeXml(weightMinor)}</WeightMinor>`;
+  if (packageType) xml += `<ShippingPackage>${escapeXml(packageType)}</ShippingPackage>`;
+  if (shippingIrregular) {
+    const irregular = normalizeText(shippingIrregular).toLowerCase();
+    if (irregular === 'true' || irregular === '1' || irregular === 'yes') {
+      xml += '<ShippingIrregular>true</ShippingIrregular>';
+    } else if (irregular === 'false' || irregular === '0' || irregular === 'no') {
+      xml += '<ShippingIrregular>false</ShippingIrregular>';
+    }
+  }
+  xml += '</ShippingPackageDetails>';
+  return xml;
+}
+
 function buildTradingAddFixedPriceItemRequestXml(item = {}, offer = {}, context = {}) {
   const compactMode = context.compactMode === true;
   const sku = normalizeText(item?.sku);
@@ -1194,6 +1266,7 @@ function buildTradingAddFixedPriceItemRequestXml(item = {}, offer = {}, context 
     currency,
     quantity
   });
+  const shippingPackageDetailsXml = buildShippingPackageDetailsXmlFragment(item);
   const listingPolicyXml = profilesXml || legacyPolicyXml;
 
   if (!sku) {
@@ -1290,6 +1363,7 @@ function buildTradingAddFixedPriceItemRequestXml(item = {}, offer = {}, context 
     postalXml +
     pictureXml +
     itemSpecificsXml +
+    shippingPackageDetailsXml +
     listingPolicyXml +
     '</Item>' +
     '</AddFixedPriceItemRequest>';
@@ -1557,6 +1631,11 @@ function firstAspectValue(aspects = {}, keys = []) {
   return values.length > 0 ? values[0] : '';
 }
 
+function extractBatchInterchangeIpn(item = {}) {
+  const aspects = item?.product?.aspects || {};
+  return firstAspectValue(aspects, ['Interchange Part Number', IPN_FIELD, 'IPN']);
+}
+
 function toCSpecificsText(aspects = {}, manufacturerPart = '', interchangePart = '', partNumber = '') {
   const out = {};
   for (const [name, raw] of Object.entries(aspects || {})) {
@@ -1599,15 +1678,64 @@ function toCategoryText(item = {}, offer = {}) {
 }
 
 function toDimensionText(item = {}, key = '') {
-  return normalizeText(item?.packageWeightAndSize?.dimensions?.[key] || '');
+  const inventoryValue = normalizeText(item?.packageWeightAndSize?.dimensions?.[key] || '');
+  if (inventoryValue) return inventoryValue;
+
+  const shippingDetails =
+    item?.rawDeepListing?.shippingPackageDetails && typeof item.rawDeepListing.shippingPackageDetails === 'object'
+      ? item.rawDeepListing.shippingPackageDetails
+      : {};
+  if (key === 'length') return normalizeText(shippingDetails.packageLength || '');
+  if (key === 'width') return normalizeText(shippingDetails.packageWidth || '');
+  if (key === 'height') return normalizeText(shippingDetails.packageHeight || shippingDetails.packageDepth || '');
+  return '';
 }
 
 function toWeightValueText(item = {}) {
-  return normalizeText(item?.packageWeightAndSize?.weight?.value || '');
+  const inventoryValue = normalizeText(item?.packageWeightAndSize?.weight?.value || '');
+  if (inventoryValue) return inventoryValue;
+
+  const shippingDetails =
+    item?.rawDeepListing?.shippingPackageDetails && typeof item.rawDeepListing.shippingPackageDetails === 'object'
+      ? item.rawDeepListing.shippingPackageDetails
+      : {};
+  const majorText = normalizeText(shippingDetails.weightMajor || '');
+  const minorText = normalizeText(shippingDetails.weightMinor || '');
+  const major = Number(majorText);
+  const minor = Number(minorText);
+  const majorUnit = normalizeText(shippingDetails.weightMajorUnit || '').toLowerCase();
+  const minorUnit = normalizeText(shippingDetails.weightMinorUnit || '').toLowerCase();
+
+  if (Number.isFinite(major) && Number.isFinite(minor)) {
+    if ((majorUnit === 'lbs' || majorUnit === 'lb' || !majorUnit) && (minorUnit === 'oz' || !minorUnit)) {
+      return String(major + minor / 16).replace(/\.?0+$/, '');
+    }
+    if (major !== 0) return String(major);
+    return String(minor);
+  }
+  if (Number.isFinite(major)) return String(major);
+  if (Number.isFinite(minor)) {
+    if (minorUnit === 'oz') {
+      return String(minor / 16).replace(/\.?0+$/, '');
+    }
+    return String(minor);
+  }
+  return '';
 }
 
 function toWeightUnitText(item = {}) {
-  return normalizeText(item?.packageWeightAndSize?.weight?.unit || '');
+  const inventoryUnit = normalizeText(item?.packageWeightAndSize?.weight?.unit || '');
+  if (inventoryUnit) return inventoryUnit;
+
+  const shippingDetails =
+    item?.rawDeepListing?.shippingPackageDetails && typeof item.rawDeepListing.shippingPackageDetails === 'object'
+      ? item.rawDeepListing.shippingPackageDetails
+      : {};
+  const majorUnit = normalizeText(shippingDetails.weightMajorUnit || '').toLowerCase();
+  const minorUnit = normalizeText(shippingDetails.weightMinorUnit || '').toLowerCase();
+  if (majorUnit === 'lbs' || majorUnit === 'lb') return 'lbs';
+  if (minorUnit === 'oz') return 'lbs';
+  return normalizeText(shippingDetails.weightMajorUnit || shippingDetails.weightMinorUnit || '');
 }
 
 function buildSeoKeywords(parts = []) {
@@ -2150,10 +2278,10 @@ function buildUpsertFields(
     'Full listing description HTML': description,
     'SEO Keywords': seoKeywords,
     'Promoted Rate': '',
-    'Package Length': packageLength,
-    'Package Width': packageWidth,
-    'Package Height': packageHeight,
-    'Package Weight': packageWeight,
+    'Package Length (ShipStation)': packageLength,
+    'Package Width (ShipStation)': packageWidth,
+    'Package Height (ShipStation)': packageHeight,
+    'Package Weight (ShipStation)': packageWeight,
     'Package Weight Unit': packageWeightUnit,
     Condition: condition,
     'Condition ID': conditionId,
@@ -2840,6 +2968,8 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
     tradingPagesFetched: 0,
     inventoryItemsFetched: 0,
     offersFetched: 0,
+    ebaySandboxBatchIpns: [],
+    ebaySandboxBatchSkus: [],
     recordsPlanned: 0,
     recordsWritten: 0,
     skippedInvalidRows: 0,
@@ -3112,6 +3242,21 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
       inventoryItems.map(item => normalizeText(item?.sku))
     );
   }
+
+  summary.ebaySandboxBatchSkus = Array.from(
+    new Set(
+      (inventoryItems || [])
+        .map(item => normalizeText(item?.sku))
+        .filter(Boolean)
+    )
+  );
+  summary.ebaySandboxBatchIpns = Array.from(
+    new Set(
+      (inventoryItems || [])
+        .map(item => normalizeText(extractBatchInterchangeIpn(item)).toUpperCase())
+        .filter(Boolean)
+    )
+  );
 
   if (writeToAirtable) {
     emitProgress(progressCallback, {

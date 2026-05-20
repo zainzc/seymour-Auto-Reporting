@@ -22,6 +22,14 @@ const { getInvoices, getSalespeople } = require('../services/reportingService');
 const { generateExcelFile } = require('../services/excelService');
 const { initialize: initSheets, writeToRawTab } = require('../services/sheetsService');
 const { startSchedule, stopSchedule, resumeSchedule, logExecution, getExecutionLogs, executeScheduledJob } = require('../services/scheduleService');
+const { runWorkOrdersSync, DEFAULT_WORK_ORDERS_SHEET_NAME } = require('../services/workOrdersGoogleSheetsSync');
+const {
+  startWorkOrdersSchedule,
+  stopWorkOrdersSchedule,
+  resumeWorkOrdersSchedule,
+  executeWorkOrdersScheduledJob,
+  getWorkOrdersExecutionLogs
+} = require('../services/workOrdersScheduleService');
 const oauth2Service = require('../services/oauth2Service');
 const { runPhase2, buildPhase2Config } = require('../services/phase2Service');
 const { runPhase3, buildPhase3Config, PARTSHUNTER_STORE_ID } = require('../services/phase3Service');
@@ -170,6 +178,188 @@ function normalizeEbayEnvironment(value) {
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function normalizeUpperIpn(value) {
+  return normalizeText(value).toUpperCase();
+}
+
+function parseIpnList(value) {
+  if (Array.isArray(value)) {
+    return value.map(item => normalizeUpperIpn(item)).filter(Boolean);
+  }
+  const text = String(value || '');
+  if (!text.trim()) return [];
+  return text
+    .split(/[\n,\t;|]+/)
+    .map(item => normalizeUpperIpn(item))
+    .filter(Boolean);
+}
+
+function chunkArray(values = [], size = 25) {
+  const list = Array.isArray(values) ? values : [];
+  const next = [];
+  const chunkSize = Math.max(1, Number(size) || 25);
+  for (let i = 0; i < list.length; i += chunkSize) {
+    next.push(list.slice(i, i + chunkSize));
+  }
+  return next;
+}
+
+function escapeAirtableFormulaValue(value) {
+  return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function buildIpnFilterFormula(fieldName = '', ipns = []) {
+  const name = normalizeText(fieldName);
+  const clauses = (Array.isArray(ipns) ? ipns : [])
+    .map(ipn => normalizeUpperIpn(ipn))
+    .filter(Boolean)
+    .map(ipn => `{${name}}="${escapeAirtableFormulaValue(ipn)}"`);
+  if (clauses.length === 0) return '';
+  if (clauses.length === 1) return clauses[0];
+  return `OR(${clauses.join(',')})`;
+}
+
+async function fetchAirtableRowsByIpnSet({
+  airtableService,
+  tableName,
+  ipnFieldName,
+  ipns,
+  selectFields = []
+}) {
+  const rows = [];
+  const normalized = Array.from(
+    new Set((Array.isArray(ipns) ? ipns : []).map(item => normalizeUpperIpn(item)).filter(Boolean))
+  );
+  for (const batch of chunkArray(normalized, 25)) {
+    const formula = buildIpnFilterFormula(ipnFieldName, batch);
+    if (!formula) continue;
+    let offset = null;
+    do {
+      const params = {
+        filterByFormula: formula
+      };
+      if (offset) params.offset = offset;
+      if (Array.isArray(selectFields) && selectFields.length > 0) {
+        params.fields = selectFields;
+      }
+      const data = await airtableService.request('GET', `/${encodeURIComponent(tableName)}`, { params });
+      rows.push(...(Array.isArray(data?.records) ? data.records : []));
+      offset = data?.offset || null;
+    } while (offset);
+  }
+  return rows;
+}
+
+function hasPopulatedValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  return Boolean(normalizeText(value));
+}
+
+function summarizeBatchGaps({
+  batchIpns = [],
+  listingRows = [],
+  masterRows = []
+}) {
+  const targetIpns = Array.from(
+    new Set((Array.isArray(batchIpns) ? batchIpns : []).map(item => normalizeUpperIpn(item)).filter(Boolean))
+  );
+  const listingRowsByIpn = new Map();
+  for (const row of listingRows) {
+    const ipn = normalizeUpperIpn(row?.fields?.['IPN (Interchange Part Number)']);
+    if (!ipn) continue;
+    if (!listingRowsByIpn.has(ipn)) listingRowsByIpn.set(ipn, []);
+    listingRowsByIpn.get(ipn).push(row);
+  }
+  const masterByIpn = new Map();
+  for (const row of masterRows) {
+    const ipn = normalizeUpperIpn(row?.fields?.IPN);
+    if (!ipn || masterByIpn.has(ipn)) continue;
+    masterByIpn.set(ipn, row);
+  }
+
+  const missingFitmentIpns = [];
+  const missingFitmentImageIpns = [];
+  const missingTitleDescriptionIpns = [];
+  const missingListingRowsIpns = [];
+  const missingMasterRowsIpns = [];
+
+  for (const ipn of targetIpns) {
+    const listingRowsForIpn = listingRowsByIpn.get(ipn) || [];
+    if (listingRowsForIpn.length === 0) {
+      missingListingRowsIpns.push(ipn);
+      missingTitleDescriptionIpns.push(ipn);
+    } else {
+      const hasAnyMissingListingOutput = listingRowsForIpn.some(row => {
+        const fields = row?.fields || {};
+        const title = normalizeText(fields['Item Title']);
+        const description = normalizeText(fields['Item Description']);
+        return !title || !description;
+      });
+      if (hasAnyMissingListingOutput) missingTitleDescriptionIpns.push(ipn);
+    }
+
+    const master = masterByIpn.get(ipn);
+    if (!master) {
+      missingMasterRowsIpns.push(ipn);
+      missingFitmentIpns.push(ipn);
+      missingFitmentImageIpns.push(ipn);
+      continue;
+    }
+
+    const fitment = normalizeText(master?.fields?.['Part Fitment']);
+    if (!fitment) missingFitmentIpns.push(ipn);
+
+    const fitmentImage = master?.fields?.['Fitment Image'];
+    if (!hasPopulatedValue(fitmentImage)) {
+      missingFitmentImageIpns.push(ipn);
+    }
+  }
+
+  return {
+    batchIpnsCount: targetIpns.length,
+    missingFitmentIpns: Array.from(new Set(missingFitmentIpns)),
+    missingFitmentImageIpns: Array.from(new Set(missingFitmentImageIpns)),
+    missingTitleDescriptionIpns: Array.from(new Set(missingTitleDescriptionIpns)),
+    missingListingRowsIpns: Array.from(new Set(missingListingRowsIpns)),
+    missingMasterRowsIpns: Array.from(new Set(missingMasterRowsIpns))
+  };
+}
+
+async function evaluateBatchOutputGaps({
+  airtableService,
+  listingsTable,
+  masterTable,
+  batchIpns
+}) {
+  const listingRows = await fetchAirtableRowsByIpnSet({
+    airtableService,
+    tableName: listingsTable,
+    ipnFieldName: 'IPN (Interchange Part Number)',
+    ipns: batchIpns,
+    selectFields: [
+      'IPN (Interchange Part Number)',
+      'Item Title',
+      'Item Description'
+    ]
+  });
+  const masterRows = await fetchAirtableRowsByIpnSet({
+    airtableService,
+    tableName: masterTable,
+    ipnFieldName: 'IPN',
+    ipns: batchIpns,
+    selectFields: [
+      'IPN',
+      'Part Fitment',
+      'Fitment Image'
+    ]
+  });
+  return summarizeBatchGaps({
+    batchIpns,
+    listingRows,
+    masterRows
+  });
 }
 
 function buildPhase5PublishLogService(config = {}) {
@@ -780,6 +970,11 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     authContext: 'inventory',
     rulesDriveFile: phase4RulesDriveFile,
     logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim(),
+    phase4GlobalDefaultsTable: String(
+      stored.phase4GlobalDefaultsTable ||
+        process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+        'Fixed Item Specifics (Global Defaults)'
+    ).trim(),
     phase4DListingsTable: listingsTable,
     phase4DTestIpn: '',
     openaiApiKey: phase4OpenAiKey,
@@ -884,6 +1079,229 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
       `writesAttempted=${summary.phase74?.writesAttempted || 0}, writesSucceeded=${summary.phase74?.writesSucceeded || 0}, ` +
       `writesFailed=${summary.phase74?.writeFailures || 0})`
   );
+
+  const batchIpns = Array.from(
+    new Set(
+      parseIpnList(runtime.ebaySandboxBatchIpns || stored.ebaySandboxBatchIpns || [])
+    )
+  );
+  const retryPasses = Math.max(
+    0,
+    Number(
+      runtime.ebaySandboxPostImportRetryPasses ||
+      stored.ebaySandboxPostImportRetryPasses ||
+      process.env.EBAY_SANDBOX_POST_IMPORT_RETRY_PASSES ||
+      2
+    ) || 0
+  );
+  summary.batchCompletionGuard = {
+    enabled: batchIpns.length > 0,
+    batchIpnsCount: batchIpns.length,
+    retryPasses,
+    strict:
+      String(
+        runtime.ebaySandboxRequireCompleteBatch ??
+          stored.ebaySandboxRequireCompleteBatch ??
+          process.env.EBAY_SANDBOX_REQUIRE_COMPLETE_BATCH ??
+          'true'
+      ).trim().toLowerCase() !== 'false',
+    passes: [],
+    resolved: false
+  };
+
+  if (batchIpns.length > 0 && resolvedAirtableToken && resolvedAirtableBaseId) {
+    const airtableService = new AirtableService({
+      token: resolvedAirtableToken,
+      baseId: resolvedAirtableBaseId,
+      masterTable: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim()
+    });
+    const masterTableName = String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim();
+
+    emitStepProgress('ebaysandbox_post_import_guard', 99, 'Verifying batch completeness for Phase 6 / 7.2 / 7.4 outputs...');
+    emitInventoryAutoChainLog(
+      `Post-import automation: batch completeness guard started (batchIpns=${batchIpns.length}, retryPasses=${retryPasses})`
+    );
+
+    let finalGaps = await evaluateBatchOutputGaps({
+      airtableService,
+      listingsTable,
+      masterTable: masterTableName,
+      batchIpns
+    });
+
+    for (let pass = 1; pass <= retryPasses; pass += 1) {
+      const passSummary = {
+        pass,
+        before: {
+          missingFitment: finalGaps.missingFitmentIpns.length,
+          missingFitmentImage: finalGaps.missingFitmentImageIpns.length,
+          missingTitleDescription: finalGaps.missingTitleDescriptionIpns.length,
+          missingListingRows: finalGaps.missingListingRowsIpns.length,
+          missingMasterRows: finalGaps.missingMasterRowsIpns.length
+        }
+      };
+      summary.batchCompletionGuard.passes.push(passSummary);
+
+      const nothingMissing =
+        passSummary.before.missingFitment === 0 &&
+        passSummary.before.missingFitmentImage === 0 &&
+        passSummary.before.missingTitleDescription === 0;
+      if (nothingMissing) {
+        summary.batchCompletionGuard.resolved = true;
+        emitInventoryAutoChainLog(
+          `Post-import automation: batch completeness guard resolved before retry pass ${pass}.`
+        );
+        break;
+      }
+
+      emitInventoryAutoChainLog(
+        `Post-import automation: batch guard pass ${pass} before rerun ` +
+          `(fitmentMissing=${passSummary.before.missingFitment}, ` +
+          `imageMissing=${passSummary.before.missingFitmentImage}, ` +
+          `titleDescMissing=${passSummary.before.missingTitleDescription})`
+      );
+
+      if (finalGaps.missingFitmentIpns.length > 0) {
+        emitStepProgress('ebaysandbox_post_import_guard', 99, `Batch guard pass ${pass}: rerunning Phase 6 for missing fitment...`);
+        passSummary.phase6Retry = await runPhase6Fitment({
+          ...chainBase,
+          phase6ListingsTable: listingsTable,
+          phaseSharedMasterTable: sharedMasterContext?.masterTable,
+          phaseSharedMasterRows: sharedMasterContext?.masterRows,
+          phaseSharedMasterByIpn: sharedMasterContext?.masterByIpn,
+          airtableMasterTable: masterTableName,
+          openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+          openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+          openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+          phase6PromptCacheEnabled:
+            String(stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
+            'false',
+          phase6PromptCacheKey: String(
+            stored.phase6PromptCacheKey ||
+              process.env.PHASE6_PROMPT_CACHE_KEY ||
+              process.env.OPENAI_PROMPT_CACHE_KEY ||
+              'phase6_fitment_v1'
+          ).trim(),
+          phase6TestIpns: finalGaps.missingFitmentIpns.join(','),
+          phase6MaxIpns: 0,
+          sampleLimit: Number(stored.phase6SampleLimit || process.env.PHASE6_SAMPLE_LIMIT || 20) || 20
+        }, buildPostImportProgressBridge('ebaysandbox_post_import_guard', `Batch Guard Phase 6 pass ${pass}`));
+      }
+
+      const phase72RetryIpns = Array.from(
+        new Set([...finalGaps.missingFitmentImageIpns, ...finalGaps.missingFitmentIpns])
+      );
+      if (phase72RetryIpns.length > 0) {
+        emitStepProgress('ebaysandbox_post_import_guard', 99, `Batch guard pass ${pass}: rerunning Phase 7.2 for missing fitment images...`);
+        passSummary.phase72Retry = await runPhase72FitmentImage({
+          ...chainBase,
+          phaseSharedMasterTable: sharedMasterContext?.masterTable,
+          phaseSharedMasterRows: sharedMasterContext?.masterRows,
+          phaseSharedMasterByIpn: sharedMasterContext?.masterByIpn,
+          phase72MasterTable: String(
+            stored.phase72MasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
+          ).trim(),
+          phase72DriveFolderId: String(stored.phase72DriveFolderId || process.env.PHASE72_DRIVE_FOLDER_ID || '').trim(),
+          phase72TestIpns: phase72RetryIpns.join(','),
+          phase72MaxIpns: 0,
+          phase72ForceRegenerate:
+            String(stored.phase72ForceRegenerate ?? process.env.PHASE72_FORCE_REGENERATE ?? 'false').trim().toLowerCase() === 'true',
+          sampleLimit: Number(stored.phase72SampleLimit || process.env.PHASE72_SAMPLE_LIMIT || 20) || 20
+        }, buildPostImportProgressBridge('ebaysandbox_post_import_guard', `Batch Guard Phase 7.2 pass ${pass}`));
+      }
+
+      if (finalGaps.missingTitleDescriptionIpns.length > 0) {
+        emitStepProgress('ebaysandbox_post_import_guard', 99, `Batch guard pass ${pass}: rerunning Phase 7.4 for missing title/description...`);
+        passSummary.phase74Retry = await runPhase74TitleDescription({
+          ...chainBase,
+          phaseSharedMasterTable: sharedMasterContext?.masterTable,
+          phaseSharedMasterRows: sharedMasterContext?.masterRows,
+          phaseSharedMasterByIpn: sharedMasterContext?.masterByIpn,
+          phase74ListingsTable: listingsTable,
+          airtableMasterTable: masterTableName,
+          openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
+          openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+          phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
+            stored.phase74TitleRulesPrompt,
+            process.env.PHASE74_TITLE_RULES_PROMPT
+          ),
+          openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
+          phase74PromptCacheEnabled:
+            String(stored.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
+            'false',
+          phase74PromptCacheKey: String(
+            stored.phase74PromptCacheKey ||
+              process.env.PHASE74_PROMPT_CACHE_KEY ||
+              process.env.OPENAI_PROMPT_CACHE_KEY ||
+              'phase74_title_description_v1'
+          ).trim(),
+          phase74TestIpns: finalGaps.missingTitleDescriptionIpns.join(','),
+          phase74MaxListings: 0,
+          sampleLimit: Number(stored.phase74SampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20
+        }, buildPostImportProgressBridge('ebaysandbox_post_import_guard', `Batch Guard Phase 7.4 pass ${pass}`));
+      }
+
+      finalGaps = await evaluateBatchOutputGaps({
+        airtableService,
+        listingsTable,
+        masterTable: masterTableName,
+        batchIpns
+      });
+      passSummary.after = {
+        missingFitment: finalGaps.missingFitmentIpns.length,
+        missingFitmentImage: finalGaps.missingFitmentImageIpns.length,
+        missingTitleDescription: finalGaps.missingTitleDescriptionIpns.length,
+        missingListingRows: finalGaps.missingListingRowsIpns.length,
+        missingMasterRows: finalGaps.missingMasterRowsIpns.length
+      };
+
+      emitInventoryAutoChainLog(
+        `Post-import automation: batch guard pass ${pass} after rerun ` +
+          `(fitmentMissing=${passSummary.after.missingFitment}, ` +
+          `imageMissing=${passSummary.after.missingFitmentImage}, ` +
+          `titleDescMissing=${passSummary.after.missingTitleDescription})`
+      );
+    }
+
+    summary.batchCompletionGuard.unresolved = {
+      missingFitmentIpns: finalGaps.missingFitmentIpns.slice(0, 200),
+      missingFitmentImageIpns: finalGaps.missingFitmentImageIpns.slice(0, 200),
+      missingTitleDescriptionIpns: finalGaps.missingTitleDescriptionIpns.slice(0, 200),
+      missingListingRowsIpns: finalGaps.missingListingRowsIpns.slice(0, 200),
+      missingMasterRowsIpns: finalGaps.missingMasterRowsIpns.slice(0, 200)
+    };
+    summary.batchCompletionGuard.resolved =
+      finalGaps.missingFitmentIpns.length === 0 &&
+      finalGaps.missingFitmentImageIpns.length === 0 &&
+      finalGaps.missingTitleDescriptionIpns.length === 0;
+
+    if (summary.batchCompletionGuard.resolved) {
+      emitInventoryAutoChainLog('Post-import automation: batch completeness guard resolved all missing outputs.');
+    } else {
+      emitInventoryAutoChainLog(
+        `Post-import automation: batch completeness guard finished with unresolved items ` +
+          `(fitment=${finalGaps.missingFitmentIpns.length}, ` +
+          `image=${finalGaps.missingFitmentImageIpns.length}, ` +
+          `titleDesc=${finalGaps.missingTitleDescriptionIpns.length}).`,
+        'error'
+      );
+      if (summary.batchCompletionGuard.strict) {
+        throw new Error(
+          `Batch completeness guard failed: unresolved outputs remain ` +
+            `(fitment=${finalGaps.missingFitmentIpns.length}, ` +
+            `image=${finalGaps.missingFitmentImageIpns.length}, ` +
+            `titleDesc=${finalGaps.missingTitleDescriptionIpns.length}).`
+        );
+      }
+    }
+  } else {
+    emitInventoryAutoChainLog(
+      batchIpns.length === 0
+        ? 'Post-import automation: batch completeness guard skipped (no batch IPNs reported by sandbox import).'
+        : 'Post-import automation: batch completeness guard skipped (missing Airtable credentials).',
+      batchIpns.length === 0 ? 'info' : 'error'
+    );
+  }
 
   emitStepProgress('ebaysandbox_post_import_complete', 100, 'Post-import automation completed.');
   emitInventoryAutoChainLog('Post-import automation completed: Phase4 -> Phase6 -> Phase7.2 -> Phase7.4');
@@ -1327,6 +1745,206 @@ ipcMain.handle('reporting-test-schedule', async () => {
     return {
       success: false,
       message: `Test failed: ${error.message}`
+    };
+  }
+});
+
+/* ---------------------------
+   WORK ORDERS IPC HANDLERS
+---------------------------- */
+
+ipcMain.handle('workorders-run-now', async (_, options = {}) => {
+  try {
+    if (!dbReady) {
+      return {
+        success: false,
+        message: 'Database not ready'
+      };
+    }
+
+    const isAuthenticated = await oauth2Service.isAuthenticated('reporting');
+    if (!isAuthenticated) {
+      return {
+        success: false,
+        message: 'Please connect to Google Sheets first using the Connect button.'
+      };
+    }
+
+    const spreadsheetId = String(
+      options.spreadsheetId ||
+      getReportingConfig('workOrdersSpreadsheetId') ||
+      ''
+    ).trim();
+    const sheetName = String(
+      options.sheetName ||
+      getReportingConfig('workOrdersSheetName') ||
+      DEFAULT_WORK_ORDERS_SHEET_NAME
+    ).trim() || DEFAULT_WORK_ORDERS_SHEET_NAME;
+
+    if (!spreadsheetId) {
+      return {
+        success: false,
+        message: 'Google Sheet ID is required for Work Orders sync.'
+      };
+    }
+
+    const authClient = await oauth2Service.getAuthenticatedClient('reporting');
+    const summary = await runWorkOrdersSync({
+      authClient,
+      spreadsheetId,
+      sheetName
+    });
+
+    saveReportingConfig('workOrdersSpreadsheetId', spreadsheetId);
+    saveReportingConfig('workOrdersSheetName', sheetName);
+
+    return {
+      success: true,
+      message: `Work Orders sync completed. Inserted=${summary.inserted}, Updated=${summary.updated}, Removed=${summary.removed}`,
+      summary
+    };
+  } catch (error) {
+    const summary = error?.summary || null;
+    return {
+      success: false,
+      message: `Work Orders sync failed: ${error.message}`,
+      summary
+    };
+  }
+});
+
+ipcMain.handle('workorders-save-schedule', async (_, scheduleConfig = {}) => {
+  try {
+    if (!dbReady) {
+      return {
+        success: false,
+        message: 'Database not ready'
+      };
+    }
+
+    const isAuthenticated = await oauth2Service.isAuthenticated('reporting');
+    if (!isAuthenticated) {
+      return {
+        success: false,
+        message: 'Please connect to Google Sheets first using the Connect button.'
+      };
+    }
+
+    const spreadsheetId = String(scheduleConfig.spreadsheetId || '').trim();
+    if (!spreadsheetId) {
+      return {
+        success: false,
+        message: 'Google Sheet ID is required.'
+      };
+    }
+
+    const frequency = String(scheduleConfig.frequency || '').trim();
+    if (!['every_1_minute', 'every_3_minutes', 'every_5_minutes'].includes(frequency)) {
+      return {
+        success: false,
+        message: 'Invalid Work Orders frequency. Use Every 1, 3, or 5 minutes.'
+      };
+    }
+
+    const sheetName = String(
+      scheduleConfig.sheetName || getReportingConfig('workOrdersSheetName') || DEFAULT_WORK_ORDERS_SHEET_NAME
+    ).trim() || DEFAULT_WORK_ORDERS_SHEET_NAME;
+
+    try {
+      const { google } = require('googleapis');
+      const authClient = await oauth2Service.getAuthenticatedClient('reporting');
+      const sheets = google.sheets({ version: 'v4', auth: authClient });
+      await sheets.spreadsheets.get({
+        spreadsheetId
+      });
+    } catch (error) {
+      return {
+        success: false,
+        message: `Failed to access Google Sheet: ${error.message}`
+      };
+    }
+
+    const configToSave = {
+      dataType: 'workorders',
+      frequency,
+      endDate: scheduleConfig.endDate || null,
+      spreadsheetId,
+      sheetName
+    };
+
+    saveReportingConfig('workOrdersSpreadsheetId', spreadsheetId);
+    saveReportingConfig('workOrdersSheetName', sheetName);
+    startWorkOrdersSchedule(configToSave);
+
+    return {
+      success: true,
+      message: `Work Orders schedule activated: ${frequency.replaceAll('_', ' ')}`
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to save Work Orders schedule: ${error.message}`
+    };
+  }
+});
+
+ipcMain.handle('workorders-cancel-schedule', async () => {
+  try {
+    stopWorkOrdersSchedule();
+    return {
+      success: true,
+      message: 'Work Orders schedule cancelled successfully'
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error.message
+    };
+  }
+});
+
+ipcMain.handle('workorders-get-schedule', async () => {
+  return getReportingConfig('workOrdersActiveSchedule') || null;
+});
+
+ipcMain.handle('workorders-get-sheet-id', async () => {
+  return getReportingConfig('workOrdersSpreadsheetId') || null;
+});
+
+ipcMain.handle('workorders-get-logs', async (_, limit) => {
+  return getWorkOrdersExecutionLogs(limit);
+});
+
+ipcMain.handle('workorders-test-schedule', async () => {
+  try {
+    if (!dbReady) {
+      return {
+        success: false,
+        message: 'Database not ready'
+      };
+    }
+
+    const schedule = getReportingConfig('workOrdersActiveSchedule');
+    if (!schedule) {
+      return {
+        success: false,
+        message: 'No active Work Orders schedule found. Please save a schedule first.'
+      };
+    }
+
+    const result = await executeWorkOrdersScheduledJob(schedule);
+    return {
+      success: Boolean(result?.success),
+      message: result?.success
+        ? `Work Orders schedule test completed. Inserted=${result.summary?.inserted || 0}, Updated=${result.summary?.updated || 0}, Removed=${result.summary?.removed || 0}`
+        : `Work Orders schedule test failed: ${result?.message || 'Unknown error'}`,
+      summary: result?.summary || null
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Work Orders schedule test failed: ${error.message}`,
+      summary: error?.summary || null
     };
   }
 });
@@ -2566,6 +3184,12 @@ ipcMain.handle('phase4d:run', async (event, options = {}) => {
             ''
         ).trim(),
       logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+      phase4GlobalDefaultsTable: String(
+        options.phase4GlobalDefaultsTable ||
+          stored.phase4GlobalDefaultsTable ||
+          process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+          'Fixed Item Specifics (Global Defaults)'
+      ).trim(),
       phase4DListingsTable: resolveListingsTableName(
         options.phase4DListingsTable,
         stored.phase4DListingsTable,
@@ -2886,6 +3510,12 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
               ''
           ).trim(),
         logicSheetName: String(options.phase4RulesLogicSheet || stored.phase4RulesLogicSheet || 'Logic').trim(),
+        phase4GlobalDefaultsTable: String(
+          options.phase4GlobalDefaultsTable ||
+            stored.phase4GlobalDefaultsTable ||
+            process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+            'Fixed Item Specifics (Global Defaults)'
+        ).trim(),
         phase4DListingsTable: resolveListingsTableName(
           options.phase4DListingsTable,
           stored.phase4DListingsTable,
@@ -4147,8 +4777,12 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
         .trim()
         .toLowerCase() !== 'false';
     const wroteListingRows = Number(summary?.recordsWritten || 0) > 0;
+    const batchIpns = Array.isArray(summary?.ebaySandboxBatchIpns)
+      ? summary.ebaySandboxBatchIpns.map(value => normalizeUpperIpn(value)).filter(Boolean)
+      : [];
+    const hasFetchedBatchIpns = batchIpns.length > 0;
 
-    if (!dryRun && autoRunPostImport && wroteListingRows) {
+    if (!dryRun && autoRunPostImport && (wroteListingRows || hasFetchedBatchIpns)) {
       event.sender.send('ebaysandbox:progress', {
         stage: 'ebaysandbox_post_import',
         percent: 99,
@@ -4179,7 +4813,8 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
             runOptions.phase6ListingsTable,
             runOptions.phase4DListingsTable,
             DEFAULT_EBAY_LISTINGS_TABLE
-          )
+          ),
+          ebaySandboxBatchIpns: batchIpns
         }, {
           onProgress: payload => {
             event.sender.send('ebaysandbox:progress', payload);
@@ -4212,10 +4847,10 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
           message: `Post-import automation failed: ${detail}`
         });
       }
-    } else if (!dryRun && autoRunPostImport && !wroteListingRows) {
+    } else if (!dryRun && autoRunPostImport && !wroteListingRows && !hasFetchedBatchIpns) {
       const reason =
-        `Post-import automation skipped: no new listing rows were written to Airtable ` +
-        `(recordsWritten=${Number(summary?.recordsWritten || 0)}, recordsPlanned=${Number(summary?.recordsPlanned || 0)}).`;
+        `Post-import automation skipped: no new listing rows were written and no batch IPNs were detected ` +
+        `(recordsWritten=${Number(summary?.recordsWritten || 0)}, recordsPlanned=${Number(summary?.recordsPlanned || 0)}, batchIpns=${batchIpns.length}).`;
       emitInventoryAutoChainLog(reason);
       event.sender.send('ebaysandbox:progress', {
         stage: 'ebaysandbox_post_import_skipped_no_writes',
@@ -4313,6 +4948,7 @@ function createWindow() {
       
       // Resume any active reporting schedules
       resumeSchedule();
+      resumeWorkOrdersSchedule();
       
       // Initialize inventory webhook schedule if it was previously active
       initInventorySchedule();
@@ -4459,12 +5095,14 @@ app.on('before-quit', () => {
   phase2AutoRunService.stop();
   phase2WritebackPoller.stop();
   stopPhase4WritebackPoller();
+  stopWorkOrdersSchedule();
 });
 
 app.on('window-all-closed', () => {
   phase2AutoRunService.stop();
   phase2WritebackPoller.stop();
   stopPhase4WritebackPoller();
+  stopWorkOrdersSchedule();
   if (process.platform !== 'darwin') app.quit();
 });
 

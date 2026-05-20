@@ -22,6 +22,16 @@ contextBridge.exposeInMainWorld('reportingAPI', {
   getSavedSheetId: () => ipcRenderer.invoke('reporting-get-sheet-id')
 });
 
+contextBridge.exposeInMainWorld('workOrdersAPI', {
+  runNow: (params) => ipcRenderer.invoke('workorders-run-now', params),
+  saveSchedule: (config) => ipcRenderer.invoke('workorders-save-schedule', config),
+  cancelSchedule: () => ipcRenderer.invoke('workorders-cancel-schedule'),
+  getCurrentSchedule: () => ipcRenderer.invoke('workorders-get-schedule'),
+  getSavedSheetId: () => ipcRenderer.invoke('workorders-get-sheet-id'),
+  getExecutionLogs: (limit) => ipcRenderer.invoke('workorders-get-logs', limit),
+  testSchedule: () => ipcRenderer.invoke('workorders-test-schedule')
+});
+
 // OAuth2 API
 contextBridge.exposeInMainWorld('oauth2API', {
   getAuthUrl: () => ipcRenderer.invoke('oauth2-get-auth-url'),

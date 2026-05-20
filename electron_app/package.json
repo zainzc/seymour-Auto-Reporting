@@ -22,7 +22,10 @@
     "phase72-fitment-image": "node src/scripts/runPhase72FitmentImage.js",
     "phase74-title-description": "node src/scripts/runPhase74TitleDescription.js",
     "ebay-mock-import": "node src/scripts/runEbayMockImport.js",
-    "ebay-mock-import:execute": "node src/scripts/runEbayMockImport.js --execute"
+    "ebay-mock-import:execute": "node src/scripts/runEbayMockImport.js --execute",
+    "test-workorders-query": "node scripts/test-workorders-query.js",
+    "test-drive-image-upload": "node scripts/test-drive-image-upload.js",
+    "test-workorders-sync": "node scripts/test-workorders-sync.js"
   },
   "keywords": [],
   "author": "hp",

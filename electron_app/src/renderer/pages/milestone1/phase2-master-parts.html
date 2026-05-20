@@ -3974,7 +3974,8 @@
         phase4BLiteDryRun: false,
         phase4CMFDryRun: false,
         phase4DDryRun: false,
-        phase4DListingsTable: DEFAULT_PHASE4D_LISTINGS_TABLE,
+        phase4DListingsTable:
+          document.getElementById('phase4d-listings-table').value.trim() || DEFAULT_PHASE4D_LISTINGS_TABLE,
         phase4DTestIpn: document.getElementById('phase4d-test-ipn').value.trim(),
         phase4RunMirror: true,
         phase4Run4A: true,
