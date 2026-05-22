@@ -2365,16 +2365,10 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
           context,
           allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
           listingTitle: normalizeText(ebayContext.productTitle),
-          listingDescription: normalizeText(ebayContext.listingDescription),
+          listingDescription: '',
           listingConditionsAndOptions: normalizeText(ebayContext.listingConditionsAndOptions),
-          listingItemSpecifics: compactText(
-            normalizePromptContextValue(ebayContext.listingItemSpecifics),
-            4000
-          ),
-          listingItemSpecificsAllCValuesRelevantToItem: compactText(
-            normalizePromptContextValue(ebayContext.listingItemSpecificsAllCValuesRelevantToItem),
-            6000
-          )
+          listingItemSpecifics: '',
+          listingItemSpecificsAllCValuesRelevantToItem: ''
         });
       }
     }
@@ -3946,18 +3940,9 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
           resolveListingConditionsAndOptions(listingFields, listingCSpecificMap),
           2000
         ),
-        listingDescription: compactText(
-          resolveListingDescription(listingFields, listingCSpecificMap),
-          4000
-        ),
-        listingItemSpecifics: compactText(
-          normalizePromptContextValue(getFieldValueByName(listingFields, LISTING_ITEM_SPECIFICS_FIELD)),
-          4000
-        ),
-        listingItemSpecificsAllCValuesRelevantToItem: compactText(
-          normalizePromptContextValue(getFieldValueByName(listingFields, LISTING_C_SPECIFICS_FIELD)),
-          6000
-        )
+        listingDescription: '',
+        listingItemSpecifics: '',
+        listingItemSpecificsAllCValuesRelevantToItem: ''
       });
     }
 
@@ -4004,11 +3989,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       masterPartsData: candidate.masterPartsData,
       allowedValues: candidate.allowedValues,
       listingTitle: candidate.listingTitle,
-      listingDescription: candidate.listingDescription,
-      listingConditionsAndOptions: candidate.listingConditionsAndOptions,
-      listingItemSpecifics: candidate.listingItemSpecifics,
-      listingItemSpecificsAllCValuesRelevantToItem:
-        candidate.listingItemSpecificsAllCValuesRelevantToItem
+      listingConditionsAndOptions: candidate.listingConditionsAndOptions
     }));
     let lastFirstPassBatchHeartbeatAt = Date.now();
     const firstPassBatch = await aiService.evaluateFieldChatBatch(firstPassPayloads, {
@@ -4163,11 +4144,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       masterPartsData: candidate.masterPartsData,
       allowedValues: candidate.allowedValues,
       listingTitle: candidate.listingTitle,
-      listingDescription: candidate.listingDescription,
-      listingConditionsAndOptions: candidate.listingConditionsAndOptions,
-      listingItemSpecifics: candidate.listingItemSpecifics,
-      listingItemSpecificsAllCValuesRelevantToItem:
-        candidate.listingItemSpecificsAllCValuesRelevantToItem
+      listingConditionsAndOptions: candidate.listingConditionsAndOptions
     }));
     let webResultsByRequestId = new Map();
     try {
