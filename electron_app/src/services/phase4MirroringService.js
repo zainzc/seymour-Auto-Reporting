@@ -1,10 +1,19 @@
 const AirtableService = require('./airtableService');
 const AirtableSchemaService = require('./airtableSchemaService');
+const { readSheetRows } = require('./phase2SheetsService');
 const { chunkArray } = require('../utils/chunk');
 const { getInventoryConfig, saveInventoryConfig } = require('../config/configStore');
 
 const MIRROR_STATE_KEY = 'phase4MirrorState';
 const EXCLUDED_PREFIXES = new Set(['900', '950', '999']);
+const MANUFACTURER_PART_FIELD = 'C:Manufacturer Part Number';
+const MANUFACTURER_LOCK_FIELD_CANDIDATES = [
+  'Rule Type',
+  'Population Rule',
+  'Item Specific Rule',
+  'Value Source',
+  'Population Source'
+];
 
 function normalizeString(value) {
   return String(value || '').trim();
@@ -197,7 +206,10 @@ function buildPhase4Config(options = {}) {
       typeof merged.phase4DryRun !== 'undefined' ? merged.phase4DryRun : process.env.PHASE4_DRY_RUN,
       false
     ),
-    sampleLimit: Number(merged.phase4SampleLimit || process.env.PHASE4_SAMPLE_LIMIT || 25) || 25
+    sampleLimit: Number(merged.phase4SampleLimit || process.env.PHASE4_SAMPLE_LIMIT || 25) || 25,
+    sheetId: normalizeString(merged.sheetId || process.env.GOOGLE_SHEET_ID || getInventoryConfig('spreadsheetId')),
+    tabName: normalizeString(merged.tabName || process.env.GOOGLE_TAB_NAME || getInventoryConfig('worksheetName')),
+    authContext: normalizeString(merged.authContext || 'inventory') || 'inventory'
   };
 }
 
@@ -211,6 +223,10 @@ function buildSummary(sampleLimit = 25) {
     ipnRowsAlreadyPresent: 0,
     ipnRowsCreated: 0,
     ipnRowsPlanned: 0,
+    manufacturerRefsMapped: 0,
+    manufacturerValuesPlanned: 0,
+    manufacturerValuesWritten: 0,
+    manufacturerValuesSkippedExisting: 0,
     errors: [],
     runMode: 'full_scan',
     lastMirrorRunAt: '',
@@ -229,6 +245,159 @@ function addError(summary, message) {
   if (summary.errors.length < 200) {
     summary.errors.push(message);
   }
+}
+
+function normalizeIpn(value) {
+  return normalizeString(value).toUpperCase();
+}
+
+function buildFixedLockFields(tableFieldNames = new Set(), targetFieldName = '') {
+  const updates = {};
+  const setF = name => {
+    if (tableFieldNames.has(name)) updates[name] = 'F';
+  };
+  const setFixedF = name => {
+    if (tableFieldNames.has(name)) updates[name] = 'Fixed (F)';
+  };
+
+  const specificRule = `${targetFieldName} Rule`;
+  const specificRuleType = `${targetFieldName} Rule Type`;
+  const specificSource = `${targetFieldName} Source`;
+  setF(specificRule);
+  setF(specificRuleType);
+  setFixedF(specificSource);
+
+  setF('Rule Type');
+  setF('Population Rule');
+  setF('Item Specific Rule');
+  setFixedF('Value Source');
+  setFixedF('Population Source');
+
+  return updates;
+}
+
+async function patchTableRecords(itemService, tableId, updates = [], options = {}) {
+  let written = 0;
+  const errors = [];
+  const successfulRecordIds = [];
+  const batches = chunkArray(updates, 10);
+  let batchIndex = 0;
+  for (const batch of batches) {
+    batchIndex += 1;
+    try {
+      const data = await itemService.request('PATCH', `/${encodeURIComponent(tableId)}`, {
+        data: {
+          records: batch,
+          typecast: true
+        }
+      });
+      const records = Array.isArray(data?.records) ? data.records : [];
+      written += records.length;
+      records.forEach(record => {
+        const id = normalizeString(record?.id);
+        if (id) successfulRecordIds.push(id);
+      });
+    } catch (error) {
+      const message =
+        error?.response?.data?.error?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        String(error);
+      errors.push(`PATCH failed for table ${tableId} (batch=${batch.length}): ${message}`);
+    } finally {
+      if (typeof options.onBatchComplete === 'function') {
+        options.onBatchComplete({
+          tableId,
+          index: batchIndex,
+          total: batches.length,
+          requested: batch.length,
+          writtenSoFar: written,
+          errorsSoFar: errors.length
+        });
+      }
+    }
+  }
+
+  return {
+    written,
+    errors,
+    successfulRecordIds
+  };
+}
+
+async function fetchTableRecordsWithProgress(itemService, tableId, selectFields = [], onPage = null) {
+  const records = [];
+  let offset = null;
+  let page = 0;
+  do {
+    const params = {};
+    if (offset) params.offset = offset;
+    if (Array.isArray(selectFields) && selectFields.length > 0) params.fields = selectFields;
+    const data = await itemService.request('GET', `/${encodeURIComponent(tableId)}`, { params });
+    const batch = Array.isArray(data?.records) ? data.records : [];
+    records.push(...batch);
+    page += 1;
+    if (typeof onPage === 'function') {
+      onPage({
+        page,
+        loaded: records.length,
+        pageSize: batch.length,
+        hasMore: Boolean(data?.offset)
+      });
+    }
+    offset = data?.offset || null;
+  } while (offset);
+  return records;
+}
+
+async function loadReferenceNumberByIpn(config, progressCallback, summary) {
+  const map = new Map();
+  if (!config.sheetId || !config.tabName) {
+    return map;
+  }
+
+  emitProgress(progressCallback, {
+    stage: 'phase4_load_sheet',
+    percent: 18,
+    counts: summary,
+    message: 'Loading source sheet for ReferenceNumber mapping...'
+  });
+
+  const values = await readSheetRows(config.sheetId, config.tabName, config.authContext || 'inventory');
+  if (!Array.isArray(values) || values.length === 0) {
+    return map;
+  }
+
+  const headers = (values[0] || []).map(value => normalizeString(value).toLowerCase());
+  const ipnIndex = headers.findIndex(name =>
+    ['inventorynumber', 'inventory number', 'inventorynu', 'ipn'].includes(name)
+  );
+  const referenceIndex = headers.findIndex(name =>
+    ['referencenumber', 'reference number', 'manufacturerpartnumber', 'manufacturer part number'].includes(name)
+  );
+
+  if (ipnIndex < 0 || referenceIndex < 0) {
+    addError(
+      summary,
+      'ReferenceNumber mapping skipped: source sheet is missing InventoryNumber or ReferenceNumber columns.'
+    );
+    return map;
+  }
+
+  for (let i = 1; i < values.length; i += 1) {
+    const row = values[i] || [];
+    const ipn = normalizeIpn(row[ipnIndex]);
+    if (!ipn) continue;
+    if (isExcludedPrefix(parseMasterPrefix(ipn))) continue;
+
+    const referenceNumber = normalizeString(row[referenceIndex]);
+    if (!referenceNumber) continue;
+    if (!map.has(ipn)) {
+      map.set(ipn, referenceNumber);
+    }
+  }
+
+  return map;
 }
 
 function detectIncrementalField(masterTableSchema = {}) {
@@ -297,6 +466,7 @@ async function fetchMasterRecords(
 async function buildRoutingMap(itemSchemaService) {
   const tables = await itemSchemaService.listTables();
   const tablesByPrefix = new Map();
+  const tablesById = new Map();
   const duplicatePrefixes = [];
 
   for (const table of tables) {
@@ -308,12 +478,18 @@ async function buildRoutingMap(itemSchemaService) {
       tableId: normalizeString(table?.id),
       tableName,
       prefix,
-      categoryKey: getRouteCategoryKey(tableName)
+      categoryKey: getRouteCategoryKey(tableName),
+      fieldNames: new Set(
+        (Array.isArray(table?.fields) ? table.fields : [])
+          .map(field => normalizeString(field?.name))
+          .filter(Boolean)
+      )
     };
     if (!tablesByPrefix.has(prefix)) {
       tablesByPrefix.set(prefix, []);
     }
     tablesByPrefix.get(prefix).push(current);
+    if (current.tableId) tablesById.set(current.tableId, current);
   }
 
   for (const [prefix, routes] of tablesByPrefix.entries()) {
@@ -326,6 +502,7 @@ async function buildRoutingMap(itemSchemaService) {
 
   return {
     tablesByPrefix,
+    tablesById,
     duplicatePrefixes
   };
 }
@@ -370,7 +547,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     counts: summary,
     message: 'Building routing map from Item Specifics base schema...'
   });
-  const { tablesByPrefix, duplicatePrefixes } = await buildRoutingMap(itemSchemaService);
+  const { tablesByPrefix, tablesById, duplicatePrefixes } = await buildRoutingMap(itemSchemaService);
 
   let categoryDefinitionLookup = new Map();
   if (duplicatePrefixes.length > 0) {
@@ -406,6 +583,19 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
 
   let masterRecords = [];
   let runMode = 'full_scan';
+  const preloadedMasterRows = Array.isArray(options.phase4SharedMasterRows)
+    ? options.phase4SharedMasterRows
+    : null;
+  if (preloadedMasterRows) {
+    runMode = 'shared_master_cache';
+    masterRecords = preloadedMasterRows;
+    emitProgress(progressCallback, {
+      stage: 'phase4_load_master',
+      percent: 20,
+      counts: summary,
+      message: `Using shared Master Parts context cache: rows=${masterRecords.length}.`
+    });
+  }
   let lastLoadProgressCount = 0;
   const reportMasterLoadProgress = ({ page = 0, loaded = 0 } = {}) => {
     // Keep logs useful without flooding: first page + every 1000 loaded.
@@ -419,7 +609,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     });
   };
 
-  if (config.incrementalEnabled && lastMirrorRunAt) {
+  if (!preloadedMasterRows && config.incrementalEnabled && lastMirrorRunAt) {
     try {
       const masterTables = await masterService.getSchemaTables();
       const masterSchema = masterService.findSchemaTable(masterTables, '', config.masterTable);
@@ -442,7 +632,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     }
   }
 
-  if (masterRecords.length === 0 && runMode === 'full_scan') {
+  if (!preloadedMasterRows && masterRecords.length === 0 && runMode === 'full_scan') {
     try {
       masterRecords = await fetchMasterRecords(
         masterService,
@@ -464,27 +654,36 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
         reportMasterLoadProgress
       );
     }
-  } else if (masterRecords.length === 0 && runMode.startsWith('incremental')) {
-    // Incremental run may legitimately find no changed records.
-    summary.runMode = runMode;
-    summary.lastMirrorRunAt = startedAt;
-    if (!config.dryRun) {
-      saveInventoryConfig(MIRROR_STATE_KEY, {
-        lastMirrorRunAt: startedAt,
-        lastRunStatus: 'success',
-        runMode,
-        masterRecordsScanned: 0,
-        ipnRowsCreated: 0,
-        ipnRowsPlanned: 0
-      });
-    }
+  } else if (!preloadedMasterRows && masterRecords.length === 0 && runMode.startsWith('incremental')) {
+    // For ReferenceNumber -> C:Manufacturer Part Number backfill, always continue with full scan.
+    runMode = 'full_scan';
     emitProgress(progressCallback, {
-      stage: 'completed',
-      percent: 100,
+      stage: 'phase4_load_master',
+      percent: 20,
       counts: summary,
-      message: `Phase 4 complete (${runMode}): no changed master records.`
+      message: 'Incremental scan returned no rows; running full scan to keep backfill in sync.'
     });
-    return summary;
+    try {
+      masterRecords = await fetchMasterRecords(
+        masterService,
+        config.masterTable,
+        selectFields,
+        '',
+        reportMasterLoadProgress
+      );
+    } catch (error) {
+      addError(
+        summary,
+        `Field-limited master fetch failed; retrying full field scan: ${error.message}`
+      );
+      masterRecords = await fetchMasterRecords(
+        masterService,
+        config.masterTable,
+        [],
+        '',
+        reportMasterLoadProgress
+      );
+    }
   }
 
   summary.runMode = runMode;
@@ -503,8 +702,12 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     message: `Routing ${masterRecords.length} master records to item-specific tables...`
   });
 
+  const referenceNumberByIpn = await loadReferenceNumberByIpn(config, progressCallback, summary);
+  summary.manufacturerRefsMapped = referenceNumberByIpn.size;
+
   const desiredByTable = new Map();
   const ipnToTable = new Map();
+  const desiredReferenceByIpn = new Map();
   const routingFailureGroups = {
     missingPrefixTable: new Map(),
     blankCategoryForDuplicatePrefix: new Map(),
@@ -512,7 +715,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
   };
 
   const unresolvedByPrefix = [];
-  const assignDestination = (ipn, prefix, destinationTableId) => {
+  const assignDestination = (ipn, prefix, destinationTableId, referenceNumber = '') => {
     const existingRoute = ipnToTable.get(ipn);
     if (existingRoute && existingRoute !== destinationTableId) {
       summary.routingFailures += 1;
@@ -532,6 +735,10 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
       desiredByTable.set(destinationTableId, new Set());
     }
     desiredByTable.get(destinationTableId).add(ipn);
+    const normalizedReference = normalizeString(referenceNumber);
+    if (normalizedReference && !desiredReferenceByIpn.has(ipn)) {
+      desiredReferenceByIpn.set(ipn, normalizedReference);
+    }
     return true;
   };
 
@@ -561,7 +768,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     }
 
     if (prefixRoutes.length === 1) {
-      assignDestination(ipn, prefix, prefixRoutes[0].tableId);
+      assignDestination(ipn, prefix, prefixRoutes[0].tableId, referenceNumberByIpn.get(ipn) || '');
       continue;
     }
 
@@ -604,7 +811,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
       categoryIdentifierTokens && categoryIdentifierTokens.has(normalizeString(route.categoryKey))
     );
     if (identifierMatches.length === 1) {
-      assignDestination(ipn, prefix, identifierMatches[0].tableId);
+      assignDestination(ipn, prefix, identifierMatches[0].tableId, referenceNumberByIpn.get(ipn) || '');
       continue;
     }
 
@@ -643,16 +850,49 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     if (desiredIpns.length === 0) continue;
 
     try {
-      const existingRecords = await itemService.fetchAllRecords(tableId, ['IPN']);
-      const existingIpns = new Set(
-        existingRecords
-          .map(record => normalizeString(record?.fields?.IPN).toUpperCase())
-          .filter(Boolean)
+      const tableMeta = tablesById.get(tableId);
+      const tableFieldNames = tableMeta?.fieldNames instanceof Set ? tableMeta.fieldNames : new Set();
+      const supportsManufacturerField = tableFieldNames.has(MANUFACTURER_PART_FIELD);
+      const fetchFields = ['IPN'];
+      if (supportsManufacturerField) {
+        fetchFields.push(MANUFACTURER_PART_FIELD);
+      }
+      MANUFACTURER_LOCK_FIELD_CANDIDATES.forEach(fieldName => {
+        if (tableFieldNames.has(fieldName)) fetchFields.push(fieldName);
+      });
+      emitProgress(progressCallback, {
+        stage: 'phase4_mirror',
+        percent: 60 + Math.floor((tableIndex / totalTables) * 35),
+        counts: summary,
+        message:
+          `Table ${tableIndex}/${totalTables}: loading existing item-specific rows ` +
+          `(fields=${[...new Set(fetchFields)].length})...`
+      });
+      const existingRecords = await fetchTableRecordsWithProgress(
+        itemService,
+        tableId,
+        [...new Set(fetchFields)],
+        pageState => {
+          emitProgress(progressCallback, {
+            stage: 'phase4_mirror',
+            percent: 60 + Math.floor((tableIndex / totalTables) * 35),
+            counts: summary,
+            message:
+              `Table ${tableIndex}/${totalTables}: loaded existing rows=${pageState.loaded} ` +
+              `(page=${pageState.page})`
+          });
+        }
       );
+      const existingByIpn = new Map();
+      existingRecords.forEach(record => {
+        const ipn = normalizeIpn(record?.fields?.IPN);
+        if (!ipn || existingByIpn.has(ipn)) return;
+        existingByIpn.set(ipn, record);
+      });
 
       const missing = [];
       for (const ipn of desiredIpns) {
-        if (existingIpns.has(ipn)) {
+        if (existingByIpn.has(ipn)) {
           summary.ipnRowsAlreadyPresent += 1;
         } else {
           missing.push(ipn);
@@ -661,10 +901,50 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
 
       if (config.dryRun) {
         summary.ipnRowsPlanned += missing.length;
+        if (supportsManufacturerField) {
+          for (const ipn of desiredIpns) {
+            const referenceNumber = normalizeString(desiredReferenceByIpn.get(ipn));
+            if (!referenceNumber) continue;
+            const existing = existingByIpn.get(ipn);
+            if (!existing) {
+              summary.manufacturerValuesPlanned += 1;
+              continue;
+            }
+            const currentValue = normalizeString(existing?.fields?.[MANUFACTURER_PART_FIELD]);
+            if (currentValue) {
+              summary.manufacturerValuesSkippedExisting += 1;
+              continue;
+            }
+            summary.manufacturerValuesPlanned += 1;
+          }
+        }
       } else {
+        emitProgress(progressCallback, {
+          stage: 'phase4_mirror',
+          percent: 60 + Math.floor((tableIndex / totalTables) * 35),
+          counts: summary,
+          message:
+            `Table ${tableIndex}/${totalTables}: creating missing IPN rows ` +
+            `(missing=${missing.length})...`
+        });
+        let createBatchIndex = 0;
+        const totalCreateBatches = Math.max(1, Math.ceil(missing.length / 10));
         for (const batch of chunkArray(missing, 10)) {
+          createBatchIndex += 1;
           const records = batch.map(ipn => ({
-            fields: { IPN: ipn }
+            fields: (() => {
+              const fields = { IPN: ipn };
+              if (supportsManufacturerField) {
+                const referenceNumber = normalizeString(desiredReferenceByIpn.get(ipn));
+                if (referenceNumber) {
+                  fields[MANUFACTURER_PART_FIELD] = referenceNumber;
+                  const lockFields = buildFixedLockFields(tableFieldNames, MANUFACTURER_PART_FIELD);
+                  Object.assign(fields, lockFields);
+                  summary.manufacturerValuesPlanned += 1;
+                }
+              }
+              return fields;
+            })()
           }));
           await itemService.request('POST', `/${encodeURIComponent(tableId)}`, {
             data: {
@@ -673,6 +953,65 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
             }
           });
           summary.ipnRowsCreated += batch.length;
+          emitProgress(progressCallback, {
+            stage: 'phase4_mirror',
+            percent: 60 + Math.floor((tableIndex / totalTables) * 35),
+            counts: summary,
+            message:
+              `Table ${tableIndex}/${totalTables}: create batch ${createBatchIndex}/${totalCreateBatches} ` +
+              `(createdSoFar=${summary.ipnRowsCreated})`
+          });
+        }
+
+        if (supportsManufacturerField) {
+          const manufacturerUpdates = [];
+          for (const ipn of desiredIpns) {
+            const existing = existingByIpn.get(ipn);
+            if (!existing) continue;
+            const referenceNumber = normalizeString(desiredReferenceByIpn.get(ipn));
+            if (!referenceNumber) continue;
+
+            const currentValue = normalizeString(existing?.fields?.[MANUFACTURER_PART_FIELD]);
+            if (currentValue) {
+              summary.manufacturerValuesSkippedExisting += 1;
+              continue;
+            }
+
+            const fields = {
+              [MANUFACTURER_PART_FIELD]: referenceNumber,
+              ...buildFixedLockFields(tableFieldNames, MANUFACTURER_PART_FIELD)
+            };
+            manufacturerUpdates.push({
+              id: String(existing.id),
+              fields
+            });
+          }
+
+          if (manufacturerUpdates.length > 0) {
+            summary.manufacturerValuesPlanned += manufacturerUpdates.length;
+            emitProgress(progressCallback, {
+              stage: 'phase4_mirror',
+              percent: 60 + Math.floor((tableIndex / totalTables) * 35),
+              counts: summary,
+              message:
+                `Table ${tableIndex}/${totalTables}: writing Manufacturer Part Number updates ` +
+                `(records=${manufacturerUpdates.length})...`
+            });
+            const result = await patchTableRecords(itemService, tableId, manufacturerUpdates, {
+              onBatchComplete: batchState => {
+                emitProgress(progressCallback, {
+                  stage: 'phase4_mirror',
+                  percent: 60 + Math.floor((tableIndex / totalTables) * 35),
+                  counts: summary,
+                  message:
+                    `Table ${tableIndex}/${totalTables}: MPN update batch ${batchState.index}/${batchState.total} ` +
+                    `(writtenSoFar=${batchState.writtenSoFar}, errors=${batchState.errorsSoFar})`
+                });
+              }
+            });
+            summary.manufacturerValuesWritten += result.written;
+            (result.errors || []).forEach(message => addError(summary, message));
+          }
         }
       }
     } catch (error) {
@@ -683,7 +1022,10 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
       stage: 'phase4_mirror',
       percent: 60 + Math.floor((tableIndex / totalTables) * 35),
       counts: summary,
-      message: `Processed table ${tableIndex}/${totalTables} (created=${summary.ipnRowsCreated}, planned=${summary.ipnRowsPlanned}, existing=${summary.ipnRowsAlreadyPresent}).`
+      message:
+        `Processed table ${tableIndex}/${totalTables} ` +
+        `(created=${summary.ipnRowsCreated}, planned=${summary.ipnRowsPlanned}, existing=${summary.ipnRowsAlreadyPresent}, ` +
+        `mpnWritten=${summary.manufacturerValuesWritten}, mpnPlanned=${summary.manufacturerValuesPlanned}).`
     });
   }
 
@@ -700,6 +1042,10 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
       ipnRowsAlreadyPresent: summary.ipnRowsAlreadyPresent,
       ipnRowsCreated: summary.ipnRowsCreated,
       ipnRowsPlanned: summary.ipnRowsPlanned,
+      manufacturerRefsMapped: summary.manufacturerRefsMapped,
+      manufacturerValuesPlanned: summary.manufacturerValuesPlanned,
+      manufacturerValuesWritten: summary.manufacturerValuesWritten,
+      manufacturerValuesSkippedExisting: summary.manufacturerValuesSkippedExisting,
       errorCount: summary.errors.length
     });
   }

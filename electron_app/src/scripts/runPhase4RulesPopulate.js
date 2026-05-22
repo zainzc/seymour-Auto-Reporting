@@ -190,6 +190,8 @@ function extractDriveFileId(input) {
 }
 
 async function loadWorkbookFromDrive(fileOrUrl, authContext = 'inventory') {
+  const REQUEST_TIMEOUT_MS = 90000;
+  const MAX_ATTEMPTS = 3;
   const fileId = extractDriveFileId(fileOrUrl);
   if (!fileId) {
     throw new Error('Invalid Google Drive file ID/URL for rules workbook.');
@@ -200,10 +202,32 @@ async function loadWorkbookFromDrive(fileOrUrl, authContext = 'inventory') {
 
   const auth = oauth2Service.getAuthenticatedClient(authContext);
   const drive = google.drive({ version: 'v3', auth });
-  const response = await drive.files.get(
-    { fileId, alt: 'media' },
-    { responseType: 'arraybuffer' }
-  );
+  let response = null;
+  let lastError = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      response = await drive.files.get(
+        { fileId, alt: 'media' },
+        { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT_MS }
+      );
+      break;
+    } catch (error) {
+      lastError = error;
+      if (attempt >= MAX_ATTEMPTS) break;
+      const delayMs = 1200 * attempt;
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  if (!response) {
+    const detail =
+      lastError?.response?.data?.error?.message ||
+      lastError?.response?.data?.error ||
+      lastError?.message ||
+      String(lastError || 'Unknown Google Drive error');
+    throw new Error(
+      `Failed to download rules workbook from Google Drive after ${MAX_ATTEMPTS} attempts (timeout=${REQUEST_TIMEOUT_MS}ms): ${detail}`
+    );
+  }
 
   const wb = new ExcelJS.Workbook();
   const buffer = Buffer.from(response.data);
@@ -445,6 +469,11 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
   let logicRowsScanned = 0;
   let rulesSource = '';
   const { workbook, fileId } = await loadWorkbookFromDrive(args.rulesDriveFile, args.authContext);
+  emitProgress(progressCallback, {
+    stage: 'phase4rules_load_rules',
+    percent: 11,
+    message: `Rules workbook loaded from Google Drive (fileId=${fileId}). Parsing Logic sheet...`
+  });
   const ws = workbook.getWorksheet(args.logicSheetName);
   const parsed = parseLogicWorksheet(ws, args.logicSheetName, args.ruleTypes);
   fixedRulesByPrefix = parsed.byPrefix;

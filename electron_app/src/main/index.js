@@ -750,7 +750,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   };
 
   emitStepProgress('ebaysandbox_post_import_start', 99, 'Post-import automation started.');
-  emitInventoryAutoChainLog('Post-import automation started: Phase4 -> Phase6 -> Phase7.2 -> Phase7.4');
+  emitInventoryAutoChainLog('Post-import automation started: Phase4-Mirror -> Phase4A -> Phase4B -> Phase4C -> Phase4D -> Phase6 -> Phase7.2 -> Phase7.4');
 
   const listingsTable = resolveListingsTableName(
     runtime.phase4DListingsTable,
@@ -872,6 +872,24 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
       'error'
     );
   }
+
+  emitStepProgress('ebaysandbox_post_import_phase4mirror', 99, 'Running Phase 4 Mirror...');
+  const phase4MirrorDryRun =
+    typeof stored.phase4DryRun === 'boolean'
+      ? stored.phase4DryRun
+      : false;
+  summary.phase4Mirror = await runPhase4Mirroring({
+    ...chainBase,
+    dryRun: phase4MirrorDryRun,
+    authContext: 'inventory',
+    phase4SharedMasterRows: sharedMasterContext?.masterRows
+  }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4mirror', 'Phase 4 Mirror'));
+  emitInventoryAutoChainLog(
+    `Post-import automation: Phase 4 Mirror completed ` +
+      `(created=${summary.phase4Mirror?.ipnRowsCreated || 0}, ` +
+      `existing=${summary.phase4Mirror?.ipnRowsAlreadyPresent || 0}, ` +
+      `mpnWritten=${summary.phase4Mirror?.manufacturerValuesWritten || 0})`
+  );
 
   emitStepProgress('ebaysandbox_post_import_phase4a', 99, 'Running Phase 4A...');
 
