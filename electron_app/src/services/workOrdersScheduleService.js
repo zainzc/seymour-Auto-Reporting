@@ -4,6 +4,7 @@ const oauth2Service = require('./oauth2Service');
 const { runWorkOrdersSync, DEFAULT_WORK_ORDERS_SHEET_NAME } = require('./workOrdersGoogleSheetsSync');
 
 let activeJob = null;
+let isWorkOrdersSyncRunning = false;
 
 function getCronExpression(frequency) {
   if (frequency === 'every_1_minute') return '* * * * *';
@@ -69,6 +70,18 @@ function startWorkOrdersSchedule(config) {
 }
 
 async function executeWorkOrdersScheduledJob(config) {
+  if (isWorkOrdersSyncRunning) {
+    const message = 'Work Orders sync skipped: previous run still in progress';
+    console.log(`[WorkOrders] ${message}`);
+    logWorkOrdersExecution(true, message, { skipped: true, reason: 'already_running' });
+    return {
+      success: true,
+      skipped: true,
+      message
+    };
+  }
+
+  isWorkOrdersSyncRunning = true;
   console.log(`[WorkOrders] Scheduled sync started at ${new Date().toISOString()}`);
 
   if (config.endDate) {
@@ -84,6 +97,7 @@ async function executeWorkOrdersScheduledJob(config) {
       });
       const message = 'End date reached - Work Orders schedule deactivated';
       logWorkOrdersExecution(false, message);
+      isWorkOrdersSyncRunning = false;
       return {
         success: false,
         message
@@ -95,6 +109,7 @@ async function executeWorkOrdersScheduledJob(config) {
   if (!isAuthenticated) {
     const message = 'Google authentication expired - please reconnect';
     logWorkOrdersExecution(false, message);
+    isWorkOrdersSyncRunning = false;
     return {
       success: false,
       message
@@ -155,6 +170,8 @@ async function executeWorkOrdersScheduledJob(config) {
       message,
       summary: failureSummary
     };
+  } finally {
+    isWorkOrdersSyncRunning = false;
   }
 }
 

@@ -582,7 +582,8 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
         payload: {
           value: Number(value.getTime()),
           time: true
-        }
+        },
+        fieldName: name
       });
       continue;
     }
@@ -632,7 +633,8 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
         id: fieldMeta.id,
         payload: {
           value: [labelId]
-        }
+        },
+        fieldName: name
       });
       continue;
     }
@@ -650,7 +652,8 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
 
     customFields.push({
       id: fieldMeta.id,
-      value: fieldValue
+      value: fieldValue,
+      fieldName: name
     });
   }
   if (missingFieldNames.length > 0) {
@@ -660,6 +663,84 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
   }
 
   return customFields;
+}
+
+function getTaskCustomFieldById(task = {}, fieldId = '') {
+  const id = normalizeCell(fieldId);
+  if (!id) return null;
+  const fields = Array.isArray(task?.custom_fields) ? task.custom_fields : [];
+  return fields.find(field => normalizeCell(field?.id) === id) || null;
+}
+
+function getCustomFieldDisplayValue(field = null) {
+  if (!field) return '';
+  const raw = field?.value;
+  if (raw === null || raw === undefined) return '';
+
+  const fieldType = normalizeUpper(field?.type);
+  if (fieldType === 'DROP_DOWN') {
+    const options = Array.isArray(field?.type_config?.options) ? field.type_config.options : [];
+    const valueId = String(raw);
+    const option =
+      options.find(opt => String(opt?.id || '') === valueId) ||
+      options.find(opt => String(opt?.orderindex || '') === valueId);
+    return normalizeCell(option?.name || raw);
+  }
+
+  if (fieldType === 'LABELS') {
+    const options = Array.isArray(field?.type_config?.options) ? field.type_config.options : [];
+    const values = Array.isArray(raw) ? raw : [raw];
+    const names = values
+      .map(item => {
+        const valueId = String(item);
+        const option =
+          options.find(opt => String(opt?.id || '') === valueId) ||
+          options.find(opt => String(opt?.orderindex || '') === valueId);
+        return normalizeCell(option?.label || option?.name || '');
+      })
+      .filter(Boolean);
+    if (names.length > 0) return names.join(', ');
+    return values.map(v => String(v)).join(', ');
+  }
+
+  if (typeof raw === 'object') {
+    return normalizeCell(raw?.name || raw?.label || raw?.value || '');
+  }
+  return normalizeCell(raw);
+}
+
+async function verifyAssigneeFieldValue(clickup, taskId, assigneeFieldId, expectedLabel, rowKey) {
+  const id = normalizeCell(taskId);
+  const fieldId = normalizeCell(assigneeFieldId);
+  const expected = normalizeCell(expectedLabel);
+  if (!id || !fieldId || !expected) return;
+
+  try {
+    const task = await clickup.getTask(id);
+    const field = getTaskCustomFieldById(task, fieldId);
+    if (!field) {
+      console.warn(
+        `[WorkOrders] Assignee verify: field not found on task. taskId='${id}', fieldId='${fieldId}', row='${rowKey || 'unknown'}'`
+      );
+      return;
+    }
+    const actual = getCustomFieldDisplayValue(field);
+    const fieldType = normalizeUpper(field?.type);
+    const rawValue = field?.value;
+    if (normalizeUpper(actual) !== normalizeUpper(expected)) {
+      console.warn(
+        `[WorkOrders] Assignee verify mismatch. row='${rowKey || 'unknown'}', expected='${expected}', actual='${actual}', fieldType='${fieldType}', fieldId='${fieldId}', raw='${JSON.stringify(
+          rawValue
+        )}'`
+      );
+    } else {
+      console.log(
+        `[WorkOrders] Assignee verify success. row='${rowKey || 'unknown'}', value='${actual}', fieldType='${fieldType}', fieldId='${fieldId}'`
+      );
+    }
+  } catch (error) {
+    console.warn(`[WorkOrders] Assignee verify failed for ${rowKey || id}: ${error?.message || error}`);
+  }
 }
 
 async function applyTaskCustomFields(clickup, taskId, customFields = [], recordKey = '', result = null) {
@@ -727,6 +808,12 @@ async function syncRowsToClickUp({
     subtasks: false
   });
   const taskByKey = buildTaskMap(tasks);
+  let assigneeVerificationCount = 0;
+  const assigneeVerificationLimit = 20;
+  const assigneeVerificationEnabled = String(process.env.WORK_ORDERS_CLICKUP_VERIFY_ASSIGNEE || '').trim() === '1';
+  if (assigneeVerificationEnabled) {
+    console.log(`[WorkOrders] Assignee verify mode enabled (limit=${assigneeVerificationLimit})`);
+  }
   const listFieldCount = Array.isArray(customFieldMeta.fields) ? customFieldMeta.fields.length : 0;
   console.log(`[WorkOrders] ClickUp list field metadata discovered: ${listFieldCount}`);
 
@@ -765,6 +852,7 @@ async function syncRowsToClickUp({
     const existingTask = taskByKey.get(key);
     const dueDate = computeDueDate(row.Created, row['Ship Via']);
     const customFields = buildTaskCustomFields(row, customFieldMeta, dueDate);
+    const resolvedAssignee = resolveLocationAssigneeLabel(row.Location);
     if (dueDate) {
       console.log(`[WorkOrders] Due date calculated for ${key}: ${dueDate.toISOString()}`);
     }
@@ -803,6 +891,19 @@ async function syncRowsToClickUp({
         const createdTaskId = normalizeCell(createdTask?.id || createdTask?.task?.id);
         if (createdTaskId) {
           await applyTaskCustomFields(clickup, createdTaskId, customFields, key, result);
+          if (
+            assigneeVerificationEnabled &&
+            resolvedAssignee &&
+            assigneeVerificationCount < assigneeVerificationLimit
+          ) {
+            const assigneeField = customFields.find(
+              field => normalizeCell(field?.fieldName) === WORK_ORDERS_TASK_FIELD_NAMES.assignee
+            );
+            if (assigneeField?.id) {
+              assigneeVerificationCount += 1;
+              await verifyAssigneeFieldValue(clickup, createdTaskId, assigneeField.id, resolvedAssignee, key);
+            }
+          }
           console.log(`[WorkOrders] Task created: ${key}`);
         }
         result.created += 1;
@@ -812,6 +913,19 @@ async function syncRowsToClickUp({
             data: taskPayload
           });
           await applyTaskCustomFields(clickup, existingTask.id, customFields, key, result);
+          if (
+            assigneeVerificationEnabled &&
+            resolvedAssignee &&
+            assigneeVerificationCount < assigneeVerificationLimit
+          ) {
+            const assigneeField = customFields.find(
+              field => normalizeCell(field?.fieldName) === WORK_ORDERS_TASK_FIELD_NAMES.assignee
+            );
+            if (assigneeField?.id) {
+              assigneeVerificationCount += 1;
+              await verifyAssigneeFieldValue(clickup, existingTask.id, assigneeField.id, resolvedAssignee, key);
+            }
+          }
           console.log(`[WorkOrders] Task updated: ${key}`);
           result.updated += 1;
         } else {
