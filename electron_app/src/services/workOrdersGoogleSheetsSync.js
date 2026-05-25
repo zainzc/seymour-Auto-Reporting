@@ -439,6 +439,47 @@ function getCustomFieldMetaMap(listData = {}) {
   return { byName: map, byCanonical: canonicalMap, fields };
 }
 
+function createEmptyFieldMetaLookup() {
+  return { byName: new Map(), byCanonical: new Map(), fields: [] };
+}
+
+function mergeFieldMetaLookups(baseLookup = null, extraLookup = null) {
+  const out = createEmptyFieldMetaLookup();
+  const appendField = field => {
+    const rawName = normalizeCell(field?.name);
+    if (!rawName) return;
+    const upperName = normalizeUpper(rawName);
+    const canonical = canonicalFieldName(rawName);
+    if (!out.byName.has(upperName)) out.byName.set(upperName, field);
+    if (canonical && !out.byCanonical.has(canonical)) out.byCanonical.set(canonical, field);
+    out.fields.push(field);
+  };
+
+  const seed = [baseLookup, extraLookup];
+  seed.forEach(lookup => {
+    if (!lookup) return;
+    const fields = Array.isArray(lookup.fields) ? lookup.fields : [];
+    fields.forEach(appendField);
+  });
+
+  return out;
+}
+
+function buildFieldMetaLookupFromTask(task = {}) {
+  const lookup = createEmptyFieldMetaLookup();
+  const fields = Array.isArray(task?.custom_fields) ? task.custom_fields : [];
+  fields.forEach(field => {
+    const rawName = normalizeCell(field?.name);
+    if (!rawName) return;
+    const upperName = normalizeUpper(rawName);
+    const canonical = canonicalFieldName(rawName);
+    if (!lookup.byName.has(upperName)) lookup.byName.set(upperName, field);
+    if (canonical && !lookup.byCanonical.has(canonical)) lookup.byCanonical.set(canonical, field);
+    lookup.fields.push(field);
+  });
+  return lookup;
+}
+
 function canonicalFieldName(value = '') {
   return normalizeCell(value).toLowerCase().replace(/[^a-z0-9]/g, '');
 }
@@ -504,7 +545,7 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
   for (const [name, value] of Object.entries(valuesByFieldName)) {
     const fieldMeta = resolveCustomFieldMeta(fieldMetaLookup, name);
     if (!fieldMeta || value === '') {
-      if (!fieldMeta && value !== '') missingFieldNames.push(name);
+      if (!fieldMeta && value !== '' && name !== 'Due Date') missingFieldNames.push(name);
       continue;
     }
 
@@ -600,12 +641,30 @@ async function syncRowsToClickUp({
   });
 
   const list = await clickup.getList();
-  const customFieldMeta = getCustomFieldMetaMap(list);
+  let customFieldMeta = getCustomFieldMetaMap(list);
   const tasks = await clickup.fetchTasksByStatuses([], {
     includeClosed: true,
     subtasks: false
   });
   const taskByKey = buildTaskMap(tasks);
+  const listFieldCount = Array.isArray(customFieldMeta.fields) ? customFieldMeta.fields.length : 0;
+  console.log(`[WorkOrders] ClickUp list field metadata discovered: ${listFieldCount}`);
+
+  if (listFieldCount === 0 && tasks.length > 0) {
+    try {
+      const seedTaskId = normalizeCell(tasks[0]?.id);
+      if (seedTaskId) {
+        const taskDetail = await clickup.getTask(seedTaskId);
+        const taskFieldMeta = buildFieldMetaLookupFromTask(taskDetail);
+        customFieldMeta = mergeFieldMetaLookups(customFieldMeta, taskFieldMeta);
+        console.log(
+          `[WorkOrders] ClickUp task-field metadata fallback discovered: ${Array.isArray(customFieldMeta.fields) ? customFieldMeta.fields.length : 0}`
+        );
+      }
+    } catch (error) {
+      console.warn(`[WorkOrders] ClickUp task-field metadata fallback failed: ${error?.message || error}`);
+    }
+  }
 
   const filteredRows = [];
   console.log(`[WorkOrders] Rows read from Google Sheets for ClickUp sync: ${latestRows.length}`);
