@@ -510,7 +510,31 @@ function resolveCustomFieldMeta(fieldMetaLookup, targetName = '') {
 function resolveDropdownOptionId(fieldMeta = null, targetLabel = '') {
   if (!fieldMeta || !fieldMeta.type_config || !Array.isArray(fieldMeta.type_config.options)) return null;
   const normalized = normalizeUpper(targetLabel);
-  const option = fieldMeta.type_config.options.find(opt => normalizeUpper(opt?.name) === normalized);
+  const canonicalTarget = canonicalFieldName(targetLabel);
+  const option = fieldMeta.type_config.options.find(opt => {
+    const name = normalizeUpper(opt?.name || '');
+    const canonicalName = canonicalFieldName(opt?.name || '');
+    return name === normalized || (canonicalTarget && canonicalName === canonicalTarget);
+  });
+  if (!option) return null;
+  return String(option.id || option.orderindex || '').trim() || null;
+}
+
+function resolveLabelOptionId(fieldMeta = null, targetLabel = '') {
+  if (!fieldMeta || !fieldMeta.type_config || !Array.isArray(fieldMeta.type_config.options)) return null;
+  const normalized = normalizeUpper(targetLabel);
+  const canonicalTarget = canonicalFieldName(targetLabel);
+  const option = fieldMeta.type_config.options.find(opt => {
+    const name = normalizeUpper(opt?.name || '');
+    const label = normalizeUpper(opt?.label || '');
+    const canonicalName = canonicalFieldName(opt?.name || '');
+    const canonicalLabel = canonicalFieldName(opt?.label || '');
+    return (
+      name === normalized ||
+      label === normalized ||
+      (canonicalTarget && (canonicalName === canonicalTarget || canonicalLabel === canonicalTarget))
+    );
+  });
   if (!option) return null;
   return String(option.id || option.orderindex || '').trim() || null;
 }
@@ -564,8 +588,64 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
     }
     if (fieldType === 'DROP_DOWN') {
       const optionId = resolveDropdownOptionId(fieldMeta, value);
-      if (!optionId) continue;
+      if (!optionId) {
+        if (name === WORK_ORDERS_TASK_FIELD_NAMES.assignee) {
+          const options = Array.isArray(fieldMeta?.type_config?.options) ? fieldMeta.type_config.options : [];
+          const optionNames = options
+            .map(opt => normalizeCell(opt?.name || opt?.label || ''))
+            .filter(Boolean)
+            .join(', ');
+          console.warn(
+            `[WorkOrders] Assignee dropdown option not found. value='${value}', fieldType='${fieldType}', options='${optionNames}'`
+          );
+        }
+        continue;
+      }
+      if (name === WORK_ORDERS_TASK_FIELD_NAMES.assignee) {
+        console.log(
+          `[WorkOrders] Assignee dropdown resolved. value='${value}', optionId='${optionId}', fieldId='${normalizeCell(fieldMeta?.id)}'`
+        );
+      }
       fieldValue = optionId;
+    }
+    if (fieldType === 'LABELS') {
+      const labelId = resolveLabelOptionId(fieldMeta, value);
+      if (!labelId) {
+        if (name === WORK_ORDERS_TASK_FIELD_NAMES.assignee) {
+          const options = Array.isArray(fieldMeta?.type_config?.options) ? fieldMeta.type_config.options : [];
+          const optionNames = options
+            .map(opt => normalizeCell(opt?.label || opt?.name || ''))
+            .filter(Boolean)
+            .join(', ');
+          console.warn(
+            `[WorkOrders] Assignee label option not found. value='${value}', fieldType='${fieldType}', options='${optionNames}'`
+          );
+        }
+        continue;
+      }
+      if (name === WORK_ORDERS_TASK_FIELD_NAMES.assignee) {
+        console.log(
+          `[WorkOrders] Assignee label resolved. value='${value}', optionId='${labelId}', fieldId='${normalizeCell(fieldMeta?.id)}'`
+        );
+      }
+      customFields.push({
+        id: fieldMeta.id,
+        payload: {
+          value: [labelId]
+        }
+      });
+      continue;
+    }
+    if (
+      name === WORK_ORDERS_TASK_FIELD_NAMES.assignee &&
+      fieldType !== 'DROP_DOWN' &&
+      fieldType !== 'LABELS'
+    ) {
+      console.warn(
+        `[WorkOrders] Assignee field type not supported for label mapping. fieldType='${fieldType}', fieldName='${normalizeCell(
+          fieldMeta?.name
+        )}', value='${value}'`
+      );
     }
 
     customFields.push({
