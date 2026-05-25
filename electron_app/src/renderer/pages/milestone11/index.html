@@ -509,6 +509,14 @@
         <button class="action-btn" style="margin-top: 10px;" onclick="testScheduleNow()">
           Test Schedule Now
         </button>
+        <button
+          class="action-btn"
+          id="clickup-sync-now-btn"
+          style="margin-top: 10px; display: none;"
+          onclick="runClickupSyncNow()"
+        >
+          Run ClickUp Sync Now
+        </button>
       </div>
     </div>
   </div>
@@ -560,15 +568,18 @@
     const destinationInfo = document.getElementById('destination-info');
     const driveFolderGroup = document.getElementById('drive-folder-group');
     const clickupListGroup = document.getElementById('clickup-list-group');
+    const clickupSyncButton = document.getElementById('clickup-sync-now-btn');
 
     if (currentDataType === 'workorders') {
       driveFolderGroup.style.display = 'block';
       clickupListGroup.style.display = 'block';
+      clickupSyncButton.style.display = 'block';
       destinationSelect.innerHTML = '<option>Google Sheets - Work Orders Tab (Auto-managed)</option>';
       destinationInfo.textContent = 'Data syncs active Work Orders and Check Part Quotes into Work Orders tab.';
     } else {
       driveFolderGroup.style.display = 'none';
       clickupListGroup.style.display = 'none';
+      clickupSyncButton.style.display = 'none';
       destinationSelect.innerHTML = '<option>Google Sheets - RAW Tab (Fixed)</option>';
       destinationInfo.textContent = 'Data will overwrite the RAW tab only.';
     }
@@ -749,6 +760,30 @@
     const frequency = document.getElementById('schedule-frequency').value;
     const weekStartGroup = document.getElementById('week-start-group');
     weekStartGroup.style.display = currentDataType === 'invoices' && frequency === 'weekly' ? 'block' : 'none';
+  }
+
+  async function runClickupSyncNow() {
+    const status = document.getElementById('scheduled-status');
+    if (currentDataType !== 'workorders') {
+      showStatus(status, 'error', 'ClickUp sync is only available for Work Orders.');
+      return;
+    }
+    showStatus(status, 'info', 'Running ClickUp sync from Google Sheet...');
+    try {
+      const spreadsheetId = document.getElementById('spreadsheet-id').value.trim();
+      const clickupListId = document.getElementById('workorders-clickup-list-id').value.trim();
+      const result = await window.workOrdersAPI.runClickupSyncNow({
+        spreadsheetId: spreadsheetId || null,
+        workOrdersClickupListId: clickupListId || null
+      });
+      if (result.success) {
+        showStatus(status, 'success', result.message);
+      } else {
+        showStatus(status, 'error', result.message || 'ClickUp sync failed.');
+      }
+    } catch (err) {
+      showStatus(status, 'error', `ClickUp sync failed: ${err.message}`);
+    }
   }
 
   async function loadSavedSheetId() {

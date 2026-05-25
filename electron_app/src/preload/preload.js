@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('reportingAPI', {
 
 contextBridge.exposeInMainWorld('workOrdersAPI', {
   runNow: (params) => ipcRenderer.invoke('workorders-run-now', params),
+  runClickupSyncNow: (params) => ipcRenderer.invoke('workorders-clickup-sync-now', params),
   saveSchedule: (config) => ipcRenderer.invoke('workorders-save-schedule', config),
   cancelSchedule: () => ipcRenderer.invoke('workorders-cancel-schedule'),
   getCurrentSchedule: () => ipcRenderer.invoke('workorders-get-schedule'),

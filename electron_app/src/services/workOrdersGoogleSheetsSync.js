@@ -80,19 +80,35 @@ function buildTaskKey(row = {}) {
 }
 
 function buildTaskName(row = {}) {
-  const key = buildTaskKey(row);
-  const customer = normalizeCell(row['Shipping Customer Name'] || row['Billing Customer Name']);
-  const suffix = customer ? ` - ${customer}` : '';
-  return `${WORK_ORDERS_TASK_NAME_PREFIX} ${key}${suffix}`.slice(0, 240);
+  const recordType = normalizeUpper(row['Record Type']);
+  const number = normalizeCell(row['W/O or Quote Number']);
+  const detail = normalizeCell(row['Detail (IPN)']).split('|')[0].trim();
+  const prefix = recordType === 'WORK ORDER' ? 'WO' : recordType === 'QUOTE' ? 'Quote' : normalizeCell(row['Record Type']);
+  const title = `${prefix} ${number}${detail ? ` - ${detail}` : ''}`.trim();
+  return title.slice(0, 240);
 }
 
 function parseTaskKeyFromName(taskName = '') {
   const text = normalizeCell(taskName);
-  if (!text.startsWith(WORK_ORDERS_TASK_NAME_PREFIX)) return '';
-  const remainder = normalizeCell(text.slice(WORK_ORDERS_TASK_NAME_PREFIX.length));
-  if (!remainder) return '';
-  const keyPart = remainder.split(' - ')[0];
-  return normalizeCell(keyPart);
+  if (!text) return '';
+  if (text.startsWith(WORK_ORDERS_TASK_NAME_PREFIX)) {
+    const remainder = normalizeCell(text.slice(WORK_ORDERS_TASK_NAME_PREFIX.length));
+    if (!remainder) return '';
+    const keyPart = remainder.split(' - ')[0];
+    return normalizeCell(keyPart);
+  }
+
+  const woMatch = text.match(/^WO\s+([^\s-]+)/i);
+  if (woMatch && woMatch[1]) {
+    return `Work Order-${normalizeCell(woMatch[1])}`;
+  }
+
+  const quoteMatch = text.match(/^Quote\s+([^\s-]+)/i);
+  if (quoteMatch && quoteMatch[1]) {
+    return `Quote-${normalizeCell(quoteMatch[1])}`;
+  }
+
+  return '';
 }
 
 function parseTaskKeyFromDescription(description = '') {
@@ -250,6 +266,10 @@ function resolveLocationAssigneeLabel(location = '') {
 }
 
 function buildTaskDescription(row = {}) {
+  const pictureLinks = String(row['Part Pictures'] || '')
+    .split('|')
+    .map(value => normalizeCell(value))
+    .filter(Boolean);
   const lines = [
     `Record Key: ${buildTaskKey(row)}`,
     `Record Type: ${normalizeCell(row['Record Type'])}`,
@@ -264,6 +284,10 @@ function buildTaskDescription(row = {}) {
     `R Number: ${normalizeCell(row['R#'])}`,
     `Notes: ${normalizeCell(row.Notes)}`
   ];
+  if (pictureLinks.length > 0) {
+    lines.push('Part Pictures:');
+    pictureLinks.forEach(link => lines.push(link));
+  }
   return lines.join('\n');
 }
 
@@ -419,7 +443,16 @@ function resolveDropdownOptionId(fieldMeta = null, targetLabel = '') {
   return String(option.id || option.orderindex || '').trim() || null;
 }
 
-function buildTaskCustomFields(row = {}, fieldMetaMap = new Map()) {
+function buildTaskCustomFields(row = {}, fieldMetaMap = new Map(), dueDate = null) {
+  const resolvedAssignee = resolveLocationAssigneeLabel(row.Location);
+  const rawLocation = normalizeCell(row.Location);
+  const rowKey = buildRecordKey(row);
+  if (rawLocation && !resolvedAssignee) {
+    console.warn(`[WorkOrders] No assignee mapping found for Location: ${rawLocation}`);
+  } else if (resolvedAssignee) {
+    console.log(`[WorkOrders] Assignee field set for ${rowKey || 'unknown'}: ${resolvedAssignee}`);
+  }
+
   const valuesByFieldName = {
     [WORK_ORDERS_TASK_FIELD_NAMES.customer]: normalizeCell(
       row['Shipping Customer Name'] || row['Billing Customer Name']
@@ -431,7 +464,8 @@ function buildTaskCustomFields(row = {}, fieldMetaMap = new Map()) {
     [WORK_ORDERS_TASK_FIELD_NAMES.stock]: normalizeCell(row['Stock #']),
     [WORK_ORDERS_TASK_FIELD_NAMES.rNumber]: normalizeCell(row['R#']),
     [WORK_ORDERS_TASK_FIELD_NAMES.notes]: normalizeCell(row.Notes),
-    [WORK_ORDERS_TASK_FIELD_NAMES.assignee]: resolveLocationAssigneeLabel(row.Location)
+    [WORK_ORDERS_TASK_FIELD_NAMES.assignee]: resolvedAssignee,
+    'Due Date': dueDate instanceof Date ? dueDate : null
   };
 
   const customFields = [];
@@ -441,6 +475,17 @@ function buildTaskCustomFields(row = {}, fieldMetaMap = new Map()) {
 
     let fieldValue = value;
     const fieldType = normalizeUpper(fieldMeta?.type);
+    if (fieldType === 'DATE') {
+      if (!(value instanceof Date) || Number.isNaN(value.getTime())) continue;
+      customFields.push({
+        id: fieldMeta.id,
+        payload: {
+          value: Number(value.getTime()),
+          time: true
+        }
+      });
+      continue;
+    }
     if (fieldType === 'DROP_DOWN') {
       const optionId = resolveDropdownOptionId(fieldMeta, value);
       if (!optionId) continue;
@@ -454,6 +499,38 @@ function buildTaskCustomFields(row = {}, fieldMetaMap = new Map()) {
   }
 
   return customFields;
+}
+
+async function applyTaskCustomFields(clickup, taskId, customFields = [], recordKey = '', result = null) {
+  const id = normalizeCell(taskId);
+  if (!id || !Array.isArray(customFields) || customFields.length === 0) return;
+
+  let updatedCount = 0;
+  for (const field of customFields) {
+    const fieldId = normalizeCell(field?.id);
+    if (!fieldId) continue;
+    try {
+      const body = field && typeof field.payload === 'object' && field.payload !== null
+        ? field.payload
+        : { value: field.value };
+      await clickup.request('POST', `/task/${id}/field/${fieldId}`, {
+        data: body
+      });
+      updatedCount += 1;
+    } catch (error) {
+      const message =
+        error?.response?.data?.err ||
+        error?.response?.data?.error ||
+        error?.message ||
+        String(error);
+      if (result && Array.isArray(result.errors)) {
+        result.errors.push(
+          `ClickUp custom field update failed for ${recordKey || id} (field=${fieldId}): ${message}`
+        );
+      }
+    }
+  }
+  console.log(`[WorkOrders] Custom fields updated for ${recordKey || id}: count=${updatedCount}`);
 }
 
 async function syncRowsToClickUp({
@@ -490,6 +567,7 @@ async function syncRowsToClickUp({
   const taskByKey = buildTaskMap(tasks);
 
   const filteredRows = [];
+  console.log(`[WorkOrders] Rows read from Google Sheets for ClickUp sync: ${latestRows.length}`);
   for (const row of latestRows) {
     const key = buildTaskKey(row);
     if (!key) continue;
@@ -506,58 +584,58 @@ async function syncRowsToClickUp({
     if (!key) continue;
     const existingTask = taskByKey.get(key);
     const dueDate = computeDueDate(row.Created, row['Ship Via']);
-    const customFields = buildTaskCustomFields(row, customFieldMeta);
+    const customFields = buildTaskCustomFields(row, customFieldMeta, dueDate);
+    if (dueDate) {
+      console.log(`[WorkOrders] Due date calculated for ${key}: ${dueDate.toISOString()}`);
+    }
 
-    const basePayload = {
+    const taskPayload = {
       name: buildTaskName(row),
-      description: buildTaskDescription(row),
-      custom_fields: customFields
+      description: buildTaskDescription(row)
     };
     if (dueDate) {
-      basePayload.due_date = Number(dueDate.getTime());
-      basePayload.due_date_time = true;
+      taskPayload.due_date = Number(dueDate.getTime());
+      taskPayload.due_date_time = true;
     }
 
     try {
       if (!existingTask) {
         const createPayload = {
-          ...basePayload,
+          ...taskPayload,
           status: CLICKUP_OPEN_STATUS
         };
+        let createdTask = null;
         try {
-          await clickup.request('POST', `/list/${clickupListId}/task`, {
+          createdTask = await clickup.request('POST', `/list/${clickupListId}/task`, {
             data: createPayload
           });
         } catch (createError) {
           if (Number(createError?.response?.status || 0) === 400) {
             const fallbackPayload = { ...createPayload };
             delete fallbackPayload.status;
-            await clickup.request('POST', `/list/${clickupListId}/task`, {
+            createdTask = await clickup.request('POST', `/list/${clickupListId}/task`, {
               data: fallbackPayload
             });
           } else {
             throw createError;
           }
         }
+        const createdTaskId = normalizeCell(createdTask?.id || createdTask?.task?.id);
+        if (createdTaskId) {
+          await applyTaskCustomFields(clickup, createdTaskId, customFields, key, result);
+          console.log(`[WorkOrders] Task created: ${key}`);
+        }
         result.created += 1;
       } else {
         if (!isCompleteStatus(existingTask?.status?.status || existingTask?.status)) {
-          try {
-            await clickup.request('PUT', `/task/${existingTask.id}`, {
-              data: basePayload
-            });
-          } catch (updateError) {
-            if (Number(updateError?.response?.status || 0) === 400) {
-              const fallbackPayload = { ...basePayload };
-              delete fallbackPayload.status;
-              await clickup.request('PUT', `/task/${existingTask.id}`, {
-                data: fallbackPayload
-              });
-            } else {
-              throw updateError;
-            }
-          }
+          await clickup.request('PUT', `/task/${existingTask.id}`, {
+            data: taskPayload
+          });
+          await applyTaskCustomFields(clickup, existingTask.id, customFields, key, result);
+          console.log(`[WorkOrders] Task updated: ${key}`);
           result.updated += 1;
+        } else {
+          console.log(`[WorkOrders] Task skipped (status preserved): ${key}`);
         }
       }
     } catch (error) {
@@ -576,6 +654,7 @@ async function syncRowsToClickUp({
     if (isCompleteStatus(task?.status?.status || task?.status)) continue;
     try {
       await clickup.updateTaskStatus(task.id, CLICKUP_COMPLETE_STATUS);
+      console.log(`[WorkOrders] Task completed (no longer active): ${key}`);
       result.closed += 1;
     } catch (error) {
       const message =
@@ -648,6 +727,69 @@ async function syncWorkOrdersRowsToSheet({ authClient, spreadsheetId, latestRows
     removed,
     totalWritten: nextRows.length
   };
+}
+
+async function readWorkOrdersRowsFromSheet({ authClient, spreadsheetId, sheetName = DEFAULT_WORK_ORDERS_SHEET_NAME }) {
+  const sheets = await getSheetsClient(authClient);
+  await ensureSheetExists(sheets, spreadsheetId, sheetName);
+  const existing = await readExistingRows(sheets, spreadsheetId, sheetName);
+  return existing.rows || [];
+}
+
+async function runClickUpSyncFromSheet({
+  authClient,
+  spreadsheetId,
+  sheetName = DEFAULT_WORK_ORDERS_SHEET_NAME,
+  clickupToken = '',
+  clickupListId = ''
+}) {
+  const summary = {
+    rowsRead: 0,
+    tasksCreated: 0,
+    tasksUpdated: 0,
+    tasksCompleted: 0,
+    quoteRowsRemovedFromSheet: 0,
+    errors: []
+  };
+
+  console.log('[WorkOrders] ClickUp sync started');
+  const sheetRows = await readWorkOrdersRowsFromSheet({
+    authClient,
+    spreadsheetId,
+    sheetName
+  });
+  summary.rowsRead = sheetRows.length;
+
+  const clickupResult = await syncRowsToClickUp({
+    clickupToken,
+    clickupListId,
+    latestRows: sheetRows,
+    summary
+  });
+
+  summary.tasksCreated = Number(clickupResult.created || 0);
+  summary.tasksUpdated = Number(clickupResult.updated || 0);
+  summary.tasksCompleted = Number(clickupResult.closed || 0);
+  summary.quoteRowsRemovedFromSheet = Number(clickupResult.skippedCompleteQuotes || 0);
+
+  if (Array.isArray(clickupResult.filteredRows) && clickupResult.filteredRows.length !== sheetRows.length) {
+    await syncWorkOrdersRowsToSheet({
+      authClient,
+      spreadsheetId,
+      latestRows: clickupResult.filteredRows,
+      sheetName
+    });
+    if (summary.quoteRowsRemovedFromSheet > 0) {
+      console.log(
+        `[WorkOrders] Quote completed and removed from sheet: count=${summary.quoteRowsRemovedFromSheet}`
+      );
+    }
+  }
+
+  console.log(
+    `[WorkOrders] ClickUp sync completed: created=${summary.tasksCreated}, updated=${summary.tasksUpdated}, completed=${summary.tasksCompleted}, quoteRemoved=${summary.quoteRowsRemovedFromSheet}`
+  );
+  return summary;
 }
 
 async function runWorkOrdersSync({
@@ -728,48 +870,42 @@ async function runWorkOrdersSync({
     `[WorkOrders] Image upload summary: uploaded=${stats.uploaded}, cached=${stats.cached}, missing=${stats.missing}, failed=${stats.failed}`
   );
 
-  let rowsForSheet = rows;
   try {
-    console.log('[WorkOrders] ClickUp sync started');
-    const clickupResult = await syncRowsToClickUp({
-      clickupToken,
-      clickupListId,
-      latestRows: rows,
-      summary
-    });
-    rowsForSheet = clickupResult.filteredRows || rows;
-    summary.clickupTasksCreated = Number(clickupResult.created || 0);
-    summary.clickupTasksUpdated = Number(clickupResult.updated || 0);
-    summary.clickupTasksCompleted = Number(clickupResult.closed || 0);
-    summary.clickupRowsSkippedCompleteOverride = Number(clickupResult.skippedCompleteQuotes || 0);
-    if (!clickupResult.enabled) {
-      console.warn('[WorkOrders] ClickUp sync skipped: missing token/list configuration');
-    } else {
-      console.log(
-        `[WorkOrders] ClickUp sync summary: created=${summary.clickupTasksCreated}, updated=${summary.clickupTasksUpdated}, completed=${summary.clickupTasksCompleted}, quoteOverrideSkips=${summary.clickupRowsSkippedCompleteOverride}`
-      );
-    }
-  } catch (error) {
-    const message = `ClickUp sync failed: ${error.message}`;
-    console.error(`[WorkOrders] ${message}`);
-    summary.errors.push(message);
-  }
-
-  try {
-    const syncResult = await syncWorkOrdersRowsToSheet({
+    const sheetSyncResult = await syncWorkOrdersRowsToSheet({
       authClient,
       spreadsheetId,
-      latestRows: rowsForSheet,
+      latestRows: rows,
       sheetName
     });
-    summary.inserted = syncResult.inserted;
-    summary.updated = syncResult.updated;
-    summary.removed = syncResult.removed;
+    summary.inserted = sheetSyncResult.inserted;
+    summary.updated = sheetSyncResult.updated;
+    summary.removed = sheetSyncResult.removed;
   } catch (error) {
     const message = `Google Sheets sync failed: ${error.message}`;
     console.error(`[WorkOrders] ${message}`);
     summary.errors.push(message);
     throw Object.assign(new Error(message), { summary });
+  }
+
+  try {
+    const clickupSummary = await runClickUpSyncFromSheet({
+      authClient,
+      spreadsheetId,
+      sheetName,
+      clickupToken,
+      clickupListId
+    });
+    summary.clickupTasksCreated = Number(clickupSummary.tasksCreated || 0);
+    summary.clickupTasksUpdated = Number(clickupSummary.tasksUpdated || 0);
+    summary.clickupTasksCompleted = Number(clickupSummary.tasksCompleted || 0);
+    summary.clickupRowsSkippedCompleteOverride = Number(clickupSummary.quoteRowsRemovedFromSheet || 0);
+    if (!normalizeCell(clickupToken) || !normalizeCell(clickupListId)) {
+      console.warn('[WorkOrders] ClickUp sync skipped: missing token/list configuration');
+    }
+  } catch (error) {
+    const message = `ClickUp sync failed: ${error.message}`;
+    console.error(`[WorkOrders] ${message}`);
+    summary.errors.push(message);
   }
 
   console.log('[WorkOrders] Work Orders sync completed');
@@ -780,6 +916,8 @@ module.exports = {
   WORK_ORDERS_HEADERS,
   DEFAULT_WORK_ORDERS_SHEET_NAME,
   buildRecordKey,
+  readWorkOrdersRowsFromSheet,
+  runClickUpSyncFromSheet,
   syncWorkOrdersRowsToSheet,
   runWorkOrdersSync
 };

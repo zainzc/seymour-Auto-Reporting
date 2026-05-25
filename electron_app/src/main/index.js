@@ -22,7 +22,11 @@ const { getInvoices, getSalespeople } = require('../services/reportingService');
 const { generateExcelFile } = require('../services/excelService');
 const { initialize: initSheets, writeToRawTab } = require('../services/sheetsService');
 const { startSchedule, stopSchedule, resumeSchedule, logExecution, getExecutionLogs, executeScheduledJob } = require('../services/scheduleService');
-const { runWorkOrdersSync, DEFAULT_WORK_ORDERS_SHEET_NAME } = require('../services/workOrdersGoogleSheetsSync');
+const {
+  runWorkOrdersSync,
+  runClickUpSyncFromSheet,
+  DEFAULT_WORK_ORDERS_SHEET_NAME
+} = require('../services/workOrdersGoogleSheetsSync');
 const {
   startWorkOrdersSchedule,
   stopWorkOrdersSchedule,
@@ -2092,6 +2096,82 @@ ipcMain.handle('workorders-test-schedule', async () => {
       success: false,
       message: `Work Orders schedule test failed: ${error.message}`,
       summary: error?.summary || null
+    };
+  }
+});
+
+ipcMain.handle('workorders-clickup-sync-now', async (_, options = {}) => {
+  try {
+    if (!dbReady) {
+      return {
+        success: false,
+        message: 'Database not ready'
+      };
+    }
+
+    const isAuthenticated = await oauth2Service.isAuthenticated('reporting');
+    if (!isAuthenticated) {
+      return {
+        success: false,
+        message: 'Please connect to Google Sheets first using the Connect button.'
+      };
+    }
+
+    const phase2Config = getInventoryConfig('phase2Config') || {};
+    const spreadsheetId = String(
+      options.spreadsheetId ||
+      getReportingConfig('workOrdersSpreadsheetId') ||
+      ''
+    ).trim();
+    const sheetName = String(
+      options.sheetName ||
+      getReportingConfig('workOrdersSheetName') ||
+      DEFAULT_WORK_ORDERS_SHEET_NAME
+    ).trim() || DEFAULT_WORK_ORDERS_SHEET_NAME;
+    const clickupToken = String(
+      options.clickupToken ||
+      getReportingConfig('workOrdersClickupToken') ||
+      phase2Config.clickupToken ||
+      process.env.CLICKUP_TOKEN ||
+      ''
+    ).trim();
+    const clickupListId = String(
+      options.workOrdersClickupListId ||
+      options.clickupListId ||
+      getReportingConfig('workOrdersClickupListId') ||
+      phase2Config.clickupListId ||
+      process.env.WORK_ORDERS_CLICKUP_LIST_ID ||
+      ''
+    ).trim();
+
+    if (!spreadsheetId) {
+      return {
+        success: false,
+        message: 'Google Sheet ID is required for ClickUp sync.'
+      };
+    }
+
+    const authClient = await oauth2Service.getAuthenticatedClient('reporting');
+    const summary = await runClickUpSyncFromSheet({
+      authClient,
+      spreadsheetId,
+      sheetName,
+      clickupToken,
+      clickupListId
+    });
+
+    return {
+      success: true,
+      message:
+        `ClickUp sync completed. Created=${summary.tasksCreated}, ` +
+        `Updated=${summary.tasksUpdated}, Completed=${summary.tasksCompleted}, ` +
+        `QuoteRemoved=${summary.quoteRowsRemovedFromSheet}`,
+      summary
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: `ClickUp sync failed: ${error.message}`
     };
   }
 });
