@@ -426,13 +426,44 @@ function buildTaskMap(tasks = []) {
 
 function getCustomFieldMetaMap(listData = {}) {
   const map = new Map();
+  const canonicalMap = new Map();
   const fields = Array.isArray(listData?.fields) ? listData.fields : [];
   fields.forEach(field => {
-    const name = normalizeUpper(field?.name);
+    const rawName = normalizeCell(field?.name);
+    const name = normalizeUpper(rawName);
     if (!name) return;
     map.set(name, field);
+    const canonical = canonicalFieldName(rawName);
+    if (canonical && !canonicalMap.has(canonical)) canonicalMap.set(canonical, field);
   });
-  return map;
+  return { byName: map, byCanonical: canonicalMap, fields };
+}
+
+function canonicalFieldName(value = '') {
+  return normalizeCell(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function resolveCustomFieldMeta(fieldMetaLookup, targetName = '') {
+  const lookup = fieldMetaLookup || {};
+  const byName = lookup.byName instanceof Map ? lookup.byName : new Map();
+  const byCanonical = lookup.byCanonical instanceof Map ? lookup.byCanonical : new Map();
+  const fields = Array.isArray(lookup.fields) ? lookup.fields : [];
+
+  const exact = byName.get(normalizeUpper(targetName));
+  if (exact) return exact;
+
+  const canonicalTarget = canonicalFieldName(targetName);
+  if (!canonicalTarget) return null;
+
+  const canonicalExact = byCanonical.get(canonicalTarget);
+  if (canonicalExact) return canonicalExact;
+
+  for (const field of fields) {
+    const candidate = canonicalFieldName(field?.name);
+    if (!candidate) continue;
+    if (candidate.includes(canonicalTarget) || canonicalTarget.includes(candidate)) return field;
+  }
+  return null;
 }
 
 function resolveDropdownOptionId(fieldMeta = null, targetLabel = '') {
@@ -443,7 +474,7 @@ function resolveDropdownOptionId(fieldMeta = null, targetLabel = '') {
   return String(option.id || option.orderindex || '').trim() || null;
 }
 
-function buildTaskCustomFields(row = {}, fieldMetaMap = new Map(), dueDate = null) {
+function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null) {
   const resolvedAssignee = resolveLocationAssigneeLabel(row.Location);
   const rawLocation = normalizeCell(row.Location);
   const rowKey = buildRecordKey(row);
@@ -469,9 +500,13 @@ function buildTaskCustomFields(row = {}, fieldMetaMap = new Map(), dueDate = nul
   };
 
   const customFields = [];
+  const missingFieldNames = [];
   for (const [name, value] of Object.entries(valuesByFieldName)) {
-    const fieldMeta = fieldMetaMap.get(normalizeUpper(name));
-    if (!fieldMeta || value === '') continue;
+    const fieldMeta = resolveCustomFieldMeta(fieldMetaLookup, name);
+    if (!fieldMeta || value === '') {
+      if (!fieldMeta && value !== '') missingFieldNames.push(name);
+      continue;
+    }
 
     let fieldValue = value;
     const fieldType = normalizeUpper(fieldMeta?.type);
@@ -496,6 +531,11 @@ function buildTaskCustomFields(row = {}, fieldMetaMap = new Map(), dueDate = nul
       id: fieldMeta.id,
       value: fieldValue
     });
+  }
+  if (missingFieldNames.length > 0) {
+    console.warn(
+      `[WorkOrders] Missing ClickUp custom fields for ${rowKey || 'unknown'}: ${missingFieldNames.join(', ')}`
+    );
   }
 
   return customFields;
@@ -523,6 +563,7 @@ async function applyTaskCustomFields(clickup, taskId, customFields = [], recordK
         error?.response?.data?.error ||
         error?.message ||
         String(error);
+      console.error(`[WorkOrders] Custom field write failed for ${recordKey || id} (field=${fieldId}): ${message}`);
       if (result && Array.isArray(result.errors)) {
         result.errors.push(
           `ClickUp custom field update failed for ${recordKey || id} (field=${fieldId}): ${message}`
