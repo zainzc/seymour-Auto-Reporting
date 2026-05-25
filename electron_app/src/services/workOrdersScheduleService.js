@@ -1,5 +1,5 @@
 const cron = require('node-cron');
-const { getReportingConfig, saveReportingConfig } = require('../config/configStore');
+const { getReportingConfig, saveReportingConfig, getInventoryConfig } = require('../config/configStore');
 const oauth2Service = require('./oauth2Service');
 const { runWorkOrdersSync, DEFAULT_WORK_ORDERS_SHEET_NAME } = require('./workOrdersGoogleSheetsSync');
 
@@ -116,7 +116,19 @@ async function executeWorkOrdersScheduledJob(config) {
       sheetName: config.sheetName || DEFAULT_WORK_ORDERS_SHEET_NAME,
       driveFolderId: config.driveFolderId || '',
       driveServiceAccountKeyPath: config.driveServiceAccountKeyPath || '',
-      imageUploadFallback: config.imageUploadFallback || ''
+      imageUploadFallback: config.imageUploadFallback || '',
+      clickupToken:
+        config.clickupToken ||
+        getReportingConfig('workOrdersClickupToken') ||
+        (getInventoryConfig('phase2Config') || {}).clickupToken ||
+        process.env.CLICKUP_TOKEN ||
+        '',
+      clickupListId:
+        config.clickupListId ||
+        getReportingConfig('workOrdersClickupListId') ||
+        (getInventoryConfig('phase2Config') || {}).clickupListId ||
+        process.env.WORK_ORDERS_CLICKUP_LIST_ID ||
+        ''
     });
 
     const updatedSchedule = getReportingConfig('workOrdersActiveSchedule') || {};

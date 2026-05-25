@@ -430,7 +430,6 @@
         <label>Schedule Frequency</label>
         <select id="schedule-frequency" onchange="updateScheduleInfo()">
           <option value="nightly">Nightly (Previous Day)</option>
-          <option value="weekly">Weekly (Last Completed Week)</option>
         </select>
       </div>
 
@@ -481,6 +480,14 @@
         <div class="info-text">Required for Work Orders image upload to Drive.</div>
       </div>
 
+      <div class="form-group" id="clickup-list-group" style="display: none;">
+        <label>
+          ClickUp List ID (Work Orders)
+        </label>
+        <input type="text" id="workorders-clickup-list-id" placeholder="e.g., 901234567890" style="font-family: Consolas, monospace;" />
+        <div class="info-text">Optional here if already configured globally. Required to enable Work Orders → ClickUp task sync.</div>
+      </div>
+
       <div class="form-group">
         <label>Destination</label>
         <select id="destination-label" disabled>
@@ -518,8 +525,7 @@
     { value: 'every_5_minutes', label: 'Every 5 Minutes' }
   ];
   const INVOICE_SCHEDULE_OPTIONS = [
-    { value: 'nightly', label: 'Nightly (Previous Day)' },
-    { value: 'weekly', label: 'Weekly (Last Completed Week)' }
+    { value: 'nightly', label: 'Nightly (Previous Day)' }
   ];
 
   // Initialize
@@ -528,6 +534,7 @@
     await loadCurrentSchedule();
     await loadSavedSheetId();
     await loadSavedDriveFolderId();
+    await loadSavedClickupListId();
   });
 
   function selectDataType(type) {
@@ -538,6 +545,7 @@
     loadCurrentSchedule();
     loadSavedSheetId();
     loadSavedDriveFolderId();
+    loadSavedClickupListId();
   }
 
   function getScheduleApi() {
@@ -551,13 +559,16 @@
     const destinationSelect = document.getElementById('destination-label');
     const destinationInfo = document.getElementById('destination-info');
     const driveFolderGroup = document.getElementById('drive-folder-group');
+    const clickupListGroup = document.getElementById('clickup-list-group');
 
     if (currentDataType === 'workorders') {
       driveFolderGroup.style.display = 'block';
+      clickupListGroup.style.display = 'block';
       destinationSelect.innerHTML = '<option>Google Sheets - Work Orders Tab (Auto-managed)</option>';
       destinationInfo.textContent = 'Data syncs active Work Orders and Check Part Quotes into Work Orders tab.';
     } else {
       driveFolderGroup.style.display = 'none';
+      clickupListGroup.style.display = 'none';
       destinationSelect.innerHTML = '<option>Google Sheets - RAW Tab (Fixed)</option>';
       destinationInfo.textContent = 'Data will overwrite the RAW tab only.';
     }
@@ -592,6 +603,7 @@
     const weekStartDay = document.getElementById('week-start-day').value;
     const spreadsheetId = document.getElementById('spreadsheet-id').value.trim();
     const googleDriveFolderId = document.getElementById('google-drive-folder-id').value.trim();
+    const workOrdersClickupListId = document.getElementById('workorders-clickup-list-id').value.trim();
 
     if (!spreadsheetId) {
       showStatus(status, 'error', 'Google Sheet ID is required');
@@ -615,6 +627,7 @@
         payload.weekStartDay = frequency === 'weekly' ? parseInt(weekStartDay) : null;
       } else {
         payload.googleDriveFolderId = googleDriveFolderId;
+        payload.workOrdersClickupListId = workOrdersClickupListId || null;
       }
 
       const result = await api.saveSchedule(payload);
@@ -707,6 +720,7 @@
           ${schedule.weekStartDay ? `<strong>Week Starts:</strong> ${getDayName(schedule.weekStartDay)}<br>` : ''}
           ${schedule.sheetName ? `<strong>Sheet Tab:</strong> ${schedule.sheetName}<br>` : ''}
           ${schedule.driveFolderId ? `<strong>Drive Folder ID:</strong> ${schedule.driveFolderId.substring(0, 20)}...<br>` : ''}
+          ${schedule.clickupListId ? `<strong>ClickUp List ID:</strong> ${schedule.clickupListId}<br>` : ''}
           ${schedule.endDate ? `<strong>Ends:</strong> ${schedule.endDate}<br>` : ''}
           ${schedule.spreadsheetId ? `<strong>Sheet ID:</strong> ${schedule.spreadsheetId.substring(0, 20)}...<br>` : ''}
           <strong>Last Run:</strong> ${schedule.lastRun || 'Never'}
@@ -719,6 +733,9 @@
         }
         if (schedule.driveFolderId) {
           document.getElementById('google-drive-folder-id').value = schedule.driveFolderId;
+        }
+        if (schedule.clickupListId) {
+          document.getElementById('workorders-clickup-list-id').value = schedule.clickupListId;
         }
       } else {
         document.getElementById('current-schedule').style.display = 'none';
@@ -750,6 +767,16 @@
       document.getElementById('google-drive-folder-id').value = savedId || '';
     } catch (err) {
       console.error('Failed to load saved drive folder ID:', err);
+    }
+  }
+
+  async function loadSavedClickupListId() {
+    if (currentDataType !== 'workorders') return;
+    try {
+      const savedId = await window.workOrdersAPI.getSavedClickupListId();
+      document.getElementById('workorders-clickup-list-id').value = savedId || '';
+    } catch (err) {
+      console.error('Failed to load saved ClickUp list ID:', err);
     }
   }
 

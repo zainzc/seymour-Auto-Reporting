@@ -1838,6 +1838,22 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
       process.env.IMAGE_UPLOAD_FALLBACK ||
       'blank'
     ).trim();
+    const phase2Config = getInventoryConfig('phase2Config') || {};
+    const clickupToken = String(
+      options.clickupToken ||
+      getReportingConfig('workOrdersClickupToken') ||
+      phase2Config.clickupToken ||
+      process.env.CLICKUP_TOKEN ||
+      ''
+    ).trim();
+    const clickupListId = String(
+      options.workOrdersClickupListId ||
+      options.clickupListId ||
+      getReportingConfig('workOrdersClickupListId') ||
+      phase2Config.clickupListId ||
+      process.env.WORK_ORDERS_CLICKUP_LIST_ID ||
+      ''
+    ).trim();
 
     if (!spreadsheetId) {
       return {
@@ -1860,7 +1876,9 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
       sheetName,
       driveFolderId,
       driveServiceAccountKeyPath,
-      imageUploadFallback
+      imageUploadFallback,
+      clickupToken,
+      clickupListId
     });
 
     saveReportingConfig('workOrdersSpreadsheetId', spreadsheetId);
@@ -1868,6 +1886,7 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
     saveReportingConfig('workOrdersDriveFolderId', driveFolderId);
     saveReportingConfig('workOrdersDriveServiceAccountKeyPath', driveServiceAccountKeyPath);
     saveReportingConfig('workOrdersImageUploadFallback', imageUploadFallback);
+    saveReportingConfig('workOrdersClickupListId', clickupListId);
 
     return {
       success: true,
@@ -1938,6 +1957,22 @@ ipcMain.handle('workorders-save-schedule', async (_, scheduleConfig = {}) => {
       process.env.IMAGE_UPLOAD_FALLBACK ||
       'blank'
     ).trim();
+    const phase2Config = getInventoryConfig('phase2Config') || {};
+    const clickupToken = String(
+      scheduleConfig.clickupToken ||
+      getReportingConfig('workOrdersClickupToken') ||
+      phase2Config.clickupToken ||
+      process.env.CLICKUP_TOKEN ||
+      ''
+    ).trim();
+    const clickupListId = String(
+      scheduleConfig.workOrdersClickupListId ||
+      scheduleConfig.clickupListId ||
+      getReportingConfig('workOrdersClickupListId') ||
+      phase2Config.clickupListId ||
+      process.env.WORK_ORDERS_CLICKUP_LIST_ID ||
+      ''
+    ).trim();
 
     try {
       const { google } = require('googleapis');
@@ -1961,7 +1996,9 @@ ipcMain.handle('workorders-save-schedule', async (_, scheduleConfig = {}) => {
       sheetName,
       driveFolderId,
       driveServiceAccountKeyPath,
-      imageUploadFallback
+      imageUploadFallback,
+      clickupToken,
+      clickupListId
     };
 
     saveReportingConfig('workOrdersSpreadsheetId', spreadsheetId);
@@ -1969,6 +2006,7 @@ ipcMain.handle('workorders-save-schedule', async (_, scheduleConfig = {}) => {
     saveReportingConfig('workOrdersDriveFolderId', driveFolderId);
     saveReportingConfig('workOrdersDriveServiceAccountKeyPath', driveServiceAccountKeyPath);
     saveReportingConfig('workOrdersImageUploadFallback', imageUploadFallback);
+    saveReportingConfig('workOrdersClickupListId', clickupListId);
     startWorkOrdersSchedule(configToSave);
 
     return {
@@ -2008,6 +2046,16 @@ ipcMain.handle('workorders-get-sheet-id', async () => {
 
 ipcMain.handle('workorders-get-drive-folder-id', async () => {
   return getReportingConfig('workOrdersDriveFolderId') || process.env.GOOGLE_DRIVE_IMAGE_FOLDER_ID || null;
+});
+
+ipcMain.handle('workorders-get-clickup-list-id', async () => {
+  const phase2Config = getInventoryConfig('phase2Config') || {};
+  return (
+    getReportingConfig('workOrdersClickupListId') ||
+    phase2Config.clickupListId ||
+    process.env.WORK_ORDERS_CLICKUP_LIST_ID ||
+    null
+  );
 });
 
 ipcMain.handle('workorders-get-logs', async (_, limit) => {

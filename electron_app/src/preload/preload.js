@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('workOrdersAPI', {
   getCurrentSchedule: () => ipcRenderer.invoke('workorders-get-schedule'),
   getSavedSheetId: () => ipcRenderer.invoke('workorders-get-sheet-id'),
   getSavedDriveFolderId: () => ipcRenderer.invoke('workorders-get-drive-folder-id'),
+  getSavedClickupListId: () => ipcRenderer.invoke('workorders-get-clickup-list-id'),
   getExecutionLogs: (limit) => ipcRenderer.invoke('workorders-get-logs', limit),
   testSchedule: () => ipcRenderer.invoke('workorders-test-schedule')
 });
