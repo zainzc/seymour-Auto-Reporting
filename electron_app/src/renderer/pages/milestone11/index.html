@@ -303,6 +303,24 @@
       line-height: 1.5;
     }
 
+    .inline-action-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .action-btn.secondary {
+      background: #eef5fd;
+      color: #1d5b97;
+      border: 1px solid #b9cfe6;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+    }
+
+    .action-btn.secondary:hover {
+      background: #e2eefb;
+    }
+
     .verification-card {
       margin-top: 12px;
       padding: 14px 15px;
@@ -362,6 +380,72 @@
       color: #476587;
       line-height: 1.45;
       font-weight: 600;
+    }
+
+    .logs-container {
+      max-height: 360px;
+      overflow-y: auto;
+      border-radius: 10px;
+      border: 1px solid #d6e2f0;
+      background: #f8fbff;
+      padding: 10px;
+    }
+
+    .logs-toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .logs-toolbar select {
+      border: 1px solid #bfcfe4;
+      border-radius: 8px;
+      padding: 7px 10px;
+      color: #1a304d;
+      background: #fcfdff;
+      font-size: 13px;
+    }
+
+    .log-entry {
+      background: #ffffff;
+      border: 1px solid #dae5f2;
+      border-left: 4px solid #8da4c0;
+      border-radius: 8px;
+      padding: 11px 12px;
+      margin-bottom: 8px;
+    }
+
+    .log-entry.success {
+      border-left-color: #0f8a6a;
+    }
+
+    .log-entry.error {
+      border-left-color: #b53d35;
+    }
+
+    .log-entry:last-child {
+      margin-bottom: 0;
+    }
+
+    .log-time {
+      font-size: 11px;
+      color: #657993;
+      margin-bottom: 4px;
+      font-weight: 700;
+    }
+
+    .log-message {
+      font-size: 14px;
+      color: #183253;
+      margin-bottom: 3px;
+      font-weight: 600;
+    }
+
+    .log-details {
+      font-size: 12px;
+      color: #6d819b;
     }
 
     .loading {
@@ -441,7 +525,8 @@
 
     @media (max-width: 700px) {
       .date-range,
-      .schedule-controls {
+      .schedule-controls,
+      .inline-action-row {
         grid-template-columns: 1fr;
       }
 
@@ -571,17 +656,19 @@
       <div class="schedule-info" id="current-schedule" style="display: none;">
         <h4>Current Schedule</h4>
         <p id="schedule-details"></p>
-        <button class="action-btn" style="margin-top: 10px;" onclick="testScheduleNow()">
-          Test Schedule Now
-        </button>
-        <button
-          class="action-btn"
-          id="clickup-sync-now-btn"
-          style="margin-top: 10px; display: none;"
-          onclick="runClickupSyncNow()"
-        >
-          Run ClickUp Sync Now
-        </button>
+        <div class="inline-action-row">
+          <button class="action-btn" onclick="testScheduleNow()">
+            Test Schedule Now
+          </button>
+          <button
+            class="action-btn secondary"
+            id="clickup-sync-now-btn"
+            style="display: none;"
+            onclick="runClickupSyncNow()"
+          >
+            Run ClickUp Sync Now
+          </button>
+        </div>
         <div class="verification-card hidden" id="clickup-verification-card">
           <h5>ClickUp Verification</h5>
           <div class="verification-grid">
@@ -609,6 +696,23 @@
       </div>
     </div>
   </div>
+
+  <div class="card" id="execution-history-card">
+    <h3>Execution History</h3>
+    <div class="logs-toolbar">
+      <button id="toggle-exec-logs-btn" class="action-btn secondary" type="button" onclick="toggleExecutionLogs()">Collapse Logs</button>
+      <select id="exec-log-filter" onchange="renderExecutionLogs()">
+        <option value="all">All</option>
+        <option value="error">Errors only</option>
+        <option value="success">Success only</option>
+        <option value="latest">Latest 20</option>
+      </select>
+      <button class="action-btn secondary" type="button" onclick="clearExecutionLogs()">Clear Logs</button>
+    </div>
+    <div id="logs-container" class="logs-container">
+      <p class="info-text">No execution logs yet.</p>
+    </div>
+  </div>
 </div>
 
   <script>
@@ -617,6 +721,8 @@
   let currentDataType = 'invoices';
   const statusHideTimers = new Map();
   let workOrdersVerificationPollTimer = null;
+  let workOrdersExecutionLogs = [];
+  let executionLogsCollapsed = false;
   const WORK_ORDERS_SCHEDULE_OPTIONS = [
     { value: 'every_1_minute', label: 'Every 1 Minute' },
     { value: 'every_3_minutes', label: 'Every 3 Minutes' },
@@ -634,6 +740,7 @@
     await loadSavedSheetId();
     await loadSavedDriveFolderId();
     await loadSavedClickupListId();
+    await loadExecutionLogs();
     syncVerificationPolling();
   });
 
@@ -651,6 +758,7 @@
     loadSavedSheetId();
     loadSavedDriveFolderId();
     loadSavedClickupListId();
+    loadExecutionLogs();
     syncVerificationPolling();
   }
 
@@ -668,12 +776,14 @@
     const clickupListGroup = document.getElementById('clickup-list-group');
     const clickupSyncButton = document.getElementById('clickup-sync-now-btn');
     const verificationCard = document.getElementById('clickup-verification-card');
+    const executionHistoryCard = document.getElementById('execution-history-card');
 
     if (currentDataType === 'workorders') {
       driveFolderGroup.style.display = 'block';
       clickupListGroup.style.display = 'block';
       clickupSyncButton.style.display = 'block';
       verificationCard.classList.remove('hidden');
+      executionHistoryCard.style.display = 'block';
       destinationSelect.innerHTML = '<option>Google Sheets - Work Orders Tab (Auto-managed)</option>';
       destinationInfo.textContent = 'Data syncs active Work Orders and Check Part Quotes into Work Orders tab.';
     } else {
@@ -681,6 +791,7 @@
       clickupListGroup.style.display = 'none';
       clickupSyncButton.style.display = 'none';
       verificationCard.classList.add('hidden');
+      executionHistoryCard.style.display = 'none';
       destinationSelect.innerHTML = '<option>Google Sheets - RAW Tab (Fixed)</option>';
       destinationInfo.textContent = 'Data will overwrite the RAW tab only.';
     }
@@ -717,7 +828,98 @@
     if (currentDataType !== 'workorders') return;
     workOrdersVerificationPollTimer = setInterval(() => {
       refreshLatestWorkOrdersVerification();
+      loadExecutionLogs();
     }, 15000);
+  }
+
+  function buildExecutionLogDetails(log) {
+    const summary = log?.summary || {};
+    const parts = [];
+    if (summary.trigger) parts.push(`trigger=${summary.trigger}`);
+    if (summary.reason) parts.push(`reason=${summary.reason}`);
+    if (Number.isFinite(Number(summary.fetched))) parts.push(`fetched=${Number(summary.fetched)}`);
+    if (Number.isFinite(Number(summary.inserted))) parts.push(`inserted=${Number(summary.inserted)}`);
+    if (Number.isFinite(Number(summary.updated))) parts.push(`updated=${Number(summary.updated)}`);
+    if (Number.isFinite(Number(summary.removed))) parts.push(`removed=${Number(summary.removed)}`);
+    if (Number.isFinite(Number(summary.tasksCreated))) parts.push(`tasksCreated=${Number(summary.tasksCreated)}`);
+    if (Number.isFinite(Number(summary.tasksUpdated))) parts.push(`tasksUpdated=${Number(summary.tasksUpdated)}`);
+    if (Number.isFinite(Number(summary.tasksCompleted))) parts.push(`tasksCompleted=${Number(summary.tasksCompleted)}`);
+    if (Number.isFinite(Number(summary.verifiedFields))) parts.push(`verifiedFields=${Number(summary.verifiedFields)}`);
+    if (Number.isFinite(Number(summary.verifyMismatches))) parts.push(`mismatches=${Number(summary.verifyMismatches)}`);
+    if (Number.isFinite(Number(summary.verifyErrors))) parts.push(`errors=${Number(summary.verifyErrors)}`);
+    return parts.join(' • ');
+  }
+
+  async function loadExecutionLogs() {
+    if (currentDataType !== 'workorders') {
+      workOrdersExecutionLogs = [];
+      renderExecutionLogs();
+      return;
+    }
+    try {
+      const logs = await window.workOrdersAPI.getExecutionLogs(50);
+      workOrdersExecutionLogs = Array.isArray(logs) ? logs : [];
+      renderExecutionLogs();
+    } catch (err) {
+      console.error('Failed to load Work Orders execution logs:', err);
+      workOrdersExecutionLogs = [];
+      renderExecutionLogs();
+    }
+  }
+
+  function renderExecutionLogs() {
+    const container = document.getElementById('logs-container');
+    const filterEl = document.getElementById('exec-log-filter');
+    const filter = filterEl ? String(filterEl.value || 'all') : 'all';
+    const allLogs = Array.isArray(workOrdersExecutionLogs) ? [...workOrdersExecutionLogs] : [];
+    container.style.display = executionLogsCollapsed ? 'none' : 'block';
+
+    let logs = allLogs;
+    if (filter === 'error') {
+      logs = allLogs.filter(log => !log?.success);
+    } else if (filter === 'success') {
+      logs = allLogs.filter(log => Boolean(log?.success));
+    } else if (filter === 'latest') {
+      logs = allLogs.slice(0, 20);
+    }
+
+    if (!logs || logs.length === 0) {
+      container.innerHTML = '<p class="info-text">No execution logs yet.</p>';
+      return;
+    }
+
+    container.innerHTML = logs.map(log => `
+      <div class="log-entry ${log.success ? 'success' : 'error'}">
+        <div class="log-time">${new Date(log.timestamp).toLocaleString()}</div>
+        <div class="log-message">${log.message || 'Work Orders execution update'}</div>
+        <div class="log-details">${buildExecutionLogDetails(log) || 'No additional details.'}</div>
+      </div>
+    `).join('');
+  }
+
+  function toggleExecutionLogs() {
+    executionLogsCollapsed = !executionLogsCollapsed;
+    const btn = document.getElementById('toggle-exec-logs-btn');
+    if (btn) {
+      btn.textContent = executionLogsCollapsed ? 'Expand Logs' : 'Collapse Logs';
+    }
+    renderExecutionLogs();
+  }
+
+  async function clearExecutionLogs() {
+    if (!confirm('Clear execution history logs?')) {
+      return;
+    }
+    try {
+      const result = await window.workOrdersAPI.clearExecutionLogs();
+      if (result?.success === false) {
+        throw new Error(result.message || 'Failed to clear execution logs.');
+      }
+      workOrdersExecutionLogs = [];
+      renderExecutionLogs();
+    } catch (err) {
+      console.error('Failed to clear Work Orders execution logs:', err);
+    }
   }
 
   function updateClickupVerificationCard(summary) {
@@ -883,13 +1085,16 @@
         showStatus(status, 'success', result.message);
         if (currentDataType === 'workorders' && result.summary) {
           updateClickupVerificationCard(result.summary);
+          await loadExecutionLogs();
         }
         console.log('Schedule test executed successfully');
       } else {
         showStatus(status, 'error', result.message);
+        await loadExecutionLogs();
       }
     } catch (err) {
       showStatus(status, 'error', `Test failed: ${err.message}`);
+      await loadExecutionLogs();
     }
   }
 
@@ -961,11 +1166,14 @@
       if (result.success) {
         showStatus(status, 'success', result.message);
         updateClickupVerificationCard(result.summary || {});
+        await loadExecutionLogs();
       } else {
         showStatus(status, 'error', result.message || 'ClickUp sync failed.');
+        await loadExecutionLogs();
       }
     } catch (err) {
       showStatus(status, 'error', `ClickUp sync failed: ${err.message}`);
+      await loadExecutionLogs();
     }
   }
 

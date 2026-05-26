@@ -32,7 +32,9 @@ const {
   stopWorkOrdersSchedule,
   resumeWorkOrdersSchedule,
   executeWorkOrdersScheduledJob,
-  getWorkOrdersExecutionLogs
+  getWorkOrdersExecutionLogs,
+  logWorkOrdersExecution,
+  clearWorkOrdersExecutionLogs
 } = require('../services/workOrdersScheduleService');
 const oauth2Service = require('../services/oauth2Service');
 const { runPhase2, buildPhase2Config } = require('../services/phase2Service');
@@ -1866,6 +1868,12 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
       };
     }
 
+    clearWorkOrdersExecutionLogs();
+    logWorkOrdersExecution(true, 'Manual Work Orders sync started', {
+      trigger: 'manual_workorders',
+      startedAt: new Date().toISOString()
+    });
+
     const authClient = await oauth2Service.getAuthenticatedClient('reporting');
     let driveAuthClient = null;
     try {
@@ -1891,6 +1899,10 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
     saveReportingConfig('workOrdersDriveServiceAccountKeyPath', driveServiceAccountKeyPath);
     saveReportingConfig('workOrdersImageUploadFallback', imageUploadFallback);
     saveReportingConfig('workOrdersClickupListId', clickupListId);
+    logWorkOrdersExecution(true, 'Manual Work Orders sync completed', {
+      trigger: 'manual_workorders',
+      ...summary
+    });
 
     return {
       success: true,
@@ -1899,6 +1911,7 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
     };
   } catch (error) {
     const summary = error?.summary || null;
+    logWorkOrdersExecution(false, `Manual Work Orders sync failed: ${error.message}`, summary);
     return {
       success: false,
       message: `Work Orders sync failed: ${error.message}`,
@@ -2066,6 +2079,18 @@ ipcMain.handle('workorders-get-logs', async (_, limit) => {
   return getWorkOrdersExecutionLogs(limit);
 });
 
+ipcMain.handle('workorders-clear-logs', async () => {
+  try {
+    clearWorkOrdersExecutionLogs();
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      message: `Failed to clear Work Orders execution logs: ${error.message}`
+    };
+  }
+});
+
 ipcMain.handle('workorders-test-schedule', async () => {
   try {
     if (!dbReady) {
@@ -2151,6 +2176,12 @@ ipcMain.handle('workorders-clickup-sync-now', async (_, options = {}) => {
       };
     }
 
+    clearWorkOrdersExecutionLogs();
+    logWorkOrdersExecution(true, 'Manual ClickUp sync started', {
+      trigger: 'manual_clickup',
+      startedAt: new Date().toISOString()
+    });
+
     const authClient = await oauth2Service.getAuthenticatedClient('reporting');
     const summary = await runClickUpSyncFromSheet({
       authClient,
@@ -2158,6 +2189,10 @@ ipcMain.handle('workorders-clickup-sync-now', async (_, options = {}) => {
       sheetName,
       clickupToken,
       clickupListId
+    });
+    logWorkOrdersExecution(true, 'Manual ClickUp sync completed', {
+      trigger: 'manual_clickup',
+      ...summary
     });
 
     return {
@@ -2169,6 +2204,7 @@ ipcMain.handle('workorders-clickup-sync-now', async (_, options = {}) => {
       summary
     };
   } catch (error) {
+    logWorkOrdersExecution(false, `Manual ClickUp sync failed: ${error.message}`, error?.summary || null);
     return {
       success: false,
       message: `ClickUp sync failed: ${error.message}`

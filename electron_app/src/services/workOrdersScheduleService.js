@@ -26,6 +26,10 @@ function logWorkOrdersExecution(success, message, summary = null) {
   saveReportingConfig('workOrdersExecutionLogs', logs);
 }
 
+function clearWorkOrdersExecutionLogs() {
+  saveReportingConfig('workOrdersExecutionLogs', []);
+}
+
 function stopWorkOrdersSchedule() {
   if (activeJob) {
     activeJob.stop();
@@ -82,6 +86,11 @@ async function executeWorkOrdersScheduledJob(config) {
   }
 
   isWorkOrdersSyncRunning = true;
+  clearWorkOrdersExecutionLogs();
+  logWorkOrdersExecution(true, 'Work Orders scheduled sync started', {
+    trigger: 'schedule',
+    startedAt: new Date().toISOString()
+  });
   console.log(`[WorkOrders] Scheduled sync started at ${new Date().toISOString()}`);
 
   if (config.endDate) {
@@ -192,5 +201,7 @@ module.exports = {
   stopWorkOrdersSchedule,
   resumeWorkOrdersSchedule,
   executeWorkOrdersScheduledJob,
-  getWorkOrdersExecutionLogs
+  getWorkOrdersExecutionLogs,
+  logWorkOrdersExecution,
+  clearWorkOrdersExecutionLogs
 };
