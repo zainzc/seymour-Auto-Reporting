@@ -672,6 +672,110 @@ function getTaskCustomFieldById(task = {}, fieldId = '') {
   return fields.find(field => normalizeCell(field?.id) === id) || null;
 }
 
+function normalizePrimitiveForCompare(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') return String(value);
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  return normalizeCell(value);
+}
+
+function normalizeArrayForCompare(values = []) {
+  return values
+    .map(item => {
+      if (item && typeof item === 'object') {
+        return normalizePrimitiveForCompare(item?.id || item?.value || item?.orderindex || item?.name || '');
+      }
+      return normalizePrimitiveForCompare(item);
+    })
+    .filter(Boolean)
+    .sort();
+}
+
+function arraysEqual(a = [], b = []) {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function extractTaskFieldRawComparableValue(taskField = null) {
+  if (!taskField) return '';
+  const fieldType = normalizeUpper(taskField?.type);
+  const raw = taskField?.value;
+  if (raw === null || raw === undefined) return '';
+
+  if (fieldType === 'LABELS') {
+    const values = Array.isArray(raw) ? raw : [raw];
+    return normalizeArrayForCompare(values);
+  }
+
+  if (typeof raw === 'object') {
+    return normalizePrimitiveForCompare(raw?.id || raw?.value || raw?.orderindex || raw?.name || '');
+  }
+  return normalizePrimitiveForCompare(raw);
+}
+
+function extractPlannedFieldComparableValue(plannedField = null) {
+  if (!plannedField || typeof plannedField !== 'object') return '';
+  if (plannedField.payload && Object.prototype.hasOwnProperty.call(plannedField.payload, 'value')) {
+    const payloadValue = plannedField.payload.value;
+    if (Array.isArray(payloadValue)) return normalizeArrayForCompare(payloadValue);
+    return normalizePrimitiveForCompare(payloadValue);
+  }
+  return normalizePrimitiveForCompare(plannedField.value);
+}
+
+function hasCustomFieldChanged(existingTask = {}, plannedField = null) {
+  if (!plannedField) return false;
+  const fieldId = normalizeCell(plannedField?.id);
+  if (!fieldId) return false;
+  const taskField = getTaskCustomFieldById(existingTask, fieldId);
+  const existingValue = extractTaskFieldRawComparableValue(taskField);
+  const plannedValue = extractPlannedFieldComparableValue(plannedField);
+
+  if (Array.isArray(existingValue) || Array.isArray(plannedValue)) {
+    const left = Array.isArray(existingValue) ? existingValue : normalizeArrayForCompare([existingValue]);
+    const right = Array.isArray(plannedValue) ? plannedValue : normalizeArrayForCompare([plannedValue]);
+    return !arraysEqual(left, right);
+  }
+
+  return normalizePrimitiveForCompare(existingValue) !== normalizePrimitiveForCompare(plannedValue);
+}
+
+function getTaskDueDateMs(task = {}) {
+  const raw = task?.due_date;
+  if (raw === null || raw === undefined || raw === '') return null;
+  const ms = Number(raw);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function buildChangedTaskPayload(existingTask = {}, taskPayload = {}) {
+  const changes = {};
+  const existingName = normalizeCell(existingTask?.name);
+  const desiredName = normalizeCell(taskPayload?.name);
+  if (desiredName && desiredName !== existingName) {
+    changes.name = desiredName;
+  }
+
+  const existingDescription = normalizeCell(existingTask?.description);
+  const desiredDescription = normalizeCell(taskPayload?.description);
+  if (desiredDescription !== existingDescription) {
+    changes.description = taskPayload.description || '';
+  }
+
+  if (Object.prototype.hasOwnProperty.call(taskPayload, 'due_date')) {
+    const desiredDueDate = Number(taskPayload.due_date);
+    const existingDueDate = getTaskDueDateMs(existingTask);
+    if (Number.isFinite(desiredDueDate) && desiredDueDate !== existingDueDate) {
+      changes.due_date = desiredDueDate;
+      changes.due_date_time = true;
+    }
+  }
+
+  return changes;
+}
+
 function getCustomFieldDisplayValue(field = null) {
   if (!field) return '';
   const raw = field?.value;
@@ -786,6 +890,7 @@ async function syncRowsToClickUp({
     enabled: false,
     created: 0,
     updated: 0,
+    skippedUnchanged: 0,
     closed: 0,
     skippedCompleteQuotes: 0,
     errors: []
@@ -909,16 +1014,30 @@ async function syncRowsToClickUp({
         result.created += 1;
       } else {
         if (!isCompleteStatus(existingTask?.status?.status || existingTask?.status)) {
-          await clickup.request('PUT', `/task/${existingTask.id}`, {
-            data: taskPayload
-          });
-          await applyTaskCustomFields(clickup, existingTask.id, customFields, key, result);
+          const changedTaskPayload = buildChangedTaskPayload(existingTask, taskPayload);
+          const changedCustomFields = customFields.filter(field => hasCustomFieldChanged(existingTask, field));
+
+          if (Object.keys(changedTaskPayload).length === 0 && changedCustomFields.length === 0) {
+            console.log(`[WorkOrders] Task skipped (unchanged): ${key}`);
+            result.skippedUnchanged += 1;
+            continue;
+          }
+
+          if (Object.keys(changedTaskPayload).length > 0) {
+            await clickup.request('PUT', `/task/${existingTask.id}`, {
+              data: changedTaskPayload
+            });
+          }
+
+          if (changedCustomFields.length > 0) {
+            await applyTaskCustomFields(clickup, existingTask.id, changedCustomFields, key, result);
+          }
           if (
             assigneeVerificationEnabled &&
             resolvedAssignee &&
             assigneeVerificationCount < assigneeVerificationLimit
           ) {
-            const assigneeField = customFields.find(
+            const assigneeField = changedCustomFields.find(
               field => normalizeCell(field?.fieldName) === WORK_ORDERS_TASK_FIELD_NAMES.assignee
             );
             if (assigneeField?.id) {
