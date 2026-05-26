@@ -321,67 +321,6 @@
       background: #e2eefb;
     }
 
-    .verification-card {
-      margin-top: 12px;
-      padding: 14px 15px;
-      border-radius: 10px;
-      border: 1px solid #cfe0f2;
-      background:
-        linear-gradient(140deg, rgba(11, 92, 171, 0.08), rgba(15, 138, 106, 0.08)),
-        #f8fbff;
-      color: #21486f;
-    }
-
-    .verification-card.hidden {
-      display: none;
-    }
-
-    .verification-card h5 {
-      margin: 0 0 10px;
-      font-size: 14px;
-      color: #1f4d78;
-      letter-spacing: 0.2px;
-    }
-
-    .verification-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .verification-metric {
-      padding: 10px 11px;
-      border-radius: 8px;
-      background: rgba(255, 255, 255, 0.75);
-      border: 1px solid rgba(191, 208, 229, 0.9);
-    }
-
-    .verification-metric .label {
-      display: block;
-      font-size: 11px;
-      color: #5b7391;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 4px;
-      font-weight: 700;
-    }
-
-    .verification-metric .value {
-      display: block;
-      font-size: 20px;
-      line-height: 1.1;
-      color: #153b61;
-      font-weight: 800;
-    }
-
-    .verification-footnote {
-      margin-top: 10px;
-      font-size: 12px;
-      color: #476587;
-      line-height: 1.45;
-      font-weight: 600;
-    }
-
     .logs-container {
       max-height: 360px;
       overflow-y: auto;
@@ -406,6 +345,14 @@
       color: #1a304d;
       background: #fcfdff;
       font-size: 13px;
+    }
+
+    .log-toolbar-btn {
+      width: auto;
+      padding: 9px 16px;
+      font-size: 13px;
+      min-width: 118px;
+      flex: 0 0 auto;
     }
 
     .log-entry {
@@ -528,10 +475,6 @@
       .schedule-controls,
       .inline-action-row {
         grid-template-columns: 1fr;
-      }
-
-      .verification-grid {
-        grid-template-columns: 1fr 1fr;
       }
 
       h1 {
@@ -669,30 +612,6 @@
             Run ClickUp Sync Now
           </button>
         </div>
-        <div class="verification-card hidden" id="clickup-verification-card">
-          <h5>ClickUp Verification</h5>
-          <div class="verification-grid">
-            <div class="verification-metric">
-              <span class="label">Tasks Verified</span>
-              <span class="value" id="verify-tasks-value">0</span>
-            </div>
-            <div class="verification-metric">
-              <span class="label">Fields Verified</span>
-              <span class="value" id="verify-fields-value">0</span>
-            </div>
-            <div class="verification-metric">
-              <span class="label">Mismatches</span>
-              <span class="value" id="verify-mismatches-value">0</span>
-            </div>
-            <div class="verification-metric">
-              <span class="label">Errors</span>
-              <span class="value" id="verify-errors-value">0</span>
-            </div>
-          </div>
-          <div class="verification-footnote" id="verify-footnote">
-            Verification results will appear here after a Work Orders ClickUp sync.
-          </div>
-        </div>
       </div>
     </div>
   </div>
@@ -700,14 +619,14 @@
   <div class="card" id="execution-history-card">
     <h3>Execution History</h3>
     <div class="logs-toolbar">
-      <button id="toggle-exec-logs-btn" class="action-btn secondary" type="button" onclick="toggleExecutionLogs()">Collapse Logs</button>
+      <button id="toggle-exec-logs-btn" class="action-btn secondary log-toolbar-btn" type="button" onclick="toggleExecutionLogs()">Collapse Logs</button>
       <select id="exec-log-filter" onchange="renderExecutionLogs()">
         <option value="all">All</option>
         <option value="error">Errors only</option>
         <option value="success">Success only</option>
         <option value="latest">Latest 20</option>
       </select>
-      <button class="action-btn secondary" type="button" onclick="clearExecutionLogs()">Clear Logs</button>
+      <button class="action-btn secondary log-toolbar-btn" type="button" onclick="clearExecutionLogs()">Clear Logs</button>
     </div>
     <div id="logs-container" class="logs-container">
       <p class="info-text">No execution logs yet.</p>
@@ -735,7 +654,6 @@
   // Initialize
   window.addEventListener('load', async () => {
     applyDataTypeUI();
-    resetClickupVerificationCard();
     await loadCurrentSchedule();
     await loadSavedSheetId();
     await loadSavedDriveFolderId();
@@ -753,7 +671,6 @@
     currentDataType = type;
     clearAllStatuses();
     applyDataTypeUI();
-    resetClickupVerificationCard();
     loadCurrentSchedule();
     loadSavedSheetId();
     loadSavedDriveFolderId();
@@ -775,14 +692,12 @@
     const driveFolderGroup = document.getElementById('drive-folder-group');
     const clickupListGroup = document.getElementById('clickup-list-group');
     const clickupSyncButton = document.getElementById('clickup-sync-now-btn');
-    const verificationCard = document.getElementById('clickup-verification-card');
     const executionHistoryCard = document.getElementById('execution-history-card');
 
     if (currentDataType === 'workorders') {
       driveFolderGroup.style.display = 'block';
       clickupListGroup.style.display = 'block';
       clickupSyncButton.style.display = 'block';
-      verificationCard.classList.remove('hidden');
       executionHistoryCard.style.display = 'block';
       destinationSelect.innerHTML = '<option>Google Sheets - Work Orders Tab (Auto-managed)</option>';
       destinationInfo.textContent = 'Data syncs active Work Orders and Check Part Quotes into Work Orders tab.';
@@ -790,7 +705,6 @@
       driveFolderGroup.style.display = 'none';
       clickupListGroup.style.display = 'none';
       clickupSyncButton.style.display = 'none';
-      verificationCard.classList.add('hidden');
       executionHistoryCard.style.display = 'none';
       destinationSelect.innerHTML = '<option>Google Sheets - RAW Tab (Fixed)</option>';
       destinationInfo.textContent = 'Data will overwrite the RAW tab only.';
@@ -807,15 +721,6 @@
     }
   }
 
-  function resetClickupVerificationCard() {
-    document.getElementById('verify-tasks-value').textContent = '0';
-    document.getElementById('verify-fields-value').textContent = '0';
-    document.getElementById('verify-mismatches-value').textContent = '0';
-    document.getElementById('verify-errors-value').textContent = '0';
-    document.getElementById('verify-footnote').textContent =
-      'Verification results will appear here after a Work Orders ClickUp sync.';
-  }
-
   function stopVerificationPolling() {
     if (workOrdersVerificationPollTimer) {
       clearInterval(workOrdersVerificationPollTimer);
@@ -827,7 +732,6 @@
     stopVerificationPolling();
     if (currentDataType !== 'workorders') return;
     workOrdersVerificationPollTimer = setInterval(() => {
-      refreshLatestWorkOrdersVerification();
       loadExecutionLogs();
     }, 15000);
   }
@@ -919,56 +823,6 @@
       renderExecutionLogs();
     } catch (err) {
       console.error('Failed to clear Work Orders execution logs:', err);
-    }
-  }
-
-  function updateClickupVerificationCard(summary) {
-    if (currentDataType !== 'workorders') return;
-    const card = document.getElementById('clickup-verification-card');
-    if (!card) return;
-
-    const verifiedTasks = Number(summary?.verifiedTasks || 0);
-    const verifiedFields = Number(summary?.verifiedFields || 0);
-    const verifyMismatches = Number(summary?.verifyMismatches || 0);
-    const verifyErrors = Number(summary?.verifyErrors || 0);
-
-    document.getElementById('verify-tasks-value').textContent = String(verifiedTasks);
-    document.getElementById('verify-fields-value').textContent = String(verifiedFields);
-    document.getElementById('verify-mismatches-value').textContent = String(verifyMismatches);
-    document.getElementById('verify-errors-value').textContent = String(verifyErrors);
-
-    const footnote = document.getElementById('verify-footnote');
-    if (verifiedTasks === 0 && verifiedFields === 0 && verifyMismatches === 0 && verifyErrors === 0) {
-      footnote.textContent = 'No ClickUp field verification was needed in this run.';
-    } else if (verifyMismatches > 0 || verifyErrors > 0) {
-      footnote.textContent =
-        `ClickUp verification completed with ${verifyMismatches} mismatch(es) and ${verifyErrors} error(s). Check logs for details.`;
-    } else {
-      footnote.textContent =
-        `ClickUp verification passed for ${verifiedTasks} task(s) and ${verifiedFields} field value(s).`;
-    }
-
-    const lastRun = summary?.lastRun || summary?.timestamp || '';
-    if (lastRun) {
-      const stamp = new Date(lastRun);
-      const label = Number.isNaN(stamp.getTime()) ? String(lastRun) : stamp.toLocaleString();
-      footnote.textContent += ` Last update: ${label}.`;
-    }
-  }
-
-  async function refreshLatestWorkOrdersVerification() {
-    if (currentDataType !== 'workorders') return;
-    try {
-      const logs = await window.workOrdersAPI.getExecutionLogs(5);
-      if (!Array.isArray(logs) || logs.length === 0) return;
-      const latestWithSummary = logs.find(entry => entry && entry.summary && typeof entry.summary === 'object');
-      if (!latestWithSummary || !latestWithSummary.summary) return;
-      updateClickupVerificationCard({
-        ...latestWithSummary.summary,
-        timestamp: latestWithSummary.timestamp
-      });
-    } catch (err) {
-      console.error('Failed to refresh Work Orders verification summary:', err);
     }
   }
 
@@ -1083,8 +937,7 @@
       
       if (result.success) {
         showStatus(status, 'success', result.message);
-        if (currentDataType === 'workorders' && result.summary) {
-          updateClickupVerificationCard(result.summary);
+        if (currentDataType === 'workorders') {
           await loadExecutionLogs();
         }
         console.log('Schedule test executed successfully');
@@ -1132,9 +985,6 @@
         if (schedule.clickupListId) {
           document.getElementById('workorders-clickup-list-id').value = schedule.clickupListId;
         }
-        if (currentDataType === 'workorders') {
-          refreshLatestWorkOrdersVerification();
-        }
       } else {
         document.getElementById('current-schedule').style.display = 'none';
       }
@@ -1165,7 +1015,6 @@
       });
       if (result.success) {
         showStatus(status, 'success', result.message);
-        updateClickupVerificationCard(result.summary || {});
         await loadExecutionLogs();
       } else {
         showStatus(status, 'error', result.message || 'ClickUp sync failed.');
