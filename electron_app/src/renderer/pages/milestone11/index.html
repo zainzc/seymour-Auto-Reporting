@@ -303,6 +303,67 @@
       line-height: 1.5;
     }
 
+    .verification-card {
+      margin-top: 12px;
+      padding: 14px 15px;
+      border-radius: 10px;
+      border: 1px solid #cfe0f2;
+      background:
+        linear-gradient(140deg, rgba(11, 92, 171, 0.08), rgba(15, 138, 106, 0.08)),
+        #f8fbff;
+      color: #21486f;
+    }
+
+    .verification-card.hidden {
+      display: none;
+    }
+
+    .verification-card h5 {
+      margin: 0 0 10px;
+      font-size: 14px;
+      color: #1f4d78;
+      letter-spacing: 0.2px;
+    }
+
+    .verification-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .verification-metric {
+      padding: 10px 11px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.75);
+      border: 1px solid rgba(191, 208, 229, 0.9);
+    }
+
+    .verification-metric .label {
+      display: block;
+      font-size: 11px;
+      color: #5b7391;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+      font-weight: 700;
+    }
+
+    .verification-metric .value {
+      display: block;
+      font-size: 20px;
+      line-height: 1.1;
+      color: #153b61;
+      font-weight: 800;
+    }
+
+    .verification-footnote {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #476587;
+      line-height: 1.45;
+      font-weight: 600;
+    }
+
     .loading {
       display: inline-block;
     }
@@ -382,6 +443,10 @@
       .date-range,
       .schedule-controls {
         grid-template-columns: 1fr;
+      }
+
+      .verification-grid {
+        grid-template-columns: 1fr 1fr;
       }
 
       h1 {
@@ -517,6 +582,30 @@
         >
           Run ClickUp Sync Now
         </button>
+        <div class="verification-card hidden" id="clickup-verification-card">
+          <h5>ClickUp Verification</h5>
+          <div class="verification-grid">
+            <div class="verification-metric">
+              <span class="label">Tasks Verified</span>
+              <span class="value" id="verify-tasks-value">0</span>
+            </div>
+            <div class="verification-metric">
+              <span class="label">Fields Verified</span>
+              <span class="value" id="verify-fields-value">0</span>
+            </div>
+            <div class="verification-metric">
+              <span class="label">Mismatches</span>
+              <span class="value" id="verify-mismatches-value">0</span>
+            </div>
+            <div class="verification-metric">
+              <span class="label">Errors</span>
+              <span class="value" id="verify-errors-value">0</span>
+            </div>
+          </div>
+          <div class="verification-footnote" id="verify-footnote">
+            Verification results will appear here after a Work Orders ClickUp sync.
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -527,6 +616,7 @@
     console.log('window.oauth2API:', window.oauth2API);
   let currentDataType = 'invoices';
   const statusHideTimers = new Map();
+  let workOrdersVerificationPollTimer = null;
   const WORK_ORDERS_SCHEDULE_OPTIONS = [
     { value: 'every_1_minute', label: 'Every 1 Minute' },
     { value: 'every_3_minutes', label: 'Every 3 Minutes' },
@@ -539,10 +629,16 @@
   // Initialize
   window.addEventListener('load', async () => {
     applyDataTypeUI();
+    resetClickupVerificationCard();
     await loadCurrentSchedule();
     await loadSavedSheetId();
     await loadSavedDriveFolderId();
     await loadSavedClickupListId();
+    syncVerificationPolling();
+  });
+
+  window.addEventListener('beforeunload', () => {
+    stopVerificationPolling();
   });
 
   function selectDataType(type) {
@@ -550,10 +646,12 @@
     currentDataType = type;
     clearAllStatuses();
     applyDataTypeUI();
+    resetClickupVerificationCard();
     loadCurrentSchedule();
     loadSavedSheetId();
     loadSavedDriveFolderId();
     loadSavedClickupListId();
+    syncVerificationPolling();
   }
 
   function getScheduleApi() {
@@ -569,28 +667,106 @@
     const driveFolderGroup = document.getElementById('drive-folder-group');
     const clickupListGroup = document.getElementById('clickup-list-group');
     const clickupSyncButton = document.getElementById('clickup-sync-now-btn');
+    const verificationCard = document.getElementById('clickup-verification-card');
 
     if (currentDataType === 'workorders') {
       driveFolderGroup.style.display = 'block';
       clickupListGroup.style.display = 'block';
       clickupSyncButton.style.display = 'block';
+      verificationCard.classList.remove('hidden');
       destinationSelect.innerHTML = '<option>Google Sheets - Work Orders Tab (Auto-managed)</option>';
       destinationInfo.textContent = 'Data syncs active Work Orders and Check Part Quotes into Work Orders tab.';
     } else {
       driveFolderGroup.style.display = 'none';
       clickupListGroup.style.display = 'none';
       clickupSyncButton.style.display = 'none';
+      verificationCard.classList.add('hidden');
       destinationSelect.innerHTML = '<option>Google Sheets - RAW Tab (Fixed)</option>';
       destinationInfo.textContent = 'Data will overwrite the RAW tab only.';
     }
 
     rebuildScheduleFrequencyOptions();
     updateScheduleInfo();
+    syncVerificationPolling();
     const scheduleTitle = document.querySelector('#current-schedule h4');
     if (scheduleTitle) {
       scheduleTitle.textContent = currentDataType === 'workorders'
         ? 'Current Schedule (Work Orders)'
         : 'Current Schedule (Invoices)';
+    }
+  }
+
+  function resetClickupVerificationCard() {
+    document.getElementById('verify-tasks-value').textContent = '0';
+    document.getElementById('verify-fields-value').textContent = '0';
+    document.getElementById('verify-mismatches-value').textContent = '0';
+    document.getElementById('verify-errors-value').textContent = '0';
+    document.getElementById('verify-footnote').textContent =
+      'Verification results will appear here after a Work Orders ClickUp sync.';
+  }
+
+  function stopVerificationPolling() {
+    if (workOrdersVerificationPollTimer) {
+      clearInterval(workOrdersVerificationPollTimer);
+      workOrdersVerificationPollTimer = null;
+    }
+  }
+
+  function syncVerificationPolling() {
+    stopVerificationPolling();
+    if (currentDataType !== 'workorders') return;
+    workOrdersVerificationPollTimer = setInterval(() => {
+      refreshLatestWorkOrdersVerification();
+    }, 15000);
+  }
+
+  function updateClickupVerificationCard(summary) {
+    if (currentDataType !== 'workorders') return;
+    const card = document.getElementById('clickup-verification-card');
+    if (!card) return;
+
+    const verifiedTasks = Number(summary?.verifiedTasks || 0);
+    const verifiedFields = Number(summary?.verifiedFields || 0);
+    const verifyMismatches = Number(summary?.verifyMismatches || 0);
+    const verifyErrors = Number(summary?.verifyErrors || 0);
+
+    document.getElementById('verify-tasks-value').textContent = String(verifiedTasks);
+    document.getElementById('verify-fields-value').textContent = String(verifiedFields);
+    document.getElementById('verify-mismatches-value').textContent = String(verifyMismatches);
+    document.getElementById('verify-errors-value').textContent = String(verifyErrors);
+
+    const footnote = document.getElementById('verify-footnote');
+    if (verifiedTasks === 0 && verifiedFields === 0 && verifyMismatches === 0 && verifyErrors === 0) {
+      footnote.textContent = 'No ClickUp field verification was needed in this run.';
+    } else if (verifyMismatches > 0 || verifyErrors > 0) {
+      footnote.textContent =
+        `ClickUp verification completed with ${verifyMismatches} mismatch(es) and ${verifyErrors} error(s). Check logs for details.`;
+    } else {
+      footnote.textContent =
+        `ClickUp verification passed for ${verifiedTasks} task(s) and ${verifiedFields} field value(s).`;
+    }
+
+    const lastRun = summary?.lastRun || summary?.timestamp || '';
+    if (lastRun) {
+      const stamp = new Date(lastRun);
+      const label = Number.isNaN(stamp.getTime()) ? String(lastRun) : stamp.toLocaleString();
+      footnote.textContent += ` Last update: ${label}.`;
+    }
+  }
+
+  async function refreshLatestWorkOrdersVerification() {
+    if (currentDataType !== 'workorders') return;
+    try {
+      const logs = await window.workOrdersAPI.getExecutionLogs(5);
+      if (!Array.isArray(logs) || logs.length === 0) return;
+      const latestWithSummary = logs.find(entry => entry && entry.summary && typeof entry.summary === 'object');
+      if (!latestWithSummary || !latestWithSummary.summary) return;
+      updateClickupVerificationCard({
+        ...latestWithSummary.summary,
+        timestamp: latestWithSummary.timestamp
+      });
+    } catch (err) {
+      console.error('Failed to refresh Work Orders verification summary:', err);
     }
   }
 
@@ -705,6 +881,9 @@
       
       if (result.success) {
         showStatus(status, 'success', result.message);
+        if (currentDataType === 'workorders' && result.summary) {
+          updateClickupVerificationCard(result.summary);
+        }
         console.log('Schedule test executed successfully');
       } else {
         showStatus(status, 'error', result.message);
@@ -748,6 +927,9 @@
         if (schedule.clickupListId) {
           document.getElementById('workorders-clickup-list-id').value = schedule.clickupListId;
         }
+        if (currentDataType === 'workorders') {
+          refreshLatestWorkOrdersVerification();
+        }
       } else {
         document.getElementById('current-schedule').style.display = 'none';
       }
@@ -778,6 +960,7 @@
       });
       if (result.success) {
         showStatus(status, 'success', result.message);
+        updateClickupVerificationCard(result.summary || {});
       } else {
         showStatus(status, 'error', result.message || 'ClickUp sync failed.');
       }

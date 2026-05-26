@@ -10,7 +10,7 @@ const {
 } = require('./googleDriveImageService');
 
 const DEFAULT_WORK_ORDERS_SHEET_NAME = process.env.WORK_ORDERS_SHEET_NAME || 'Work Orders';
-const EASTERN_TIMEZONE = 'America/New_York';
+const EST_FIXED_OFFSET_MINUTES = -5 * 60;
 const CLICKUP_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_OPEN_STATUS = 'OPEN';
 const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT']);
@@ -125,31 +125,17 @@ function parseRowDate(value) {
   return parsed;
 }
 
-function getZonedParts(date, timeZone = EASTERN_TIMEZONE) {
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    weekday: 'short',
-    hourCycle: 'h23'
-  });
-  const parts = formatter.formatToParts(date);
-  const out = {};
-  for (const part of parts) {
-    out[part.type] = part.value;
-  }
+function getZonedParts(date) {
+  const shifted = new Date(date.getTime() + EST_FIXED_OFFSET_MINUTES * 60 * 1000);
+  const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   return {
-    year: Number(out.year),
-    month: Number(out.month),
-    day: Number(out.day),
-    hour: Number(out.hour),
-    minute: Number(out.minute),
-    second: Number(out.second || 0),
-    weekday: String(out.weekday || '')
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+    day: shifted.getUTCDate(),
+    hour: shifted.getUTCHours(),
+    minute: shifted.getUTCMinutes(),
+    second: shifted.getUTCSeconds(),
+    weekday: weekdayNames[shifted.getUTCDay()] || ''
   };
 }
 
@@ -164,35 +150,17 @@ function compareLocalParts(a, b) {
   return 0;
 }
 
-function zonedDateToUtc(localParts, timeZone = EASTERN_TIMEZONE) {
-  let guess = new Date(
+function zonedDateToUtc(localParts) {
+  return new Date(
     Date.UTC(
       Number(localParts.year || 0),
       Number(localParts.month || 1) - 1,
       Number(localParts.day || 1),
-      Number(localParts.hour || 0),
+      Number(localParts.hour || 0) - Math.trunc(EST_FIXED_OFFSET_MINUTES / 60),
       Number(localParts.minute || 0),
       0
     )
   );
-
-  for (let i = 0; i < 3; i += 1) {
-    const current = getZonedParts(guess, timeZone);
-    const currentUtc = Date.UTC(current.year, current.month - 1, current.day, current.hour, current.minute, 0);
-    const targetUtc = Date.UTC(
-      Number(localParts.year || 0),
-      Number(localParts.month || 1) - 1,
-      Number(localParts.day || 1),
-      Number(localParts.hour || 0),
-      Number(localParts.minute || 0),
-      0
-    );
-    const deltaMs = targetUtc - currentUtc;
-    if (deltaMs === 0) break;
-    guess = new Date(guess.getTime() + deltaMs);
-  }
-
-  return guess;
 }
 
 function isBusinessWeekday(weekday = '') {
@@ -888,6 +856,65 @@ async function verifyAssigneeFieldValue(clickup, taskId, assigneeFieldId, expect
   }
 }
 
+async function verifyTaskCustomFields(clickup, taskId, customFields = [], rowKey = '', result = null) {
+  const id = normalizeCell(taskId);
+  const fieldsToVerify = Array.isArray(customFields) ? customFields.filter(field => normalizeCell(field?.id)) : [];
+  if (!id || fieldsToVerify.length === 0) {
+    return { verifiedFields: 0, mismatches: 0, errors: 0 };
+  }
+
+  try {
+    const task = await clickup.getTask(id);
+    let verifiedFields = 0;
+    let mismatches = 0;
+
+    for (const plannedField of fieldsToVerify) {
+      const taskField = getTaskCustomFieldById(task, plannedField.id);
+      const fieldName = normalizeCell(plannedField?.fieldName || plannedField?.id);
+      if (!taskField) {
+        mismatches += 1;
+        console.warn(
+          `[WorkOrders] ClickUp verify mismatch for ${rowKey || id}: field '${fieldName}' not found after update`
+        );
+        continue;
+      }
+
+      const changed = hasCustomFieldChanged({ custom_fields: [taskField] }, plannedField);
+      if (changed) {
+        mismatches += 1;
+        const actual = getCustomFieldDisplayValue(taskField);
+        console.warn(
+          `[WorkOrders] ClickUp verify mismatch for ${rowKey || id}: field '${fieldName}' expected write did not round-trip cleanly (actual='${actual}')`
+        );
+      } else {
+        verifiedFields += 1;
+      }
+    }
+
+    if (result) {
+      result.verifiedTasks = Number(result.verifiedTasks || 0) + 1;
+      result.verifiedFields = Number(result.verifiedFields || 0) + verifiedFields;
+      result.verifyMismatches = Number(result.verifyMismatches || 0) + mismatches;
+    }
+
+    console.log(
+      `[WorkOrders] ClickUp verify completed for ${rowKey || id}: verifiedFields=${verifiedFields}, mismatches=${mismatches}`
+    );
+
+    return { verifiedFields, mismatches, errors: 0 };
+  } catch (error) {
+    const message = error?.message || String(error);
+    console.warn(`[WorkOrders] ClickUp verify failed for ${rowKey || id}: ${message}`);
+    if (result) {
+      result.verifyErrors = Number(result.verifyErrors || 0) + 1;
+      if (Array.isArray(result.errors)) {
+        result.errors.push(`ClickUp verify failed for ${rowKey || id}: ${message}`);
+      }
+    }
+    return { verifiedFields: 0, mismatches: 0, errors: 1 };
+  }
+}
+
 async function applyTaskCustomFields(clickup, taskId, customFields = [], recordKey = '', result = null) {
   const id = normalizeCell(taskId);
   if (!id || !Array.isArray(customFields) || customFields.length === 0) return;
@@ -934,6 +961,10 @@ async function syncRowsToClickUp({
     skippedUnchanged: 0,
     closed: 0,
     skippedCompleteQuotes: 0,
+    verifiedTasks: 0,
+    verifiedFields: 0,
+    verifyMismatches: 0,
+    verifyErrors: 0,
     errors: []
   };
 
@@ -1037,6 +1068,9 @@ async function syncRowsToClickUp({
         const createdTaskId = normalizeCell(createdTask?.id || createdTask?.task?.id);
         if (createdTaskId) {
           await applyTaskCustomFields(clickup, createdTaskId, customFields, key, result);
+          if (customFields.length > 0) {
+            await verifyTaskCustomFields(clickup, createdTaskId, customFields, key, result);
+          }
           if (
             assigneeVerificationEnabled &&
             resolvedAssignee &&
@@ -1079,6 +1113,7 @@ async function syncRowsToClickUp({
 
           if (changedCustomFields.length > 0) {
             await applyTaskCustomFields(clickup, existingTask.id, changedCustomFields, key, result);
+            await verifyTaskCustomFields(clickup, existingTask.id, changedCustomFields, key, result);
           }
           if (
             assigneeVerificationEnabled &&
@@ -1210,6 +1245,10 @@ async function runClickUpSyncFromSheet({
     tasksUpdated: 0,
     tasksCompleted: 0,
     quoteRowsRemovedFromSheet: 0,
+    verifiedTasks: 0,
+    verifiedFields: 0,
+    verifyMismatches: 0,
+    verifyErrors: 0,
     errors: []
   };
 
@@ -1232,6 +1271,10 @@ async function runClickUpSyncFromSheet({
   summary.tasksUpdated = Number(clickupResult.updated || 0);
   summary.tasksCompleted = Number(clickupResult.closed || 0);
   summary.quoteRowsRemovedFromSheet = Number(clickupResult.skippedCompleteQuotes || 0);
+  summary.verifiedTasks = Number(clickupResult.verifiedTasks || 0);
+  summary.verifiedFields = Number(clickupResult.verifiedFields || 0);
+  summary.verifyMismatches = Number(clickupResult.verifyMismatches || 0);
+  summary.verifyErrors = Number(clickupResult.verifyErrors || 0);
 
   if (Array.isArray(clickupResult.filteredRows) && clickupResult.filteredRows.length !== sheetRows.length) {
     await syncWorkOrdersRowsToSheet({
@@ -1248,7 +1291,7 @@ async function runClickUpSyncFromSheet({
   }
 
   console.log(
-    `[WorkOrders] ClickUp sync completed: created=${summary.tasksCreated}, updated=${summary.tasksUpdated}, completed=${summary.tasksCompleted}, quoteRemoved=${summary.quoteRowsRemovedFromSheet}`
+    `[WorkOrders] ClickUp sync completed: created=${summary.tasksCreated}, updated=${summary.tasksUpdated}, completed=${summary.tasksCompleted}, quoteRemoved=${summary.quoteRowsRemovedFromSheet}, verifiedTasks=${summary.verifiedTasks}, verifiedFields=${summary.verifiedFields}, verifyMismatches=${summary.verifyMismatches}, verifyErrors=${summary.verifyErrors}`
   );
   return summary;
 }
@@ -1275,6 +1318,10 @@ async function runWorkOrdersSync({
     clickupTasksUpdated: 0,
     clickupTasksCompleted: 0,
     clickupRowsSkippedCompleteOverride: 0,
+    verifiedTasks: 0,
+    verifiedFields: 0,
+    verifyMismatches: 0,
+    verifyErrors: 0,
     errors: []
   };
 
@@ -1360,6 +1407,10 @@ async function runWorkOrdersSync({
     summary.clickupTasksUpdated = Number(clickupSummary.tasksUpdated || 0);
     summary.clickupTasksCompleted = Number(clickupSummary.tasksCompleted || 0);
     summary.clickupRowsSkippedCompleteOverride = Number(clickupSummary.quoteRowsRemovedFromSheet || 0);
+    summary.verifiedTasks = Number(clickupSummary.verifiedTasks || 0);
+    summary.verifiedFields = Number(clickupSummary.verifiedFields || 0);
+    summary.verifyMismatches = Number(clickupSummary.verifyMismatches || 0);
+    summary.verifyErrors = Number(clickupSummary.verifyErrors || 0);
     if (!normalizeCell(clickupToken) || !normalizeCell(clickupListId)) {
       console.warn('[WorkOrders] ClickUp sync skipped: missing token/list configuration');
     }
