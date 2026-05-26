@@ -583,7 +583,8 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
           value: Number(value.getTime()),
           time: true
         },
-        fieldName: name
+        fieldName: name,
+        fieldType
       });
       continue;
     }
@@ -634,7 +635,8 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
         payload: {
           value: [labelId]
         },
-        fieldName: name
+        fieldName: name,
+        fieldType
       });
       continue;
     }
@@ -653,7 +655,8 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
     customFields.push({
       id: fieldMeta.id,
       value: fieldValue,
-      fieldName: name
+      fieldName: name,
+      fieldType
     });
   }
   if (missingFieldNames.length > 0) {
@@ -677,6 +680,33 @@ function normalizePrimitiveForCompare(value) {
   if (typeof value === 'number') return String(value);
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   return normalizeCell(value);
+}
+
+function toEpochMsSafe(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === 'string') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+    const parsed = Date.parse(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  if (typeof value === 'object') {
+    const candidates = [value.value, value.date, value.start, value.start_date, value.timestamp];
+    for (const candidate of candidates) {
+      const ms = toEpochMsSafe(candidate);
+      if (ms !== null) return ms;
+    }
+  }
+  return null;
+}
+
+function normalizeDateMsToMinute(value) {
+  const ms = toEpochMsSafe(value);
+  if (ms === null) return null;
+  return Math.floor(ms / 60000) * 60000;
 }
 
 function normalizeArrayForCompare(values = []) {
@@ -705,6 +735,11 @@ function extractTaskFieldRawComparableValue(taskField = null) {
   const raw = taskField?.value;
   if (raw === null || raw === undefined) return '';
 
+  if (fieldType === 'DATE') {
+    const ms = normalizeDateMsToMinute(raw);
+    return ms === null ? '' : String(ms);
+  }
+
   if (fieldType === 'LABELS') {
     const values = Array.isArray(raw) ? raw : [raw];
     return normalizeArrayForCompare(values);
@@ -718,6 +753,12 @@ function extractTaskFieldRawComparableValue(taskField = null) {
 
 function extractPlannedFieldComparableValue(plannedField = null) {
   if (!plannedField || typeof plannedField !== 'object') return '';
+  const plannedFieldType = normalizeUpper(plannedField?.fieldType);
+  if (plannedFieldType === 'DATE') {
+    const plannedValue = plannedField?.payload?.value ?? plannedField?.value;
+    const ms = normalizeDateMsToMinute(plannedValue);
+    return ms === null ? '' : String(ms);
+  }
   if (plannedField.payload && Object.prototype.hasOwnProperty.call(plannedField.payload, 'value')) {
     const payloadValue = plannedField.payload.value;
     if (Array.isArray(payloadValue)) return normalizeArrayForCompare(payloadValue);
@@ -1016,6 +1057,13 @@ async function syncRowsToClickUp({
         if (!isCompleteStatus(existingTask?.status?.status || existingTask?.status)) {
           const changedTaskPayload = buildChangedTaskPayload(existingTask, taskPayload);
           const changedCustomFields = customFields.filter(field => hasCustomFieldChanged(existingTask, field));
+          if (changedCustomFields.length > 0) {
+            const changedNames = changedCustomFields
+              .map(field => normalizeCell(field?.fieldName))
+              .filter(Boolean)
+              .join(', ');
+            console.log(`[WorkOrders] Changed custom fields for ${key}: ${changedNames}`);
+          }
 
           if (Object.keys(changedTaskPayload).length === 0 && changedCustomFields.length === 0) {
             console.log(`[WorkOrders] Task skipped (unchanged): ${key}`);
