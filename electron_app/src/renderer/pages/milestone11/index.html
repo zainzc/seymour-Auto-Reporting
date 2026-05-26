@@ -334,7 +334,7 @@
       display: flex;
       gap: 8px;
       margin-bottom: 10px;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       align-items: center;
     }
 
@@ -345,6 +345,8 @@
       color: #1a304d;
       background: #fcfdff;
       font-size: 13px;
+      width: 120px;
+      flex: 0 0 120px;
     }
 
     .log-toolbar-btn {
@@ -475,6 +477,15 @@
       .schedule-controls,
       .inline-action-row {
         grid-template-columns: 1fr;
+      }
+
+      .logs-toolbar {
+        flex-wrap: wrap;
+      }
+
+      .logs-toolbar select {
+        width: 100%;
+        flex: 1 1 100%;
       }
 
       h1 {
