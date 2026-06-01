@@ -5,6 +5,7 @@ const { runWorkOrdersSync, DEFAULT_WORK_ORDERS_SHEET_NAME } = require('./workOrd
 
 let activeJob = null;
 let isWorkOrdersSyncRunning = false;
+const MAX_SUCCESSFUL_RUNS_IN_HISTORY = 20;
 
 function getCronExpression(frequency) {
   if (frequency === 'every_1_minute') return '* * * * *';
@@ -22,7 +23,29 @@ function logWorkOrdersExecution(success, message, summary = null) {
     message,
     summary: summary || null
   });
-  if (logs.length > 100) logs.splice(100);
+
+  // Keep execution history until we exceed the configured number of
+  // successful completed runs, then prune the oldest run history.
+  let successfulCompletedRuns = 0;
+  let pruneAfterIndex = logs.length;
+  for (let i = 0; i < logs.length; i += 1) {
+    const log = logs[i];
+    const isSuccessfulCompletion = Boolean(
+      log?.success && typeof log?.message === 'string' && /completed/i.test(log.message)
+    );
+    if (!isSuccessfulCompletion) continue;
+
+    successfulCompletedRuns += 1;
+    if (successfulCompletedRuns === MAX_SUCCESSFUL_RUNS_IN_HISTORY) {
+      pruneAfterIndex = i + 1;
+      break;
+    }
+  }
+
+  if (successfulCompletedRuns >= MAX_SUCCESSFUL_RUNS_IN_HISTORY && logs.length > pruneAfterIndex) {
+    logs.splice(pruneAfterIndex);
+  }
+
   saveReportingConfig('workOrdersExecutionLogs', logs);
 }
 
@@ -86,7 +109,6 @@ async function executeWorkOrdersScheduledJob(config) {
   }
 
   isWorkOrdersSyncRunning = true;
-  clearWorkOrdersExecutionLogs();
   logWorkOrdersExecution(true, 'Work Orders scheduled sync started', {
     trigger: 'schedule',
     startedAt: new Date().toISOString()

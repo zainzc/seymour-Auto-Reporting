@@ -1868,7 +1868,6 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
       };
     }
 
-    clearWorkOrdersExecutionLogs();
     logWorkOrdersExecution(true, 'Manual Work Orders sync started', {
       trigger: 'manual_workorders',
       startedAt: new Date().toISOString()
@@ -2176,7 +2175,6 @@ ipcMain.handle('workorders-clickup-sync-now', async (_, options = {}) => {
       };
     }
 
-    clearWorkOrdersExecutionLogs();
     logWorkOrdersExecution(true, 'Manual ClickUp sync started', {
       trigger: 'manual_clickup',
       startedAt: new Date().toISOString()
