@@ -140,6 +140,7 @@ async function makeFilePublic(fileId) {
   const drive = await getDriveClient();
   await drive.permissions.create({
     fileId,
+    supportsAllDrives: true,
     requestBody: {
       type: 'anyone',
       role: 'reader'
@@ -155,6 +156,7 @@ async function uploadFileToDrive(localPath) {
   const cfg = ensureConfig();
   const drive = await getDriveClient();
   const created = await drive.files.create({
+    supportsAllDrives: true,
     requestBody: {
       name: path.basename(localPath),
       parents: [cfg.driveFolderId]
