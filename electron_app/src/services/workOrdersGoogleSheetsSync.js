@@ -33,6 +33,7 @@ const LOCATION_ASSIGNEE_MAP = {
   T1: 'T1',
   T2: 'T2'
 };
+const WORK_ORDERS_CLICKUP_MAX_CONCURRENCY = 5;
 
 const WORK_ORDERS_HEADERS = [
   'Date/Time Last Synced',
@@ -650,6 +651,24 @@ function normalizePrimitiveForCompare(value) {
   return normalizeCell(value);
 }
 
+function normalizeTokenForCompare(value) {
+  return normalizeCell(value).replace(/\s+/g, ' ').toLowerCase();
+}
+
+function normalizeModeToken(value) {
+  return normalizeCell(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function normalizeMultilineTextForCompare(value) {
+  return String(value || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map(line => line.replace(/[ \t]+$/g, ''))
+    .join('\n')
+    .trim();
+}
+
 function toEpochMsSafe(value) {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'number') {
@@ -689,6 +708,53 @@ function normalizeArrayForCompare(values = []) {
     .sort();
 }
 
+function findMatchingOption(options = [], rawValue = null) {
+  const candidates = [];
+  if (rawValue && typeof rawValue === 'object') {
+    candidates.push(rawValue.id, rawValue.value, rawValue.orderindex, rawValue.name, rawValue.label);
+  } else {
+    candidates.push(rawValue);
+  }
+
+  const candidateTokens = candidates.map(normalizeTokenForCompare).filter(Boolean);
+  if (candidateTokens.length === 0) return null;
+
+  return (
+    options.find(opt => {
+      const tokens = [
+        normalizeTokenForCompare(opt?.id),
+        normalizeTokenForCompare(opt?.orderindex),
+        normalizeTokenForCompare(opt?.name),
+        normalizeTokenForCompare(opt?.label)
+      ].filter(Boolean);
+      return tokens.some(token => candidateTokens.includes(token));
+    }) || null
+  );
+}
+
+function normalizeSelectSingleValueForCompare(rawValue = null, options = []) {
+  const matched = findMatchingOption(options, rawValue);
+  if (matched) {
+    const canonical = normalizeTokenForCompare(
+      matched?.id || matched?.orderindex || matched?.name || matched?.label || ''
+    );
+    return canonical ? `opt:${canonical}` : '';
+  }
+
+  if (rawValue && typeof rawValue === 'object') {
+    return normalizeTokenForCompare(rawValue?.id || rawValue?.value || rawValue?.orderindex || rawValue?.name || rawValue?.label || '');
+  }
+  return normalizeTokenForCompare(rawValue);
+}
+
+function normalizeLabelsForCompare(rawValue = null, options = []) {
+  const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+  return values
+    .map(item => normalizeSelectSingleValueForCompare(item, options))
+    .filter(Boolean)
+    .sort();
+}
+
 function arraysEqual(a = [], b = []) {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i += 1) {
@@ -702,15 +768,19 @@ function extractTaskFieldRawComparableValue(taskField = null) {
   const fieldType = normalizeUpper(taskField?.type);
   const raw = taskField?.value;
   if (raw === null || raw === undefined) return '';
+  const options = Array.isArray(taskField?.type_config?.options) ? taskField.type_config.options : [];
 
   if (fieldType === 'DATE') {
     const ms = normalizeDateMsToMinute(raw);
     return ms === null ? '' : String(ms);
   }
 
+  if (fieldType === 'DROP_DOWN') {
+    return normalizeSelectSingleValueForCompare(raw, options);
+  }
+
   if (fieldType === 'LABELS') {
-    const values = Array.isArray(raw) ? raw : [raw];
-    return normalizeArrayForCompare(values);
+    return normalizeLabelsForCompare(raw, options);
   }
 
   if (typeof raw === 'object') {
@@ -722,10 +792,19 @@ function extractTaskFieldRawComparableValue(taskField = null) {
 function extractPlannedFieldComparableValue(plannedField = null) {
   if (!plannedField || typeof plannedField !== 'object') return '';
   const plannedFieldType = normalizeUpper(plannedField?.fieldType);
+  const options = Array.isArray(plannedField?.options) ? plannedField.options : [];
   if (plannedFieldType === 'DATE') {
     const plannedValue = plannedField?.payload?.value ?? plannedField?.value;
     const ms = normalizeDateMsToMinute(plannedValue);
     return ms === null ? '' : String(ms);
+  }
+  if (plannedFieldType === 'DROP_DOWN') {
+    const plannedValue = plannedField?.payload?.value ?? plannedField?.value;
+    return normalizeSelectSingleValueForCompare(plannedValue, options);
+  }
+  if (plannedFieldType === 'LABELS') {
+    const plannedValue = plannedField?.payload?.value ?? plannedField?.value;
+    return normalizeLabelsForCompare(plannedValue, options);
   }
   if (plannedField.payload && Object.prototype.hasOwnProperty.call(plannedField.payload, 'value')) {
     const payloadValue = plannedField.payload.value;
@@ -767,8 +846,8 @@ function buildChangedTaskPayload(existingTask = {}, taskPayload = {}) {
     changes.name = desiredName;
   }
 
-  const existingDescription = normalizeCell(existingTask?.description);
-  const desiredDescription = normalizeCell(taskPayload?.description);
+  const existingDescription = normalizeMultilineTextForCompare(existingTask?.description);
+  const desiredDescription = normalizeMultilineTextForCompare(taskPayload?.description);
   if (desiredDescription !== existingDescription) {
     changes.description = taskPayload.description || '';
   }
@@ -948,6 +1027,25 @@ async function applyTaskCustomFields(clickup, taskId, customFields = [], recordK
   console.log(`[WorkOrders] Custom fields updated for ${recordKey || id}: count=${updatedCount}`);
 }
 
+async function mapWithConcurrency(items, mapper, concurrency = 1) {
+  if (!Array.isArray(items) || items.length === 0) return [];
+  const maxWorkers = Math.max(1, Math.min(concurrency, items.length));
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await mapper(items[index], index);
+    }
+  }
+
+  const workers = Array.from({ length: maxWorkers }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
 async function syncRowsToClickUp({
   clickupToken = '',
   clickupListId = '',
@@ -988,9 +1086,45 @@ async function syncRowsToClickUp({
   let assigneeVerificationCount = 0;
   const assigneeVerificationLimit = 20;
   const assigneeVerificationEnabled = String(process.env.WORK_ORDERS_CLICKUP_VERIFY_ASSIGNEE || '').trim() === '1';
+  const verifyMode = normalizeModeToken(process.env.WORK_ORDERS_CLICKUP_VERIFY_MODE || 'sample');
+  const updatedVerifyLimitRaw = Number.parseInt(process.env.WORK_ORDERS_CLICKUP_VERIFY_UPDATED_LIMIT || '20', 10);
+  const updatedVerifyLimit = Number.isFinite(updatedVerifyLimitRaw) ? Math.max(0, updatedVerifyLimitRaw) : 20;
+  const clickupConcurrencyRaw = Number.parseInt(process.env.WORK_ORDERS_CLICKUP_SYNC_CONCURRENCY || '3', 10);
+  const clickupConcurrency = Number.isFinite(clickupConcurrencyRaw)
+    ? Math.max(1, Math.min(clickupConcurrencyRaw, WORK_ORDERS_CLICKUP_MAX_CONCURRENCY))
+    : 3;
+  let updatedVerifyCount = 0;
+
+  function shouldVerifyCreatedCustomFields() {
+    return verifyMode !== 'none' && verifyMode !== 'updatedonly';
+  }
+
+  function shouldVerifyUpdatedCustomFields() {
+    if (verifyMode === 'none' || verifyMode === 'createdonly') return false;
+    if (verifyMode === 'all') return true;
+    if (verifyMode === 'sample') {
+      if (updatedVerifyCount >= updatedVerifyLimit) return false;
+      updatedVerifyCount += 1;
+      return true;
+    }
+    if (updatedVerifyCount >= updatedVerifyLimit) return false;
+    updatedVerifyCount += 1;
+    return true;
+  }
+
+  function reserveAssigneeVerificationSlot() {
+    if (!assigneeVerificationEnabled) return false;
+    if (assigneeVerificationCount >= assigneeVerificationLimit) return false;
+    assigneeVerificationCount += 1;
+    return true;
+  }
+
   if (assigneeVerificationEnabled) {
     console.log(`[WorkOrders] Assignee verify mode enabled (limit=${assigneeVerificationLimit})`);
   }
+  console.log(
+    `[WorkOrders] ClickUp sync settings: concurrency=${clickupConcurrency}, verifyMode=${verifyMode}, updatedVerifyLimit=${updatedVerifyLimit}`
+  );
   const listFieldCount = Array.isArray(customFieldMeta.fields) ? customFieldMeta.fields.length : 0;
   console.log(`[WorkOrders] ClickUp list field metadata discovered: ${listFieldCount}`);
 
@@ -1023,12 +1157,28 @@ async function syncRowsToClickUp({
     filteredRows.push(row);
   }
 
+  const uniqueFilteredRows = [];
+  const seenRowKeys = new Set();
   for (const row of filteredRows) {
     const key = buildTaskKey(row);
-    if (!key) continue;
+    if (!key || seenRowKeys.has(key)) continue;
+    seenRowKeys.add(key);
+    uniqueFilteredRows.push(row);
+  }
+
+  await mapWithConcurrency(uniqueFilteredRows, async row => {
+    const key = buildTaskKey(row);
+    if (!key) return;
     const existingTask = taskByKey.get(key);
     const dueDate = computeDueDate(row.Created, row['Ship Via']);
-    const customFields = buildTaskCustomFields(row, customFieldMeta, dueDate);
+    const customFields = buildTaskCustomFields(row, customFieldMeta, dueDate).map(field => {
+      const fieldMeta = resolveCustomFieldMeta(customFieldMeta, field.fieldName);
+      const options = Array.isArray(fieldMeta?.type_config?.options) ? fieldMeta.type_config.options : [];
+      return {
+        ...field,
+        options
+      };
+    });
     const resolvedAssignee = resolveLocationAssigneeLabel(row.Location);
     if (dueDate) {
       console.log(`[WorkOrders] Due date calculated for ${key}: ${dueDate.toISOString()}`);
@@ -1068,21 +1218,14 @@ async function syncRowsToClickUp({
         const createdTaskId = normalizeCell(createdTask?.id || createdTask?.task?.id);
         if (createdTaskId) {
           await applyTaskCustomFields(clickup, createdTaskId, customFields, key, result);
-          if (customFields.length > 0) {
+          if (customFields.length > 0 && shouldVerifyCreatedCustomFields()) {
             await verifyTaskCustomFields(clickup, createdTaskId, customFields, key, result);
           }
-          if (
-            assigneeVerificationEnabled &&
-            resolvedAssignee &&
-            assigneeVerificationCount < assigneeVerificationLimit
-          ) {
-            const assigneeField = customFields.find(
-              field => normalizeCell(field?.fieldName) === WORK_ORDERS_TASK_FIELD_NAMES.assignee
-            );
-            if (assigneeField?.id) {
-              assigneeVerificationCount += 1;
-              await verifyAssigneeFieldValue(clickup, createdTaskId, assigneeField.id, resolvedAssignee, key);
-            }
+          const assigneeField = customFields.find(
+            field => normalizeCell(field?.fieldName) === WORK_ORDERS_TASK_FIELD_NAMES.assignee
+          );
+          if (resolvedAssignee && assigneeField?.id && reserveAssigneeVerificationSlot()) {
+            await verifyAssigneeFieldValue(clickup, createdTaskId, assigneeField.id, resolvedAssignee, key);
           }
           console.log(`[WorkOrders] Task created: ${key}`);
         }
@@ -1113,20 +1256,15 @@ async function syncRowsToClickUp({
 
           if (changedCustomFields.length > 0) {
             await applyTaskCustomFields(clickup, existingTask.id, changedCustomFields, key, result);
-            await verifyTaskCustomFields(clickup, existingTask.id, changedCustomFields, key, result);
-          }
-          if (
-            assigneeVerificationEnabled &&
-            resolvedAssignee &&
-            assigneeVerificationCount < assigneeVerificationLimit
-          ) {
-            const assigneeField = changedCustomFields.find(
-              field => normalizeCell(field?.fieldName) === WORK_ORDERS_TASK_FIELD_NAMES.assignee
-            );
-            if (assigneeField?.id) {
-              assigneeVerificationCount += 1;
-              await verifyAssigneeFieldValue(clickup, existingTask.id, assigneeField.id, resolvedAssignee, key);
+            if (shouldVerifyUpdatedCustomFields()) {
+              await verifyTaskCustomFields(clickup, existingTask.id, changedCustomFields, key, result);
             }
+          }
+          const assigneeField = changedCustomFields.find(
+            field => normalizeCell(field?.fieldName) === WORK_ORDERS_TASK_FIELD_NAMES.assignee
+          );
+          if (resolvedAssignee && assigneeField?.id && reserveAssigneeVerificationSlot()) {
+            await verifyAssigneeFieldValue(clickup, existingTask.id, assigneeField.id, resolvedAssignee, key);
           }
           console.log(`[WorkOrders] Task updated: ${key}`);
           result.updated += 1;
@@ -1142,9 +1280,9 @@ async function syncRowsToClickUp({
         String(error);
       result.errors.push(`ClickUp sync failed for ${key}: ${message}`);
     }
-  }
+  }, clickupConcurrency);
 
-  const latestKeys = new Set(filteredRows.map(row => buildTaskKey(row)).filter(Boolean));
+  const latestKeys = new Set(uniqueFilteredRows.map(row => buildTaskKey(row)).filter(Boolean));
   for (const [key, task] of taskByKey.entries()) {
     if (latestKeys.has(key)) continue;
     if (isCompleteStatus(task?.status?.status || task?.status)) continue;
@@ -1168,7 +1306,7 @@ async function syncRowsToClickUp({
 
   return {
     ...result,
-    filteredRows
+    filteredRows: uniqueFilteredRows
   };
 }
 
