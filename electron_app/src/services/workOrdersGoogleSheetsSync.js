@@ -1245,7 +1245,7 @@ async function syncRowsToClickUp({
           if (Object.keys(changedTaskPayload).length === 0 && changedCustomFields.length === 0) {
             console.log(`[WorkOrders] Task skipped (unchanged): ${key}`);
             result.skippedUnchanged += 1;
-            continue;
+            return;
           }
 
           if (Object.keys(changedTaskPayload).length > 0) {
