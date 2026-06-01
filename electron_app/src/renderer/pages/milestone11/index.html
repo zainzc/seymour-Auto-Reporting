@@ -744,18 +744,26 @@
     if (currentDataType !== 'workorders') return;
     workOrdersVerificationPollTimer = setInterval(() => {
       loadExecutionLogs();
-    }, 15000);
+    }, 5000);
   }
 
   function buildExecutionLogDetails(log) {
     const summary = log?.summary || {};
     const parts = [];
+    if (summary.event) parts.push(`event=${summary.event}`);
+    if (summary.stage) parts.push(`stage=${summary.stage}`);
     if (summary.trigger) parts.push(`trigger=${summary.trigger}`);
     if (summary.reason) parts.push(`reason=${summary.reason}`);
+    if (summary.skipped) parts.push(`skipped=${summary.skipped}`);
+    if (summary.error) parts.push(`error=${summary.error}`);
     if (Number.isFinite(Number(summary.fetched))) parts.push(`fetched=${Number(summary.fetched)}`);
     if (Number.isFinite(Number(summary.inserted))) parts.push(`inserted=${Number(summary.inserted)}`);
     if (Number.isFinite(Number(summary.updated))) parts.push(`updated=${Number(summary.updated)}`);
     if (Number.isFinite(Number(summary.removed))) parts.push(`removed=${Number(summary.removed)}`);
+    if (Number.isFinite(Number(summary.imagesUploaded))) parts.push(`imagesUploaded=${Number(summary.imagesUploaded)}`);
+    if (Number.isFinite(Number(summary.imagesCached))) parts.push(`imagesCached=${Number(summary.imagesCached)}`);
+    if (Number.isFinite(Number(summary.imagesMissing))) parts.push(`imagesMissing=${Number(summary.imagesMissing)}`);
+    if (Number.isFinite(Number(summary.imagesFailed))) parts.push(`imagesFailed=${Number(summary.imagesFailed)}`);
     if (Number.isFinite(Number(summary.tasksCreated))) parts.push(`tasksCreated=${Number(summary.tasksCreated)}`);
     if (Number.isFinite(Number(summary.tasksUpdated))) parts.push(`tasksUpdated=${Number(summary.tasksUpdated)}`);
     if (Number.isFinite(Number(summary.tasksCompleted))) parts.push(`tasksCompleted=${Number(summary.tasksCompleted)}`);

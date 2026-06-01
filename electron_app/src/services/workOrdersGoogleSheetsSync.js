@@ -1086,10 +1086,10 @@ async function syncRowsToClickUp({
   let assigneeVerificationCount = 0;
   const assigneeVerificationLimit = 20;
   const assigneeVerificationEnabled = String(process.env.WORK_ORDERS_CLICKUP_VERIFY_ASSIGNEE || '').trim() === '1';
-  const verifyMode = normalizeModeToken(process.env.WORK_ORDERS_CLICKUP_VERIFY_MODE || 'sample');
+  const verifyMode = normalizeModeToken(process.env.WORK_ORDERS_CLICKUP_VERIFY_MODE || 'none');
   const updatedVerifyLimitRaw = Number.parseInt(process.env.WORK_ORDERS_CLICKUP_VERIFY_UPDATED_LIMIT || '20', 10);
   const updatedVerifyLimit = Number.isFinite(updatedVerifyLimitRaw) ? Math.max(0, updatedVerifyLimitRaw) : 20;
-  const clickupConcurrencyRaw = Number.parseInt(process.env.WORK_ORDERS_CLICKUP_SYNC_CONCURRENCY || '3', 10);
+  const clickupConcurrencyRaw = Number.parseInt(process.env.WORK_ORDERS_CLICKUP_SYNC_CONCURRENCY || '5', 10);
   const clickupConcurrency = Number.isFinite(clickupConcurrencyRaw)
     ? Math.max(1, Math.min(clickupConcurrencyRaw, WORK_ORDERS_CLICKUP_MAX_CONCURRENCY))
     : 3;
@@ -1443,8 +1443,24 @@ async function runWorkOrdersSync({
   driveServiceAccountKeyPath = '',
   imageUploadFallback = '',
   clickupToken = '',
-  clickupListId = ''
+  clickupListId = '',
+  onProgress = null
 }) {
+  const emitProgress = (message, partialSummary = {}) => {
+    if (typeof onProgress !== 'function') return;
+    try {
+      onProgress({
+        message,
+        summary: {
+          stage: normalizeCell(partialSummary.stage),
+          ...partialSummary
+        }
+      });
+    } catch (_) {
+      // Best-effort progress event; never fail the sync because UI logging failed.
+    }
+  };
+
   const summary = {
     fetched: 0,
     inserted: 0,
@@ -1465,19 +1481,32 @@ async function runWorkOrdersSync({
 
   console.log('[WorkOrders] Work Orders sync started');
   console.log('[WorkOrders] Powerlink SQL query started');
+  emitProgress('Powerlink query started', { stage: 'powerlink_query' });
   let rows = [];
   try {
     rows = await fetchWorkOrderRows();
     summary.fetched = rows.length;
     console.log(`[WorkOrders] Powerlink SQL query completed. fetched=${rows.length}`);
+    emitProgress('Powerlink query completed', {
+      stage: 'powerlink_query',
+      fetched: rows.length
+    });
   } catch (error) {
     const message = `Powerlink SQL query failed: ${error.message}`;
     console.error(`[WorkOrders] ${message}`);
     summary.errors.push(message);
+    emitProgress('Powerlink query failed', {
+      stage: 'powerlink_query',
+      error: error.message
+    });
     throw Object.assign(new Error(message), { summary });
   }
 
   console.log('[WorkOrders] Image upload started');
+  emitProgress('Image conversion started', {
+    stage: 'image_conversion',
+    fetched: rows.length
+  });
   setDriveImageRuntimeConfig({
     authClient: driveAuthClient || null,
     driveFolderId,
@@ -1515,8 +1544,18 @@ async function runWorkOrdersSync({
   console.log(
     `[WorkOrders] Image upload summary: uploaded=${stats.uploaded}, cached=${stats.cached}, missing=${stats.missing}, failed=${stats.failed}`
   );
+  emitProgress('Image conversion completed', {
+    stage: 'image_conversion',
+    imagesUploaded: stats.uploaded,
+    imagesCached: stats.cached,
+    imagesMissing: stats.missing,
+    imagesFailed: stats.failed
+  });
 
   try {
+    emitProgress('Google Sheet sync started', {
+      stage: 'google_sheet_sync'
+    });
     const sheetSyncResult = await syncWorkOrdersRowsToSheet({
       authClient,
       spreadsheetId,
@@ -1526,14 +1565,27 @@ async function runWorkOrdersSync({
     summary.inserted = sheetSyncResult.inserted;
     summary.updated = sheetSyncResult.updated;
     summary.removed = sheetSyncResult.removed;
+    emitProgress('Google Sheet sync completed', {
+      stage: 'google_sheet_sync',
+      inserted: summary.inserted,
+      updated: summary.updated,
+      removed: summary.removed
+    });
   } catch (error) {
     const message = `Google Sheets sync failed: ${error.message}`;
     console.error(`[WorkOrders] ${message}`);
     summary.errors.push(message);
+    emitProgress('Google Sheet sync failed', {
+      stage: 'google_sheet_sync',
+      error: error.message
+    });
     throw Object.assign(new Error(message), { summary });
   }
 
   try {
+    emitProgress('ClickUp sync started', {
+      stage: 'clickup_sync'
+    });
     const clickupSummary = await runClickUpSyncFromSheet({
       authClient,
       spreadsheetId,
@@ -1549,13 +1601,31 @@ async function runWorkOrdersSync({
     summary.verifiedFields = Number(clickupSummary.verifiedFields || 0);
     summary.verifyMismatches = Number(clickupSummary.verifyMismatches || 0);
     summary.verifyErrors = Number(clickupSummary.verifyErrors || 0);
+    emitProgress('ClickUp sync completed', {
+      stage: 'clickup_sync',
+      tasksCreated: summary.clickupTasksCreated,
+      tasksUpdated: summary.clickupTasksUpdated,
+      tasksCompleted: summary.clickupTasksCompleted,
+      verifiedFields: summary.verifiedFields,
+      verifyMismatches: summary.verifyMismatches,
+      verifyErrors: summary.verifyErrors
+    });
     if (!normalizeCell(clickupToken) || !normalizeCell(clickupListId)) {
       console.warn('[WorkOrders] ClickUp sync skipped: missing token/list configuration');
+      emitProgress('ClickUp sync skipped: missing token/list configuration', {
+        stage: 'clickup_sync',
+        skipped: true,
+        reason: 'missing_clickup_config'
+      });
     }
   } catch (error) {
     const message = `ClickUp sync failed: ${error.message}`;
     console.error(`[WorkOrders] ${message}`);
     summary.errors.push(message);
+    emitProgress('ClickUp sync failed', {
+      stage: 'clickup_sync',
+      error: error.message
+    });
   }
 
   console.log('[WorkOrders] Work Orders sync completed');

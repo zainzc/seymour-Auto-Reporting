@@ -31,7 +31,9 @@ function logWorkOrdersExecution(success, message, summary = null) {
   for (let i = 0; i < logs.length; i += 1) {
     const log = logs[i];
     const isSuccessfulCompletion = Boolean(
-      log?.success && typeof log?.message === 'string' && /completed/i.test(log.message)
+      log?.success &&
+      (log?.summary?.event === 'run_completed' ||
+        (typeof log?.message === 'string' && /schedule sync completed/i.test(log.message)))
     );
     if (!isSuccessfulCompletion) continue;
 
@@ -174,7 +176,14 @@ async function executeWorkOrdersScheduledJob(config) {
         getReportingConfig('workOrdersClickupListId') ||
         (getInventoryConfig('phase2Config') || {}).clickupListId ||
         process.env.WORK_ORDERS_CLICKUP_LIST_ID ||
-        ''
+        '',
+      onProgress: ({ message, summary: progressSummary }) => {
+        logWorkOrdersExecution(true, message, {
+          trigger: 'schedule',
+          event: 'progress',
+          ...(progressSummary || {})
+        });
+      }
     });
 
     const updatedSchedule = getReportingConfig('workOrdersActiveSchedule') || {};
@@ -185,7 +194,10 @@ async function executeWorkOrdersScheduledJob(config) {
       lastRun: new Date().toISOString()
     });
 
-    logWorkOrdersExecution(true, 'Work Orders schedule sync completed', summary);
+    logWorkOrdersExecution(true, 'Work Orders schedule sync completed', {
+      event: 'run_completed',
+      ...summary
+    });
     return {
       success: true,
       message: 'Work Orders schedule sync completed',

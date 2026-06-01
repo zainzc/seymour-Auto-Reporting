@@ -2,7 +2,32 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 
-const CACHE_PATH = process.env.GOOGLE_DRIVE_IMAGE_CACHE_PATH || 'data/image-upload-cache.json';
+function resolveDefaultCachePath() {
+  const configured = String(process.env.GOOGLE_DRIVE_IMAGE_CACHE_PATH || '').trim();
+  if (configured) return configured;
+
+  try {
+    // Prefer Electron userData so dev and packaged app share a stable per-user cache location.
+    const { app } = require('electron');
+    if (app && typeof app.getPath === 'function') {
+      const userDataPath = app.getPath('userData');
+      if (userDataPath) {
+        return path.join(userDataPath, 'image-upload-cache.json');
+      }
+    }
+  } catch (_) {
+    // Not running under Electron main process (e.g. node script/test).
+  }
+
+  const appDataRoot = process.env.APPDATA || process.env.LOCALAPPDATA || '';
+  if (appDataRoot) {
+    return path.join(appDataRoot, 'SeymourAutoReporting', 'image-upload-cache.json');
+  }
+
+  return path.resolve(process.cwd(), 'data', 'image-upload-cache.json');
+}
+
+const CACHE_PATH = resolveDefaultCachePath();
 const DEFAULT_DRIVE_SCOPE = process.env.GOOGLE_DRIVE_SCOPE || 'https://www.googleapis.com/auth/drive.file';
 
 let cache = null;

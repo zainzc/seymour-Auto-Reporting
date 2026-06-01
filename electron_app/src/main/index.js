@@ -1889,7 +1889,14 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
       driveServiceAccountKeyPath,
       imageUploadFallback,
       clickupToken,
-      clickupListId
+      clickupListId,
+      onProgress: ({ message, summary: progressSummary }) => {
+        logWorkOrdersExecution(true, message, {
+          trigger: 'manual_workorders',
+          event: 'progress',
+          ...(progressSummary || {})
+        });
+      }
     });
 
     saveReportingConfig('workOrdersSpreadsheetId', spreadsheetId);
@@ -1900,6 +1907,7 @@ ipcMain.handle('workorders-run-now', async (_, options = {}) => {
     saveReportingConfig('workOrdersClickupListId', clickupListId);
     logWorkOrdersExecution(true, 'Manual Work Orders sync completed', {
       trigger: 'manual_workorders',
+      event: 'run_completed',
       ...summary
     });
 
