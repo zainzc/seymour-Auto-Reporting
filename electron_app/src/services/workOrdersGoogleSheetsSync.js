@@ -80,7 +80,23 @@ function buildTaskKey(row = {}) {
   return buildRecordKey(row);
 }
 
+function buildWorkOrderTaskTitleParts(row = {}) {
+  const customerName = normalizeCell(row['Shipping Customer Name'] || row['Billing Customer Name']);
+  const interchangeNumber = normalizeCell(row['Detail (IPN)']).split('|')[0].trim();
+
+  const parts = [];
+  if (customerName) parts.push(customerName);
+  if (interchangeNumber) parts.push(interchangeNumber);
+
+  return parts;
+}
+
 function buildTaskName(row = {}) {
+  const parts = buildWorkOrderTaskTitleParts(row);
+  if (parts.length > 0) {
+    return parts.join(' - ').slice(0, 240);
+  }
+
   const recordType = normalizeUpper(row['Record Type']);
   const number = normalizeCell(row['W/O or Quote Number']);
   const detail = normalizeCell(row['Detail (IPN)']).split('|')[0].trim();
