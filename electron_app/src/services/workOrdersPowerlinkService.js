@@ -1,5 +1,7 @@
 const { getDB } = require('./db');
 
+const { formatDateInTimeZone } = require('../utils/timezone');
+
 const WORK_ORDERS_QUERY = `
 DECLARE @LastSynced DATETIME = GETDATE();
 
@@ -213,6 +215,7 @@ WHERE q.IsLastRevision = 1
 
 function normalizeValue(value) {
   if (value === null || value === undefined) return '';
+  if (value instanceof Date) return formatDateInTimeZone(value);
   return String(value);
 }
 

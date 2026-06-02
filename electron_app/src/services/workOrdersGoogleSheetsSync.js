@@ -8,9 +8,13 @@ const {
   resetRunStats,
   getRunStats
 } = require('./googleDriveImageService');
+const {
+  DEFAULT_TIME_ZONE,
+  getTimeZoneParts,
+  timeZoneDateToUtc
+} = require('../utils/timezone');
 
 const DEFAULT_WORK_ORDERS_SHEET_NAME = process.env.WORK_ORDERS_SHEET_NAME || 'Work Orders';
-const EST_FIXED_OFFSET_MINUTES = -5 * 60;
 const CLICKUP_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_OPEN_STATUS = 'OPEN';
 const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT']);
@@ -147,16 +151,27 @@ function parseRowDate(value) {
 }
 
 function getZonedParts(date) {
-  const shifted = new Date(date.getTime() + EST_FIXED_OFFSET_MINUTES * 60 * 1000);
-  const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const parts = getTimeZoneParts(date, DEFAULT_TIME_ZONE);
+  if (!parts) {
+    return {
+      year: 0,
+      month: 0,
+      day: 0,
+      hour: 0,
+      minute: 0,
+      second: 0,
+      weekday: ''
+    };
+  }
+
   return {
-    year: shifted.getUTCFullYear(),
-    month: shifted.getUTCMonth() + 1,
-    day: shifted.getUTCDate(),
-    hour: shifted.getUTCHours(),
-    minute: shifted.getUTCMinutes(),
-    second: shifted.getUTCSeconds(),
-    weekday: weekdayNames[shifted.getUTCDay()] || ''
+    year: Number(parts.year || 0),
+    month: Number(parts.monthNumber || 0),
+    day: Number(parts.day || 0),
+    hour: Number(parts.hour || 0),
+    minute: Number(parts.minute || 0),
+    second: Number(parts.second || 0),
+    weekday: parts.weekday || ''
   };
 }
 
@@ -172,15 +187,16 @@ function compareLocalParts(a, b) {
 }
 
 function zonedDateToUtc(localParts) {
-  return new Date(
-    Date.UTC(
-      Number(localParts.year || 0),
-      Number(localParts.month || 1) - 1,
-      Number(localParts.day || 1),
-      Number(localParts.hour || 0) - Math.trunc(EST_FIXED_OFFSET_MINUTES / 60),
-      Number(localParts.minute || 0),
-      0
-    )
+  return timeZoneDateToUtc(
+    {
+      year: localParts.year,
+      month: localParts.month,
+      day: localParts.day,
+      hour: localParts.hour,
+      minute: localParts.minute,
+      second: localParts.second || 0
+    },
+    DEFAULT_TIME_ZONE
   );
 }
 
