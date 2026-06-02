@@ -21,6 +21,10 @@ const WORK_ORDERS_TASK_FIELD_NAMES = {
   alert: 'Alert',
   location: 'Location',
   detail: 'Interchange Number / Detail',
+  woQuoteNumber: 'WO/QuoteNumber',
+  totalPrice: 'Total Price',
+  poNumber: 'PO Number',
+  ebayOrderNumber: 'Ebay Order Number',
   stock: 'Stock #',
   rNumber: 'R Number',
   notes: 'Notes',
@@ -279,6 +283,16 @@ function buildTaskDescription(row = {}) {
 function buildPriorityAlert(shipVia = '') {
   const normalized = normalizeUpper(shipVia);
   return PRIORITY_SHIP_VIA.has(normalized) ? 'Priority' : '';
+}
+
+function normalizeMoneyFieldValue(value = '') {
+  const text = normalizeCell(value);
+  if (!text) return '';
+  const numericText = text.replace(/[^0-9.-]/g, '');
+  if (!numericText) return '';
+  const numericValue = Number(numericText);
+  if (!Number.isFinite(numericValue)) return text;
+  return numericValue;
 }
 
 function toSheetRowObject(input = {}) {
@@ -542,6 +556,10 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
     [WORK_ORDERS_TASK_FIELD_NAMES.alert]: buildPriorityAlert(row['Ship Via']),
     [WORK_ORDERS_TASK_FIELD_NAMES.location]: normalizeCell(row.Location),
     [WORK_ORDERS_TASK_FIELD_NAMES.detail]: normalizeCell(row['Detail (IPN)']),
+    [WORK_ORDERS_TASK_FIELD_NAMES.woQuoteNumber]: normalizeCell(row['W/O or Quote Number']),
+    [WORK_ORDERS_TASK_FIELD_NAMES.totalPrice]: normalizeCell(row['Amount (Total)']),
+    [WORK_ORDERS_TASK_FIELD_NAMES.poNumber]: normalizeCell(row['Customer PO']),
+    [WORK_ORDERS_TASK_FIELD_NAMES.ebayOrderNumber]: normalizeCell(row['eBay Order Number']),
     [WORK_ORDERS_TASK_FIELD_NAMES.stock]: normalizeCell(row['Stock #']),
     [WORK_ORDERS_TASK_FIELD_NAMES.rNumber]: normalizeCell(row['R#']),
     [WORK_ORDERS_TASK_FIELD_NAMES.notes]: normalizeCell(row.Notes),
@@ -572,6 +590,10 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
         fieldType
       });
       continue;
+    }
+    if (name === WORK_ORDERS_TASK_FIELD_NAMES.totalPrice && (fieldType === 'NUMBER' || fieldType === 'CURRENCY')) {
+      fieldValue = normalizeMoneyFieldValue(value);
+      if (fieldValue === '') continue;
     }
     if (fieldType === 'DROP_DOWN') {
       const optionId = resolveDropdownOptionId(fieldMeta, value);
