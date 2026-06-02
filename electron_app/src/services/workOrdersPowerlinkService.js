@@ -13,45 +13,29 @@ WITH ImageDedup AS (
       AND FileName IS NOT NULL
 ),
 
-WorkOrderImageAgg AS (
+LineImageAgg AS (
     SELECT
-        x.WorkOrderID,
-        STRING_AGG(CAST(x.ImagePath AS varchar(max)), ' | ') AS PartPictures
-    FROM (
-        SELECT DISTINCT
-            wol.WorkOrderID,
-            img.ImagePath
-        FROM dbo.WORKORDER_LINEITEM wol
-        LEFT JOIN ImageDedup img
-            ON img.InventoryID = wol.LocalInventoryID
-        WHERE img.ImagePath IS NOT NULL
-    ) x
-    GROUP BY x.WorkOrderID
-),
-
-QuoteImageAgg AS (
-    SELECT
-        x.QuoteID,
-        STRING_AGG(CAST(x.ImagePath AS varchar(max)), ' | ') AS PartPictures
-    FROM (
-        SELECT DISTINCT
-            ql.QuoteID,
-            img.ImagePath
-        FROM dbo.QUOTE_LINEITEM ql
-        LEFT JOIN ImageDedup img
-            ON img.InventoryID = ql.LocalInventoryID
-        WHERE img.ImagePath IS NOT NULL
-    ) x
-    GROUP BY x.QuoteID
+        InventoryID,
+        STRING_AGG(CAST(ImagePath AS varchar(max)), ' | ') AS PartPictures
+    FROM ImageDedup
+    GROUP BY InventoryID
 ),
 
 WorkOrderLineDedup AS (
     SELECT DISTINCT
         wol.WorkOrderID,
         wol.LineItemID,
+        wol.LineItemStatus,
         wol.InventoryNumber,
         wol.LocalInventoryID,
+        wol.LineItemDescription,
         wol.LineItemNotes,
+        wol.LineItemSourceDetails,
+        wol.Quantity,
+        wol.UnitPrice,
+        wol.LineItemTotal,
+        wol.ShipVIA AS LineShipVIA,
+        wol.TrackingNumber,
         wol.EBayItemId,
         inv.StockTicketNumber,
         inv.LocationCode,
@@ -62,37 +46,14 @@ WorkOrderLineDedup AS (
     FROM dbo.WORKORDER_LINEITEM wol
     LEFT JOIN dbo.INVENTORY inv
         ON inv.InventoryID = wol.LocalInventoryID
-),
-
-WorkOrderLineAgg AS (
-    SELECT
-        WorkOrderID,
-        STRING_AGG(
-            CAST(ISNULL(InventoryNumber, '') AS varchar(max)),
-            ' | '
-        ) AS DetailIPN,
-        STRING_AGG(
-            CAST(
-                CASE
-                    WHEN LocalInventoryID IS NOT NULL THEN CONCAT('R0', LocalInventoryID)
-                    ELSE ''
-                END AS varchar(max)
-            ),
-            ' | '
-        ) AS RNumber,
-        STRING_AGG(CAST(ISNULL(StockTicketNumber, '') AS varchar(max)), ' | ') AS StockNumber,
-        STRING_AGG(CAST(ISNULL(SourceCode, '') AS varchar(max)), ' | ') AS SC,
-        STRING_AGG(CAST(ISNULL(LocationCode, '') AS varchar(max)), ' | ') AS Location,
-        STRING_AGG(CAST(ISNULL(LineItemNotes, '') AS varchar(max)), ' | ') AS LineNotes,
-        STRING_AGG(CAST(ISNULL(EBayItemId, '') AS varchar(max)), ' | ') AS EBayItemIds
-    FROM WorkOrderLineDedup
-    GROUP BY WorkOrderID
+    WHERE wol.LineItemStatus = 'O'
 ),
 
 QuoteLineDedup AS (
     SELECT DISTINCT
         ql.QuoteID,
         ql.LineItemID,
+        ql.LineItemStatus,
         ql.InventoryNumber,
         ql.LocalInventoryID,
         ql.LineItemNotes,
@@ -105,43 +66,33 @@ QuoteLineDedup AS (
     FROM dbo.QUOTE_LINEITEM ql
     LEFT JOIN dbo.INVENTORY inv
         ON inv.InventoryID = ql.LocalInventoryID
-),
-
-QuoteLineAgg AS (
-    SELECT
-        QuoteID,
-        STRING_AGG(
-            CAST(ISNULL(InventoryNumber, '') AS varchar(max)),
-            ' | '
-        ) AS DetailIPN,
-        STRING_AGG(
-            CAST(
-                CASE
-                    WHEN LocalInventoryID IS NOT NULL THEN CONCAT('R0', LocalInventoryID)
-                    ELSE ''
-                END AS varchar(max)
-            ),
-            ' | '
-        ) AS RNumber,
-        STRING_AGG(CAST(ISNULL(StockTicketNumber, '') AS varchar(max)), ' | ') AS StockNumber,
-        STRING_AGG(CAST(ISNULL(SourceCode, '') AS varchar(max)), ' | ') AS SC,
-        STRING_AGG(CAST(ISNULL(LocationCode, '') AS varchar(max)), ' | ') AS Location,
-        STRING_AGG(CAST(ISNULL(LineItemNotes, '') AS varchar(max)), ' | ') AS LineNotes
-    FROM QuoteLineDedup
-    GROUP BY QuoteID
+    WHERE ql.LineItemStatus = 'O'
 )
 
 SELECT
     @LastSynced AS [Date/Time Last Synced],
     wo.DateCreated AS [Created],
     wo.WorkOrderNumber AS [W/O or Quote Number],
+    wold.LineItemID AS [Line Item ID],
+
     'Open' AS [Status],
+    wold.LineItemStatus AS [Line Item Status],
+
     COALESCE(woemp.EmployeeName, CAST(wo.CreatedBy AS varchar(50))) AS [Created By],
-    wo.ShipVIA AS [Ship Via],
+
+    COALESCE(NULLIF(wold.LineShipVIA, ''), wo.ShipVIA) AS [Ship Via],
+    wold.TrackingNumber AS [Tracking Number],
+
     wo.Amount AS [Amount (Total)],
+    wold.Quantity AS [Line Quantity],
+    wold.UnitPrice AS [Line Unit Price],
+    wold.LineItemTotal AS [Line Total],
+
     wo.CustomerPO AS [Customer PO],
+
     COALESCE(NULLIF(wo.BillToBusinessName, ''), wo.BillToContactName) AS [Billing Customer Name],
     COALESCE(NULLIF(wo.ShipToBusinessName, ''), wo.ShipToContactName) AS [Shipping Customer Name],
+
     CONCAT_WS(', ',
         NULLIF(wo.ShipToAddress1, ''),
         NULLIF(wo.ShipToAddress2, ''),
@@ -150,24 +101,38 @@ SELECT
         NULLIF(wo.ShipToPostalCode, ''),
         NULLIF(wo.ShipToCountry, '')
     ) AS [Shipping Customer Address],
+
     wo.ShipToContactPhone AS [Shipping Customer Phone Number],
     wo.EbayOrderNumber AS [eBay Order Number],
-    wola.DetailIPN AS [Detail (IPN)],
-    wola.RNumber AS [R#],
-    wola.StockNumber AS [Stock #],
-    wola.SC AS [S/C],
-    wola.Location AS [Location],
+    wold.EBayItemId AS [eBay Item ID],
+
+    wold.InventoryNumber AS [Detail (IPN)],
+    wold.LineItemDescription AS [Line Item Description],
+
+    CASE
+        WHEN wold.LocalInventoryID IS NOT NULL THEN CONCAT('R0', wold.LocalInventoryID)
+        ELSE ''
+    END AS [R#],
+
+    wold.StockTicketNumber AS [Stock #],
+    wold.SourceCode AS [S/C],
+    wold.LocationCode AS [Location],
+
+    wold.LineItemSourceDetails AS [Source Details],
+
     CONCAT_WS(' | ',
         NULLIF(wo.WorkOrderNotes, ''),
-        NULLIF(wola.LineNotes, '')
+        NULLIF(wold.LineItemNotes, '')
     ) AS [Notes],
-    woimg.PartPictures AS [Part Pictures],
+
+    img.PartPictures AS [Part Pictures],
     'Work Order' AS [Record Type]
+
 FROM dbo.WORKORDER wo
-LEFT JOIN WorkOrderLineAgg wola
-    ON wola.WorkOrderID = wo.WorkOrderID
-LEFT JOIN WorkOrderImageAgg woimg
-    ON woimg.WorkOrderID = wo.WorkOrderID
+INNER JOIN WorkOrderLineDedup wold
+    ON wold.WorkOrderID = wo.WorkOrderID
+LEFT JOIN LineImageAgg img
+    ON img.InventoryID = wold.LocalInventoryID
 LEFT JOIN dbo.EMPLOYEE woemp
     ON woemp.EmployeeID = wo.CreatedBy
 WHERE wo.IsLastRevision = 1
@@ -179,13 +144,26 @@ SELECT
     @LastSynced AS [Date/Time Last Synced],
     q.DateCreated AS [Created],
     q.QuoteNumber AS [W/O or Quote Number],
+    qld.LineItemID AS [Line Item ID],
+
     'Open' AS [Status],
+    qld.LineItemStatus AS [Line Item Status],
+
     COALESCE(qemp.EmployeeName, CAST(q.CreatedBy AS varchar(50))) AS [Created By],
+
     q.ShipVIA AS [Ship Via],
+    NULL AS [Tracking Number],
+
     q.QuoteAmount AS [Amount (Total)],
+    NULL AS [Line Quantity],
+    NULL AS [Line Unit Price],
+    NULL AS [Line Total],
+
     q.CustomerPO AS [Customer PO],
+
     COALESCE(NULLIF(q.BillToBusinessName, ''), q.BillToContactName) AS [Billing Customer Name],
     COALESCE(NULLIF(q.ShipToBusinessName, ''), q.ShipToContactName) AS [Shipping Customer Name],
+
     CONCAT_WS(', ',
         NULLIF(q.ShipToAddress1, ''),
         NULLIF(q.ShipToAddress2, ''),
@@ -194,24 +172,38 @@ SELECT
         NULLIF(q.ShipToPostalCode, ''),
         NULLIF(q.ShipToCountry, '')
     ) AS [Shipping Customer Address],
+
     q.ShipToContactPhone AS [Shipping Customer Phone Number],
     NULL AS [eBay Order Number],
-    qla.DetailIPN AS [Detail (IPN)],
-    qla.RNumber AS [R#],
-    qla.StockNumber AS [Stock #],
-    qla.SC AS [S/C],
-    qla.Location AS [Location],
+    NULL AS [eBay Item ID],
+
+    qld.InventoryNumber AS [Detail (IPN)],
+    NULL AS [Line Item Description],
+
+    CASE
+        WHEN qld.LocalInventoryID IS NOT NULL THEN CONCAT('R0', qld.LocalInventoryID)
+        ELSE ''
+    END AS [R#],
+
+    qld.StockTicketNumber AS [Stock #],
+    qld.SourceCode AS [S/C],
+    qld.LocationCode AS [Location],
+
+    NULL AS [Source Details],
+
     CONCAT_WS(' | ',
         NULLIF(q.QuoteNotes, ''),
-        NULLIF(qla.LineNotes, '')
+        NULLIF(qld.LineItemNotes, '')
     ) AS [Notes],
-    qimg.PartPictures AS [Part Pictures],
+
+    img.PartPictures AS [Part Pictures],
     'Quote' AS [Record Type]
+
 FROM dbo.QUOTE q
-LEFT JOIN QuoteLineAgg qla
-    ON qla.QuoteID = q.QuoteID
-LEFT JOIN QuoteImageAgg qimg
-    ON qimg.QuoteID = q.QuoteID
+INNER JOIN QuoteLineDedup qld
+    ON qld.QuoteID = q.QuoteID
+LEFT JOIN LineImageAgg img
+    ON img.InventoryID = qld.LocalInventoryID
 LEFT JOIN dbo.EMPLOYEE qemp
     ON qemp.EmployeeID = q.CreatedBy
 WHERE q.IsLastRevision = 1
