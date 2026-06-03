@@ -1733,16 +1733,10 @@ async function runWorkOrdersSync({
       const liveCompletedQuoteNumbers = clickupQuoteState?.completed instanceof Set
         ? clickupQuoteState.completed
         : new Set();
-      const liveOpenQuoteNumbers = clickupQuoteState?.open instanceof Set
-        ? clickupQuoteState.open
-        : new Set();
       const completedQuoteNumbers = mergeCompletedQuoteNumbers(
         cachedCompletedQuoteNumbers,
         liveCompletedQuoteNumbers
       );
-      liveOpenQuoteNumbers.forEach(quoteNumber => {
-        completedQuoteNumbers.delete(normalizeCell(quoteNumber));
-      });
 
       const mergedCompletedQuoteNumbers = Array.from(completedQuoteNumbers);
       if (mergedCompletedQuoteNumbers.length > 0 || cachedCompletedQuoteNumbers.size > 0) {
