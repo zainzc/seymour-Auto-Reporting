@@ -47,6 +47,7 @@ const WORK_ORDERS_HEADERS = [
   'Date/Time Last Synced',
   'Created',
   'W/O or Quote Number',
+  'Line Item ID',
   'Status',
   'Created By',
   'Ship Via',
@@ -85,6 +86,14 @@ function isCheckPartQuote(row = {}) {
 }
 
 function buildTaskKey(row = {}) {
+  return buildRecordKey(row);
+}
+
+function buildSheetRowKey(row = {}) {
+  const lineItemId = normalizeCell(row['Line Item ID']);
+  if (lineItemId) {
+    return `Line Item-${lineItemId}`;
+  }
   return buildRecordKey(row);
 }
 
@@ -1373,7 +1382,7 @@ async function syncWorkOrdersRowsToSheet({ authClient, spreadsheetId, latestRows
 
   const existingMap = new Map();
   existing.rows.forEach(row => {
-    const key = buildRecordKey(row);
+    const key = buildSheetRowKey(row);
     if (!key) return;
     existingMap.set(key, row);
   });
@@ -1381,7 +1390,7 @@ async function syncWorkOrdersRowsToSheet({ authClient, spreadsheetId, latestRows
   const latestMap = new Map();
   latestRows.forEach(rawRow => {
     const row = toSheetRowObject(rawRow);
-    const key = buildRecordKey(row);
+    const key = buildSheetRowKey(row);
     if (!key) return;
     latestMap.set(key, row);
   });
