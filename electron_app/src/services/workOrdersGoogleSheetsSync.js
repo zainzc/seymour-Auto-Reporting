@@ -21,6 +21,7 @@ const {
 const DEFAULT_WORK_ORDERS_SHEET_NAME = process.env.WORK_ORDERS_SHEET_NAME || 'Work Orders';
 const CLICKUP_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_OPEN_STATUS = 'OPEN';
+const CLICKUP_COMPLETED_STATUS_TOKENS = ['COMPLETE', 'COMPLETED', 'CLOSED', 'DONE', 'RESOLVED'];
 const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT']);
 const WORK_ORDERS_TASK_NAME_PREFIX = '[WorkOrderSync]';
 const WORK_ORDERS_COMPLETED_QUOTE_NUMBERS_CONFIG_KEY = 'workOrdersCompletedQuoteNumbers';
@@ -177,6 +178,30 @@ function parseTaskQuoteNumber(description = '') {
   return quoteMatch && quoteMatch[1] ? normalizeCell(quoteMatch[1]) : '';
 }
 
+function normalizeClickUpStatusToken(value = '') {
+  return normalizeUpper(value).replace(/[^A-Z0-9]+/g, ' ').trim();
+}
+
+function isCompletedStatusLabel(value = '') {
+  const normalized = normalizeClickUpStatusToken(value);
+  if (!normalized) return false;
+  return CLICKUP_COMPLETED_STATUS_TOKENS.some(token => normalized === token || normalized.includes(token));
+}
+
+function getCompletedStatusNamesFromList(list = {}) {
+  const completed = new Set();
+  const statuses = Array.isArray(list?.statuses) ? list.statuses : [];
+  statuses.forEach(status => {
+    const type = normalizeUpper(status?.type);
+    const label = normalizeClickUpStatusToken(status?.status || status?.name || status?.label);
+    if (!label) return;
+    if (type === 'CLOSED' || type.includes('CLOSED') || isCompletedStatusLabel(label)) {
+      completed.add(label);
+    }
+  });
+  return completed;
+}
+
 function normalizeQuoteNumberList(values = []) {
   return Array.from(
     new Set(
@@ -221,7 +246,7 @@ function mergeCompletedQuoteNumbers(...setsOrArrays) {
   return merged;
 }
 
-async function getQuoteCompletionStateFromClickUp(clickup) {
+async function getQuoteCompletionStateFromClickUp(clickup, completedStatusNames = new Set()) {
   if (!clickup) {
     return {
       completed: new Set(),
@@ -244,7 +269,7 @@ async function getQuoteCompletionStateFromClickUp(clickup) {
 
     const current = quoteStats.get(quoteNumber) || { total: 0, open: 0 };
     current.total += 1;
-    if (!isCompleteStatus(task?.status?.status || task?.status)) {
+    if (!isCompleteStatus(task?.status?.status || task?.status, completedStatusNames)) {
       current.open += 1;
     }
     quoteStats.set(quoteNumber, current);
@@ -374,9 +399,11 @@ function computeDueDate(createdAt, shipVia = '') {
   return zonedDateToUtc(dueLocal);
 }
 
-function isCompleteStatus(status = '') {
-  const normalized = normalizeUpper(status);
-  return normalized === CLICKUP_COMPLETE_STATUS || normalized === 'COMPLETED';
+function isCompleteStatus(status = '', completedStatusNames = new Set()) {
+  const normalized = normalizeClickUpStatusToken(status);
+  if (!normalized) return false;
+  if (completedStatusNames instanceof Set && completedStatusNames.has(normalized)) return true;
+  return isCompletedStatusLabel(normalized);
 }
 
 function resolveLocationAssigneeLabel(location = '') {
@@ -1256,6 +1283,7 @@ async function syncRowsToClickUp({
 
   const list = await clickup.getList();
   let customFieldMeta = getCustomFieldMetaMap(list);
+  const completedStatusNames = getCompletedStatusNamesFromList(list);
   const tasks = await clickup.fetchTasksByStatuses([], {
     includeClosed: true,
     subtasks: false
@@ -1305,6 +1333,9 @@ async function syncRowsToClickUp({
   );
   const listFieldCount = Array.isArray(customFieldMeta.fields) ? customFieldMeta.fields.length : 0;
   console.log(`[WorkOrders] ClickUp list field metadata discovered: ${listFieldCount}`);
+  console.log(
+    `[WorkOrders] ClickUp completed statuses detected: ${Array.from(completedStatusNames).join(', ') || 'none'}`
+  );
 
   if (listFieldCount === 0 && tasks.length > 0) {
     try {
@@ -1328,7 +1359,7 @@ async function syncRowsToClickUp({
     const key = buildTaskKey(row);
     if (!key) continue;
     const existingTask = taskByKey.get(key);
-    if (isCheckPartQuote(row) && existingTask && isCompleteStatus(existingTask?.status?.status || existingTask?.status)) {
+    if (isCheckPartQuote(row) && existingTask && isCompleteStatus(existingTask?.status?.status || existingTask?.status, completedStatusNames)) {
       const quoteNumber = normalizeCell(row['W/O or Quote Number']);
       if (quoteNumber && !result.skippedCompleteQuoteNumbers.includes(quoteNumber)) {
         result.skippedCompleteQuoteNumbers.push(quoteNumber);
@@ -1413,7 +1444,7 @@ async function syncRowsToClickUp({
         }
         result.created += 1;
       } else {
-        if (!isCompleteStatus(existingTask?.status?.status || existingTask?.status)) {
+        if (!isCompleteStatus(existingTask?.status?.status || existingTask?.status, completedStatusNames)) {
           const changedTaskPayload = buildChangedTaskPayload(existingTask, taskPayload);
           const changedCustomFields = customFields.filter(field => hasCustomFieldChanged(existingTask, field));
           if (changedCustomFields.length > 0) {
@@ -1467,7 +1498,7 @@ async function syncRowsToClickUp({
   const latestKeys = new Set(uniqueFilteredRows.map(row => buildTaskKey(row)).filter(Boolean));
   for (const [key, task] of taskByKey.entries()) {
     if (latestKeys.has(key)) continue;
-    if (isCompleteStatus(task?.status?.status || task?.status)) continue;
+    if (isCompleteStatus(task?.status?.status || task?.status, completedStatusNames)) continue;
     try {
       await clickup.updateTaskStatus(task.id, CLICKUP_COMPLETE_STATUS);
       console.log(`[WorkOrders] Task completed (no longer active): ${key}`);
@@ -1695,8 +1726,10 @@ async function runWorkOrdersSync({
         token: clickupToken,
         listId: clickupListId
       });
+      const clickupList = await clickup.getList();
+      const completedStatusNames = getCompletedStatusNamesFromList(clickupList);
       const cachedCompletedQuoteNumbers = loadCompletedQuoteNumberCache();
-      const clickupQuoteState = await getQuoteCompletionStateFromClickUp(clickup);
+      const clickupQuoteState = await getQuoteCompletionStateFromClickUp(clickup, completedStatusNames);
       const liveCompletedQuoteNumbers = clickupQuoteState?.completed instanceof Set
         ? clickupQuoteState.completed
         : new Set();
