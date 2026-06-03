@@ -9,6 +9,10 @@ const {
   getRunStats
 } = require('./googleDriveImageService');
 const {
+  getReportingConfig,
+  saveReportingConfig
+} = require('../config/configStore');
+const {
   DEFAULT_TIME_ZONE,
   getTimeZoneParts,
   timeZoneDateToUtc
@@ -19,6 +23,7 @@ const CLICKUP_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_OPEN_STATUS = 'OPEN';
 const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT']);
 const WORK_ORDERS_TASK_NAME_PREFIX = '[WorkOrderSync]';
+const WORK_ORDERS_COMPLETED_QUOTE_NUMBERS_CONFIG_KEY = 'workOrdersCompletedQuoteNumbers';
 const WORK_ORDERS_TASK_FIELD_NAMES = {
   customer: 'Customer',
   shipVia: 'Ship Via',
@@ -172,8 +177,57 @@ function parseTaskQuoteNumber(description = '') {
   return quoteMatch && quoteMatch[1] ? normalizeCell(quoteMatch[1]) : '';
 }
 
-async function getCompletedQuoteNumbersFromClickUp(clickup) {
-  if (!clickup) return new Set();
+function normalizeQuoteNumberList(values = []) {
+  return Array.from(
+    new Set(
+      values
+        .map(value => normalizeCell(value))
+        .filter(Boolean)
+    )
+  );
+}
+
+function loadCompletedQuoteNumberCache() {
+  const stored = getReportingConfig(WORK_ORDERS_COMPLETED_QUOTE_NUMBERS_CONFIG_KEY);
+  if (!Array.isArray(stored)) return new Set();
+  return new Set(normalizeQuoteNumberList(stored));
+}
+
+function saveCompletedQuoteNumberCache(quoteNumbers = []) {
+  saveReportingConfig(
+    WORK_ORDERS_COMPLETED_QUOTE_NUMBERS_CONFIG_KEY,
+    normalizeQuoteNumberList(quoteNumbers)
+  );
+}
+
+function mergeCompletedQuoteNumbers(...setsOrArrays) {
+  const merged = new Set();
+  setsOrArrays.forEach(values => {
+    if (!values) return;
+    if (values instanceof Set) {
+      values.forEach(value => {
+        const normalized = normalizeCell(value);
+        if (normalized) merged.add(normalized);
+      });
+      return;
+    }
+    if (Array.isArray(values)) {
+      values.forEach(value => {
+        const normalized = normalizeCell(value);
+        if (normalized) merged.add(normalized);
+      });
+    }
+  });
+  return merged;
+}
+
+async function getQuoteCompletionStateFromClickUp(clickup) {
+  if (!clickup) {
+    return {
+      completed: new Set(),
+      open: new Set()
+    };
+  }
 
   const tasks = await clickup.fetchTasksByStatuses([], {
     includeClosed: true,
@@ -197,13 +251,16 @@ async function getCompletedQuoteNumbersFromClickUp(clickup) {
   }
 
   const completed = new Set();
+  const open = new Set();
   quoteStats.forEach((stats, quoteNumber) => {
     if (stats.total > 0 && stats.open === 0) {
       completed.add(quoteNumber);
+    } else if (stats.open > 0) {
+      open.add(quoteNumber);
     }
   });
 
-  return completed;
+  return { completed, open };
 }
 
 function parseRowDate(value) {
@@ -1179,6 +1236,7 @@ async function syncRowsToClickUp({
     skippedUnchanged: 0,
     closed: 0,
     skippedCompleteQuotes: 0,
+    skippedCompleteQuoteNumbers: [],
     verifiedTasks: 0,
     verifiedFields: 0,
     verifyMismatches: 0,
@@ -1271,6 +1329,10 @@ async function syncRowsToClickUp({
     if (!key) continue;
     const existingTask = taskByKey.get(key);
     if (isCheckPartQuote(row) && existingTask && isCompleteStatus(existingTask?.status?.status || existingTask?.status)) {
+      const quoteNumber = normalizeCell(row['W/O or Quote Number']);
+      if (quoteNumber && !result.skippedCompleteQuoteNumbers.includes(quoteNumber)) {
+        result.skippedCompleteQuoteNumbers.push(quoteNumber);
+      }
       result.skippedCompleteQuotes += 1;
       continue;
     }
@@ -1503,6 +1565,7 @@ async function runClickUpSyncFromSheet({
     tasksUpdated: 0,
     tasksCompleted: 0,
     quoteRowsRemovedFromSheet: 0,
+    skippedCompleteQuoteNumbers: [],
     verifiedTasks: 0,
     verifiedFields: 0,
     verifyMismatches: 0,
@@ -1529,6 +1592,9 @@ async function runClickUpSyncFromSheet({
   summary.tasksUpdated = Number(clickupResult.updated || 0);
   summary.tasksCompleted = Number(clickupResult.closed || 0);
   summary.quoteRowsRemovedFromSheet = Number(clickupResult.skippedCompleteQuotes || 0);
+  summary.skippedCompleteQuoteNumbers = Array.isArray(clickupResult.skippedCompleteQuoteNumbers)
+    ? [...clickupResult.skippedCompleteQuoteNumbers]
+    : [];
   summary.verifiedTasks = Number(clickupResult.verifiedTasks || 0);
   summary.verifiedFields = Number(clickupResult.verifiedFields || 0);
   summary.verifyMismatches = Number(clickupResult.verifyMismatches || 0);
@@ -1629,7 +1695,27 @@ async function runWorkOrdersSync({
         token: clickupToken,
         listId: clickupListId
       });
-      const completedQuoteNumbers = await getCompletedQuoteNumbersFromClickUp(clickup);
+      const cachedCompletedQuoteNumbers = loadCompletedQuoteNumberCache();
+      const clickupQuoteState = await getQuoteCompletionStateFromClickUp(clickup);
+      const liveCompletedQuoteNumbers = clickupQuoteState?.completed instanceof Set
+        ? clickupQuoteState.completed
+        : new Set();
+      const liveOpenQuoteNumbers = clickupQuoteState?.open instanceof Set
+        ? clickupQuoteState.open
+        : new Set();
+      const completedQuoteNumbers = mergeCompletedQuoteNumbers(
+        cachedCompletedQuoteNumbers,
+        liveCompletedQuoteNumbers
+      );
+      liveOpenQuoteNumbers.forEach(quoteNumber => {
+        completedQuoteNumbers.delete(normalizeCell(quoteNumber));
+      });
+
+      const mergedCompletedQuoteNumbers = Array.from(completedQuoteNumbers);
+      if (mergedCompletedQuoteNumbers.length > 0 || cachedCompletedQuoteNumbers.size > 0) {
+        saveCompletedQuoteNumberCache(mergedCompletedQuoteNumbers);
+      }
+
       if (completedQuoteNumbers.size > 0) {
         const beforeCount = rows.length;
         rows = rows.filter(row => {
@@ -1748,6 +1834,16 @@ async function runWorkOrdersSync({
     summary.verifiedFields = Number(clickupSummary.verifiedFields || 0);
     summary.verifyMismatches = Number(clickupSummary.verifyMismatches || 0);
     summary.verifyErrors = Number(clickupSummary.verifyErrors || 0);
+
+    if (Array.isArray(clickupSummary.skippedCompleteQuoteNumbers) && clickupSummary.skippedCompleteQuoteNumbers.length > 0) {
+      const cache = loadCompletedQuoteNumberCache();
+      const merged = mergeCompletedQuoteNumbers(cache, clickupSummary.skippedCompleteQuoteNumbers);
+      saveCompletedQuoteNumberCache(Array.from(merged));
+      console.log(
+        `[WorkOrders] Cached completed quote numbers updated from ClickUp sync: count=${clickupSummary.skippedCompleteQuoteNumbers.length}`
+      );
+    }
+
     emitProgress('ClickUp sync completed', {
       stage: 'clickup_sync',
       tasksCreated: summary.clickupTasksCreated,
