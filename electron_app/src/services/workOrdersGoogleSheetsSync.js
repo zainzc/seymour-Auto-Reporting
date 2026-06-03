@@ -155,6 +155,57 @@ function parseTaskKeyFromDescription(description = '') {
   return match && match[1] ? normalizeCell(match[1]) : '';
 }
 
+function parseTaskRecordType(description = '') {
+  const text = String(description || '');
+  const match = text.match(/(?:^|\n)\s*Record Type:\s*([^\n\r]+)/i);
+  return match && match[1] ? normalizeUpper(match[1]) : '';
+}
+
+function parseTaskQuoteNumber(description = '') {
+  const text = String(description || '');
+  const parentMatch = text.match(/(?:^|\n)\s*Parent Record Key:\s*Quote-([^\n\r]+)/i);
+  if (parentMatch && parentMatch[1]) {
+    return normalizeCell(parentMatch[1]);
+  }
+
+  const quoteMatch = text.match(/(?:^|\n)\s*W\/O or Quote Number:\s*([^\n\r]+)/i);
+  return quoteMatch && quoteMatch[1] ? normalizeCell(quoteMatch[1]) : '';
+}
+
+async function getCompletedQuoteNumbersFromClickUp(clickup) {
+  if (!clickup) return new Set();
+
+  const tasks = await clickup.fetchTasksByStatuses([], {
+    includeClosed: true,
+    subtasks: false
+  });
+
+  const quoteStats = new Map();
+  for (const task of tasks) {
+    const description = String(task?.description || '');
+    if (parseTaskRecordType(description) !== 'QUOTE') continue;
+
+    const quoteNumber = parseTaskQuoteNumber(description);
+    if (!quoteNumber) continue;
+
+    const current = quoteStats.get(quoteNumber) || { total: 0, open: 0 };
+    current.total += 1;
+    if (!isCompleteStatus(task?.status?.status || task?.status)) {
+      current.open += 1;
+    }
+    quoteStats.set(quoteNumber, current);
+  }
+
+  const completed = new Set();
+  quoteStats.forEach((stats, quoteNumber) => {
+    if (stats.total > 0 && stats.open === 0) {
+      completed.add(quoteNumber);
+    }
+  });
+
+  return completed;
+}
+
 function parseRowDate(value) {
   const text = normalizeCell(value);
   if (!text) return null;
@@ -1532,6 +1583,7 @@ async function runWorkOrdersSync({
 
   const summary = {
     fetched: 0,
+    quoteRowsSuppressedBeforeSheet: 0,
     inserted: 0,
     updated: 0,
     removed: 0,
@@ -1569,6 +1621,32 @@ async function runWorkOrdersSync({
       error: error.message
     });
     throw Object.assign(new Error(message), { summary });
+  }
+
+  if (normalizeCell(clickupToken) && normalizeCell(clickupListId)) {
+    try {
+      const clickup = new ClickUpService({
+        token: clickupToken,
+        listId: clickupListId
+      });
+      const completedQuoteNumbers = await getCompletedQuoteNumbersFromClickUp(clickup);
+      if (completedQuoteNumbers.size > 0) {
+        const beforeCount = rows.length;
+        rows = rows.filter(row => {
+          if (!isQuoteRow(row)) return true;
+          const quoteNumber = normalizeCell(row['W/O or Quote Number']);
+          return !quoteNumber || !completedQuoteNumbers.has(quoteNumber);
+        });
+        summary.quoteRowsSuppressedBeforeSheet = beforeCount - rows.length;
+        if (summary.quoteRowsSuppressedBeforeSheet > 0) {
+          console.log(
+            `[WorkOrders] Completed quotes suppressed before sheet sync: count=${summary.quoteRowsSuppressedBeforeSheet}`
+          );
+        }
+      }
+    } catch (error) {
+      console.warn(`[WorkOrders] Completed quote suppression check failed: ${error?.message || error}`);
+    }
   }
 
   console.log('[WorkOrders] Image upload started');
