@@ -86,6 +86,10 @@ function isCheckPartQuote(row = {}) {
 }
 
 function buildTaskKey(row = {}) {
+  const lineItemId = normalizeCell(row['Line Item ID']);
+  if (lineItemId) {
+    return `Line Item-${lineItemId}`;
+  }
   return buildRecordKey(row);
 }
 
@@ -286,8 +290,10 @@ function buildTaskDescription(row = {}) {
     .filter(Boolean);
   const lines = [
     `Record Key: ${buildTaskKey(row)}`,
+    `Parent Record Key: ${buildRecordKey(row)}`,
     `Record Type: ${normalizeCell(row['Record Type'])}`,
     `W/O or Quote Number: ${normalizeCell(row['W/O or Quote Number'])}`,
+    `Line Item ID: ${normalizeCell(row['Line Item ID'])}`,
     `Status: ${normalizeCell(row.Status)}`,
     `Created: ${normalizeCell(row.Created)}`,
     `Customer: ${normalizeCell(row['Shipping Customer Name'] || row['Billing Customer Name'])}`,
