@@ -48,6 +48,7 @@ const { runPhase72FitmentImage } = require('../scripts/runPhase72FitmentImage');
 const { runPhase74TitleDescription } = require('../scripts/runPhase74TitleDescription');
 const { runEbayMockImport } = require('../scripts/runEbayMockImport');
 const { runEbaySandboxInventoryImport } = require('../scripts/runEbaySandboxInventoryImport');
+const { runEbayBrandPropagation } = require('../services/ebayBrandPropagationService');
 const { runPhase5PublishApproved } = require('../services/phase5Service');
 const { Phase5PublishLogService } = require('../services/phase5PublishLogService');
 const {
@@ -5107,6 +5108,46 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
     const summary = await runEbaySandboxInventoryImport(runOptions, progress => {
       event.sender.send('ebaysandbox:progress', progress);
     });
+
+    if (!dryRun) {
+      try {
+        event.sender.send('ebaysandbox:progress', {
+          stage: 'ebaysandbox_brand_propagation',
+          percent: 94,
+          counts: summary,
+          message: 'Starting Brand propagation from eBay Item Specifics JSON...'
+        });
+        const brandPropagationSummary = await runEbayBrandPropagation({
+          ...runOptions,
+          sourceBaseId: runOptions.airtableBaseId,
+          destinationBaseId: runOptions.itemSpecificsBaseId,
+          sourceTableName: runOptions.ebaySandboxTableName || DEFAULT_EBAY_SANDBOX_TABLE
+        }, progress => {
+          event.sender.send('ebaysandbox:progress', progress);
+        });
+        summary.brandPropagation = brandPropagationSummary;
+        event.sender.send('ebaysandbox:progress', {
+          stage: 'ebaysandbox_brand_propagation',
+          percent: 100,
+          counts: summary,
+          message:
+            `Brand propagation completed: scanned=${brandPropagationSummary?.sourceRowsScanned || 0}, ` +
+            `written=${brandPropagationSummary?.written || 0}`
+        });
+      } catch (error) {
+        const detail = error?.message || String(error);
+        summary.brandPropagation = {
+          success: false,
+          message: detail
+        };
+        event.sender.send('ebaysandbox:progress', {
+          stage: 'ebaysandbox_brand_propagation_error',
+          percent: 100,
+          counts: summary,
+          message: `Brand propagation failed: ${detail}`
+        });
+      }
+    }
 
     const autoRunPostImport =
       String(
