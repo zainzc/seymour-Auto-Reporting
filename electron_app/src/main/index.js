@@ -5164,6 +5164,9 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
     const summary = await runEbaySandboxInventoryImport(runOptions, progress => {
       event.sender.send('ebaysandbox:progress', progress);
     });
+    const batchIpns = Array.isArray(summary?.ebaySandboxBatchIpns)
+      ? summary.ebaySandboxBatchIpns.map(value => normalizeUpperIpn(value)).filter(Boolean)
+      : [];
 
     if (!dryRun) {
       try {
@@ -5216,9 +5219,6 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
         .trim()
         .toLowerCase() !== 'false';
     const wroteListingRows = Number(summary?.recordsWritten || 0) > 0;
-    const batchIpns = Array.isArray(summary?.ebaySandboxBatchIpns)
-      ? summary.ebaySandboxBatchIpns.map(value => normalizeUpperIpn(value)).filter(Boolean)
-      : [];
     const hasFetchedBatchIpns = batchIpns.length > 0;
 
     if (!dryRun && autoRunPostImport && (wroteListingRows || hasFetchedBatchIpns)) {
