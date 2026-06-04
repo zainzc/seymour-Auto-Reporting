@@ -14,6 +14,7 @@ const {
 } = require('../config/configStore');
 const {
   DEFAULT_TIME_ZONE,
+  formatDateInTimeZone,
   getTimeZoneParts,
   timeZoneDateToUtc
 } = require('../utils/timezone');
@@ -1810,6 +1811,11 @@ async function runWorkOrdersSync({
     imagesCached: stats.cached,
     imagesMissing: stats.missing,
     imagesFailed: stats.failed
+  });
+
+  const sheetSyncTimestamp = formatDateInTimeZone(new Date(), DEFAULT_TIME_ZONE);
+  rows.forEach(row => {
+    row['Date/Time Last Synced'] = sheetSyncTimestamp;
   });
 
   try {

@@ -1,6 +1,4 @@
-const DEFAULT_TIME_ZONE = 'EST';
-const FIXED_OFFSET_MINUTES = -5 * 60;
-const FIXED_TIME_ZONE_LABEL = 'Eastern Standard Time';
+const DEFAULT_TIME_ZONE = 'America/New_York';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -17,24 +15,65 @@ function getTimeZoneParts(date, timeZone = DEFAULT_TIME_ZONE) {
   const targetDate = toDate(date);
   if (!targetDate) return null;
 
-  const shifted = new Date(targetDate.getTime() + FIXED_OFFSET_MINUTES * 60 * 1000);
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+  const parts = formatter.formatToParts(targetDate);
+  const lookup = {};
+  parts.forEach(part => {
+    if (part.type !== 'literal') {
+      lookup[part.type] = part.value;
+    }
+  });
+
   return {
-    weekday: WEEKDAY_NAMES[shifted.getUTCDay()] || '',
-    monthNumber: String(shifted.getUTCMonth() + 1).padStart(2, '0'),
-    day: String(shifted.getUTCDate()).padStart(2, '0'),
-    year: String(shifted.getUTCFullYear()),
-    hour: String(shifted.getUTCHours()).padStart(2, '0'),
-    minute: String(shifted.getUTCMinutes()).padStart(2, '0'),
-    second: String(shifted.getUTCSeconds()).padStart(2, '0')
+    weekday: lookup.weekday || '',
+    monthNumber: lookup.month || '',
+    day: lookup.day || '',
+    year: lookup.year || '',
+    hour: lookup.hour || '',
+    minute: lookup.minute || '',
+    second: lookup.second || ''
   };
 }
 
 function getTimeZoneDisplayName(date, timeZone = DEFAULT_TIME_ZONE) {
-  return FIXED_TIME_ZONE_LABEL;
+  const targetDate = toDate(date);
+  if (!targetDate) return '';
+
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    timeZoneName: 'long'
+  });
+  const parts = formatter.formatToParts(targetDate);
+  const zone = parts.find(part => part.type === 'timeZoneName');
+  return zone ? zone.value : '';
 }
 
 function getTimeZoneOffsetMinutes(date, timeZone = DEFAULT_TIME_ZONE) {
-  return FIXED_OFFSET_MINUTES;
+  const targetDate = toDate(date);
+  if (!targetDate) return 0;
+
+  const parts = getTimeZoneParts(targetDate, timeZone);
+  if (!parts) return 0;
+
+  const asUtc = Date.UTC(
+    Number(parts.year || 0),
+    Math.max(0, Number(parts.monthNumber || 1) - 1),
+    Number(parts.day || 1),
+    Number(parts.hour || 0),
+    Number(parts.minute || 0),
+    Number(parts.second || 0)
+  );
+  return Math.round((asUtc - targetDate.getTime()) / 60000);
 }
 
 function formatTimeZoneOffset(minutes = 0) {
@@ -69,7 +108,15 @@ function timeZoneDateToUtc(localParts = {}, timeZone = DEFAULT_TIME_ZONE) {
   const hour = Number(localParts.hour || 0);
   const minute = Number(localParts.minute || 0);
   const second = Number(localParts.second || 0);
-  return new Date(Date.UTC(year, month, day, hour, minute, second) - FIXED_OFFSET_MINUTES * 60000);
+
+  let utcMs = Date.UTC(year, month, day, hour, minute, second);
+  for (let i = 0; i < 3; i += 1) {
+    const offsetMinutes = getTimeZoneOffsetMinutes(new Date(utcMs), timeZone);
+    const nextUtcMs = Date.UTC(year, month, day, hour, minute, second) - offsetMinutes * 60000;
+    if (nextUtcMs === utcMs) break;
+    utcMs = nextUtcMs;
+  }
+  return new Date(utcMs);
 }
 
 module.exports = {

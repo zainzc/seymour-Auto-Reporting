@@ -72,7 +72,7 @@ QuoteLineDedup AS (
 )
 
 SELECT
-    @LastSynced AS [Date/Time Last Synced],
+    NULL AS [Date/Time Last Synced],
     wo.DateCreated AS [Created],
     wo.WorkOrderNumber AS [W/O or Quote Number],
     wold.LineItemID AS [Line Item ID],
@@ -143,7 +143,7 @@ WHERE wo.IsLastRevision = 1
 UNION ALL
 
 SELECT
-    @LastSynced AS [Date/Time Last Synced],
+    NULL AS [Date/Time Last Synced],
     q.DateCreated AS [Created],
     q.QuoteNumber AS [W/O or Quote Number],
     qld.LineItemID AS [Line Item ID],
