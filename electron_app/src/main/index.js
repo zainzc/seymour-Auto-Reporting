@@ -2369,7 +2369,53 @@ setPostPushHook(async payload => {
         `ipnsUpdated=${phase3Summary?.ipnsUpdated || 0}, ` +
         `dryRun=${Boolean(phase3Config?.phase3DryRun)})`
     );
-    emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase3 by configuration.');
+
+    const phase4Config = buildPhase4Config({
+      ...stored,
+      sheetId: payload?.spreadsheetId || stored.sheetId || stored.spreadsheetId || '',
+      tabName: payload?.worksheetName || stored.tabName || stored.worksheetName || ''
+    });
+    const hasPhase4MinimumConfig =
+      Boolean(phase4Config?.airtableToken) &&
+      Boolean(phase4Config?.masterBaseId) &&
+      Boolean(phase4Config?.itemSpecificsBaseId) &&
+      Boolean(phase4Config?.sheetId) &&
+      Boolean(phase4Config?.tabName);
+
+    if (!hasPhase4MinimumConfig) {
+      emitInventoryAutoChainLog('Phase4 mirroring skipped after Phase3 success: missing Phase4 config');
+      emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase3 by configuration.');
+      return;
+    }
+
+    try {
+      const phase4Summary = await runPhase4Mirroring({
+        ...stored,
+        sheetId: phase4Config.sheetId,
+        tabName: phase4Config.tabName,
+        airtableToken: phase4Config.airtableToken,
+        airtableBaseId: phase4Config.masterBaseId,
+        itemSpecificsBaseId: phase4Config.itemSpecificsBaseId,
+        phase4DryRun: phase4Config.dryRun,
+        phase4IncrementalEnabled: phase4Config.incrementalEnabled,
+        authContext: 'inventory'
+      }, () => {});
+      emitInventoryAutoChainLog(
+        `Phase4 mirroring auto-run completed after Phase3 success ` +
+          `(masterScanned=${phase4Summary?.masterRecordsScanned || 0}, ` +
+          `eligible=${phase4Summary?.masterRecordsEligible || 0}, ` +
+          `created=${phase4Summary?.ipnRowsCreated || 0}, ` +
+          `mpnWritten=${phase4Summary?.manufacturerValuesWritten || 0}, ` +
+          `dryRun=${Boolean(phase4Config?.dryRun)})`
+      );
+      emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase4 by configuration.');
+    } catch (error) {
+      emitInventoryAutoChainLog(
+        `Phase4 mirroring failed after Phase3 success: ${error.message}`,
+        'error'
+      );
+      emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase3 by configuration.');
+    }
   } catch (error) {
     emitInventoryAutoChainLog(
       `Phase3 auto-run failed after Phase2 success: ${error.message}`,
