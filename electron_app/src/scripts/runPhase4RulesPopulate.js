@@ -202,14 +202,44 @@ async function loadWorkbookFromDrive(fileOrUrl, authContext = 'inventory') {
 
   const auth = oauth2Service.getAuthenticatedClient(authContext);
   const drive = google.drive({ version: 'v3', auth });
+  let mimeType = '';
+  let fileName = '';
+  try {
+    const metadata = await drive.files.get({
+      fileId,
+      fields: 'id,name,mimeType'
+    });
+    mimeType = String(metadata?.data?.mimeType || '').trim();
+    fileName = String(metadata?.data?.name || '').trim();
+  } catch (error) {
+    const detail =
+      error?.response?.data?.error?.message ||
+      error?.response?.data?.error ||
+      error?.message ||
+      String(error || 'Unknown Google Drive metadata error');
+    throw new Error(`Failed to read rules workbook metadata from Google Drive: ${detail}`);
+  }
+
   let response = null;
   let lastError = null;
+  const isDocsEditorFile = mimeType.startsWith('application/vnd.google-apps.');
+  const exportMimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     try {
-      response = await drive.files.get(
-        { fileId, alt: 'media' },
-        { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT_MS }
-      );
+      if (isDocsEditorFile) {
+        response = await drive.files.export(
+          {
+            fileId,
+            mimeType: exportMimeType
+          },
+          { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT_MS }
+        );
+      } else {
+        response = await drive.files.get(
+          { fileId, alt: 'media' },
+          { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT_MS }
+        );
+      }
       break;
     } catch (error) {
       lastError = error;
@@ -225,7 +255,8 @@ async function loadWorkbookFromDrive(fileOrUrl, authContext = 'inventory') {
       lastError?.message ||
       String(lastError || 'Unknown Google Drive error');
     throw new Error(
-      `Failed to download rules workbook from Google Drive after ${MAX_ATTEMPTS} attempts (timeout=${REQUEST_TIMEOUT_MS}ms): ${detail}`
+      `Failed to ${isDocsEditorFile ? 'export' : 'download'} rules workbook from Google Drive after ${MAX_ATTEMPTS} attempts ` +
+        `(timeout=${REQUEST_TIMEOUT_MS}ms, mimeType=${mimeType || 'unknown'}, fileId=${fileId}, fileName=${fileName || 'unknown'}): ${detail}`
     );
   }
 
