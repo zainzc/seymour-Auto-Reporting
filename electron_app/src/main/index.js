@@ -642,6 +642,57 @@ function emitInventoryAutoChainLog(text, level = 'info') {
   } catch (_) {}
 }
 
+function buildInventoryAutoChainLogEntry(text, level = 'info') {
+  const message = String(text || '').trim();
+  if (!message) return null;
+  const normalizedLevel = level === 'error' ? 'error' : 'info';
+  const now = new Date();
+  return {
+    time: now.toLocaleTimeString(),
+    text: `[Auto Chain] ${message}`,
+    level: normalizedLevel,
+    at: now.toISOString()
+  };
+}
+
+function sendInventoryAutoChainLogEvent(channel, payload) {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      mainWindow.webContents.send(channel, payload);
+    }
+  } catch (_) {}
+}
+
+function resetInventoryAutoChainLogs(reason = '') {
+  try {
+    saveInventoryConfig('inventoryAutoChainLogs', []);
+  } catch (_) {}
+  sendInventoryAutoChainLogEvent('inventory:auto-chain-log-reset', {
+    at: new Date().toISOString(),
+    reason: String(reason || '').trim()
+  });
+}
+
+function compactInventoryAutoChainLogsToSuccessOnly() {
+  try {
+    const existing = Array.isArray(getInventoryConfig('inventoryAutoChainLogs'))
+      ? getInventoryConfig('inventoryAutoChainLogs')
+      : [];
+    const compacted = existing.filter(entry => {
+      const text = String(entry?.text || '').toLowerCase();
+      if (!text) return false;
+      if (String(entry?.level || '').toLowerCase() === 'error') return false;
+      if (text.includes('skipped') || text.includes('failed') || text.includes('error')) return false;
+      return text.includes('completed') || text.includes('passed') || text.includes('successfully');
+    });
+    saveInventoryConfig('inventoryAutoChainLogs', compacted);
+    sendInventoryAutoChainLogEvent('inventory:auto-chain-log-replace', {
+      at: new Date().toISOString(),
+      entries: compacted
+    });
+  } catch (_) {}
+}
+
 const PHASE4_MASTER_LOAD_LOG_EVERY_ROWS = 5000;
 
 function normalizeMasterIpn(value) {
@@ -712,6 +763,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     ...runtime
   };
   const summary = {};
+  resetInventoryAutoChainLogs('post_import_start');
   const firstNonEmpty = (...values) => {
     for (const value of values) {
       const text = normalizeText(value);
@@ -1367,6 +1419,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
 
   emitStepProgress('ebaysandbox_post_import_complete', 100, 'Post-import automation completed.');
   emitInventoryAutoChainLog('Post-import automation completed: Phase4 -> Phase6 -> Phase7.2 -> Phase7.4');
+  compactInventoryAutoChainLogsToSuccessOnly();
   return summary;
 }
 
@@ -2353,6 +2406,7 @@ const {
 } = require('../services/inventoryScheduleService');
 
 setPostPushHook(async payload => {
+  resetInventoryAutoChainLogs('phase1_push_start');
   const phase2Result = await phase2AutoRunService.onPhase1PushSuccess(payload);
   if (phase2Result?.skipped) {
     emitInventoryAutoChainLog(
@@ -2401,6 +2455,7 @@ setPostPushHook(async payload => {
     if (!hasPhase4MinimumConfig) {
       emitInventoryAutoChainLog('Phase4 mirroring skipped after Phase3 success: missing Phase4 config');
       emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase3 by configuration.');
+      compactInventoryAutoChainLogsToSuccessOnly();
       return;
     }
 
@@ -2425,6 +2480,7 @@ setPostPushHook(async payload => {
           `dryRun=${Boolean(phase4Config?.dryRun)})`
       );
       emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase4 by configuration.');
+      compactInventoryAutoChainLogsToSuccessOnly();
     } catch (error) {
       emitInventoryAutoChainLog(
         `Phase4 mirroring failed after Phase3 success: ${error.message}`,
@@ -5121,7 +5177,8 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
           ...runOptions,
           sourceBaseId: runOptions.airtableBaseId,
           destinationBaseId: runOptions.itemSpecificsBaseId,
-          sourceTableName: runOptions.ebaySandboxTableName || DEFAULT_EBAY_SANDBOX_TABLE
+          sourceTableName: runOptions.ebaySandboxTableName || DEFAULT_EBAY_SANDBOX_TABLE,
+          sourceIpns: batchIpns
         }, progress => {
           event.sender.send('ebaysandbox:progress', progress);
         });

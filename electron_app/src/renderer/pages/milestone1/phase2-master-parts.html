@@ -2380,6 +2380,41 @@
       }
     }
 
+    function isAutoChainLogEntry(entry = {}) {
+      return String(entry?.text || '').trim().startsWith('[Auto Chain]');
+    }
+
+    function clearAutoChainLogsInView() {
+      const kept = logEntries.filter(entry => !isAutoChainLogEntry(entry));
+      logEntries.length = 0;
+      kept.forEach(entry => logEntries.push(entry));
+      renderLogs();
+    }
+
+    function replaceAutoChainLogsInView(entries = []) {
+      const nextEntries = Array.isArray(entries)
+        ? entries
+            .map(item => ({
+              time: String(item?.time || ''),
+              text: String(item?.text || '').trim(),
+              level: String(item?.level || 'info'),
+              at: String(item?.at || '')
+            }))
+            .filter(entry => entry.text)
+        : [];
+      const kept = logEntries.filter(entry => !isAutoChainLogEntry(entry));
+      logEntries.length = 0;
+      nextEntries
+        .sort((a, b) => {
+          const aTime = Date.parse(a?.at || '') || 0;
+          const bTime = Date.parse(b?.at || '') || 0;
+          return bTime - aTime;
+        })
+        .forEach(entry => logEntries.push(entry));
+      kept.forEach(entry => logEntries.push(entry));
+      renderLogs();
+    }
+
     function toggleLogs() {
       logsCollapsed = !logsCollapsed;
       document.getElementById('toggle-logs-btn').textContent = logsCollapsed ? 'Expand Logs' : 'Collapse Logs';
@@ -4637,6 +4672,19 @@
           if (!text) return;
           const level = String(payload.level || 'info').toLowerCase() === 'error' ? 'error' : 'info';
           logLine(`[Auto Chain] ${text}`, level, false);
+        });
+      }
+
+      if (window.inventoryAutoChainAPI && typeof window.inventoryAutoChainAPI.onReset === 'function') {
+        window.inventoryAutoChainAPI.onReset(() => {
+          clearAutoChainLogsInView();
+        });
+      }
+
+      if (window.inventoryAutoChainAPI && typeof window.inventoryAutoChainAPI.onReplace === 'function') {
+        window.inventoryAutoChainAPI.onReplace((event, payload) => {
+          const entries = Array.isArray(payload?.entries) ? payload.entries : Array.isArray(payload) ? payload : [];
+          replaceAutoChainLogsInView(entries);
         });
       }
     }

@@ -223,6 +223,35 @@ function findFieldNameByNormalizedName(existingFields = new Set(), fieldName = '
   return '';
 }
 
+function filterFieldNamesBySchema(existingFields = new Set(), fieldNames = []) {
+  const out = [];
+  for (const rawName of Array.isArray(fieldNames) ? fieldNames : []) {
+    const match = findFieldNameByNormalizedName(existingFields, rawName);
+    if (match) out.push(match);
+  }
+  return Array.from(new Set(out));
+}
+
+function formatAirtableErrorDetail(error) {
+  const status = error?.response?.status ? `HTTP ${error.response.status}` : 'HTTP error';
+  const responseData = error?.response?.data;
+  const responseText = (() => {
+    if (responseData === null || responseData === undefined) return '';
+    if (typeof responseData === 'string') return responseData;
+    try {
+      return JSON.stringify(responseData);
+    } catch (_) {
+      return String(responseData);
+    }
+  })();
+  const message =
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.error ||
+    error?.message ||
+    String(error);
+  return responseText ? `${status}: ${message} | response=${responseText}` : `${status}: ${message}`;
+}
+
 function buildConfig(overrides = {}) {
   const phase2Config = getInventoryConfig('phase2Config') || {};
   const token = String(
@@ -256,13 +285,21 @@ function buildConfig(overrides = {}) {
     typeof overrides.dryRun === 'boolean'
       ? overrides.dryRun
       : String(process.env.EBAY_BRAND_PROPAGATION_DRY_RUN || '').toLowerCase() === 'true';
+  const sourceIpns = Array.from(
+    new Set(
+      (Array.isArray(overrides.sourceIpns) ? overrides.sourceIpns : [])
+        .map(value => normalizeIpn(value))
+        .filter(Boolean)
+    )
+  );
 
   return {
     token,
     sourceBaseId,
     destinationBaseId,
     sourceTableName,
-    dryRun
+    dryRun,
+    sourceIpns
   };
 }
 
@@ -327,9 +364,22 @@ async function buildRoutingMap(schemaService) {
   };
 }
 
-async function patchTableRecords(itemService, tableId, updates = []) {
+function getNormalizedTableName(value) {
+  return normalizeText(value).toLowerCase();
+}
+
+async function findTableSchemaByName(schemaService, tableName = '') {
+  const target = getNormalizedTableName(tableName);
+  if (!target) return null;
+  const tables = await schemaService.listTables();
+  return (Array.isArray(tables) ? tables : []).find(table => getNormalizedTableName(table?.name) === target) || null;
+}
+
+async function patchTableRecords(itemService, tableId, updates = [], options = {}) {
   let written = 0;
   const errors = [];
+  const progressCallback = typeof options.progressCallback === 'function' ? options.progressCallback : null;
+  const tableName = normalizeText(options.tableName || '');
   for (const batch of chunkArray(Array.isArray(updates) ? updates : [], 10)) {
     if (batch.length === 0) continue;
     try {
@@ -342,12 +392,52 @@ async function patchTableRecords(itemService, tableId, updates = []) {
       const records = Array.isArray(data?.records) ? data.records : [];
       written += records.length;
     } catch (error) {
-      const message =
-        error?.response?.data?.error?.message ||
-        error?.response?.data?.error ||
-        error?.message ||
-        String(error);
-      errors.push(`PATCH failed for table ${tableId} (batch=${batch.length}): ${message}`);
+      const batchFieldNames = Array.from(
+        new Set(
+          batch.flatMap(record =>
+            Object.keys(record?.fields || {}).map(name => normalizeText(name)).filter(Boolean)
+          )
+        )
+      );
+      const batchMessage =
+        `PATCH failed for table ${tableName || tableId} (batch=${batch.length}, fields=[${batchFieldNames.join(', ')}]): ` +
+        `${formatAirtableErrorDetail(error)}`;
+      errors.push(batchMessage);
+      if (progressCallback) {
+        progressCallback({
+          stage: 'ebay_brand_propagation_error',
+          percent: 99,
+          message: batchMessage
+        });
+      }
+
+      for (const record of batch) {
+        const recordFieldNames = Object.keys(record?.fields || {})
+          .map(name => normalizeText(name))
+          .filter(Boolean);
+        try {
+          const single = await itemService.request('PATCH', `/${encodeURIComponent(tableId)}`, {
+            data: {
+              records: [record],
+              typecast: true
+            }
+          });
+          const records = Array.isArray(single?.records) ? single.records : [];
+          written += records.length;
+        } catch (singleError) {
+          const singleMessage =
+            `PATCH failed for table ${tableName || tableId} record=${normalizeText(record?.id) || 'unknown'} ` +
+            `(fields=[${recordFieldNames.join(', ')}]): ${formatAirtableErrorDetail(singleError)}`;
+          errors.push(singleMessage);
+          if (progressCallback) {
+            progressCallback({
+              stage: 'ebay_brand_propagation_error',
+              percent: 99,
+              message: singleMessage
+            });
+          }
+        }
+      }
     }
   }
 
@@ -362,6 +452,7 @@ async function runEbayBrandPropagation(options = {}, progressCallback = () => {}
   const summary = {
     dryRun: Boolean(config.dryRun),
     sourceTableName: config.sourceTableName,
+    sourceIpnsProvided: Array.isArray(config.sourceIpns) ? config.sourceIpns.length : 0,
     sourceRowsScanned: 0,
     sourceRowsWithBrand: 0,
     sourceRowsSkippedBlankBrand: 0,
@@ -402,6 +493,10 @@ async function runEbayBrandPropagation(options = {}, progressCallback = () => {}
     token: config.token,
     baseId: config.destinationBaseId
   });
+  const sourceSchemaService = new AirtableSchemaService({
+    token: config.token,
+    baseId: config.sourceBaseId
+  });
 
   if (config.dryRun) {
     summary.message = 'Dry run enabled; Brand propagation skipped.';
@@ -413,7 +508,9 @@ async function runEbayBrandPropagation(options = {}, progressCallback = () => {}
       stage: 'ebay_brand_propagation_start',
       percent: 5,
       counts: summary,
-      message: `Brand propagation started for ${config.sourceTableName}...`
+      message:
+        `Brand propagation started for ${config.sourceTableName}... ` +
+        `(currentRunIpns=${Array.isArray(config.sourceIpns) ? config.sourceIpns.length : 0})`
     });
   }
 
@@ -428,16 +525,51 @@ async function runEbayBrandPropagation(options = {}, progressCallback = () => {}
     });
   }
 
-  const sourceSelectFields = [
+  const sourceTableSchema = await findTableSchemaByName(sourceSchemaService, config.sourceTableName);
+  const sourceFieldNames = new Set(
+    (Array.isArray(sourceTableSchema?.fields) ? sourceTableSchema.fields : [])
+      .map(field => normalizeText(field?.name))
+      .filter(Boolean)
+  );
+  const sourceSelectFields = filterFieldNamesBySchema(sourceFieldNames, [
     ...SOURCE_IPN_FIELDS,
     ...SOURCE_CATEGORY_FIELDS,
     SOURCE_ITEM_SPECIFICS_FIELD
-  ];
-  const sourceRows = await sourceService.fetchAllRecords(config.sourceTableName, sourceSelectFields);
-  summary.sourceRowsScanned = sourceRows.length;
+  ]);
+  if (typeof progressCallback === 'function') {
+    progressCallback({
+      stage: 'ebay_brand_propagation_source_schema',
+      percent: 14,
+      counts: summary,
+      message:
+        sourceSelectFields.length > 0
+          ? `Source schema resolved for ${config.sourceTableName}: fields=[${sourceSelectFields.join(', ')}]`
+          : `Source schema resolved for ${config.sourceTableName}: no matching source fields found, reading all fields.`
+    });
+  }
+  const currentRunIpnSet = new Set(Array.isArray(config.sourceIpns) ? config.sourceIpns : []);
+  if (currentRunIpnSet.size === 0) {
+    summary.message =
+      'Brand propagation skipped: no current-run IPNs were provided from the eBay fetch/import step.';
+    if (typeof progressCallback === 'function') {
+      progressCallback({
+        stage: 'ebay_brand_propagation_skipped',
+        percent: 100,
+        counts: summary,
+        message: summary.message
+      });
+    }
+    return summary;
+  }
+  const sourceRows = await sourceService.fetchAllRecords(
+    config.sourceTableName,
+    sourceSelectFields.length > 0 ? sourceSelectFields : []
+  );
+  const sourceRowsForCurrentRun = sourceRows.filter(row => currentRunIpnSet.has(resolveListingIpn(row?.fields || {})));
+  summary.sourceRowsScanned = sourceRowsForCurrentRun.length;
 
   const byRoute = new Map();
-  for (const row of sourceRows) {
+  for (const row of sourceRowsForCurrentRun) {
     const fields = row?.fields || {};
     const ipn = resolveListingIpn(fields);
     if (!ipn) {
@@ -503,13 +635,32 @@ async function runEbayBrandPropagation(options = {}, progressCallback = () => {}
     }
 
     const lockFields = buildFixedLockFields(route.fieldNames, targetFieldName);
-    const selectFields = Array.from(
-      new Set([
-        findFieldNameByNormalizedName(route.fieldNames, 'IPN') || 'IPN',
-        targetFieldName,
-        ...Object.keys(lockFields)
-      ])
-    );
+    const selectFields = filterFieldNamesBySchema(route.fieldNames, [
+      'IPN',
+      targetFieldName,
+      ...Object.keys(lockFields)
+    ]);
+    if (selectFields.length === 0) {
+      const detail = `Brand propagation skipped ${route.tableName}: no matching readable fields found in schema.`;
+      summary.destinationRowsSkippedMissingField += entry.rows.length;
+      summary.errors.push(detail);
+      if (typeof progressCallback === 'function') {
+        progressCallback({
+          stage: 'ebay_brand_propagation_error',
+          percent: 99,
+          message: detail
+        });
+      }
+      continue;
+    }
+    if (typeof progressCallback === 'function') {
+      progressCallback({
+        stage: 'ebay_brand_propagation_route',
+        percent: Math.min(90, 15 + Math.floor((processedRoutes / Math.max(routeEntries.length, 1)) * 65)),
+        counts: summary,
+        message: `Brand propagation reading ${route.tableName} with fields=[${selectFields.join(', ')}]`
+      });
+    }
     const destinationRows = await destinationService.fetchAllRecords(route.tableName, selectFields);
     summary.destinationRowsScanned += destinationRows.length;
     const destinationByIpn = new Map();
@@ -569,7 +720,10 @@ async function runEbayBrandPropagation(options = {}, progressCallback = () => {}
       continue;
     }
 
-    const writeSummary = await patchTableRecords(destinationService, route.tableId, Array.from(pendingUpdates.values()));
+    const writeSummary = await patchTableRecords(destinationService, route.tableId, Array.from(pendingUpdates.values()), {
+      tableName: route.tableName,
+      progressCallback
+    });
     summary.written += writeSummary.written;
     if (Array.isArray(writeSummary.errors) && writeSummary.errors.length > 0) {
       summary.errors.push(...writeSummary.errors);

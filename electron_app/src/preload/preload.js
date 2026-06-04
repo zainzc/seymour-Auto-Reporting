@@ -205,6 +205,8 @@ contextBridge.exposeInMainWorld('itemSpecificSyncAPI', {
 
 contextBridge.exposeInMainWorld('inventoryAutoChainAPI', {
   onLog: (callback) => ipcRenderer.on('inventory:auto-chain-log', callback),
+  onReset: (callback) => ipcRenderer.on('inventory:auto-chain-log-reset', callback),
+  onReplace: (callback) => ipcRenderer.on('inventory:auto-chain-log-replace', callback),
   getLogs: () => ipcRenderer.invoke('inventory-auto-chain-get-logs'),
   clearLogs: () => ipcRenderer.invoke('inventory-auto-chain-clear-logs')
 });
