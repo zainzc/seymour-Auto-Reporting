@@ -624,6 +624,21 @@ function emitInventoryAutoChainLog(text, level = 'info') {
       });
     }
   } catch (_) {}
+
+  try {
+    const existing = getInventoryConfig('inventoryAutoChainLogs') || [];
+    const entry = {
+      time: new Date().toLocaleTimeString(),
+      text: `[Auto Chain] ${message}`,
+      level: level === 'error' ? 'error' : 'info',
+      at: new Date().toISOString()
+    };
+    existing.unshift(entry);
+    if (existing.length > 300) {
+      existing.length = 300;
+    }
+    saveInventoryConfig('inventoryAutoChainLogs', existing);
+  } catch (_) {}
 }
 
 const PHASE4_MASTER_LOAD_LOG_EVERY_ROWS = 5000;
@@ -2829,10 +2844,12 @@ ipcMain.handle('phase2-get-activity-logs', async () => {
 
 ipcMain.handle('phase2-append-activity-log', async (_, entry = {}) => {
   const logs = getInventoryConfig('phase2ActivityLogs') || [];
+  const at = new Date().toISOString();
   const normalized = {
     time: String(entry.time || new Date().toLocaleTimeString()),
     text: String(entry.text || '').trim(),
-    level: String(entry.level || 'info')
+    level: String(entry.level || 'info'),
+    at
   };
   if (!normalized.text) {
     return { success: false, message: 'Log text is required.' };
@@ -2845,6 +2862,15 @@ ipcMain.handle('phase2-append-activity-log', async (_, entry = {}) => {
 
 ipcMain.handle('phase2-clear-activity-logs', async () => {
   saveInventoryConfig('phase2ActivityLogs', []);
+  return { success: true };
+});
+
+ipcMain.handle('inventory-auto-chain-get-logs', async () => {
+  return getInventoryConfig('inventoryAutoChainLogs') || [];
+});
+
+ipcMain.handle('inventory-auto-chain-clear-logs', async () => {
+  saveInventoryConfig('inventoryAutoChainLogs', []);
   return { success: true };
 });
 

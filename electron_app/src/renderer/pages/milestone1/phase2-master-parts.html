@@ -2401,25 +2401,46 @@
       if (window.phase2API?.clearActivityLogs) {
         window.phase2API.clearActivityLogs().catch(() => {});
       }
+      if (window.inventoryAutoChainAPI?.clearLogs) {
+        window.inventoryAutoChainAPI.clearLogs().catch(() => {});
+      }
     }
 
     async function loadPersistedActivityLogs() {
       try {
         if (!window.phase2API || typeof window.phase2API.getActivityLogs !== 'function') return;
-        const stored = await window.phase2API.getActivityLogs();
-        if (!Array.isArray(stored)) return;
-        logEntries.length = 0;
-        stored.forEach(item => {
-          const text = String(item?.text || '').trim();
-          if (!text) return;
-          logEntries.push({
-            time: String(item?.time || ''),
-            text,
-            level: String(item?.level || 'info')
+        const [phase2Stored, autoChainStored] = await Promise.all([
+          window.phase2API.getActivityLogs(),
+          window.inventoryAutoChainAPI && typeof window.inventoryAutoChainAPI.getLogs === 'function'
+            ? window.inventoryAutoChainAPI.getLogs()
+            : Promise.resolve([])
+        ]);
+        const nextEntries = [];
+        for (const source of [phase2Stored, autoChainStored]) {
+          if (!Array.isArray(source)) continue;
+          source.forEach(item => {
+            const text = String(item?.text || '').trim();
+            if (!text) return;
+            nextEntries.push({
+              time: String(item?.time || ''),
+              text,
+              level: String(item?.level || 'info'),
+              at: String(item?.at || '')
+            });
           });
-        });
+        }
+        logEntries.length = 0;
+        nextEntries
+          .sort((a, b) => {
+            const aTime = Date.parse(a?.at || '') || 0;
+            const bTime = Date.parse(b?.at || '') || 0;
+            return bTime - aTime;
+          })
+          .forEach(entry => {
+            logEntries.push(entry);
+          });
       } catch (error) {
-        console.error('Failed to load persisted Phase 2 activity logs:', error);
+        console.error('Failed to load persisted workspace activity logs:', error);
       }
     }
 
@@ -4615,7 +4636,7 @@
           const text = String(payload.message || '').trim();
           if (!text) return;
           const level = String(payload.level || 'info').toLowerCase() === 'error' ? 'error' : 'info';
-          logLine(`[Auto Chain] ${text}`, level);
+          logLine(`[Auto Chain] ${text}`, level, false);
         });
       }
     }
