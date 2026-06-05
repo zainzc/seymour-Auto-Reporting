@@ -882,10 +882,12 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   }
 
   const phase4RulesDriveFile = String(
-    firstNonEmpty(runtime.phase4RulesDriveFile, persisted.phase4RulesDriveFile) ||
-      process.env.PHASE4_RULES_DRIVE_FILE ||
-      process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-      ''
+    firstNonEmpty(
+      runtime.phase4RulesTableName,
+      persisted.phase4RulesTableName,
+      process.env.PHASE4_RULES_TABLE,
+      'ebay Item Specific Rules'
+    ) || ''
   ).trim();
   const phase4OpenAiKey = String(firstNonEmpty(runtime.openaiApiKey, persisted.openaiApiKey) || process.env.OPENAI_API_KEY || '').trim();
   const phase4BListId = String(
@@ -909,7 +911,8 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     openaiApiKey: phase4OpenAiKey,
     phase4BClickupListId: phase4BListId,
     phase4CClickupListId: phase4CListId,
-    phase4RulesDriveFile
+    phase4RulesDriveFile,
+    phase4RulesTableName: phase4RulesDriveFile
   };
   const chainBase = await attachPhase5PublishedState(chainBaseBase, 'post-import');
   const missingPhase4Config = [];
@@ -917,7 +920,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   if (!resolvedAirtableBaseId) missingPhase4Config.push('airtableBaseId');
   if (!resolvedItemSpecificsBaseId) missingPhase4Config.push('itemSpecificsBaseId');
   if (!resolvedClickupToken) missingPhase4Config.push('clickupToken');
-  if (!phase4RulesDriveFile) missingPhase4Config.push('phase4RulesDriveFile');
+  if (!phase4RulesDriveFile) missingPhase4Config.push('phase4RulesTableName');
   if (!phase4OpenAiKey) missingPhase4Config.push('openaiApiKey');
   if (!phase4BListId) missingPhase4Config.push('phase4BClickupListId');
   if (!phase4CListId) missingPhase4Config.push('phase4CClickupListId');
@@ -977,13 +980,12 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     execute: !rulesDryRun,
     ruleTypes: ['F'],
     authContext: 'inventory',
-    rulesDriveFile: phase4RulesDriveFile,
+    rulesTableName: phase4RulesDriveFile,
     globalDefaultsTable: String(
       stored.phase4GlobalDefaultsTable ||
         process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
         'Fixed Item Specifics (Global Defaults)'
     ).trim(),
-    logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim(),
     phase4SharedMasterRows: sharedMasterContext?.masterRows,
     phase4SharedMasterIpnSet: sharedMasterContext?.masterIpnSet
   }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4a', 'Phase 4A'));
@@ -1000,7 +1002,6 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     execute: !bliteDryRun,
     authContext: 'inventory',
     rulesDriveFile: phase4RulesDriveFile,
-    logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim(),
     testTableName: '',
     testMaxTables: 0,
     openaiApiKey: phase4OpenAiKey,
@@ -1032,7 +1033,6 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     execute: !cmfDryRun,
     authContext: 'inventory',
     rulesDriveFile: phase4RulesDriveFile,
-    logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim(),
     phase4CClickupListName: String(
       stored.phase4CClickupListName || stored.phase4BClickupListName || ''
     ).trim(),
@@ -1061,7 +1061,6 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     execute: !dDryRun,
     authContext: 'inventory',
     rulesDriveFile: phase4RulesDriveFile,
-    logicSheetName: String(stored.phase4RulesLogicSheet || 'Logic').trim(),
     phase4GlobalDefaultsTable: String(
       stored.phase4GlobalDefaultsTable ||
         process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
@@ -2768,7 +2767,14 @@ ipcMain.handle('phase2-get-config', async () => {
     phase3LookbackDays: Number(phase3Config.phase3LookbackDays || 90),
     phase3DryRun: Boolean(phase3Config.phase3DryRun),
     itemSpecificsBaseId: stored.itemSpecificsBaseId || '',
-    phase4RulesDriveFile: stored.phase4RulesDriveFile || process.env.PHASE4_RULES_DRIVE_FILE || process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE || '',
+    phase4RulesDriveFile:
+      stored.phase4RulesTableName ||
+      process.env.PHASE4_RULES_TABLE ||
+      'ebay Item Specific Rules',
+    phase4RulesTableName:
+      stored.phase4RulesTableName ||
+      process.env.PHASE4_RULES_TABLE ||
+      'ebay Item Specific Rules',
     phase4RulesLogicSheet: stored.phase4RulesLogicSheet || process.env.PHASE4_LOGIC_SHEET || 'Logic',
     phase4GlobalDefaultsTable: stored.phase4GlobalDefaultsTable || process.env.PHASE4_GLOBAL_DEFAULTS_TABLE || 'Fixed Item Specifics (Global Defaults)',
     phase4RulesDryRun:
@@ -3239,12 +3245,17 @@ ipcMain.handle('phase4:run', async (event, options = {}) => {
 ipcMain.handle('phase4rules:get-config', async () => {
   const stored = getInventoryConfig('phase2Config') || {};
   return {
+    rulesTableName:
+      String(
+        stored.phase4RulesTableName ||
+          process.env.PHASE4_RULES_TABLE ||
+          'ebay Item Specific Rules'
+      ).trim(),
     rulesDriveFile:
       String(
-        stored.phase4RulesDriveFile ||
-          process.env.PHASE4_RULES_DRIVE_FILE ||
-          process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-          ''
+        stored.phase4RulesTableName ||
+          process.env.PHASE4_RULES_TABLE ||
+          'ebay Item Specific Rules'
       ).trim(),
     globalDefaultsTable:
       String(
@@ -3277,13 +3288,12 @@ ipcMain.handle('phase4rules:run', async (event, options = {}) => {
       execute: !dryRun,
       ruleTypes: ['F'],
       authContext: 'inventory',
-      rulesDriveFile:
+      rulesTableName:
         String(
-          options.phase4RulesDriveFile ||
-            stored.phase4RulesDriveFile ||
-            process.env.PHASE4_RULES_DRIVE_FILE ||
-            process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-            ''
+          options.phase4RulesTableName ||
+          stored.phase4RulesTableName ||
+          process.env.PHASE4_RULES_TABLE ||
+          'ebay Item Specific Rules'
         ).trim(),
       globalDefaultsTable: String(
         options.phase4GlobalDefaultsTable ||
@@ -3322,10 +3332,15 @@ ipcMain.handle('phase4blite:get-config', async () => {
   return {
     rulesDriveFile:
       String(
-        stored.phase4RulesDriveFile ||
-          process.env.PHASE4_RULES_DRIVE_FILE ||
-          process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-          ''
+        stored.phase4RulesTableName ||
+          process.env.PHASE4_RULES_TABLE ||
+          'ebay Item Specific Rules'
+      ).trim(),
+    rulesTableName:
+      String(
+        stored.phase4RulesTableName ||
+          process.env.PHASE4_RULES_TABLE ||
+          'ebay Item Specific Rules'
       ).trim(),
     logicSheetName: String(stored.phase4RulesLogicSheet || process.env.PHASE4_LOGIC_SHEET || 'Logic').trim(),
     dryRun:
@@ -3428,10 +3443,15 @@ ipcMain.handle('phase4cmf:get-config', async () => {
   return {
     rulesDriveFile:
       String(
-        stored.phase4RulesDriveFile ||
-          process.env.PHASE4_RULES_DRIVE_FILE ||
-          process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-          ''
+        stored.phase4RulesTableName ||
+          process.env.PHASE4_RULES_TABLE ||
+          'ebay Item Specific Rules'
+      ).trim(),
+    rulesTableName:
+      String(
+        stored.phase4RulesTableName ||
+          process.env.PHASE4_RULES_TABLE ||
+          'ebay Item Specific Rules'
       ).trim(),
     logicSheetName: String(stored.phase4RulesLogicSheet || process.env.PHASE4_LOGIC_SHEET || 'Logic').trim(),
     dryRun:
@@ -3537,10 +3557,15 @@ ipcMain.handle('phase4d:get-config', async () => {
   return {
     rulesDriveFile:
       String(
-        stored.phase4RulesDriveFile ||
-          process.env.PHASE4_RULES_DRIVE_FILE ||
-          process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-          ''
+        stored.phase4RulesTableName ||
+          process.env.PHASE4_RULES_TABLE ||
+          'ebay Item Specific Rules'
+      ).trim(),
+    rulesTableName:
+      String(
+        stored.phase4RulesTableName ||
+          process.env.PHASE4_RULES_TABLE ||
+          'ebay Item Specific Rules'
       ).trim(),
     logicSheetName: String(stored.phase4RulesLogicSheet || process.env.PHASE4_LOGIC_SHEET || 'Logic').trim(),
     dryRun:

@@ -4,10 +4,7 @@ const AirtableSchemaService = require('../services/airtableSchemaService');
 const ClickUpService = require('../services/clickupService');
 const Phase4AiEvaluatorService = require('../services/phase4AiEvaluatorService');
 const { chunkArray } = require('../utils/chunk');
-const oauth2Service = require('../services/oauth2Service');
-const { google } = require('googleapis');
 const ElectronStore = require('electron-store').default;
-const ExcelJS = require('exceljs');
 const path = require('path');
 const { asIdentitySet, isPublishedIdentity } = require('../services/phase5IdentityService');
 const { isManualOverrideForField: isManualOverrideFromGovernance } = require('../services/phase5GovernanceService');
@@ -660,11 +657,19 @@ function parseArgs(argv = []) {
     dryRun: !argv.includes('--execute'),
     ruleTypes: ['VF', 'VMF'],
     authContext: normalizeText(getArg('--auth-context') || process.env.PHASE4_GOOGLE_AUTH_CONTEXT || 'inventory'),
+    rulesTableName: normalizeText(
+      getArg('--rules-table') ||
+        getArg('--rules-drive-file') ||
+        process.env.PHASE4_RULES_TABLE ||
+        process.env.PHASE4_RULES_DRIVE_FILE ||
+        process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
+        'ebay Item Specific Rules'
+    ),
     rulesDriveFile: normalizeText(
       getArg('--rules-drive-file') ||
         process.env.PHASE4_RULES_DRIVE_FILE ||
         process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-        ''
+        'ebay Item Specific Rules'
     ),
     globalDefaultsTable: normalizeText(
       getArg('--global-defaults-table') ||
@@ -825,92 +830,81 @@ function loadPhaseConfigFromStore() {
   }
 }
 
-function extractDriveFileId(input) {
-  const text = normalizeText(input);
-  if (!text) return '';
-  if (/^[a-zA-Z0-9_-]{20,}$/.test(text)) return text;
-  const dMatch = text.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
-  if (dMatch?.[1]) return dMatch[1];
-  const idMatch = text.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
-  if (idMatch?.[1]) return idMatch[1];
+function getFieldValueByName(fields = {}, candidates = []) {
+  if (!fields || typeof fields !== 'object') return '';
+  const names = Array.isArray(candidates) ? candidates : [candidates];
+  for (const candidate of names) {
+    if (Object.prototype.hasOwnProperty.call(fields, candidate)) return fields[candidate];
+    const target = normalizeText(candidate).toLowerCase();
+    for (const [key, value] of Object.entries(fields)) {
+      if (normalizeText(key).toLowerCase() === target) return value;
+    }
+  }
   return '';
 }
 
-async function loadWorkbookFromDrive(fileOrUrl, authContext = 'inventory') {
-  const REQUEST_TIMEOUT_MS = 90000;
-  const MAX_ATTEMPTS = 3;
-  const fileId = extractDriveFileId(fileOrUrl);
-  if (!fileId) {
-    throw new Error('Invalid Google Drive file ID/URL for rules workbook.');
-  }
-  if (!oauth2Service.isAuthenticated(authContext)) {
-    throw new Error(`Google account is not connected for auth context '${authContext}'.`);
-  }
+function parseRulesTableRows(rows, allowedRules = ['VF', 'VMF']) {
+  const allowedRuleSet = new Set(
+    (Array.isArray(allowedRules) ? allowedRules : [allowedRules])
+      .map(rule => normalizeText(rule).toUpperCase())
+      .filter(Boolean)
+  );
+  const all = new Map();
+  const byPrefix = new Map();
+  let scannedRows = 0;
+  let loadedRules = 0;
 
-  const auth = oauth2Service.getAuthenticatedClient(authContext);
-  const drive = google.drive({ version: 'v3', auth });
-  let mimeType = '';
-  let fileName = '';
-  try {
-    const metadata = await drive.files.get({
-      fileId,
-      fields: 'id,name,mimeType'
-    });
-    mimeType = String(metadata?.data?.mimeType || '').trim();
-    fileName = String(metadata?.data?.name || '').trim();
-  } catch (error) {
-    const detail =
-      error?.response?.data?.error?.message ||
-      error?.response?.data?.error ||
-      error?.message ||
-      String(error || 'Unknown Google Drive metadata error');
-    throw new Error(`Failed to read rules workbook metadata from Google Drive: ${detail}`);
-  }
+  for (const row of rows || []) {
+    scannedRows += 1;
+    const fields = row?.fields || {};
+    const ruleValue = normalizeText(getFieldValueByName(fields, ['Rule'])).toUpperCase();
+    if (!ruleValue || (allowedRuleSet.size > 0 && !allowedRuleSet.has(ruleValue))) continue;
 
-  let response = null;
-  let lastError = null;
-  const isDocsEditorFile = mimeType.startsWith('application/vnd.google-apps.');
-  const exportMimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    try {
-      if (isDocsEditorFile) {
-        response = await drive.files.export(
-          {
-            fileId,
-            mimeType: exportMimeType
-          },
-          { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT_MS }
-        );
-      } else {
-        response = await drive.files.get(
-          { fileId, alt: 'media' },
-          { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT_MS }
-        );
-      }
-      break;
-    } catch (error) {
-      lastError = error;
-      if (attempt >= MAX_ATTEMPTS) break;
-      const delayMs = 1200 * attempt;
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+    const itemSpecificName = normalizeText(
+      getFieldValueByName(fields, ['Item Specific', 'Item Specific (eBay Download Only)', 'Item Specific(eBay Download Only)'])
+    );
+    const valueHint = normalizeText(getFieldValueByName(fields, ['F (Value)', '(F) Value', 'F Value']));
+    if (!itemSpecificName) continue;
+
+    const prefix = normalizeGlobalPrefix(getFieldValueByName(fields, ['IPN Prefix']));
+    const ruleKey = normalizeCSpecificKey(itemSpecificName);
+    if (!ruleKey) continue;
+
+    const bucket =
+      prefix === 'ALL'
+        ? all
+        : (() => {
+            if (!byPrefix.has(prefix)) byPrefix.set(prefix, new Map());
+            return byPrefix.get(prefix);
+          })();
+
+    if (!bucket.has(ruleKey)) {
+      bucket.set(ruleKey, {
+        fieldName: itemSpecificName,
+        ruleType: ruleValue,
+        allowedValues: parseAllowedValues(valueHint),
+        value: valueHint
+      });
+      loadedRules += 1;
     }
   }
-  if (!response) {
-    const detail =
-      lastError?.response?.data?.error?.message ||
-      lastError?.response?.data?.error ||
-      lastError?.message ||
-      String(lastError || 'Unknown Google Drive error');
-    throw new Error(
-      `Failed to ${isDocsEditorFile ? 'export' : 'download'} rules workbook from Google Drive after ${MAX_ATTEMPTS} attempts ` +
-        `(timeout=${REQUEST_TIMEOUT_MS}ms, mimeType=${mimeType || 'unknown'}, fileId=${fileId}, fileName=${fileName || 'unknown'}): ${detail}`
-    );
-  }
 
-  const wb = new ExcelJS.Workbook();
-  const buffer = Buffer.from(response.data);
-  await wb.xlsx.load(buffer);
-  return { workbook: wb, fileId };
+  return {
+    all,
+    byPrefix,
+    scannedRows,
+    loadedRules
+  };
+}
+
+async function loadRulesFromAirtable(itemService, tableName, allowedRules = ['VF', 'VMF'], onProgress = () => {}) {
+  const rows = await fetchAllRecordsWithFallbackAndProgress(
+    itemService,
+    tableName,
+    ['IPN Prefix', 'Item Specific', 'Rule', 'F (Value)'],
+    onProgress
+  );
+  return parseRulesTableRows(rows, allowedRules);
 }
 
 async function fetchAllRecordsWithFallback(service, tableNameOrId, selectFields = []) {
@@ -966,56 +960,6 @@ function parseAllowedValues(raw) {
     .split(/[\n|;,]+/)
     .map(item => normalizeText(item))
     .filter(Boolean);
-}
-
-function parseLogicWorksheet(ws, sheetName, allowedRules = ['VF', 'VMF']) {
-  if (!ws) {
-    throw new Error(`Rules sheet '${sheetName}' not found.`);
-  }
-
-  const header = ws.getRow(1).values.slice(1).map(value => normalizeText(value).toLowerCase());
-  const idxPrefix = header.indexOf('ipn prefix');
-  const idxField = header.indexOf('item specific');
-  const idxRule = header.indexOf('rule');
-  const idxAllowed = header.findIndex(name => name.includes('allowed') || name.includes('valid value'));
-  const idxFormat = header.findIndex(name => name.includes('format'));
-
-  if (idxPrefix < 0 || idxField < 0 || idxRule < 0) {
-    throw new Error(`Rules sheet '${sheetName}' missing required columns.`);
-  }
-
-  const byPrefix = new Map();
-  let scannedRows = 0;
-
-  const allowed = new Set((allowedRules || []).map(value => normalizeText(value).toUpperCase()).filter(Boolean));
-  for (let r = 2; r <= ws.rowCount; r += 1) {
-    const row = ws.getRow(r).values.slice(1);
-    const prefix = normalizeText(row[idxPrefix]);
-    const fieldName = normalizeText(row[idxField]);
-    const rule = normalizeText(row[idxRule]).toUpperCase();
-    if (!prefix && !fieldName && !rule) continue;
-    scannedRows += 1;
-    if (!allowed.has(rule)) continue;
-    if (!/^\d{3}$/.test(prefix)) continue;
-    if (!fieldName.startsWith('C:')) continue;
-
-    const allowedRaw =
-      (idxAllowed >= 0 ? row[idxAllowed] : '') || (idxFormat >= 0 ? row[idxFormat] : '');
-    const allowedValues = parseAllowedValues(allowedRaw);
-
-    if (!byPrefix.has(prefix)) byPrefix.set(prefix, new Map());
-    if (!byPrefix.get(prefix).has(fieldName)) {
-      byPrefix.get(prefix).set(fieldName, {
-        ruleType: rule,
-        allowedValues
-      });
-    }
-  }
-
-  return {
-    byPrefix,
-    scannedRows
-  };
 }
 
 async function processWithConcurrency(items = [], concurrency = 4, handler = async () => {}, onProgress = () => {}) {
@@ -1896,11 +1840,12 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
   const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
+  const rulesTableName = normalizeText(args.rulesTableName || args.rulesDriveFile || 'ebay Item Specific Rules');
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!masterBaseId) throw new Error('Missing AIRTABLE_BASE_ID (Master base).');
   if (!itemSpecificsBaseId) throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID).');
-  if (!args.rulesDriveFile) throw new Error('Missing rules drive file. Provide --rules-drive-file=<FILE_ID_OR_URL>.');
+  if (!rulesTableName) throw new Error('Missing rules table name. Provide --rules-table=<TABLE_NAME>.');
   if (!openaiApiKey) throw new Error('Missing OpenAI API key for Phase 4B-lite.');
   const hasClickupConfig = Boolean(clickupToken && clickupListId);
   if (!args.dryRun && !clickupToken) throw new Error('Missing ClickUp token for VMF low-confidence tasks.');
@@ -1911,23 +1856,25 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   emitProgress(progressCallback, {
     stage: 'phase4blite_load_rules',
     percent: 10,
-    message: 'Loading VF/VMF rules workbook from Google Drive...'
+    message: 'Loading VF/VMF rules from Airtable...'
   });
 
   let rulesByPrefix;
   let logicRowsScanned = 0;
   let rulesSource = '';
-  const { workbook, fileId } = await loadWorkbookFromDrive(args.rulesDriveFile, args.authContext);
+  const rulesService = new AirtableService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const parsed = await loadRulesFromAirtable(rulesService, rulesTableName, ['VF', 'VMF']);
   emitProgress(progressCallback, {
     stage: 'phase4blite_load_rules',
     percent: 12,
-    message: `VF/VMF rules workbook loaded from Google Drive (fileId=${fileId}). Parsing Logic sheet...`
+    message: `VF/VMF rules loaded from Airtable table '${rulesTableName}'.`
   });
-  const ws = workbook.getWorksheet(args.logicSheetName);
-  const parsed = parseLogicWorksheet(ws, args.logicSheetName);
   rulesByPrefix = parsed.byPrefix;
   logicRowsScanned = parsed.scannedRows;
-  rulesSource = `google_drive:${fileId}`;
+  rulesSource = `airtable:${rulesTableName}`;
 
   const aiService = new Phase4AiEvaluatorService({
     apiKey: openaiApiKey,
@@ -2091,15 +2038,15 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       percent: 19,
       message: `Loading listing-driven IPN scope from '${ebayListingsTableName}'...`
     });
-    const listingScopeSelectFields = [...EBAY_LISTING_LOOKUP_KEY_FIELDS, LISTING_C_SPECIFICS_FIELD];
     let scopeLoaded = false;
-    for (const service of [masterService, itemService]) {
+    const scopeErrors = [];
+    for (const { label, service } of [{ label: 'master base', service: masterService }]) {
       try {
         let lastScopeLoadProgressAt = Date.now();
         const listingRows = await fetchAllRecordsWithFallbackAndProgress(
           service,
           ebayListingsTableName,
-          listingScopeSelectFields,
+          [],
           state => {
             const now = Date.now();
             if (!state?.hasMore || now - lastScopeLoadProgressAt >= 800) {
@@ -2130,14 +2077,16 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         );
         scopeLoaded = true;
         break;
-      } catch (_) {
+      } catch (error) {
+        scopeErrors.push(`${label}: ${formatAirtableError(error)}`);
         continue;
       }
     }
     if (!scopeLoaded) {
+      const details = scopeErrors.length > 0 ? ` Details: ${scopeErrors.join(' | ')}` : '';
       throw new Error(
         `Unable to build listing-driven IPN scope from '${ebayListingsTableName}'. ` +
-          `Ensure the eBay listings table exists and is accessible in configured Airtable bases.`
+          `Ensure the eBay listings table exists and is accessible in configured Airtable bases.${details}`
       );
     }
     emitProgress(progressCallback, {
@@ -2154,7 +2103,8 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     ruleTypes: args.ruleTypes,
     rulesSource,
     authContext: args.authContext,
-    rulesDriveFile: args.rulesDriveFile || '',
+    rulesTableName,
+    rulesDriveFile: args.rulesTableName || args.rulesDriveFile || '',
     logicSheetName: args.logicSheetName,
     logicRowsScanned,
     openaiModel,
@@ -2977,22 +2927,25 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
       stored.phase4BClickupOpenStatus ||
       'To Do'
   );
+  const rulesTableName = normalizeText(args.rulesTableName || args.rulesDriveFile || 'ebay Item Specific Rules');
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!itemSpecificsBaseId) throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID).');
-  if (!args.rulesDriveFile) throw new Error('Missing rules drive file. Provide --rules-drive-file=<FILE_ID_OR_URL>.');
+  if (!rulesTableName) throw new Error('Missing rules table name. Provide --rules-table=<TABLE_NAME>.');
   if (!clickupToken) throw new Error('Missing ClickUp token for Phase 4C MF tasks.');
   if (!clickupListId) throw new Error('Missing Phase 4C ClickUp List ID for MF tasks.');
 
   emitProgress(progressCallback, {
     stage: 'phase4cmf_load_rules',
     percent: 10,
-    message: 'Loading MF rules workbook from Google Drive...'
+    message: 'Loading MF rules from Airtable...'
   });
 
-  const { workbook, fileId } = await loadWorkbookFromDrive(args.rulesDriveFile, args.authContext);
-  const ws = workbook.getWorksheet(args.logicSheetName);
-  const parsed = parseLogicWorksheet(ws, args.logicSheetName, ['MF']);
+  const rulesService = new AirtableService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const parsed = await loadRulesFromAirtable(rulesService, rulesTableName, ['MF']);
   const rulesByPrefix = parsed.byPrefix;
 
   const schemaService = new AirtableSchemaService({
@@ -3039,14 +2992,15 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
       message: `Loading listing-driven IPN scope from '${listingsTableName}'...`
     });
     let scopeLoaded = false;
-    const listingScopeServices = masterBaseService ? [masterBaseService, itemService] : [itemService];
-    for (const service of listingScopeServices) {
+    const scopeErrors = [];
+    const listingScopeServices = masterBaseService ? [{ label: 'master base', service: masterBaseService }] : [];
+    for (const { label, service } of listingScopeServices) {
       try {
         let lastListingScopeHeartbeatAt = Date.now();
         const listingRows = await fetchAllRecordsWithFallbackAndProgress(
           service,
           listingsTableName,
-          [...EBAY_LISTING_IPN_FIELDS, LISTING_C_SPECIFICS_FIELD],
+          [],
           state => {
             const now = Date.now();
             if (!state?.hasMore || now - lastListingScopeHeartbeatAt >= 800) {
@@ -3075,14 +3029,16 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
         listingsScopeIpns = allowedListingIpnSet.size;
         scopeLoaded = true;
         break;
-      } catch (_) {
+      } catch (error) {
+        scopeErrors.push(`${label}: ${formatAirtableError(error)}`);
         continue;
       }
     }
     if (!scopeLoaded) {
+      const details = scopeErrors.length > 0 ? ` Details: ${scopeErrors.join(' | ')}` : '';
       throw new Error(
         `Unable to build listing-driven IPN scope from '${listingsTableName}'. ` +
-          `Ensure eBay listings table is accessible in configured Airtable bases.`
+          `Ensure eBay listings table is accessible in configured Airtable bases.${details}`
       );
     }
     emitProgress(progressCallback, {
@@ -3110,7 +3066,7 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
 
   const summary = {
     dryRun: Boolean(args.dryRun),
-    rulesSource: `google_drive:${fileId}`,
+    rulesSource: `airtable:${args.rulesTableName || args.rulesDriveFile || ''}`,
     listingsTable: listingsTableName,
     restrictToListingsPrefixIpns: Boolean(args.restrictToListingsPrefixIpns),
     listingsScopePrefixes: listingsScopeByPrefix.size,
@@ -3460,6 +3416,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
       DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE
   );
+  const rulesTableName = normalizeText(args.rulesTableName || args.rulesDriveFile || 'ebay Item Specific Rules');
   const requestedIpnSet = parseIpnSet(args.phase4DTestIpn);
   const requestedIpnLabel = requestedIpnSet.size > 0 ? Array.from(requestedIpnSet).join(', ') : '';
 
@@ -3468,18 +3425,20 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   if (!itemSpecificsBaseId) {
     throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID) for global defaults enforcement.');
   }
-  if (!args.rulesDriveFile) throw new Error('Missing rules drive file. Provide --rules-drive-file=<FILE_ID_OR_URL>.');
+  if (!rulesTableName) throw new Error('Missing rules table name. Provide --rules-table=<TABLE_NAME>.');
   if (!openaiApiKey) throw new Error('Missing OpenAI API key for Phase 4D.');
 
   emitProgress(progressCallback, {
     stage: 'phase4d_load_rules',
     percent: 8,
-    message: 'Loading listing-only rules workbook from Google Drive...'
+    message: 'Loading listing-only rules from Airtable...'
   });
 
-  const { workbook, fileId } = await loadWorkbookFromDrive(args.rulesDriveFile, args.authContext);
-  const ws = workbook.getWorksheet(args.logicSheetName);
-  const parsed = parseLogicWorksheet(ws, args.logicSheetName, ['FSV', 'V1', 'V2', 'VB']);
+  const rulesService = new AirtableService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const parsed = await loadRulesFromAirtable(rulesService, rulesTableName, ['FSV', 'V1', 'V2', 'VB']);
   const rulesByPrefix = parsed.byPrefix;
 
   const schemaService = new AirtableSchemaService({
@@ -3667,8 +3626,9 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
 
   const summary = {
     dryRun: Boolean(args.dryRun),
-    rulesSource: `google_drive:${fileId}`,
-    rulesDriveFile: args.rulesDriveFile || '',
+    rulesSource: `airtable:${args.rulesTableName || args.rulesDriveFile || ''}`,
+    rulesTableName: args.rulesTableName || args.rulesDriveFile || '',
+    rulesDriveFile: args.rulesTableName || args.rulesDriveFile || '',
     listingsTable: effectiveListingsTableName,
     testIpn: requestedIpnLabel,
     listingsScanned: listingsRows.length,

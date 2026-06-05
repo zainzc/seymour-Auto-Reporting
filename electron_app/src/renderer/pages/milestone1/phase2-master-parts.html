@@ -997,11 +997,11 @@
                   <input id="phase4-unified-item-specific-base-id" type="text" placeholder="appXXXXXXXXXXXXXX">
                 </div>
                 <div class="form-group">
-                  <label for="phase4-unified-rules-drive-file">Rules File (Google Drive ID/URL)</label>
-                  <input id="phase4-unified-rules-drive-file" type="text" placeholder="Google Drive file ID or full URL">
+                  <label for="phase4-unified-rules-drive-file">Rules Table (Airtable)</label>
+                  <input id="phase4-unified-rules-drive-file" type="text" placeholder="ebay Item Specific Rules">
                 </div>
                 <div class="form-group">
-                  <label for="phase4-unified-rules-logic-sheet">Rules Sheet Name</label>
+                  <label for="phase4-unified-rules-logic-sheet">Legacy Logic Sheet Name</label>
                   <input id="phase4-unified-rules-logic-sheet" type="text" value="Logic">
                 </div>
                 <div class="form-group">
@@ -1104,13 +1104,13 @@
             <div class="grid-2">
               <div>
                 <div class="form-group">
-                  <label for="phase4-rules-drive-file">Rules File (Google Drive ID/URL)</label>
-                  <input id="phase4-rules-drive-file" type="text" placeholder="Google Drive file ID or full URL">
-                  <div class="hint">Source workbook is loaded from Google Drive using connected inventory Google auth.</div>
+                  <label for="phase4-rules-drive-file">Rules Table (Airtable)</label>
+                  <input id="phase4-rules-drive-file" type="text" placeholder="ebay Item Specific Rules">
+                  <div class="hint">Rules are loaded from the Airtable table in the Item Specifics base.</div>
                   <div id="err-phase4-rules-drive-file" class="field-error"></div>
                 </div>
               <div class="form-group">
-                <label for="phase4-rules-logic-sheet">Rules Sheet Name</label>
+                <label for="phase4-rules-logic-sheet">Legacy Logic Sheet Name</label>
                 <input id="phase4-rules-logic-sheet" type="text" value="Logic">
               </div>
               <div class="form-group">
@@ -3391,7 +3391,8 @@
         if (window.phase4RulesAPI && typeof window.phase4RulesAPI.getConfig === 'function') {
           const rulesConfig = await window.phase4RulesAPI.getConfig();
           if (rulesConfig && typeof rulesConfig === 'object') {
-            document.getElementById('phase4-rules-drive-file').value = rulesConfig.rulesDriveFile || document.getElementById('phase4-rules-drive-file').value;
+            document.getElementById('phase4-rules-drive-file').value =
+              rulesConfig.rulesTableName || rulesConfig.rulesDriveFile || document.getElementById('phase4-rules-drive-file').value;
             document.getElementById('phase4-rules-logic-sheet').value = rulesConfig.logicSheetName || DEFAULT_PHASE4_RULES_LOGIC_SHEET;
             document.getElementById('phase4-global-defaults-table').value = rulesConfig.globalDefaultsTable || DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE;
             document.getElementById('phase4-rules-dry-run').value = rulesConfig.dryRun === false ? 'false' : 'true';
@@ -4024,6 +4025,7 @@
         phase4DryRun: false,
         phase4IncrementalEnabled: document.getElementById('phase4-incremental-enabled').value === 'true',
         phase4RulesDriveFile: document.getElementById('phase4-rules-drive-file').value.trim(),
+        phase4RulesTableName: document.getElementById('phase4-rules-drive-file').value.trim(),
         phase4RulesLogicSheet: document.getElementById('phase4-rules-logic-sheet').value.trim() || DEFAULT_PHASE4_RULES_LOGIC_SHEET,
         phase4GlobalDefaultsTable: document.getElementById('phase4-global-defaults-table').value.trim() || DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE,
         phase4RulesDryRun: false,
@@ -5075,7 +5077,7 @@
       const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
       const clickupListId = document.getElementById('phase4b-clickup-list-id').value.trim();
       if (!rulesDriveFile) {
-        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        setFieldError('phase4-rules-drive-file', 'Rules table name is required.');
         showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4 pipeline.');
         return;
       }
@@ -5203,8 +5205,8 @@
         return;
       }
       if (!rulesDriveFile) {
-        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
-        showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4A.');
+        setFieldError('phase4-rules-drive-file', 'Rules table name is required.');
+        showStatus('run-status', 'error', 'Enter the Airtable rules table name before running Phase 4A.');
         return;
       }
 
@@ -5277,7 +5279,7 @@
         return;
       }
       if (!rulesDriveFile) {
-        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        setFieldError('phase4-rules-drive-file', 'Rules table name is required.');
         showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4B-lite.');
         return;
       }
@@ -5363,7 +5365,7 @@
         return;
       }
       if (!rulesDriveFile) {
-        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        setFieldError('phase4-rules-drive-file', 'Rules table name is required.');
         showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4C.');
         return;
       }
@@ -5433,7 +5435,7 @@
       const openaiApiKey = document.getElementById('openai-api-key').value.trim();
       const listingsTable = document.getElementById('phase4d-listings-table').value.trim();
       if (!rulesDriveFile) {
-        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        setFieldError('phase4-rules-drive-file', 'Rules table name is required.');
         showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4D.');
         return;
       }
@@ -5525,7 +5527,7 @@
         return;
       }
       if (!rulesDriveFile) {
-        setFieldError('phase4-rules-drive-file', 'Google Drive file ID/URL is required.');
+        setFieldError('phase4-rules-drive-file', 'Rules table name is required.');
         showStatus('run-status', 'error', 'Enter rules Drive file ID/URL before running Phase 4 Combined.');
         return;
       }

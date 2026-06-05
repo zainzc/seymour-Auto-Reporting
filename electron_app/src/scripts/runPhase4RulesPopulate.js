@@ -2,16 +2,14 @@ const { loadEnv } = require('../config/loadEnv');
 const AirtableService = require('../services/airtableService');
 const AirtableSchemaService = require('../services/airtableSchemaService');
 const { chunkArray } = require('../utils/chunk');
-const oauth2Service = require('../services/oauth2Service');
-const { google } = require('googleapis');
 const ElectronStore = require('electron-store').default;
-const ExcelJS = require('exceljs');
 const path = require('path');
 
 loadEnv();
 
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const LEGACY_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
+const DEFAULT_RULES_TABLE_NAME = 'ebay Item Specific Rules';
 const MASTER_LOAD_LOG_EVERY_ROWS = 5000;
 const LISTING_C_SPECIFICS_FIELD = 'Item Specifics - All C: values relevant to item';
 const EBAY_LISTING_IPN_FIELDS = [
@@ -58,6 +56,23 @@ function parseJsonObject(value) {
     return null;
   }
   return null;
+}
+
+function getFieldValueByName(fields = {}, candidates = []) {
+  if (!fields || typeof fields !== 'object') return '';
+  const names = Array.isArray(candidates) ? candidates : [candidates];
+  for (const candidate of names) {
+    const target = normalizeText(candidate).toLowerCase();
+    if (!target) continue;
+    const key = Object.keys(fields).find(item => normalizeText(item).toLowerCase() === target);
+    if (!key) continue;
+    const value = fields[key];
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'string' && !value.trim()) continue;
+    if (Array.isArray(value) && value.length === 0) continue;
+    return value;
+  }
+  return '';
 }
 
 function normalizeCSpecificKey(value = '') {
@@ -109,21 +124,20 @@ function parseArgs(argv = []) {
       .split(',')
       .map(item => normalizeText(item).toUpperCase())
       .filter(Boolean),
-    authContext: normalizeText(getArg('--auth-context') || process.env.PHASE4_GOOGLE_AUTH_CONTEXT || 'inventory'),
-    rulesDriveFile: normalizeText(
-      getArg('--rules-drive-file') ||
+    rulesTableName: normalizeText(
+      getArg('--rules-table') ||
+        getArg('--rules-drive-file') ||
+        process.env.PHASE4_RULES_TABLE ||
         process.env.PHASE4_RULES_DRIVE_FILE ||
         process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-        ''
+        DEFAULT_RULES_TABLE_NAME
     ),
     globalDefaultsTable: normalizeText(
       getArg('--global-defaults-table') ||
         process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
         'Fixed Item Specifics (Global Defaults)'
     ),
-    phase4DListingsTable: normalizeText(
-      getArg('--phase4d-listings-table') || process.env.PHASE4D_LISTINGS_TABLE || ''
-    ),
+    phase4DListingsTable: normalizeText(getArg('--phase4d-listings-table') || process.env.PHASE4D_LISTINGS_TABLE || ''),
     restrictToListingsPrefixIpns:
       normalizeText(
         getArg('--restrict-to-listing-prefix-ipns') ||
@@ -131,7 +145,6 @@ function parseArgs(argv = []) {
           process.env.PHASE4B_RESTRICT_TO_LISTING_PREFIX_IPNS ||
           'true'
       ).toLowerCase() !== 'false',
-    logicSheetName: normalizeText(getArg('--logic-sheet') || process.env.PHASE4_LOGIC_SHEET || 'Logic'),
     sampleLimit: Number(getArg('--sample-limit') || 30) || 30
   };
 }
@@ -175,95 +188,40 @@ function formatAirtableError(error) {
   return status ? `HTTP ${status}: ${detail}` : String(detail);
 }
 
-function extractDriveFileId(input) {
-  const text = normalizeText(input);
-  if (!text) return '';
-  if (/^[a-zA-Z0-9_-]{20,}$/.test(text)) return text;
+function parseRulesTableRows(rows = [], ruleTypes = ['F']) {
+  const allowedRules = new Set(ruleTypes.map(item => normalizeText(item).toUpperCase()).filter(Boolean));
+  const byPrefix = new Map();
+  let scannedRows = 0;
 
-  const dMatch = text.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
-  if (dMatch?.[1]) return dMatch[1];
+  for (const row of rows) {
+    const fields = row?.fields || {};
+    const prefix = normalizeText(getFieldValueByName(fields, ['IPN Prefix']));
+    const fieldName = normalizeText(getFieldValueByName(fields, ['Item Specific', 'Item Specific (eBay Download Only)']));
+    const rule = normalizeText(getFieldValueByName(fields, ['Rule'])).toUpperCase();
+    const fixedValue = normalizeText(getFieldValueByName(fields, ['F (Value)', '(F) Value', 'F Value', 'Value']));
+    if (!prefix && !fieldName && !rule && !fixedValue) continue;
 
-  const idMatch = text.match(/[?&]id=([a-zA-Z0-9_-]{20,})/);
-  if (idMatch?.[1]) return idMatch[1];
+    scannedRows += 1;
+    if (!allowedRules.has(rule)) continue;
+    if (!/^\d{3}$/.test(prefix)) continue;
+    if (!fieldName.startsWith('C:')) continue;
+    if (!fixedValue) continue;
 
-  return '';
-}
-
-async function loadWorkbookFromDrive(fileOrUrl, authContext = 'inventory') {
-  const REQUEST_TIMEOUT_MS = 90000;
-  const MAX_ATTEMPTS = 3;
-  const fileId = extractDriveFileId(fileOrUrl);
-  if (!fileId) {
-    throw new Error('Invalid Google Drive file ID/URL for rules workbook.');
-  }
-  if (!oauth2Service.isAuthenticated(authContext)) {
-    throw new Error(`Google account is not connected for auth context '${authContext}'.`);
-  }
-
-  const auth = oauth2Service.getAuthenticatedClient(authContext);
-  const drive = google.drive({ version: 'v3', auth });
-  let mimeType = '';
-  let fileName = '';
-  try {
-    const metadata = await drive.files.get({
-      fileId,
-      fields: 'id,name,mimeType'
-    });
-    mimeType = String(metadata?.data?.mimeType || '').trim();
-    fileName = String(metadata?.data?.name || '').trim();
-  } catch (error) {
-    const detail =
-      error?.response?.data?.error?.message ||
-      error?.response?.data?.error ||
-      error?.message ||
-      String(error || 'Unknown Google Drive metadata error');
-    throw new Error(`Failed to read rules workbook metadata from Google Drive: ${detail}`);
-  }
-
-  let response = null;
-  let lastError = null;
-  const isDocsEditorFile = mimeType.startsWith('application/vnd.google-apps.');
-  const exportMimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    try {
-      if (isDocsEditorFile) {
-        response = await drive.files.export(
-          {
-            fileId,
-            mimeType: exportMimeType
-          },
-          { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT_MS }
-        );
-      } else {
-        response = await drive.files.get(
-          { fileId, alt: 'media' },
-          { responseType: 'arraybuffer', timeout: REQUEST_TIMEOUT_MS }
-        );
-      }
-      break;
-    } catch (error) {
-      lastError = error;
-      if (attempt >= MAX_ATTEMPTS) break;
-      const delayMs = 1200 * attempt;
-      await new Promise(resolve => setTimeout(resolve, delayMs));
+    if (!byPrefix.has(prefix)) byPrefix.set(prefix, new Map());
+    if (!byPrefix.get(prefix).has(fieldName)) {
+      byPrefix.get(prefix).set(fieldName, fixedValue);
     }
   }
-  if (!response) {
-    const detail =
-      lastError?.response?.data?.error?.message ||
-      lastError?.response?.data?.error ||
-      lastError?.message ||
-      String(lastError || 'Unknown Google Drive error');
-    throw new Error(
-      `Failed to ${isDocsEditorFile ? 'export' : 'download'} rules workbook from Google Drive after ${MAX_ATTEMPTS} attempts ` +
-        `(timeout=${REQUEST_TIMEOUT_MS}ms, mimeType=${mimeType || 'unknown'}, fileId=${fileId}, fileName=${fileName || 'unknown'}): ${detail}`
-    );
-  }
 
-  const wb = new ExcelJS.Workbook();
-  const buffer = Buffer.from(response.data);
-  await wb.xlsx.load(buffer);
-  return { workbook: wb, fileId };
+  return {
+    byPrefix,
+    scannedRows
+  };
+}
+
+async function loadRulesFromAirtable(itemService, tableName, ruleTypes = ['F']) {
+  const rows = await fetchAllRecordsWithFallback(itemService, tableName, []);
+  return parseRulesTableRows(rows, ruleTypes);
 }
 
 async function fetchAllRecordsWithFallback(service, tableNameOrId, selectFields = []) {
@@ -310,52 +268,6 @@ async function fetchAllRecordsWithFallbackAndProgress(
     if (error?.response?.status !== 422) throw error;
     return fetchPaged([]);
   }
-}
-
-function parseLogicWorksheet(ws, sheetName, ruleTypes = ['F']) {
-  if (!ws) {
-    throw new Error(`Rules sheet '${sheetName}' not found.`);
-  }
-
-  const header = ws.getRow(1).values.slice(1).map(value => normalizeText(value).toLowerCase());
-  const idxPrefix = header.indexOf('ipn prefix');
-  const idxField = header.indexOf('item specific');
-  const idxRule = header.indexOf('rule');
-  const idxFValue = header.indexOf('(f) value');
-
-  if (idxPrefix < 0 || idxField < 0 || idxRule < 0 || idxFValue < 0) {
-    throw new Error(`Rules sheet '${sheetName}' missing required columns.`);
-  }
-
-  const allowedRules = new Set(ruleTypes.map(item => normalizeText(item).toUpperCase()));
-  const byPrefix = new Map();
-  let scannedRows = 0;
-
-  for (let r = 2; r <= ws.rowCount; r += 1) {
-    const row = ws.getRow(r).values.slice(1);
-    const prefix = normalizeText(row[idxPrefix]);
-    const fieldName = normalizeText(row[idxField]);
-    const rule = normalizeText(row[idxRule]).toUpperCase();
-    const fixedValue = normalizeText(row[idxFValue]);
-    if (!prefix && !fieldName && !rule && !fixedValue) continue;
-
-    scannedRows += 1;
-    if (!allowedRules.has(rule)) continue;
-    if (!/^\d{3}$/.test(prefix)) continue;
-    if (!fieldName.startsWith('C:')) continue;
-    if (!fixedValue) continue;
-
-    if (!byPrefix.has(prefix)) byPrefix.set(prefix, new Map());
-    // first non-blank deterministic value wins to preserve spreadsheet order.
-    if (!byPrefix.get(prefix).has(fieldName)) {
-      byPrefix.get(prefix).set(fieldName, fixedValue);
-    }
-  }
-
-  return {
-    byPrefix,
-    scannedRows
-  };
 }
 
 async function patchTableRecords(itemService, tableId, updates = [], options = {}) {
@@ -486,43 +398,41 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
   if (!itemSpecificsBaseId) {
     throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID).');
   }
-  if (!args.rulesDriveFile) {
-    throw new Error('Missing rules drive file. Provide --rules-drive-file=<FILE_ID_OR_URL>.');
+  if (!args.rulesTableName) {
+    throw new Error('Missing rules table name. Provide --rules-table=<TABLE_NAME>.');
   }
 
   emitProgress(progressCallback, {
     stage: 'phase4rules_load_rules',
     percent: 10,
-    message: 'Loading rules workbook from Google Drive...'
+    message: 'Loading rules table from Airtable...'
   });
 
   let fixedRulesByPrefix;
   let logicRowsScanned = 0;
   let rulesSource = '';
-  const { workbook, fileId } = await loadWorkbookFromDrive(args.rulesDriveFile, args.authContext);
+  const itemService = new AirtableService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const { byPrefix, scannedRows } = await loadRulesFromAirtable(itemService, args.rulesTableName, args.ruleTypes);
+  fixedRulesByPrefix = byPrefix;
+  logicRowsScanned = scannedRows;
+  rulesSource = `airtable:${args.rulesTableName}`;
   emitProgress(progressCallback, {
     stage: 'phase4rules_load_rules',
     percent: 11,
-    message: `Rules workbook loaded from Google Drive (fileId=${fileId}). Parsing Logic sheet...`
+    message: `Rules loaded from Airtable table '${args.rulesTableName}'.`
   });
-  const ws = workbook.getWorksheet(args.logicSheetName);
-  const parsed = parseLogicWorksheet(ws, args.logicSheetName, args.ruleTypes);
-  fixedRulesByPrefix = parsed.byPrefix;
-  logicRowsScanned = parsed.scannedRows;
-  rulesSource = `google_drive:${fileId}`;
   emitProgress(progressCallback, {
     stage: 'phase4rules_load_rules',
     percent: 12,
     message:
-      `Rules parsed from Logic sheet '${args.logicSheetName}': ` +
+      `Rules parsed from Airtable table '${args.rulesTableName}': ` +
       `prefixes=${fixedRulesByPrefix.size}, rows=${logicRowsScanned}, ruleTypes=${args.ruleTypes.join(',')}`
   });
 
   const schemaService = new AirtableSchemaService({
-    token: airtableToken,
-    baseId: itemSpecificsBaseId
-  });
-  const itemService = new AirtableService({
     token: airtableToken,
     baseId: itemSpecificsBaseId
   });
@@ -683,8 +593,7 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     dryRun: args.dryRun,
     ruleTypes: args.ruleTypes,
     rulesSource,
-    authContext: args.authContext,
-    rulesDriveFile: args.rulesDriveFile || '',
+    rulesTableName: args.rulesTableName || '',
     globalDefaultsTable: args.globalDefaultsTable,
     listingsTable,
     restrictToListingsPrefixIpns: Boolean(args.restrictToListingsPrefixIpns),
@@ -692,7 +601,6 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     listingsScopeIpns: listingScopeIpns,
     listingsScopeRowsScanned: listingScopeRowsScanned,
     globalDefaultsEntries: globalDefaultsMap.size,
-    logicSheetName: args.logicSheetName,
     logicRowsScanned,
     tablesScanned: 0,
     tablesSkippedNoLogicPrefix: 0,
