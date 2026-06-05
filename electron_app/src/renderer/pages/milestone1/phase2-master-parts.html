@@ -1013,6 +1013,11 @@
                   <input id="phase4-unified-openai-model" type="text" value="gpt-5.4-mini">
                 </div>
                 <div class="form-group">
+                  <label for="phase72-drive-folder-id">Phase 7.2 Google Drive Folder (ID or URL)</label>
+                  <input id="phase72-drive-folder-id" type="text" placeholder="https://drive.google.com/drive/folders/...">
+                  <div class="hint">Generated fitment images upload directly to this folder during post-import automation.</div>
+                </div>
+                <div class="form-group">
                   <label for="phase4-unified-title-rules-prompt">Title Generation Prompt (Phase 7.4)</label>
                   <textarea
                     id="phase4-unified-title-rules-prompt"
@@ -1650,11 +1655,6 @@
             <label for="phase72-max-ipns">Max IPNs (Testing)</label>
             <input id="phase72-max-ipns" type="number" min="0" step="1" value="5">
             <div class="hint">Use 4-5 for testing. Set 0 for full run.</div>
-          </div>
-          <div class="form-group">
-            <label for="phase72-drive-folder-id">Google Drive Folder (ID or URL)</label>
-            <input id="phase72-drive-folder-id" type="text" placeholder="https://drive.google.com/drive/folders/...">
-            <div class="hint">Generated fitment images upload directly to this folder; no local files are stored.</div>
           </div>
         </div>
         <div>
