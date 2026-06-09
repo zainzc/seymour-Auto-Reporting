@@ -6,6 +6,39 @@ const oauth2Service = require('./oauth2Service');
  * Handles writing inventory data to Google Sheets following Phase 1 requirements
  */
 
+const CURRENT_INVENTORY_TIME_ZONE = 'America/New_York';
+
+function toDateValue(value) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateForNewYorkSheet(value) {
+  const date = toDateValue(value);
+  if (!date) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: CURRENT_INVENTORY_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true
+  }).format(date);
+}
+
+function formatInventoryCellValue(fieldName, value) {
+  if (value === null || value === undefined) return '';
+  if (fieldName === 'LastDateModified') {
+    return formatDateForNewYorkSheet(value);
+  }
+  if (value instanceof Date) return value.toISOString().split('T')[0];
+  return String(value);
+}
+
 async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryData, progressCallback = () => {}) {
   try {
     const startTime = Date.now();
@@ -22,52 +55,49 @@ async function writeInventoryToSheets(spreadsheetId, worksheetName, inventoryDat
       percent: 55
     });
 
-    const headers = [
-      'RNumber',
-      'InventoryNumber',
-      'ModelYear',
-      'ModelName',
-      'CategoryCode',
-      'StockTicketNumber',
-      'PartType',
-      'LocationCode',
-      'PrimaryARADamageCode',
-      'SecondaryARADamageCode',
-      'ConditionsAndOptions',
-      'PartNotes',
-      'IsAlternate',
-      'PartRating',
-      'InventoriedDate',
-      'DateAcquired',
-      'ConditionCode',
-      'QuantityAvailable',
-      'QuantityQuoted',
-      'QuantityOnHold',
-      'InventorierID',
-      'DismantlerID',
-      'Mileage',
-      'RetailPrice',
-      'WholesalePrice',
-      'CostPrice',
-      'ValuePrice',
-      'EbayPrice',
-      'EcomPrice',
-      'DamageReported',
-      'UnitsOfDamage',
-      'DateBPGGraded',
-      'EComDescription',
-      'PrivacyIndicator',
-      'BlockOnlineSale',
-      'ReferenceNumber'
+    const columnSpecs = [
+      { header: 'RNumber', field: 'RNumber' },
+      { header: 'Last Modified Date/Time', field: 'LastDateModified' },
+      { header: 'InventoryNumber', field: 'InventoryNumber' },
+      { header: 'ModelYear', field: 'ModelYear' },
+      { header: 'ModelName', field: 'ModelName' },
+      { header: 'CategoryCode', field: 'CategoryCode' },
+      { header: 'StockTicketNumber', field: 'StockTicketNumber' },
+      { header: 'PartType', field: 'PartType' },
+      { header: 'LocationCode', field: 'LocationCode' },
+      { header: 'PrimaryARADamageCode', field: 'PrimaryARADamageCode' },
+      { header: 'SecondaryARADamageCode', field: 'SecondaryARADamageCode' },
+      { header: 'ConditionsAndOptions', field: 'ConditionsAndOptions' },
+      { header: 'PartNotes', field: 'PartNotes' },
+      { header: 'IsAlternate', field: 'IsAlternate' },
+      { header: 'PartRating', field: 'PartRating' },
+      { header: 'InventoriedDate', field: 'InventoriedDate' },
+      { header: 'DateAcquired', field: 'DateAcquired' },
+      { header: 'ConditionCode', field: 'ConditionCode' },
+      { header: 'QuantityAvailable', field: 'QuantityAvailable' },
+      { header: 'QuantityQuoted', field: 'QuantityQuoted' },
+      { header: 'QuantityOnHold', field: 'QuantityOnHold' },
+      { header: 'InventorierID', field: 'InventorierID' },
+      { header: 'DismantlerID', field: 'DismantlerID' },
+      { header: 'Mileage', field: 'Mileage' },
+      { header: 'RetailPrice', field: 'RetailPrice' },
+      { header: 'WholesalePrice', field: 'WholesalePrice' },
+      { header: 'CostPrice', field: 'CostPrice' },
+      { header: 'ValuePrice', field: 'ValuePrice' },
+      { header: 'EbayPrice', field: 'EbayPrice' },
+      { header: 'EcomPrice', field: 'EcomPrice' },
+      { header: 'DamageReported', field: 'DamageReported' },
+      { header: 'UnitsOfDamage', field: 'UnitsOfDamage' },
+      { header: 'DateBPGGraded', field: 'DateBPGGraded' },
+      { header: 'EComDescription', field: 'EComDescription' },
+      { header: 'PrivacyIndicator', field: 'PrivacyIndicator' },
+      { header: 'BlockOnlineSale', field: 'BlockOnlineSale' },
+      { header: 'ReferenceNumber', field: 'ReferenceNumber' }
     ];
+    const headers = columnSpecs.map(column => column.header);
 
     const dataRows = inventoryData.map(record =>
-      headers.map(header => {
-        const value = record[header];
-        if (value === null || value === undefined) return '';
-        if (value instanceof Date) return value.toISOString().split('T')[0];
-        return String(value);
-      })
+      columnSpecs.map(column => formatInventoryCellValue(column.field, record?.[column.field]))
     );
 
     const limiter = createRequestLimiter(

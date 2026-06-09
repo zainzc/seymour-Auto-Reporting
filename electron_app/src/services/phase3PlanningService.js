@@ -40,15 +40,49 @@ function formatTextNumber(value, decimals = 0) {
   return parsed.toFixed(decimals);
 }
 
+function normalizeWeightUnit(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase();
+}
+
+function convertWeightToLbs(value, unit) {
+  const parsed = parseNumber(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+
+  const normalizedUnit = normalizeWeightUnit(unit);
+  if (!normalizedUnit || normalizedUnit === 'oz' || normalizedUnit === 'ounce' || normalizedUnit === 'ounces') {
+    return parsed / 16;
+  }
+  if (normalizedUnit === 'lb' || normalizedUnit === 'lbs' || normalizedUnit === 'pound' || normalizedUnit === 'pounds') {
+    return parsed;
+  }
+  if (normalizedUnit === 'g' || normalizedUnit === 'gram' || normalizedUnit === 'grams') {
+    return parsed / 453.59237;
+  }
+  if (normalizedUnit === 'kg' || normalizedUnit === 'kilogram' || normalizedUnit === 'kilograms') {
+    return parsed * 2.2046226218;
+  }
+
+  return parsed / 16;
+}
+
 function extractCompleteShipmentMeasurements(shipment) {
-  const weightOz = parseNumber(shipment?.weight?.value);
+  const weightValue = parseNumber(shipment?.weight?.value);
+  const weightUnit =
+    shipment?.weight?.units ||
+    shipment?.weight?.unit ||
+    shipment?.weightUnit ||
+    shipment?.weightUnits ||
+    '';
+  const weightLbs = convertWeightToLbs(weightValue, weightUnit);
   const lengthIn = parseNumber(shipment?.dimensions?.length);
   const widthIn = parseNumber(shipment?.dimensions?.width);
   const heightIn = parseNumber(shipment?.dimensions?.height);
   const createDateMs = parseCreateDateMs(shipment?.createDate);
 
   const hasCompleteDims =
-    isPositiveNumber(weightOz) &&
+    isPositiveNumber(weightLbs) &&
     isPositiveNumber(lengthIn) &&
     isPositiveNumber(widthIn) &&
     isPositiveNumber(heightIn);
@@ -56,7 +90,9 @@ function extractCompleteShipmentMeasurements(shipment) {
   if (!hasCompleteDims) return null;
 
   return {
-    weightOz,
+    weightLbs: roundToTwo(weightLbs),
+    weightSourceValue: weightValue,
+    weightSourceUnit: normalizeWeightUnit(weightUnit),
     lengthIn,
     widthIn,
     heightIn,
@@ -169,11 +205,45 @@ function resolveExistingFieldName(existingFields, exactCandidates = [], contains
   return fallback;
 }
 
+function resolveExistingFieldNames(existingFields, exactCandidates = [], containsAllKeywords = [], fallback = '') {
+  const fieldNames = Object.keys(existingFields || {});
+  const normalizedToOriginal = new Map(fieldNames.map(name => [normalizeFieldKey(name), name]));
+  const matches = [];
+  const seen = new Set();
+
+  const add = value => {
+    const text = String(value || '').trim();
+    if (!text) return;
+    const key = normalizeFieldKey(text);
+    if (seen.has(key)) return;
+    seen.add(key);
+    matches.push(text);
+  };
+
+  for (const candidate of exactCandidates) {
+    const match = normalizedToOriginal.get(normalizeFieldKey(candidate));
+    if (match) add(match);
+  }
+
+  for (const fieldName of fieldNames) {
+    const normalized = normalizeFieldKey(fieldName);
+    if (containsAllKeywords.every(keyword => normalized.includes(normalizeFieldKey(keyword)))) {
+      add(fieldName);
+    }
+  }
+
+  if (matches.length === 0 && fallback) {
+    add(fallback);
+  }
+
+  return matches;
+}
+
 function buildShipstationFieldsForBlankTargets(existingFields, dims) {
   const lengthText = formatTextNumber(dims.lengthIn, 0);
   const widthText = formatTextNumber(dims.widthIn, 0);
   const heightText = formatTextNumber(dims.heightIn, 0);
-  const weightLbs = roundToTwo(dims.weightOz / 16);
+  const weightLbs = roundToTwo(dims.weightLbs);
   const weightText = formatTextNumber(weightLbs, 2);
 
   const lengthFieldName = resolveExistingFieldName(
@@ -194,7 +264,7 @@ function buildShipstationFieldsForBlankTargets(existingFields, dims) {
     ['package', 'height', 'shipstation'],
     'Package Height (ShipStation)'
   );
-  const weightFieldName = resolveExistingFieldName(
+  const weightFieldNames = resolveExistingFieldNames(
     existingFields,
     [
       'Package Weight (ShipStation)',
@@ -210,7 +280,12 @@ function buildShipstationFieldsForBlankTargets(existingFields, dims) {
     { fieldName: lengthFieldName, value: lengthText, mode: 'blank_only' },
     { fieldName: widthFieldName, value: widthText, mode: 'blank_only' },
     { fieldName: heightFieldName, value: heightText, mode: 'blank_only' },
-    { fieldName: weightFieldName, value: weightText, numericValue: weightLbs, mode: 'sync_weight_lbs' }
+    ...weightFieldNames.map(fieldName => ({
+      fieldName,
+      value: weightText,
+      numericValue: weightLbs,
+      mode: 'sync_weight_lbs'
+    }))
   ];
 
   const fields = {};
