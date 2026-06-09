@@ -98,6 +98,11 @@ const LEGACY_PHASE1_HEADERS_WITH_INTERCHANGE_BEFORE_REFERENCE = [
   'ReferenceNumber'
 ];
 
+const OPTIONAL_PHASE1_HEADERS = new Set([
+  'Last Modified Date/Time',
+  'LastDateModified'
+]);
+
 function normalizeString(value) {
   if (value === null || value === undefined) return '';
   return String(value).trim();
@@ -117,6 +122,16 @@ function parseNumeric(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function matchesVariant(cleaned, variant) {
+  if (cleaned.length !== variant.length) return false;
+  for (let i = 0; i < variant.length; i += 1) {
+    if (cleaned[i] !== variant[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 function findHeaderVariant(headers) {
   const variants = [
     EXPECTED_PHASE1_HEADERS,
@@ -129,16 +144,19 @@ function findHeaderVariant(headers) {
   const cleaned = headers.map(h => String(h || '').trim());
 
   for (const variant of variants) {
-    if (cleaned.length !== variant.length) continue;
-    let allMatch = true;
-    for (let i = 0; i < variant.length; i += 1) {
-      if (cleaned[i] !== variant[i]) {
-        allMatch = false;
-        break;
-      }
+    if (matchesVariant(cleaned, variant)) {
+      return cleaned;
     }
-    if (allMatch) {
-      return variant;
+
+    if (
+      cleaned.length === variant.length + 1 &&
+      cleaned[0] === variant[0] &&
+      OPTIONAL_PHASE1_HEADERS.has(cleaned[1])
+    ) {
+      const withoutOptional = [cleaned[0], ...cleaned.slice(2)];
+      if (matchesVariant(withoutOptional, variant)) {
+        return cleaned;
+      }
     }
   }
 
