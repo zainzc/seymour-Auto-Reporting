@@ -2397,10 +2397,12 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
           context,
           allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
           listingTitle: normalizeText(ebayContext.productTitle),
-          listingDescription: '',
+          listingDescription: normalizeText(ebayContext.listingDescription),
           listingConditionsAndOptions: normalizeText(ebayContext.listingConditionsAndOptions),
-          listingItemSpecifics: '',
-          listingItemSpecificsAllCValuesRelevantToItem: ''
+          listingItemSpecifics: normalizeText(ebayContext.listingItemSpecifics),
+          listingItemSpecificsAllCValuesRelevantToItem: normalizeText(
+            ebayContext.listingItemSpecificsAllCValuesRelevantToItem
+          )
         });
       }
     }
@@ -4076,9 +4078,15 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
           resolveListingConditionsAndOptions(listingFields, listingCSpecificMap),
           2000
         ),
-        listingDescription: '',
-        listingItemSpecifics: '',
-        listingItemSpecificsAllCValuesRelevantToItem: ''
+        listingDescription: compactText(resolveListingDescription(listingFields, listingCSpecificMap), 8000),
+        listingItemSpecifics: compactText(
+          normalizePromptContextValue(getFieldValueByName(listingFields, LISTING_ITEM_SPECIFICS_FIELD)),
+          8000
+        ),
+        listingItemSpecificsAllCValuesRelevantToItem: compactText(
+          normalizePromptContextValue(getFieldValueByName(listingFields, LISTING_C_SPECIFICS_FIELD)),
+          8000
+        )
       });
     }
 
@@ -4125,7 +4133,11 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       masterPartsData: candidate.masterPartsData,
       allowedValues: candidate.allowedValues,
       listingTitle: candidate.listingTitle,
-      listingConditionsAndOptions: candidate.listingConditionsAndOptions
+      listingDescription: candidate.listingDescription,
+      listingConditionsAndOptions: candidate.listingConditionsAndOptions,
+      listingItemSpecifics: candidate.listingItemSpecifics,
+      listingItemSpecificsAllCValuesRelevantToItem:
+        candidate.listingItemSpecificsAllCValuesRelevantToItem
     }));
     let lastFirstPassBatchHeartbeatAt = Date.now();
     const firstPassBatch = await aiService.evaluateFieldChatBatch(firstPassPayloads, {
@@ -4212,12 +4224,11 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       const serializedSpecifics = stringifyCSpecificMap(nextCSpecificMap);
       const nextItemSpecificsMap = cloneItemSpecificsMap(currentItemSpecificsMap);
       const itemSpecificsChanged = upsertItemSpecificValue(nextItemSpecificsMap, candidate.fieldName, nextValue);
-      const updateFields = {};
+      const updateFields = {
+        [LISTING_C_SPECIFICS_FIELD]: serializedSpecifics
+      };
       if (itemSpecificsChanged) {
         updateFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
-      }
-      if (Object.keys(updateFields).length === 0) {
-        continue;
       }
       const writeResult = await patchTableRecords(
         airtableService,
@@ -4280,7 +4291,11 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       masterPartsData: candidate.masterPartsData,
       allowedValues: candidate.allowedValues,
       listingTitle: candidate.listingTitle,
-      listingConditionsAndOptions: candidate.listingConditionsAndOptions
+      listingDescription: candidate.listingDescription,
+      listingConditionsAndOptions: candidate.listingConditionsAndOptions,
+      listingItemSpecifics: candidate.listingItemSpecifics,
+      listingItemSpecificsAllCValuesRelevantToItem:
+        candidate.listingItemSpecificsAllCValuesRelevantToItem
     }));
     let webResultsByRequestId = new Map();
     try {
@@ -4369,12 +4384,11 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         const serializedSpecifics = stringifyCSpecificMap(nextCSpecificMap);
         const nextItemSpecificsMap = cloneItemSpecificsMap(currentItemSpecificsMap);
         const itemSpecificsChanged = upsertItemSpecificValue(nextItemSpecificsMap, candidate.fieldName, nextValue);
-        const updateFields = {};
+        const updateFields = {
+          [LISTING_C_SPECIFICS_FIELD]: serializedSpecifics
+        };
         if (itemSpecificsChanged) {
           updateFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
-        }
-        if (Object.keys(updateFields).length === 0) {
-          continue;
         }
         const writeResult = await patchTableRecords(
           airtableService,

@@ -1085,7 +1085,13 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     phase4SharedMasterRows: sharedMasterContext?.masterRows,
     phase4SharedMasterIpnSet: sharedMasterContext?.masterIpnSet
   }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4a', 'Phase 4A')));
-  emitInventoryAutoChainLog(`Post-import automation: Phase 4A completed (updated=${summary.phase4A?.fixedFieldsUpdated || 0})`);
+  emitInventoryAutoChainLog(
+    `Post-import automation: Phase 4A completed ` +
+      `(planned=${summary.phase4A?.fixedFieldsPlanned || 0}, ` +
+      `updated=${summary.phase4A?.fixedFieldsUpdated || 0}, ` +
+      `skippedFilled=${summary.phase4A?.fixedFieldsSkippedAlreadyFilled || 0}, ` +
+      `rowsInScope=${summary.phase4A?.rowsInListingsScope || 0})`
+  );
 
   emitStepProgress('ebaysandbox_post_import_phase4b', 99, 'Running Phase 4B-lite...');
   const bliteDryRun =
@@ -1115,7 +1121,12 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4b', 'Phase 4B-lite')));
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 4B completed ` +
-      `(vmfUpdated=${summary.phase4B?.vmfFieldsUpdated || 0}, vmfTasksCreated=${summary.phase4B?.vmfTasksCreated || 0})`
+      `(vfUpdated=${summary.phase4B?.vfFieldsUpdated || 0}, ` +
+      `vmfUpdated=${summary.phase4B?.vmfFieldsUpdated || 0}, ` +
+      `vmfTasksCreated=${summary.phase4B?.vmfLowConfidenceTasksCreated || 0}, ` +
+      `vmfTasksUpdated=${summary.phase4B?.vmfLowConfidenceTasksUpdated || 0}, ` +
+      `writebackSucceeded=${summary.phase4B?.vmfDeterminedWritebackSucceeded || 0}, ` +
+      `webSearchUsed=${summary.phase4B?.aiWebSearchUsed || 0})`
   );
 
   emitStepProgress('ebaysandbox_post_import_phase4c', 99, 'Running Phase 4C...');
@@ -1143,7 +1154,10 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   }, buildPostImportProgressBridge('ebaysandbox_post_import_phase4c', 'Phase 4C')));
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 4C completed ` +
-      `(mfTasksCreated=${summary.phase4C?.mfTasksCreated || 0}, mfWritebacksCompleted=${summary.phase4C?.mfWritebacksCompleted || 0})`
+      `(mfTasksCreated=${summary.phase4C?.mfTasksCreated || 0}, ` +
+      `mfTasksUpdated=${summary.phase4C?.mfTasksUpdated || 0}, ` +
+      `mfWritebacksCompleted=${summary.phase4C?.mfWritebacksCompleted || 0}, ` +
+      `rowsInScope=${summary.phase4C?.rowsInListingsScope || 0})`
   );
 
   emitStepProgress('ebaysandbox_post_import_phase4d', 99, 'Running Phase 4D...');
