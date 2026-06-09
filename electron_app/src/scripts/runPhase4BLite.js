@@ -3,6 +3,14 @@ const AirtableService = require('../services/airtableService');
 const AirtableSchemaService = require('../services/airtableSchemaService');
 const ClickUpService = require('../services/clickupService');
 const Phase4AiEvaluatorService = require('../services/phase4AiEvaluatorService');
+const {
+  filterSpecificsByAllowlist,
+  loadRulesLogicAllowlist,
+  loadRulesLogicFixedRuleSet,
+  loadRulesLogicRuleSet,
+  normalizeSpecificName,
+  resolveRulesLogicTableName
+} = require('../services/rulesLogicService');
 const { chunkArray } = require('../utils/chunk');
 const ElectronStore = require('electron-store').default;
 const path = require('path');
@@ -17,7 +25,7 @@ const DEFAULT_PHASE4B_COMPLETED_STATUS = 'Completed / Closed';
 const MASTER_LOAD_LOG_EVERY_ROWS = 5000;
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const LEGACY_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
-const DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE = 'Fixed Item Specifics (Global Defaults)';
+const DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE = 'Rule Logic';
 const LISTING_ITEM_SPECIFICS_FIELD = 'Item Specifics';
 const LISTING_C_SPECIFICS_FIELD = 'Item Specifics - All C: values relevant to item';
 const EBAY_LISTING_TITLE_FIELD = 'Title';
@@ -338,6 +346,71 @@ function stringifyCSpecificMap(map = new Map()) {
   }
 }
 
+function mapSpecificsMapToAspectObject(sourceMap = new Map()) {
+  const out = {};
+  for (const [, entry] of sourceMap instanceof Map ? sourceMap.entries() : []) {
+    const name = normalizeSpecificName(normalizeText(entry?.originalKey || ''));
+    if (!name) continue;
+    const values = toCSpecificValueArray(entry?.values || []);
+    if (values.length === 0) continue;
+    out[name] = values;
+  }
+  return out;
+}
+
+function buildItemSpecificsMapFromAspectObject(aspects = {}, existingMap = new Map()) {
+  const out = new Map();
+  for (const [rawName, rawValue] of Object.entries(aspects || {})) {
+    const name = normalizeSpecificName(rawName);
+    if (!name) continue;
+    const key = normalizeFieldKey(name);
+    if (!key) continue;
+    const values = toCSpecificValueArray(rawValue);
+    if (values.length === 0) continue;
+    const existing = existingMap instanceof Map ? existingMap.get(key) : null;
+    out.set(key, {
+      originalKey: normalizeText(existing?.originalKey || name) || name,
+      values
+    });
+  }
+  return out;
+}
+
+function buildCSpecificMapFromAspectObject(aspects = {}, existingMap = new Map()) {
+  const out = new Map();
+  for (const [rawName, rawValue] of Object.entries(aspects || {})) {
+    const name = normalizeSpecificName(rawName);
+    if (!name) continue;
+    const key = normalizeCSpecificKey(name);
+    if (!key) continue;
+    const values = toCSpecificValueArray(rawValue);
+    if (values.length === 0) continue;
+    const existing = existingMap instanceof Map ? existingMap.get(key) : null;
+    out.set(key, {
+      originalKey: normalizeText(existing?.originalKey || ('C:' + name)) || ('C:' + name),
+      values
+    });
+  }
+  return out;
+}
+
+function filterListingSpecificMapsByRulesLogic(itemSpecificsMap = new Map(), cSpecificMap = new Map(), allowlistContext = null) {
+  const filteredItem = filterSpecificsByAllowlist(mapSpecificsMapToAspectObject(itemSpecificsMap), allowlistContext || new Map());
+  const filteredC = filterSpecificsByAllowlist(mapSpecificsMapToAspectObject(cSpecificMap), allowlistContext || new Map());
+  const nextItemSpecificsMap = buildItemSpecificsMapFromAspectObject(filteredItem.filtered, itemSpecificsMap);
+  const nextCSpecificMap = buildCSpecificMapFromAspectObject(filteredC.filtered, cSpecificMap);
+  const itemSpecificsSerialized = stringifyItemSpecificsMap(nextItemSpecificsMap);
+  const cSpecificsSerialized = stringifyCSpecificMap(nextCSpecificMap);
+  return {
+    nextItemSpecificsMap,
+    nextCSpecificMap,
+    itemSpecificsSerialized,
+    cSpecificsSerialized,
+    itemSpecificsChanged: itemSpecificsSerialized !== stringifyItemSpecificsMap(itemSpecificsMap),
+    cSpecificsChanged: cSpecificsSerialized !== stringifyCSpecificMap(cSpecificMap),
+    skippedNames: Array.from(new Set([...(filteredItem.skipped || []), ...(filteredC.skipped || [])]))
+  };
+}
 function resolveListingIpnFromCSpecifics(fields = {}, cSpecificMap = null) {
   const direct = resolveListingIpn(fields);
   if (direct) return direct;
@@ -663,13 +736,13 @@ function parseArgs(argv = []) {
         process.env.PHASE4_RULES_TABLE ||
         process.env.PHASE4_RULES_DRIVE_FILE ||
         process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-        'ebay Item Specific Rules'
+        DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE
     ),
     rulesDriveFile: normalizeText(
       getArg('--rules-drive-file') ||
         process.env.PHASE4_RULES_DRIVE_FILE ||
         process.env.ITEM_SPECIFIC_RULES_DRIVE_FILE ||
-        'ebay Item Specific Rules'
+        'Rule Logic'
     ),
     globalDefaultsTable: normalizeText(
       getArg('--global-defaults-table') ||
@@ -749,54 +822,42 @@ function normalizeGlobalPrefix(prefixValue = '') {
   return match ? match[1] : raw;
 }
 
-async function loadGlobalDefaultsRuleSet(itemService, tableName) {
-  const rows = await fetchAllRecordsWithFallback(itemService, tableName, []);
-  const all = new Map();
-  const byPrefix = new Map();
-  let scannedRows = 0;
-  let loadedRules = 0;
-
-  for (const row of rows) {
-    scannedRows += 1;
-    const fields = row?.fields || {};
-    if (!isGlobalFixedRuleLabel(fields['Rule'])) continue;
-
-    const itemSpecificName = normalizeText(
-      firstNonEmptyField(fields, [
-        'Item Specific (eBay Download Only)',
-        'Item Specific(eBay Download Only)',
-        'Item Specific'
-      ])
-    );
-    const fixedValue = normalizeText(fields['(F) Value']);
-    if (!itemSpecificName || !fixedValue) continue;
-
-    const prefix = normalizeGlobalPrefix(fields['IPN Prefix']);
-    const ruleKey = normalizeCSpecificKey(itemSpecificName);
-    if (!ruleKey) continue;
-
-    const bucket = prefix === 'ALL'
-      ? all
-      : (() => {
-          if (!byPrefix.has(prefix)) byPrefix.set(prefix, new Map());
-          return byPrefix.get(prefix);
-        })();
-
-    if (!bucket.has(ruleKey)) {
-      bucket.set(ruleKey, {
-        fieldName: itemSpecificName,
-        value: fixedValue
-      });
-      loadedRules += 1;
-    }
+class MergedPrefixRuleMap extends Map {
+  constructor(allRules = new Map(), entries = []) {
+    super(entries);
+    this.allRules = allRules instanceof Map ? allRules : new Map();
   }
 
-  return {
-    all,
-    byPrefix,
-    scannedRows,
-    loadedRules
-  };
+  get(prefix) {
+    const merged = new Map(this.allRules);
+    const specific = super.get(prefix);
+    if (specific instanceof Map) {
+      for (const [fieldName, ruleMeta] of specific.entries()) {
+        merged.set(fieldName, ruleMeta);
+      }
+    }
+    return merged.size > 0 ? merged : undefined;
+  }
+}
+
+function buildLegacyFieldRuleMap(ruleEntries = new Map()) {
+  const out = new Map();
+  for (const [, ruleMeta] of ruleEntries instanceof Map ? ruleEntries.entries() : []) {
+    const fieldName = normalizeText(ruleMeta?.fieldName || '');
+    if (!fieldName || out.has(fieldName)) continue;
+    out.set(fieldName, {
+      fieldName,
+      ruleType: normalizeText(ruleMeta?.ruleType || '').toUpperCase(),
+      allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
+      value: normalizeText(ruleMeta?.value || '')
+    });
+  }
+  return out;
+}
+
+async function loadGlobalDefaultsRuleSet(itemService, tableName) {
+  const resolvedTableName = resolveRulesLogicTableName(tableName);
+  return loadRulesLogicFixedRuleSet(itemService, resolvedTableName);
 }
 
 function resolveGlobalDefaultsForPrefix(ruleSet, listingPrefix = '') {
@@ -843,68 +904,23 @@ function getFieldValueByName(fields = {}, candidates = []) {
   return '';
 }
 
-function parseRulesTableRows(rows, allowedRules = ['VF', 'VMF']) {
-  const allowedRuleSet = new Set(
-    (Array.isArray(allowedRules) ? allowedRules : [allowedRules])
-      .map(rule => normalizeText(rule).toUpperCase())
-      .filter(Boolean)
-  );
-  const all = new Map();
-  const byPrefix = new Map();
-  let scannedRows = 0;
-  let loadedRules = 0;
-
-  for (const row of rows || []) {
-    scannedRows += 1;
-    const fields = row?.fields || {};
-    const ruleValue = normalizeText(getFieldValueByName(fields, ['Rule'])).toUpperCase();
-    if (!ruleValue || (allowedRuleSet.size > 0 && !allowedRuleSet.has(ruleValue))) continue;
-
-    const itemSpecificName = normalizeText(
-      getFieldValueByName(fields, ['Item Specific', 'Item Specific (eBay Download Only)', 'Item Specific(eBay Download Only)'])
-    );
-    const valueHint = normalizeText(getFieldValueByName(fields, ['F (Value)', '(F) Value', 'F Value']));
-    if (!itemSpecificName) continue;
-
-    const prefix = normalizeGlobalPrefix(getFieldValueByName(fields, ['IPN Prefix']));
-    const ruleKey = normalizeCSpecificKey(itemSpecificName);
-    if (!ruleKey) continue;
-
-    const bucket =
-      prefix === 'ALL'
-        ? all
-        : (() => {
-            if (!byPrefix.has(prefix)) byPrefix.set(prefix, new Map());
-            return byPrefix.get(prefix);
-          })();
-
-    if (!bucket.has(ruleKey)) {
-      bucket.set(ruleKey, {
-        fieldName: itemSpecificName,
-        ruleType: ruleValue,
-        allowedValues: parseAllowedValues(valueHint),
-        value: valueHint
-      });
-      loadedRules += 1;
-    }
-  }
+async function loadRulesFromAirtable(itemService, tableName, allowedRules = ['VF', 'VMF'], onProgress = () => {}) {
+  const resolvedTableName = resolveRulesLogicTableName(tableName);
+  const ruleSet = await loadRulesLogicRuleSet(itemService, resolvedTableName, allowedRules);
+  const allRules = buildLegacyFieldRuleMap(ruleSet.all);
+  const prefixEntries = Array.from((ruleSet.byPrefix || new Map()).entries()).map(([prefix, entries]) => [
+    prefix,
+    buildLegacyFieldRuleMap(entries)
+  ]);
 
   return {
-    all,
-    byPrefix,
-    scannedRows,
-    loadedRules
+    all: allRules,
+    byPrefix: new MergedPrefixRuleMap(allRules, prefixEntries),
+    scannedRows: Number(ruleSet.scannedRows || 0),
+    loadedRules: Number(ruleSet.loadedRules || 0),
+    rowsLoaded: Number(ruleSet.rowsLoaded || 0),
+    tableName: resolvedTableName
   };
-}
-
-async function loadRulesFromAirtable(itemService, tableName, allowedRules = ['VF', 'VMF'], onProgress = () => {}) {
-  const rows = await fetchAllRecordsWithFallbackAndProgress(
-    itemService,
-    tableName,
-    ['IPN Prefix', 'Item Specific', 'Rule', 'F (Value)'],
-    onProgress
-  );
-  return parseRulesTableRows(rows, allowedRules);
 }
 
 async function fetchAllRecordsWithFallback(service, tableNameOrId, selectFields = []) {
@@ -1831,6 +1847,12 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       process.env.ITEM_SPECIFICS_BASE_ID ||
       stored.itemSpecificsBaseId
   );
+  const rulesLogicBaseId = normalizeText(
+    process.env.AIRTABLE_RULES_LOGIC_BASE_ID ||
+      process.env.RULES_LOGIC_BASE_ID ||
+      stored.rulesLogicBaseId ||
+      masterBaseId
+  );
   const clickupToken = normalizeText(process.env.CLICKUP_TOKEN || stored.clickupToken);
   const clickupListId = normalizeText(
     args.phase4BClickupListId ||
@@ -1840,7 +1862,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
   const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
-  const rulesTableName = normalizeText(args.rulesTableName || args.rulesDriveFile || 'ebay Item Specific Rules');
+  const rulesTableName = resolveRulesLogicTableName(args.rulesTableName, args.rulesDriveFile);
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!masterBaseId) throw new Error('Missing AIRTABLE_BASE_ID (Master base).');
@@ -1864,17 +1886,17 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   let rulesSource = '';
   const rulesService = new AirtableService({
     token: airtableToken,
-    baseId: itemSpecificsBaseId
+    baseId: rulesLogicBaseId
   });
   const parsed = await loadRulesFromAirtable(rulesService, rulesTableName, ['VF', 'VMF']);
   emitProgress(progressCallback, {
     stage: 'phase4blite_load_rules',
     percent: 12,
-    message: `VF/VMF rules loaded from Airtable table '${rulesTableName}'.`
+    message: `VF/VMF rules loaded from Airtable Rules Logic table '${parsed.tableName || rulesTableName}'.`
   });
   rulesByPrefix = parsed.byPrefix;
   logicRowsScanned = parsed.scannedRows;
-  rulesSource = `airtable:${rulesTableName}`;
+  rulesSource = `airtable:${parsed.tableName || rulesTableName}`;
 
   const aiService = new Phase4AiEvaluatorService({
     apiKey: openaiApiKey,
@@ -2104,7 +2126,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     rulesSource,
     authContext: args.authContext,
     rulesTableName,
-    rulesDriveFile: args.rulesTableName || args.rulesDriveFile || '',
+    rulesDriveFile: rulesTableName,
     logicSheetName: args.logicSheetName,
     logicRowsScanned,
     openaiModel,
@@ -2699,10 +2721,17 @@ async function runPhase4BWritebackOnly(options = {}, progressCallback = () => {}
   const stored = loadPhaseConfigFromStore();
 
   const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
+  const masterBaseId = normalizeText(process.env.AIRTABLE_BASE_ID || stored.airtableBaseId);
   const itemSpecificsBaseId = normalizeText(
     process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
       process.env.ITEM_SPECIFICS_BASE_ID ||
       stored.itemSpecificsBaseId
+  );
+  const rulesLogicBaseId = normalizeText(
+    process.env.AIRTABLE_RULES_LOGIC_BASE_ID ||
+      process.env.RULES_LOGIC_BASE_ID ||
+      stored.rulesLogicBaseId ||
+      masterBaseId
   );
   const clickupToken = normalizeText(process.env.CLICKUP_TOKEN || stored.clickupToken);
   const clickupListId = normalizeText(
@@ -2801,10 +2830,17 @@ async function runPhase4CMFWritebackOnly(options = {}, progressCallback = () => 
   const stored = loadPhaseConfigFromStore();
 
   const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
+  const masterBaseId = normalizeText(process.env.AIRTABLE_BASE_ID || stored.airtableBaseId);
   const itemSpecificsBaseId = normalizeText(
     process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
       process.env.ITEM_SPECIFICS_BASE_ID ||
       stored.itemSpecificsBaseId
+  );
+  const rulesLogicBaseId = normalizeText(
+    process.env.AIRTABLE_RULES_LOGIC_BASE_ID ||
+      process.env.RULES_LOGIC_BASE_ID ||
+      stored.rulesLogicBaseId ||
+      masterBaseId
   );
   const clickupToken = normalizeText(process.env.CLICKUP_TOKEN || stored.clickupToken);
   const clickupListId = normalizeText(
@@ -2903,6 +2939,12 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
       process.env.ITEM_SPECIFICS_BASE_ID ||
       stored.itemSpecificsBaseId
   );
+  const rulesLogicBaseId = normalizeText(
+    process.env.AIRTABLE_RULES_LOGIC_BASE_ID ||
+      process.env.RULES_LOGIC_BASE_ID ||
+      stored.rulesLogicBaseId ||
+      masterBaseId
+  );
   const clickupToken = normalizeText(process.env.CLICKUP_TOKEN || stored.clickupToken);
   const clickupListId = normalizeText(
     args.phase4CClickupListId ||
@@ -2927,7 +2969,7 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
       stored.phase4BClickupOpenStatus ||
       'To Do'
   );
-  const rulesTableName = normalizeText(args.rulesTableName || args.rulesDriveFile || 'ebay Item Specific Rules');
+  const rulesTableName = resolveRulesLogicTableName(args.rulesTableName, args.rulesDriveFile, DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE);
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!itemSpecificsBaseId) throw new Error('Missing item specifics base ID (AIRTABLE_ITEM_SPECIFICS_BASE_ID).');
@@ -2943,7 +2985,7 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
 
   const rulesService = new AirtableService({
     token: airtableToken,
-    baseId: itemSpecificsBaseId
+    baseId: rulesLogicBaseId
   });
   const parsed = await loadRulesFromAirtable(rulesService, rulesTableName, ['MF']);
   const rulesByPrefix = parsed.byPrefix;
@@ -3066,7 +3108,7 @@ async function runPhase4CMF(options = {}, progressCallback = () => {}) {
 
   const summary = {
     dryRun: Boolean(args.dryRun),
-    rulesSource: `airtable:${args.rulesTableName || args.rulesDriveFile || ''}`,
+    rulesSource: `airtable:${rulesTableName}`,
     listingsTable: listingsTableName,
     restrictToListingsPrefixIpns: Boolean(args.restrictToListingsPrefixIpns),
     listingsScopePrefixes: listingsScopeByPrefix.size,
@@ -3397,6 +3439,12 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       process.env.ITEM_SPECIFICS_BASE_ID ||
       stored.itemSpecificsBaseId
   );
+  const rulesLogicBaseId = normalizeText(
+    process.env.AIRTABLE_RULES_LOGIC_BASE_ID ||
+      process.env.RULES_LOGIC_BASE_ID ||
+      stored.rulesLogicBaseId ||
+      masterBaseId
+  );
   const masterTable = normalizeText(
     process.env.AIRTABLE_MASTER_TABLE || stored.airtableMasterTable || 'Master Parts Table'
   );
@@ -3409,14 +3457,16 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
   const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
-  const globalDefaultsTable = normalizeText(
+  const globalDefaultsTable = resolveRulesLogicTableName(
     args.phase4GlobalDefaultsTable ||
       args.globalDefaultsTable ||
+      args.rulesTableName ||
+      args.rulesDriveFile ||
       stored.phase4GlobalDefaultsTable ||
       process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
       DEFAULT_PHASE4_GLOBAL_DEFAULTS_TABLE
   );
-  const rulesTableName = normalizeText(args.rulesTableName || args.rulesDriveFile || 'ebay Item Specific Rules');
+  const rulesTableName = resolveRulesLogicTableName(args.rulesTableName, args.rulesDriveFile, globalDefaultsTable);
   const requestedIpnSet = parseIpnSet(args.phase4DTestIpn);
   const requestedIpnLabel = requestedIpnSet.size > 0 ? Array.from(requestedIpnSet).join(', ') : '';
 
@@ -3431,12 +3481,12 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   emitProgress(progressCallback, {
     stage: 'phase4d_load_rules',
     percent: 8,
-    message: 'Loading listing-only rules from Airtable...'
+    message: `Loading listing-only rules from Airtable Rules Logic table (base=${rulesLogicBaseId})...`
   });
 
   const rulesService = new AirtableService({
     token: airtableToken,
-    baseId: itemSpecificsBaseId
+    baseId: rulesLogicBaseId
   });
   const parsed = await loadRulesFromAirtable(rulesService, rulesTableName, ['FSV', 'V1', 'V2', 'VB']);
   const rulesByPrefix = parsed.byPrefix;
@@ -3476,7 +3526,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     percent: 12,
     message: `Loading global defaults from '${globalDefaultsTable}'...`
   });
-  const globalDefaultsRuleSet = await loadGlobalDefaultsRuleSet(itemSpecificsService, globalDefaultsTable);
+  const globalDefaultsRuleSet = await loadGlobalDefaultsRuleSet(rulesService, globalDefaultsTable);
   emitProgress(progressCallback, {
     stage: 'phase4d_load_rules',
     percent: 13,
@@ -3627,7 +3677,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
   const summary = {
     dryRun: Boolean(args.dryRun),
     rulesSource: `airtable:${args.rulesTableName || args.rulesDriveFile || ''}`,
-    rulesTableName: args.rulesTableName || args.rulesDriveFile || '',
+    rulesTableName: rulesTableName,
     rulesDriveFile: args.rulesTableName || args.rulesDriveFile || '',
     listingsTable: effectiveListingsTableName,
     testIpn: requestedIpnLabel,
@@ -3645,6 +3695,9 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     skippedNoPrefixRules: 0,
     masterPartsMissing: 0,
     listingFieldsCreated: 0,
+    rulesLogicSpecificsFilteredRows: 0,
+    rulesLogicSpecificsSkippedFields: 0,
+    rulesLogicSpecificsManualOverrideSkipped: 0,
     globalDefaultsTable,
     globalDefaultsRulesLoaded: Number(globalDefaultsRuleSet.loadedRules || 0),
     globalDefaultsRowsScanned: Number(globalDefaultsRuleSet.scannedRows || 0),
@@ -3692,6 +3745,16 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       summary.sampleSkips.push(message);
     }
   };
+  const rulesLogicAllowlistByPrefix = new Map();
+  const getRulesLogicAllowlistForPrefix = async prefix => {
+    const key = normalizeText(prefix).toUpperCase();
+    if (rulesLogicAllowlistByPrefix.has(key)) {
+      return rulesLogicAllowlistByPrefix.get(key);
+    }
+    const context = await loadRulesLogicAllowlist(rulesService, rulesTableName, prefix);
+    rulesLogicAllowlistByPrefix.set(key, context);
+    return context;
+  };
 
   for (let i = 0; i < listingsRows.length; i += 1) {
     const row = listingsRows[i];
@@ -3717,7 +3780,68 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         continue;
       }
     }
+    if (!ipn) {
+      summary.skippedMissingIpn += 1;
+      const availableFields = Object.keys(listingFields || {})
+        .map(name => normalizeText(name))
+        .filter(Boolean)
+        .slice(0, 12)
+        .join(', ');
+      pushSkipSample(
+        `skip=missing_ipn record='${recordKey || recordId}' fields='${availableFields || 'none'}'`
+      );
+      continue;
+    }
     const listingPrefix = parsePrefixFromIpn(ipn);
+    const itemSpecificsManualOverride =
+      isManualOverrideForField(listingFields, LISTING_ITEM_SPECIFICS_FIELD) ||
+      isManualOverrideForField(listingFields, LISTING_C_SPECIFICS_FIELD);
+    if (itemSpecificsManualOverride) {
+      summary.rulesLogicSpecificsManualOverrideSkipped += 1;
+      pushSkipSample(`skip=rules_logic_manual_override record='${recordKey || recordId}' ipn='${ipn}'`);
+    } else {
+      const allowlistContext = await getRulesLogicAllowlistForPrefix(listingPrefix);
+      const filteredSpecifics = filterListingSpecificMapsByRulesLogic(
+        listingItemSpecificsMap,
+        listingCSpecificMap,
+        allowlistContext
+      );
+      if (filteredSpecifics.skippedNames.length > 0) {
+        summary.rulesLogicSpecificsSkippedFields += filteredSpecifics.skippedNames.length;
+        pushSkipSample(
+          `rules_logic_filtered record='${recordKey || recordId}' ipn='${ipn}' prefix='${listingPrefix || 'ALL'}' skipped='${filteredSpecifics.skippedNames.slice(0, 8).join(', ')}'`
+        );
+      }
+      listingItemSpecificsMap = filteredSpecifics.nextItemSpecificsMap;
+      listingCSpecificMap = filteredSpecifics.nextCSpecificMap;
+      itemSpecificsMapByRecordId.set(recordId, listingItemSpecificsMap);
+      cSpecificMapByRecordId.set(recordId, listingCSpecificMap);
+      listingFields[LISTING_ITEM_SPECIFICS_FIELD] = filteredSpecifics.itemSpecificsSerialized;
+      listingFields[LISTING_C_SPECIFICS_FIELD] = filteredSpecifics.cSpecificsSerialized;
+      if (filteredSpecifics.itemSpecificsChanged || filteredSpecifics.cSpecificsChanged) {
+        summary.rulesLogicSpecificsFilteredRows += 1;
+        if (!args.dryRun) {
+          const updateFields = {
+            [LISTING_ITEM_SPECIFICS_FIELD]: filteredSpecifics.itemSpecificsSerialized,
+            [LISTING_C_SPECIFICS_FIELD]: filteredSpecifics.cSpecificsSerialized
+          };
+          const writeResult = await patchTableRecords(
+            airtableService,
+            effectiveListingsTableId,
+            [{ id: recordId, fields: updateFields }]
+          );
+          if (writeResult.updatedRecords <= 0 || writeResult.errors.length > 0) {
+            if (summary.errors.length < args.sampleLimit) {
+              summary.errors.push(
+                `Rules Logic specifics cleanup failed record='${recordKey || recordId}' ipn='${ipn}'`
+              );
+            }
+          } else {
+            writesDone += 1;
+          }
+        }
+      }
+    }
     const applicableGlobalDefaults = resolveGlobalDefaultsForPrefix(globalDefaultsRuleSet, listingPrefix);
     if (applicableGlobalDefaults.size > 0) {
       const nextCSpecificMap = cloneCSpecificMap(listingCSpecificMap);
@@ -3746,7 +3870,9 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       if (globalFieldsUpdatedInRow > 0) {
         if (!args.dryRun) {
           const serializedSpecifics = stringifyCSpecificMap(nextCSpecificMap);
-          const updateFields = {};
+          const updateFields = {
+            [LISTING_C_SPECIFICS_FIELD]: serializedSpecifics
+          };
           if (itemSpecificsChanged) {
             updateFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
           }
@@ -3783,18 +3909,6 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       }
     }
 
-    if (!ipn) {
-      summary.skippedMissingIpn += 1;
-      const availableFields = Object.keys(listingFields || {})
-        .map(name => normalizeText(name))
-        .filter(Boolean)
-        .slice(0, 12)
-        .join(', ');
-      pushSkipSample(
-        `skip=missing_ipn record='${recordKey || recordId}' fields='${availableFields || 'none'}'`
-      );
-      continue;
-    }
     if (args.restrictToListingsPrefixIpns) {
       const listingPrefix = parsePrefixFromIpn(ipn);
       const prefixScope = listingsScopeByPrefix.get(listingPrefix) || new Set();
@@ -3884,7 +3998,9 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
             itemSpecificsChanged = removeItemSpecificValue(nextItemSpecificsMap, fieldName);
           }
           const serializedSpecifics = stringifyCSpecificMap(nextCSpecificMap);
-          const updateFields = {};
+          const updateFields = {
+            [LISTING_C_SPECIFICS_FIELD]: serializedSpecifics
+          };
           if (itemSpecificsChanged) {
             updateFields[LISTING_ITEM_SPECIFICS_FIELD] = stringifyItemSpecificsMap(nextItemSpecificsMap);
           }
@@ -4365,3 +4481,9 @@ module.exports = {
   runPhase4CMF,
   runPhase4DListing
 };
+
+
+
+
+
+

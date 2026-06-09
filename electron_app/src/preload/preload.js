@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer, shell } = require('electron');
+﻿const { contextBridge, ipcRenderer, shell } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
   saveConfig: (config) => ipcRenderer.invoke('save-db-config', config),
@@ -107,6 +107,7 @@ contextBridge.exposeInMainWorld('phase3API', {
 contextBridge.exposeInMainWorld('phase4API', {
   getConfig: () => ipcRenderer.invoke('phase4:get-config'),
   run: (options) => ipcRenderer.invoke('phase4:run', options),
+  backfillEbayItemSpecificsUrls: (options) => ipcRenderer.invoke('phase4:backfill-ebay-item-specifics-urls', options),
   onProgress: (callback) => ipcRenderer.on('phase4:progress', callback)
 });
 
@@ -210,3 +211,4 @@ contextBridge.exposeInMainWorld('inventoryAutoChainAPI', {
   getLogs: () => ipcRenderer.invoke('inventory-auto-chain-get-logs'),
   clearLogs: () => ipcRenderer.invoke('inventory-auto-chain-clear-logs')
 });
+

@@ -3,6 +3,11 @@ const { loadEnv } = require('../config/loadEnv');
 const AirtableService = require('../services/airtableService');
 const AirtableSchemaService = require('../services/airtableSchemaService');
 const { getInventoryConfig, saveInventoryConfig } = require('../config/configStore');
+const {
+  filterSpecificsByAllowlist,
+  loadRulesLogicAllowlist,
+  resolveRulesLogicTableName
+} = require('../services/rulesLogicService');
 const { asIdentitySet, isPublishedIdentity } = require('../services/phase5IdentityService');
 const { Phase5PublishLogService } = require('../services/phase5PublishLogService');
 const { buildListingPayloadHash, parseCsvList } = require('../services/phase5GovernanceService');
@@ -107,6 +112,36 @@ function normalizeFieldKey(value) {
   return normalizeText(value)
     .toLowerCase()
     .replace(/\s+/g, ' ');
+}
+
+function parseJsonObject(value) {
+  if (!value && value !== 0) return null;
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function parseRulesLogicPrefixFromIpn(value = '') {
+  const text = normalizeText(value);
+  if (!text) return '';
+  const firstSegment = normalizeText(text.split('-')[0]);
+  if (/^\d{3}$/.test(firstSegment)) return firstSegment;
+  const match = text.match(/^(\d{3})/);
+  return match && match[1] ? match[1] : firstSegment;
+}
+
+function buildFilteredSpecificsPayloads(itemSpecificsObject = {}, cSpecificsObject = {}, allowlistContext = null) {
+  const filteredItem = filterSpecificsByAllowlist(itemSpecificsObject || {}, allowlistContext || new Map());
+  const filteredC = filterSpecificsByAllowlist(cSpecificsObject || {}, allowlistContext || new Map());
+  return {
+    itemSpecifics: filteredItem.filtered || {},
+    cSpecifics: filteredC.filtered || {},
+    skippedNames: Array.from(new Set([...(filteredItem.skipped || []), ...(filteredC.skipped || [])]))
+  };
 }
 
 function decodeXmlEntities(value = '') {
@@ -2930,6 +2965,33 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
   const tradingSiteId = normalizeText(
     runOptions.phase5EbaySiteId || process.env.EBAY_TRADING_SITE_ID || EBAY_TRADING_DEFAULT_SITE_ID
   ) || EBAY_TRADING_DEFAULT_SITE_ID;
+  const rulesLogicBaseId = normalizeText(
+    runOptions.rulesLogicBaseId ||
+      process.env.AIRTABLE_RULES_LOGIC_BASE_ID ||
+      process.env.RULES_LOGIC_BASE_ID ||
+      stored.rulesLogicBaseId ||
+      airtableBaseId
+  );
+  const rulesLogicTableName = resolveRulesLogicTableName(
+    runOptions.phase4RulesTableName ||
+      runOptions.phase4RulesDriveFile ||
+      stored.phase4RulesTableName ||
+      stored.phase4RulesDriveFile ||
+      process.env.PHASE4_RULES_TABLE ||
+      'Rule Logic'
+  );
+  const rulesLogicAllowlistByPrefix = new Map();
+  const getRulesLogicAllowlistForPrefix = async prefix => {
+    const key = normalizeText(prefix).toUpperCase();
+    if (rulesLogicAllowlistByPrefix.has(key)) return rulesLogicAllowlistByPrefix.get(key);
+    const context = await loadRulesLogicAllowlist(
+      new AirtableService({ token: airtableToken, baseId: rulesLogicBaseId }),
+      rulesLogicTableName,
+      prefix
+    );
+    rulesLogicAllowlistByPrefix.set(key, context);
+    return context;
+  };
 
   if (writeToAirtable && !airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (writeToAirtable && !airtableBaseId) throw new Error('Missing AIRTABLE_BASE_ID.');
@@ -2980,6 +3042,8 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
     sandboxMirrorFailed: 0,
     fieldsCreated: 0,
     tableCreated: false,
+    rulesLogicSpecificsFilteredRecords: 0,
+    rulesLogicSpecificsSkippedFields: 0,
     errors: []
   };
 
@@ -3348,6 +3412,30 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
       if (!fields) {
         summary.skippedInvalidRows += 1;
         continue;
+      }
+
+      if (writeToAirtable) {
+        const ipn = normalizeText(fields['IPN (Interchange Part Number)'] || extractBatchInterchangeIpn(item));
+        const prefix = parseRulesLogicPrefixFromIpn(ipn);
+        const itemSpecificsObject = parseJsonObject(fields['Item Specifics']) || {};
+        const cSpecificsObject = parseJsonObject(fields['Item Specifics - All C: values relevant to item']) || {};
+        const allowlistContext = await getRulesLogicAllowlistForPrefix(prefix);
+        const filteredPayloads = buildFilteredSpecificsPayloads(
+          itemSpecificsObject,
+          cSpecificsObject,
+          allowlistContext
+        );
+        if (filteredPayloads.skippedNames.length > 0) {
+          summary.rulesLogicSpecificsFilteredRecords += 1;
+          summary.rulesLogicSpecificsSkippedFields += filteredPayloads.skippedNames.length;
+          if (summary.errors.length < 30) {
+            summary.errors.push(
+              `Rules Logic filtered import specifics ipn='${ipn || 'n/a'}' prefix='${prefix || 'ALL'}' skipped='${filteredPayloads.skippedNames.slice(0, 8).join(', ')}'`
+            );
+          }
+        }
+        fields['Item Specifics'] = stringifyJsonObject(filteredPayloads.itemSpecifics);
+        fields['Item Specifics - All C: values relevant to item'] = stringifyJsonObject(filteredPayloads.cSpecifics);
       }
 
       if (isPublishedIdentity(fields, publishedIdentitySet)) {

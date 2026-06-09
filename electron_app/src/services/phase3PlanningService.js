@@ -137,32 +137,105 @@ function buildIpnToDims(skuToDims, rnumToIpn, summary, handlers = {}) {
   return ipnToDims;
 }
 
+function isBlankFieldValue(value) {
+  return (
+    value === null ||
+    value === undefined ||
+    (typeof value === 'string' && !value.trim()) ||
+    (Array.isArray(value) && value.length === 0)
+  );
+}
+
+function normalizeFieldKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function resolveExistingFieldName(existingFields, exactCandidates = [], containsAllKeywords = [], fallback = '') {
+  const fieldNames = Object.keys(existingFields || {});
+  const normalizedToOriginal = new Map(fieldNames.map(name => [normalizeFieldKey(name), name]));
+
+  for (const candidate of exactCandidates) {
+    const match = normalizedToOriginal.get(normalizeFieldKey(candidate));
+    if (match) return match;
+  }
+
+  for (const fieldName of fieldNames) {
+    const normalized = normalizeFieldKey(fieldName);
+    if (containsAllKeywords.every(keyword => normalized.includes(normalizeFieldKey(keyword)))) {
+      return fieldName;
+    }
+  }
+
+  return fallback;
+}
+
 function buildShipstationFieldsForBlankTargets(existingFields, dims) {
   const lengthText = formatTextNumber(dims.lengthIn, 0);
   const widthText = formatTextNumber(dims.widthIn, 0);
   const heightText = formatTextNumber(dims.heightIn, 0);
-  const weightText = formatTextNumber(roundToTwo(dims.weightOz / 16), 2);
+  const weightLbs = roundToTwo(dims.weightOz / 16);
+  const weightText = formatTextNumber(weightLbs, 2);
+
+  const lengthFieldName = resolveExistingFieldName(
+    existingFields,
+    ['Package Length (ShipStation)', 'Package Length (Shipstation)'],
+    ['package', 'length', 'shipstation'],
+    'Package Length (ShipStation)'
+  );
+  const widthFieldName = resolveExistingFieldName(
+    existingFields,
+    ['Package Width (ShipStation)', 'Package Width (Shipstation)'],
+    ['package', 'width', 'shipstation'],
+    'Package Width (ShipStation)'
+  );
+  const heightFieldName = resolveExistingFieldName(
+    existingFields,
+    ['Package Height (ShipStation)', 'Package Height (Shipstation)'],
+    ['package', 'height', 'shipstation'],
+    'Package Height (ShipStation)'
+  );
+  const weightFieldName = resolveExistingFieldName(
+    existingFields,
+    [
+      'Package Weight (ShipStation)',
+      'Package Weight (Shipstation)',
+      'Package Weight (ShipStation) converted to lbs',
+      'Package Weight (Shipstation) converted to lbs'
+    ],
+    ['package', 'weight', 'shipstation'],
+    'Package Weight (ShipStation)'
+  );
 
   const targets = [
-    ['Package Length (ShipStation)', lengthText],
-    ['Package Width (ShipStation)', widthText],
-    ['Package Height (ShipStation)', heightText],
-    ['Package Weight (ShipStation)', weightText]
+    { fieldName: lengthFieldName, value: lengthText, mode: 'blank_only' },
+    { fieldName: widthFieldName, value: widthText, mode: 'blank_only' },
+    { fieldName: heightFieldName, value: heightText, mode: 'blank_only' },
+    { fieldName: weightFieldName, value: weightText, numericValue: weightLbs, mode: 'sync_weight_lbs' }
   ];
 
   const fields = {};
-  for (const [fieldName, value] of targets) {
-    if (!value) continue;
+  for (const target of targets) {
+    const fieldName = String(target?.fieldName || '').trim();
+    const value = target?.value;
+    if (!fieldName || !value) continue;
+
     const current = existingFields ? existingFields[fieldName] : undefined;
-    const isBlank =
-      current === null ||
-      current === undefined ||
-      (typeof current === 'string' && !current.trim()) ||
-      (Array.isArray(current) && current.length === 0);
-    if (isBlank) {
-      fields[fieldName] = value;
+    if (target.mode === 'blank_only') {
+      if (isBlankFieldValue(current)) {
+        fields[fieldName] = value;
+      }
+      continue;
+    }
+
+    if (target.mode === 'sync_weight_lbs') {
+      const currentNumber = parseNumber(current);
+      const isAccurate = Number.isFinite(currentNumber) && Math.abs(currentNumber - target.numericValue) < 0.01;
+      if (!isAccurate) {
+        fields[fieldName] = value;
+      }
     }
   }
+
   return fields;
 }
 
@@ -173,3 +246,4 @@ module.exports = {
   isExcludedIpn,
   normalizeSku
 };
+

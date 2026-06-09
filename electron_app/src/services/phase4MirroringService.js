@@ -1,5 +1,8 @@
 const AirtableService = require('./airtableService');
 const AirtableSchemaService = require('./airtableSchemaService');
+const {
+  populateEbayItemSpecificsUrlsForRecords
+} = require('./masterEbayItemSpecificsUrlService');
 const { readSheetRows } = require('./phase2SheetsService');
 const { chunkArray } = require('../utils/chunk');
 const { getInventoryConfig, saveInventoryConfig } = require('../config/configStore');
@@ -7,6 +10,7 @@ const { getInventoryConfig, saveInventoryConfig } = require('../config/configSto
 const MIRROR_STATE_KEY = 'phase4MirrorState';
 const EXCLUDED_PREFIXES = new Set(['900', '950', '999']);
 const MANUFACTURER_PART_FIELD = 'C:Manufacturer Part Number';
+const MASTER_EBAY_ITEM_SPECIFICS_FIELD = 'eBay Item Specifics';
 const MANUFACTURER_LOCK_FIELD_CANDIDATES = [
   'Rule Type',
   'Population Rule',
@@ -575,6 +579,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
   const selectFields = [
     'IPN',
     'IPN Prefix',
+    MASTER_EBAY_ITEM_SPECIFICS_FIELD,
     'Category Name',
     'Category Definitions Link',
     'Category Definitions',
@@ -694,6 +699,38 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     counts: summary,
     message: `Loaded Master Parts records: ${masterRecords.length}`
   });
+
+  const ebayItemSpecificsUrlSummary = await populateEbayItemSpecificsUrlsForRecords(masterRecords, {
+    airtableToken: config.airtableToken,
+    airtableBaseId: config.masterBaseId,
+    airtableMasterTable: config.masterTable,
+    itemSpecificsBaseId: config.itemSpecificsBaseId,
+    targetFieldName: MASTER_EBAY_ITEM_SPECIFICS_FIELD,
+    sampleLimit: config.sampleLimit,
+    dryRun: config.dryRun,
+    masterService
+  }, progress => {
+    emitProgress(progressCallback, {
+      stage: progress?.stage || 'phase4_master_urls',
+      percent:
+        progress?.stage === 'master_item_specifics_url_completed'
+          ? 38
+          : progress?.stage === 'master_item_specifics_url_write'
+            ? 34
+            : 30,
+      counts: summary,
+      message:
+        normalizeString(progress?.message) ||
+        `Populating Master Parts '${MASTER_EBAY_ITEM_SPECIFICS_FIELD}' URLs...`
+    });
+  });
+  summary.ebayItemSpecificsUrl = ebayItemSpecificsUrlSummary;
+  summary.ebayItemSpecificsUrlsPlanned = Number(ebayItemSpecificsUrlSummary?.recordsPlanned || 0);
+  summary.ebayItemSpecificsUrlsUpdated = Number(ebayItemSpecificsUrlSummary?.recordsUpdated || 0);
+  summary.ebayItemSpecificsUrlsSkippedExisting = Number(ebayItemSpecificsUrlSummary?.skippedAlreadyPopulated || 0);
+  summary.ebayItemSpecificsUrlsSkippedNoMatch = Number(ebayItemSpecificsUrlSummary?.skippedNoMatchingTable || 0);
+  summary.ebayItemSpecificsUrlsSkippedAmbiguous = Number(ebayItemSpecificsUrlSummary?.skippedAmbiguousTable || 0);
+  (ebayItemSpecificsUrlSummary?.errors || []).forEach(message => addError(summary, message));
 
   emitProgress(progressCallback, {
     stage: 'phase4_plan',

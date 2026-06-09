@@ -1070,6 +1070,14 @@
                   >
                     Sync/Rebuild Item Specific Tables
                   </button>
+                  <button
+                    id='run-phase4-backfill-visible-btn'
+                    class='btn btn-secondary'
+                    type='button'
+                    onclick='runPhase4EbayItemSpecificsUrlBackfill()'
+                  >
+                    Backfill eBay Item Specifics URLs
+                  </button>
                 </div>
               </div>
             </div>
@@ -1792,6 +1800,7 @@
     let isRunning = false;
     let isPhase3Running = false;
     let isPhase4Running = false;
+    let isPhase4BackfillRunning = false;
     let isPhase4RulesRunning = false;
     let isPhase4BLiteRunning = false;
     let isPhase4CMFRunning = false;
@@ -2145,6 +2154,15 @@
     const PHASE4_STAGE_LABELS = {
       phase4_route_map: 'Phase 4: Building route map',
       phase4_load_master: 'Phase 4: Loading master records',
+      master_item_specifics_url_backfill_prepare: 'Phase 4 URL Backfill: Preparing',
+      master_item_specifics_url_backfill_load: 'Phase 4 URL Backfill: Loading records',
+      master_item_specifics_url_backfill_scan: 'Phase 4 URL Backfill: Resolving URLs',
+      master_item_specifics_url_backfill_write: 'Phase 4 URL Backfill: Writing updates',
+      master_item_specifics_url_backfill_completed: 'Phase 4 URL Backfill completed',
+      master_item_specifics_url_prepare: 'Phase 4 URL Backfill: Preparing',
+      master_item_specifics_url_scan: 'Phase 4 URL Backfill: Resolving URLs',
+      master_item_specifics_url_write: 'Phase 4 URL Backfill: Writing updates',
+      master_item_specifics_url_completed: 'Phase 4 URL Backfill completed',
       phase4_plan: 'Phase 4: Planning mirror targets',
       phase4_mirror: 'Phase 4: Mirroring IPN rows',
       completed: 'Phase 4 completed',
@@ -2599,6 +2617,7 @@
       const runBtn = document.getElementById('run-sync-btn');
       const runPhase3Btn = document.getElementById('run-phase3-btn');
       const runPhase4Btn = document.getElementById('run-phase4-btn');
+      const runPhase4BackfillVisibleBtn = document.getElementById('run-phase4-backfill-visible-btn');
       const runPhase4RulesBtn = document.getElementById('run-phase4-rules-btn');
       const runPhase4BLiteBtn = document.getElementById('run-phase4blite-btn');
       const runPhase4BLiteUnifiedBtn = document.getElementById('run-phase4blite-unified-btn');
@@ -2627,6 +2646,7 @@
         isRunning ||
         isPhase3Running ||
         isPhase4Running ||
+        isPhase4BackfillRunning ||
         isPhase4RulesRunning ||
         isPhase4BLiteRunning ||
         isPhase4CMFRunning ||
@@ -2665,6 +2685,9 @@
         runPhase3Btn.disabled = busy || !validatePhase3Form(false);
       }
       runPhase4Btn.disabled = busy || !hasItemSpecificBaseId;
+      if (runPhase4BackfillVisibleBtn) {
+        runPhase4BackfillVisibleBtn.disabled = busy || !hasItemSpecificBaseId || !hasAirtableCore;
+      }
       runPhase4RulesBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile;
       if (runPhase4BLiteBtn) {
         runPhase4BLiteBtn.disabled = busy || !hasItemSpecificBaseId || !hasRulesDriveFile || !hasOpenAiKey;
@@ -5064,6 +5087,65 @@
       }
     }
 
+
+    async function runPhase4EbayItemSpecificsUrlBackfill() {
+      if (isPhase4PipelineRunning || isPhase4Running || isPhase4BackfillRunning || isRunning || isPhase3Running || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
+      if (!window.phase4API || typeof window.phase4API.backfillEbayItemSpecificsUrls !== 'function') {
+        showStatus('run-status', 'error', 'Phase 4 backfill API is unavailable.');
+        return;
+      }
+
+      const itemSpecificBaseId = document.getElementById('item-specific-base-id').value.trim();
+      if (!itemSpecificBaseId) {
+        setFieldError('item-specific-base-id', 'Item Specifics Base ID is required.');
+        showStatus('run-status', 'error', 'Enter Item Specifics Base ID before running the eBay Item Specifics URL backfill.');
+        return;
+      }
+
+      isPhase4BackfillRunning = true;
+      updateRunButtonState();
+      setRunState('Running', 'Phase 4 eBay Item Specifics URL backfill is in progress...');
+      showStatus('run-status', 'info', 'Phase 4 eBay Item Specifics URL backfill started...');
+      document.getElementById('phase4-status-text').textContent = 'Automation status: running eBay Item Specifics URL backfill...';
+      logLine('Starting Phase 4 eBay Item Specifics URL backfill.');
+
+      try {
+        const config = collectConfigFromForm();
+        await window.phase2API.saveConfig(config);
+        const result = await window.phase4API.backfillEbayItemSpecificsUrls(config);
+
+        if (!result?.success) {
+          throw new Error(result?.message || 'Phase 4 eBay Item Specifics URL backfill failed.');
+        }
+
+        const summary = result.summary || {};
+        renderPhase4Summary(summary);
+        const mode = summary.dryRun ? 'dry run' : 'write run';
+        const scanned = summary.recordsScanned || 0;
+        const planned = summary.recordsPlanned || 0;
+        const updated = summary.recordsUpdated || 0;
+        const skippedExisting = summary.skippedAlreadyPopulated || 0;
+        setRunState('Success', 'Phase 4 eBay Item Specifics URL backfill completed successfully.');
+        showStatus('run-status', 'success', `Phase 4 eBay Item Specifics URL backfill completed (${mode}). Updated=${updated}, Planned=${planned}, Scanned=${scanned}.`);
+        document.getElementById('phase4-status-text').textContent = `Automation status: URL backfill completed (${mode}). Updated ${updated}, Planned ${planned}, Scanned ${scanned}, Already Populated ${skippedExisting}.`;
+        logLine(`Phase 4 eBay Item Specifics URL backfill completed. Mode=${mode}, Scanned=${scanned}, Processed=${summary.recordsProcessed || 0}, Planned=${planned}, Updated=${updated}, AlreadyPopulated=${skippedExisting}, MissingTable=${summary.skippedNoMatchingTable || 0}, Ambiguous=${summary.skippedAmbiguousTable || 0}`);
+
+        if (Array.isArray(summary.logSamples) && summary.logSamples.length > 0) {
+          summary.logSamples.forEach(sample => logLine(`Phase4 URL backfill sample: ${sample}`));
+        }
+        if (Array.isArray(summary.errors) && summary.errors.length > 0) {
+          summary.errors.forEach(err => logLine(`Phase4 URL backfill: ${err}`, 'error'));
+        }
+      } catch (err) {
+        setRunState('Error', `Phase 4 eBay Item Specifics URL backfill failed: ${err.message}`);
+        showStatus('run-status', 'error', `Phase 4 eBay Item Specifics URL backfill failed: ${err.message}`);
+        document.getElementById('phase4-status-text').textContent = `Automation status: URL backfill failed (${err.message})`;
+        logLine(`Phase 4 eBay Item Specifics URL backfill failed: ${err.message}`, 'error');
+      } finally {
+        isPhase4BackfillRunning = false;
+        updateRunButtonState();
+      }
+    }
     async function runPhase4Pipeline() {
       if (isPhase4PipelineRunning || isRunning || isPhase3Running || isPhase4Running || isPhase4RulesRunning || isPhase4BLiteRunning || isPhase4CMFRunning || isPhase4DRunning || isPhase4CombinedRunning || isItemSpecificSyncRunning || isPhase6Running || isPhase72Running || isPhase74Running) return;
       if (!window.phase4PipelineAPI || typeof window.phase4PipelineAPI.run !== 'function') {
@@ -6159,10 +6241,10 @@
     }
 
     function renderPhase4Summary(summary) {
-      document.getElementById('sum4-scanned').textContent = summary.masterRecordsScanned || 0;
-      document.getElementById('sum4-eligible').textContent = summary.masterRecordsEligible || 0;
-      document.getElementById('sum4-planned').textContent = summary.ipnRowsPlanned || 0;
-      document.getElementById('sum4-created').textContent = summary.ipnRowsCreated || 0;
+      document.getElementById('sum4-scanned').textContent = summary.masterRecordsScanned || summary.recordsScanned || 0;
+      document.getElementById('sum4-eligible').textContent = summary.masterRecordsEligible || summary.recordsProcessed || 0;
+      document.getElementById('sum4-planned').textContent = summary.ipnRowsPlanned || summary.recordsPlanned || 0;
+      document.getElementById('sum4-created').textContent = summary.ipnRowsCreated || summary.recordsUpdated || 0;
     }
 
     function showStatus(id, type, message) {
@@ -6183,5 +6265,10 @@
   </script>
 </body>
 </html>
+
+
+
+
+
 
 

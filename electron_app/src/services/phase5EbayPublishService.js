@@ -386,7 +386,13 @@ function buildPackageWeightAndSize(fields = {}) {
     firstNonEmptyField(fields, ['Package Dimension Unit', 'Dimensions Unit', 'Dimension Unit'])
   );
   const weightValue = parseNumberValue(
-    firstNonEmptyField(fields, ['Package Weight (ShipStation)', 'Package Weight'])
+    firstNonEmptyField(fields, [
+      'Package Weight (ShipStation) converted to lbs',
+      'Package Weight (Shipstation) converted to lbs',
+      'Package Weight (ShipStation)',
+      'Package Weight',
+      'Package Weight converted to lbs'
+    ])
   );
   // Business rule: listing revise payload always uses pounds.
   const weightUnit = 'POUND';
@@ -1205,3 +1211,4 @@ class Phase5EbayPublishService {
 module.exports = {
   Phase5EbayPublishService
 };
+

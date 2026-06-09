@@ -1,6 +1,10 @@
 const { loadEnv } = require('../config/loadEnv');
 const AirtableService = require('../services/airtableService');
 const AirtableSchemaService = require('../services/airtableSchemaService');
+const {
+  loadRulesLogicFixedRuleSet,
+  resolveRulesLogicTableName
+} = require('../services/rulesLogicService');
 const { chunkArray } = require('../utils/chunk');
 const ElectronStore = require('electron-store').default;
 const path = require('path');
@@ -9,7 +13,7 @@ loadEnv();
 
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const LEGACY_EBAY_LISTINGS_TABLE = 'eBay Listings (API) (Mock)';
-const DEFAULT_RULES_TABLE_NAME = 'ebay Item Specific Rules';
+const DEFAULT_RULES_TABLE_NAME = 'Rule Logic';
 const MASTER_LOAD_LOG_EVERY_ROWS = 5000;
 const LISTING_C_SPECIFICS_FIELD = 'Item Specifics - All C: values relevant to item';
 const EBAY_LISTING_IPN_FIELDS = [
@@ -135,7 +139,7 @@ function parseArgs(argv = []) {
     globalDefaultsTable: normalizeText(
       getArg('--global-defaults-table') ||
         process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
-        'Fixed Item Specifics (Global Defaults)'
+        DEFAULT_RULES_TABLE_NAME
     ),
     phase4DListingsTable: normalizeText(getArg('--phase4d-listings-table') || process.env.PHASE4D_LISTINGS_TABLE || ''),
     restrictToListingsPrefixIpns:
@@ -188,40 +192,66 @@ function formatAirtableError(error) {
   return status ? `HTTP ${status}: ${detail}` : String(detail);
 }
 
-function parseRulesTableRows(rows = [], ruleTypes = ['F']) {
-  const allowedRules = new Set(ruleTypes.map(item => normalizeText(item).toUpperCase()).filter(Boolean));
-  const byPrefix = new Map();
-  let scannedRows = 0;
-
-  for (const row of rows) {
-    const fields = row?.fields || {};
-    const prefix = normalizeText(getFieldValueByName(fields, ['IPN Prefix']));
-    const fieldName = normalizeText(getFieldValueByName(fields, ['Item Specific', 'Item Specific (eBay Download Only)']));
-    const rule = normalizeText(getFieldValueByName(fields, ['Rule'])).toUpperCase();
-    const fixedValue = normalizeText(getFieldValueByName(fields, ['F (Value)', '(F) Value', 'F Value', 'Value']));
-    if (!prefix && !fieldName && !rule && !fixedValue) continue;
-
-    scannedRows += 1;
-    if (!allowedRules.has(rule)) continue;
-    if (!/^\d{3}$/.test(prefix)) continue;
-    if (!fieldName.startsWith('C:')) continue;
-    if (!fixedValue) continue;
-
-    if (!byPrefix.has(prefix)) byPrefix.set(prefix, new Map());
-    if (!byPrefix.get(prefix).has(fieldName)) {
-      byPrefix.get(prefix).set(fieldName, fixedValue);
-    }
+class MergedPrefixRuleMap extends Map {
+  constructor(allRules = new Map(), entries = []) {
+    super(entries);
+    this.allRules = allRules instanceof Map ? allRules : new Map();
   }
 
-  return {
-    byPrefix,
-    scannedRows
-  };
+  get(prefix) {
+    const merged = new Map(this.allRules);
+    const specific = super.get(prefix);
+    if (specific instanceof Map) {
+      for (const [fieldName, value] of specific.entries()) {
+        merged.set(fieldName, value);
+      }
+    }
+    return merged.size > 0 ? merged : undefined;
+  }
+}
+
+function buildFixedFieldValueMap(entries = new Map()) {
+  const out = new Map();
+  for (const [, ruleMeta] of entries instanceof Map ? entries.entries() : []) {
+    const fieldName = normalizeText(ruleMeta?.fieldName || '');
+    const fixedValue = normalizeText(ruleMeta?.value || '');
+    if (!fieldName || !fixedValue) continue;
+    if (!out.has(fieldName)) {
+      out.set(fieldName, fixedValue);
+    }
+  }
+  return out;
 }
 
 async function loadRulesFromAirtable(itemService, tableName, ruleTypes = ['F']) {
-  const rows = await fetchAllRecordsWithFallback(itemService, tableName, []);
-  return parseRulesTableRows(rows, ruleTypes);
+  const allowedRules = new Set(
+    (Array.isArray(ruleTypes) ? ruleTypes : [ruleTypes])
+      .map(item => normalizeText(item).toUpperCase())
+      .filter(Boolean)
+  );
+  if (allowedRules.size > 0 && !allowedRules.has('F')) {
+    return {
+      byPrefix: new MergedPrefixRuleMap(),
+      scannedRows: 0,
+      loadedRules: 0,
+      tableName: resolveRulesLogicTableName(tableName)
+    };
+  }
+
+  const resolvedTableName = resolveRulesLogicTableName(tableName);
+  const fixedRuleSet = await loadRulesLogicFixedRuleSet(itemService, resolvedTableName);
+  const allRules = buildFixedFieldValueMap(fixedRuleSet.all);
+  const prefixEntries = Array.from((fixedRuleSet.byPrefix || new Map()).entries()).map(([prefix, rules]) => [
+    prefix,
+    buildFixedFieldValueMap(rules)
+  ]);
+
+  return {
+    byPrefix: new MergedPrefixRuleMap(allRules, prefixEntries),
+    scannedRows: Number(fixedRuleSet.scannedRows || 0),
+    loadedRules: Number(fixedRuleSet.loadedRules || 0),
+    tableName: resolvedTableName
+  };
 }
 
 async function fetchAllRecordsWithFallback(service, tableNameOrId, selectFields = []) {
@@ -375,6 +405,8 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     ...options
   };
   const stored = loadPhaseConfigFromStore();
+  args.rulesTableName = resolveRulesLogicTableName(args.rulesTableName, args.globalDefaultsTable);
+  args.globalDefaultsTable = args.rulesTableName;
 
   const airtableToken = normalizeText(process.env.AIRTABLE_TOKEN || stored.airtableToken);
   const masterBaseId = normalizeText(process.env.AIRTABLE_BASE_ID || stored.airtableBaseId);
@@ -392,6 +424,12 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
       process.env.ITEM_SPECIFICS_BASE_ID ||
       stored.itemSpecificsBaseId
   );
+  const rulesLogicBaseId = normalizeText(
+    process.env.AIRTABLE_RULES_LOGIC_BASE_ID ||
+      process.env.RULES_LOGIC_BASE_ID ||
+      stored.rulesLogicBaseId ||
+      masterBaseId
+  );
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!masterBaseId) throw new Error('Missing AIRTABLE_BASE_ID (Master base).');
@@ -405,17 +443,17 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
   emitProgress(progressCallback, {
     stage: 'phase4rules_load_rules',
     percent: 10,
-    message: 'Loading rules table from Airtable...'
+    message: 'Loading fixed F rules from Airtable Rules Logic table...'
   });
 
   let fixedRulesByPrefix;
   let logicRowsScanned = 0;
   let rulesSource = '';
-  const itemService = new AirtableService({
+  const rulesService = new AirtableService({
     token: airtableToken,
-    baseId: itemSpecificsBaseId
+    baseId: rulesLogicBaseId
   });
-  const { byPrefix, scannedRows } = await loadRulesFromAirtable(itemService, args.rulesTableName, args.ruleTypes);
+  const { byPrefix, scannedRows } = await loadRulesFromAirtable(rulesService, args.rulesTableName, args.ruleTypes);
   fixedRulesByPrefix = byPrefix;
   logicRowsScanned = scannedRows;
   rulesSource = `airtable:${args.rulesTableName}`;
@@ -428,11 +466,15 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
     stage: 'phase4rules_load_rules',
     percent: 12,
     message:
-      `Rules parsed from Airtable table '${args.rulesTableName}': ` +
-      `prefixes=${fixedRulesByPrefix.size}, rows=${logicRowsScanned}, ruleTypes=${args.ruleTypes.join(',')}`
+      `Rules Logic parsed from Airtable table '${args.rulesTableName}': ` +
+      `prefixGroups=${fixedRulesByPrefix.size}, rows=${logicRowsScanned}, ruleTypes=${args.ruleTypes.join(',')}`
   });
 
   const schemaService = new AirtableSchemaService({
+    token: airtableToken,
+    baseId: itemSpecificsBaseId
+  });
+  const itemService = new AirtableService({
     token: airtableToken,
     baseId: itemSpecificsBaseId
   });
@@ -508,13 +550,13 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
   emitProgress(progressCallback, {
     stage: 'phase4rules_scan_tables',
     percent: 18,
-    message: `Loading global defaults from '${args.globalDefaultsTable}'...`
+    message: `Using '${args.rulesTableName}' for both prefix-specific and global 'All' F rules.`
   });
-  const globalDefaultsMap = await loadGlobalDefaultsMap(itemService, args.globalDefaultsTable);
+  const globalDefaultsMap = new Map();
   emitProgress(progressCallback, {
     stage: 'phase4rules_scan_tables',
     percent: 19,
-    message: `Global defaults loaded: entries=${globalDefaultsMap.size}`
+    message: 'Global defaults are already merged from the same Rules Logic table.'
   });
 
   emitProgress(progressCallback, {
@@ -664,7 +706,7 @@ async function runPhase4RulesPopulate(options = {}, progressCallback = () => {})
       summary.tablesSkippedNoLogicPrefix += 1;
       if (summary.skippedNoLogicPrefixSamples.length < args.sampleLimit) {
         summary.skippedNoLogicPrefixSamples.push(
-          `[skip][no_logic_prefix] table='${tableName}' prefix='${prefix}' reason='prefix not found in Logic sheet F rules'`
+          `[skip][no_logic_prefix] table='${tableName}' prefix='${prefix}' reason='prefix not found in Rules Logic F rules'`
         );
       }
       continue;
@@ -892,3 +934,5 @@ if (require.main === module) {
 module.exports = {
   runPhase4RulesPopulate
 };
+
+

@@ -209,7 +209,7 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
     counts: summary,
     message: config.phase3DryRun
       ? 'Planning Airtable updates (dry run)...'
-      : 'Updating Airtable Master Parts (only blank fields)...'
+      : 'Updating Airtable Master Parts (blank dims + corrected ShipStation lbs weight)...'
   });
 
   const airtableService = new AirtableService({
@@ -286,3 +286,4 @@ module.exports = {
   buildPhase3Config,
   PARTSHUNTER_STORE_ID
 };
+
