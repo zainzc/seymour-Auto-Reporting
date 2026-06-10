@@ -63,6 +63,34 @@ function normalizeTextArray(values = [], maxItems = 500) {
   return out;
 }
 
+function cleanupFitmentApplicationText(value) {
+  return normalizeText(value)
+    .replace(/^(?:fits|fit|compatible with|this part fits)\s+/i, '')
+    .replace(/[.;,\s]+$/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function normalizeFitmentRewriteOutput(value) {
+  const normalized = normalizeText(value)
+    .replace(/\r/g, '\n')
+    .replace(/\.\s+(?=\d{4}(?:-\d{4})?\b)/g, ';\n')
+    .replace(/\n+/g, '\n');
+
+  if (!normalized) return '';
+
+  const applications = normalized
+    .split(/(?:\s*;\s*|\n+)/)
+    .map(item => cleanupFitmentApplicationText(item))
+    .filter(Boolean);
+
+  if (applications.length === 0) {
+    return cleanupFitmentApplicationText(normalized);
+  }
+
+  return applications.join('; ');
+}
+
 class Phase4AiEvaluatorService {
   static sharedFieldResolutionCache = new Map();
 
@@ -1017,12 +1045,23 @@ class Phase4AiEvaluatorService {
         {
           role: 'system',
           content:
-            'Return only JSON. Rewrite compatibility text into concise buyer-friendly wording. Preserve meaning, avoid verbatim copying, avoid unsupported assumptions, and do not add marketing fluff.'
+            [
+              'Return only JSON.',
+              'Rewrite compatibility text into concise buyer-friendly wording.',
+              'Preserve meaning, avoid verbatim copying, avoid unsupported assumptions, and do not add marketing fluff.',
+              'Use this exact front-loaded application format for each fitment entry:',
+              '[Year or Year-Range] [Make] [Model] [Part] [Side/Detail].',
+              'If multiple applications exist, separate them with semicolons.',
+              'Do not begin with phrases like Fits or Compatible with.',
+              'Do not use bullets or introductory text.'
+            ].join(' ')
         },
         {
           role: 'user',
           content: JSON.stringify({
             task: 'phase6_fitment_rewrite',
+            formatRequirement:
+              '[Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]',
             expectedOutput: {
               fitment: 'rewritten_text_only'
             },
@@ -1065,7 +1104,9 @@ class Phase4AiEvaluatorService {
       response?.data?.choices?.[0]?.message?.content || ''
     ).trim();
     const parsed = extractJsonObject(content) || {};
-    const fitment = normalizeText(parsed.fitment || parsed.value || parsed.rewrittenFitment || '');
+    const fitment = normalizeFitmentRewriteOutput(
+      parsed.fitment || parsed.value || parsed.rewrittenFitment || ''
+    );
 
     return {
       fitment

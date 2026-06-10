@@ -1059,6 +1059,8 @@
                 <div class="phase4-status-stack">
                   <p class="phase4-status-line" id="phase4-status-text-legacy">Automation status: idle</p>
                   <p class="phase4-status-line" id="phase4-pipeline-status-text">Pipeline status: idle</p>
+                  <p class="phase4-status-line" id="phase4blite-status-text-visible">Phase 4B-lite status: idle</p>
+                  <p class="phase4-status-line" id="phase4d-status-text-visible">Phase 4D status: idle</p>
                   <p class="hint">The pipeline runs all internal Phase 4 steps automatically using these saved inputs.</p>
                 </div>
                 <div class="btn-group" style="margin-top: 10px;">
@@ -5381,6 +5383,8 @@
       setRunState('Running', 'Phase 4B-lite is in progress...');
       showStatus('run-status', 'info', 'Phase 4B-lite started...');
       document.getElementById('phase4blite-status-text').textContent = 'Phase 4B-lite status: running...';
+      const phase4BLiteVisibleStatus = document.getElementById('phase4blite-status-text-visible');
+      if (phase4BLiteVisibleStatus) phase4BLiteVisibleStatus.textContent = 'Phase 4B-lite status: running...';
       logLine('Starting Phase 4B-lite run.');
 
       try {
@@ -5399,6 +5403,10 @@
           );
           document.getElementById('phase4blite-status-text').textContent =
             `Phase 4B-lite status: completed (${mode}). VF Updated ${summary.vfFieldsUpdated || 0}, VMF Updated ${summary.vmfFieldsUpdated || 0}.`;
+          if (phase4BLiteVisibleStatus) {
+            phase4BLiteVisibleStatus.textContent =
+              `Phase 4B-lite status: completed (${mode}). VF Updated ${summary.vfFieldsUpdated || 0}, VMF Updated ${summary.vmfFieldsUpdated || 0}.`;
+          }
           logLine(
             `Phase 4B-lite completed. Mode=${mode}, ClickUpListId=${summary.phase4BClickupListId || ''}, Tables=${summary.tablesScanned || 0}, Rows=${summary.rowsScanned || 0}, RowsWithIPN=${summary.rowsWithIPN || 0}, MissingMaster=${summary.masterPartsMissing || 0}, VFEvaluated=${summary.vfFieldsEvaluated || 0}, VFUpdated=${summary.vfFieldsUpdated || 0}, VFSkippedLowConfidence=${summary.vfFieldsLowConfidenceSkipped || 0}, VFDotSkipped=${summary.vfDotNumberSkipped || 0}, VMFEvaluated=${summary.vmfFieldsEvaluated || 0}, VMFUpdated=${summary.vmfFieldsUpdated || 0}, AIWebSearchUsed=${summary.aiWebSearchUsed || 0}, VMFTasksCreated=${summary.vmfLowConfidenceTasksCreated || 0}, VMFTasksUpdated=${summary.vmfLowConfidenceTasksUpdated || 0}, VMFTasksSkippedExisting=${summary.vmfLowConfidenceTasksSkippedExisting || 0}, VMFDeterminedFound=${summary.vmfDeterminedTasksFound || 0}, VMFWritebackSucceeded=${summary.vmfDeterminedWritebackSucceeded || 0}, VMFWritebackFailed=${summary.vmfDeterminedWritebackFailed || 0}, VMFClosed=${summary.vmfDeterminedTasksClosed || 0}, VMFCloseFailed=${summary.vmfDeterminedTaskCloseFailed || 0}`
           );
@@ -5424,6 +5432,9 @@
         setRunState('Error', `Phase 4B-lite failed: ${err.message}`);
         showStatus('run-status', 'error', `Phase 4B-lite failed: ${err.message}`);
         document.getElementById('phase4blite-status-text').textContent = `Phase 4B-lite status: failed (${err.message})`;
+        if (phase4BLiteVisibleStatus) {
+          phase4BLiteVisibleStatus.textContent = `Phase 4B-lite status: failed (${err.message})`;
+        }
         logLine(`Phase 4B-lite failed: ${err.message}`, 'error');
       } finally {
         isPhase4BLiteRunning = false;
@@ -5536,6 +5547,8 @@
       updateRunButtonState();
       setRunState('Running', 'Phase 4D is in progress...');
       showStatus('run-status', 'info', 'Phase 4D started...');
+      const phase4DVisibleStatus = document.getElementById('phase4d-status-text-visible');
+      if (phase4DVisibleStatus) phase4DVisibleStatus.textContent = 'Phase 4D status: running...';
       document.getElementById('progress-bar').style.width = '1%';
       document.getElementById('progress-text').textContent = 'Phase 4D: Starting...';
       document.getElementById('phase4d-status-text').textContent = 'Phase 4D status: running...';
@@ -5558,6 +5571,10 @@
         );
         document.getElementById('phase4d-status-text').textContent =
           `Phase 4D status: completed (${mode}). Table ${summary.listingsTable || listingsTable}, Writes ${summary.totalWrites || 0}, FsV ${summary.fsvFieldsUpdated || 0}, V1 ${summary.v1FieldsUpdated || 0}, V2 ${summary.v2FieldsUpdated || 0}, VB ${summary.vbFieldsUpdated || 0}.`;
+        if (phase4DVisibleStatus) {
+          phase4DVisibleStatus.textContent =
+            `Phase 4D status: completed (${mode}). Table ${summary.listingsTable || listingsTable}, Writes ${summary.totalWrites || 0}, FsV ${summary.fsvFieldsUpdated || 0}, V1 ${summary.v1FieldsUpdated || 0}, V2 ${summary.v2FieldsUpdated || 0}, VB ${summary.vbFieldsUpdated || 0}.`;
+        }
         logLine(
           `Phase 4D completed. Mode=${mode}, Table=${summary.listingsTable || listingsTable}, TotalWrites=${summary.totalWrites || 0}, ListingsScanned=${summary.listingsScanned || 0}, ListingsEligible=${summary.listingsEligible || 0}, SkippedAlreadyPublished=${summary.skippedAlreadyPublished || 0}, SkippedByTestIpn=${summary.skippedByTestIpn || 0}, SkippedMissingIpn=${summary.skippedMissingIpn || 0}, SkippedOutOfScope=${summary.skippedOutOfScope || 0}, SkippedNoPrefixRules=${summary.skippedNoPrefixRules || 0}, MasterPartsMissing=${summary.masterPartsMissing || 0}, ListingFieldsCreated=${summary.listingFieldsCreated || 0}, FsVEvaluated=${summary.fsvFieldsEvaluated || 0}, FsVUpdated=${summary.fsvFieldsUpdated || 0}, FsVDNA=${summary.fsvDNAWritten || 0}, V1Evaluated=${summary.v1FieldsEvaluated || 0}, V1Updated=${summary.v1FieldsUpdated || 0}, V1DNA=${summary.v1DNAWritten || 0}, V2Evaluated=${summary.v2FieldsEvaluated || 0}, V2Updated=${summary.v2FieldsUpdated || 0}, V2DNA=${summary.v2DNAWritten || 0}, V2DNASkippedOverwrite=${summary.v2DNASkippedOverwrite || 0}, VBEvaluated=${summary.vbFieldsEvaluated || 0}, VBUpdated=${summary.vbFieldsUpdated || 0}, VBLowConfidenceLeftBlank=${summary.vbLowConfidenceLeftBlank || 0}, AIWebSearchUsed=${summary.aiWebSearchUsed || 0}, ManualOverrideSkipped=${summary.manualOverrideSkipped || 0}`
         );
@@ -5585,6 +5602,9 @@
         setRunState('Error', `Phase 4D failed: ${err.message}`);
         showStatus('run-status', 'error', `Phase 4D failed: ${err.message}`);
         document.getElementById('phase4d-status-text').textContent = `Phase 4D status: failed (${err.message})`;
+        if (phase4DVisibleStatus) {
+          phase4DVisibleStatus.textContent = `Phase 4D status: failed (${err.message})`;
+        }
         logLine(`Phase 4D failed: ${err.message}`, 'error');
       } finally {
         isPhase4DRunning = false;
