@@ -1055,10 +1055,10 @@ class Phase4AiEvaluatorService {
               'Return only JSON.',
               'Rewrite compatibility text into concise buyer-friendly wording.',
               'Preserve meaning, avoid verbatim copying, avoid unsupported assumptions, and do not add marketing fluff.',
-              'Use this exact front-loaded application format for each fitment entry:',
-              'Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail].',
-              'If multiple applications exist, separate them with semicolons.',
-              'Every application entry must begin with Fits.',
+              'Use this exact front-loaded format for each fitment entry:',
+              'Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; etc.',
+              'Repeat Fits at the start of every entry.',
+              'Separate multiple applications with semicolons and a single space after each semicolon.',
               'Do not use bullets or introductory text.'
             ].join(' ')
         },
@@ -1067,7 +1067,7 @@ class Phase4AiEvaluatorService {
           content: JSON.stringify({
             task: 'phase6_fitment_rewrite',
             formatRequirement:
-              'Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]',
+              'Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; etc.',
             expectedOutput: {
               fitment: 'rewritten_text_only'
             },
