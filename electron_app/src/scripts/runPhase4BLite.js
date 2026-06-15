@@ -12,6 +12,7 @@ const {
   resolveRulesLogicTableName
 } = require('../services/rulesLogicService');
 const { chunkArray } = require('../utils/chunk');
+const { readSheetRows } = require('../services/phase2SheetsService');
 const ElectronStore = require('electron-store').default;
 const path = require('path');
 const { asIdentitySet, isPublishedIdentity } = require('../services/phase5IdentityService');
@@ -872,6 +873,70 @@ function loadPhaseConfigFromStore() {
   }
 }
 
+function resolveCurrentInventorySheetConfig(stored = {}) {
+  return {
+    sheetId: normalizeText(process.env.GOOGLE_SHEET_ID || stored.sheetId),
+    tabName: normalizeText(process.env.GOOGLE_TAB_NAME || stored.tabName),
+    authContext: 'inventory'
+  };
+}
+
+function buildSheetRowObject(headers = [], row = []) {
+  const out = {};
+  for (let i = 0; i < headers.length; i += 1) {
+    const header = normalizeText(headers[i]);
+    if (!header) continue;
+    out[header] = row[i];
+  }
+  return out;
+}
+
+async function loadCurrentInventoryEvidenceMap(sheetConfig = {}) {
+  const sheetId = normalizeText(sheetConfig.sheetId);
+  const tabName = normalizeText(sheetConfig.tabName);
+  const authContext = normalizeText(sheetConfig.authContext || 'inventory') || 'inventory';
+
+  if (!sheetId || !tabName) {
+    return {
+      map: new Map(),
+      rowsScanned: 0,
+      matchedIpns: 0,
+      available: false,
+      reason: 'missing_sheet_config'
+    };
+  }
+
+  const values = await readSheetRows(sheetId, tabName, authContext);
+  const headers = Array.isArray(values?.[0]) ? values[0] : [];
+  const rows = Array.isArray(values) ? values.slice(1) : [];
+  const out = new Map();
+
+  for (const row of rows) {
+    const rowObject = buildSheetRowObject(headers, Array.isArray(row) ? row : []);
+    const ipn = normalizeText(rowObject.InventoryNumber).toUpperCase();
+    if (!ipn) continue;
+    const conditionsAndOptions = normalizeText(rowObject.ConditionsAndOptions);
+    const referenceNumber = normalizeText(rowObject.ReferenceNumber);
+    const interchangeNumber = normalizeText(rowObject.InterchangeNumber);
+    if (!conditionsAndOptions && !referenceNumber && !interchangeNumber) continue;
+    if (!out.has(ipn)) {
+      out.set(ipn, {
+        conditionsAndOptions,
+        referenceNumber,
+        interchangeNumber
+      });
+    }
+  }
+
+  return {
+    map: out,
+    rowsScanned: rows.length,
+    matchedIpns: out.size,
+    available: true,
+    reason: ''
+  };
+}
+
 function getFieldValueByName(fields = {}, candidates = []) {
   if (!fields || typeof fields !== 'object') return '';
   const names = Array.isArray(candidates) ? candidates : [candidates];
@@ -998,15 +1063,29 @@ function extractMasterPartsContext(fields = {}) {
   return context;
 }
 
-function buildVmfMasterPartsContext(fields = {}) {
-  return {};
+function buildVmfMasterPartsContext(currentInventoryEvidence = null) {
+  const context = {};
+  const conditionsAndOptions = normalizeText(currentInventoryEvidence?.conditionsAndOptions);
+  const referenceNumber = normalizeText(currentInventoryEvidence?.referenceNumber);
+  const interchangeNumber = normalizeText(currentInventoryEvidence?.interchangeNumber);
+
+  if (conditionsAndOptions) {
+    context['Current Inventory - Condition and Options'] = conditionsAndOptions;
+  }
+  if (referenceNumber) {
+    context['Published Reference Number'] = referenceNumber;
+  }
+  if (interchangeNumber) {
+    context['Published Partslink / Interchange Reference'] = interchangeNumber;
+  }
+  return context;
 }
 
 function buildVmfFieldInstructions(fieldName = '') {
   const safeField = normalizeText(fieldName) || 'the target field';
   return [
     `Resolve '${safeField}' for rule type VMF.`,
-    "Use only the exact eBay Listings (API) columns 'Title' and 'Conditions & Options' plus any IPN-linked published reference/OEM/Partslink values explicitly supplied in the request context.",
+    "Use only 'Current Inventory - Condition and Options', 'Published Reference Number', and 'Published Partslink / Interchange Reference' from the Current Inventory sheet plus the exact eBay Listings (API) columns 'Title' and 'Conditions & Options'.",
     'Use the IPN as the primary lookup key when deriving or web-searching the answer.',
     'Ignore any existing value equal to Does not apply.',
     'Do not use listing description, existing listing item specifics, or Item Specifics - All C values as evidence for VMF.',
@@ -1851,6 +1930,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
   const rulesTableName = resolveRulesLogicTableName(args.rulesTableName, args.rulesDriveFile);
+  const currentInventorySheetConfig = resolveCurrentInventorySheetConfig(stored);
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!masterBaseId) throw new Error('Missing AIRTABLE_BASE_ID (Master base).');
@@ -1885,6 +1965,40 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
   rulesByPrefix = parsed.byPrefix;
   logicRowsScanned = parsed.scannedRows;
   rulesSource = `airtable:${parsed.tableName || rulesTableName}`;
+
+  let currentInventoryEvidenceByIpn = new Map();
+  emitProgress(progressCallback, {
+    stage: 'phase4blite_load_master',
+    percent: 16,
+    message: 'Loading Current Inventory sheet context for VMF sourcing...'
+  });
+  try {
+    const currentInventoryResult = await loadCurrentInventoryEvidenceMap(currentInventorySheetConfig);
+    currentInventoryEvidenceByIpn =
+      currentInventoryResult.map instanceof Map ? currentInventoryResult.map : new Map();
+    if (currentInventoryResult.available) {
+      emitProgress(progressCallback, {
+        stage: 'phase4blite_load_master',
+        percent: 17,
+        message:
+          `Current Inventory VMF source ready: sheet='${currentInventorySheetConfig.tabName}', ` +
+          `rows=${currentInventoryResult.rowsScanned}, matchedIpns=${currentInventoryResult.matchedIpns}.`
+      });
+    } else {
+      emitProgress(progressCallback, {
+        stage: 'phase4blite_load_master',
+        percent: 17,
+        message:
+          `Current Inventory VMF source unavailable: ${currentInventoryResult.reason || 'not configured'}.`
+      });
+    }
+  } catch (error) {
+    emitProgress(progressCallback, {
+      stage: 'phase4blite_load_master',
+      percent: 17,
+      message: `Current Inventory VMF source failed: ${error.message}`
+    });
+  }
 
   const aiService = new Phase4AiEvaluatorService({
     apiKey: openaiApiKey,
@@ -2333,7 +2447,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         continue;
       }
       const context = extractMasterPartsContext(master.fields || {});
-      const vmfContext = buildVmfMasterPartsContext(master.fields || {});
+      const vmfContext = buildVmfMasterPartsContext(currentInventoryEvidenceByIpn.get(ipn));
       const ebayContext = (await getEbayContextForIpn(ipn)) || {};
       summary.ebayContextLookupCount = ebayContextStats.lookups;
       summary.ebayContextLookupHits = ebayContextStats.lookupHits;
