@@ -168,6 +168,7 @@ function splitLines(text = '') {
 
 function splitFitmentApplicationsRaw(text = '') {
   const normalized = String(text || '')
+    .replace(/^\s*(?:fits|fit)\s+/i, '')
     .replace(/^compatible with:\s*/i, '')
     .replace(/\r/g, '\n')
     .replace(/<br\s*\/?>/gi, '\n')
@@ -218,7 +219,7 @@ function splitFitmentApplicationsRaw(text = '') {
       .map(part => normalizeText(part))
       .filter(Boolean);
     for (const part of splitBySemicolon) {
-      const compact = normalizeText(part);
+      const compact = normalizeText(part).replace(/^(?:fits|fit)\s+/i, '');
       if (!compact) continue;
       const candidates = splitCommaBeforeYear(compact);
       if (candidates.length > 0) {

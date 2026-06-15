@@ -268,15 +268,6 @@ async function loadRulesLogicRows(airtableService, tableName = '') {
   return rows;
 }
 
-function parseAllowedValues(value = '') {
-  const text = normalizeText(value);
-  if (!text) return [];
-  return text
-    .split(/[\n|;,]+/)
-    .map(item => normalizeText(item))
-    .filter(Boolean);
-}
-
 function normalizeRulesLogicPrefix(prefixValue = '') {
   const raw = normalizeText(prefixValue).toUpperCase();
   if (!raw || raw === 'ALL' || raw === '*') return 'ALL';
@@ -290,16 +281,6 @@ function getRulesLogicItemSpecific(fields = {}) {
       getFieldValueByName(fields, 'Item Specifics') ||
       getFieldValueByName(fields, 'Item Specific (eBay Download Only)') ||
       getFieldValueByName(fields, 'Item Specific(eBay Download Only)')
-  );
-}
-
-function getRulesLogicAllowedValues(fields = {}) {
-  return parseAllowedValues(
-    getFieldValueByName(fields, 'Allowed Values') ||
-      getFieldValueByName(fields, 'Valid Values') ||
-      getFieldValueByName(fields, 'Valid Value') ||
-      getFieldValueByName(fields, 'Format') ||
-      getFieldValueByName(fields, 'Allowed/Valid Values')
   );
 }
 
@@ -364,7 +345,6 @@ function buildRulesLogicRuleSetFromRows(rows = [], allowedRules = []) {
       bucket.set(ruleKey, {
         fieldName,
         ruleType,
-        allowedValues: getRulesLogicAllowedValues(fields),
         prefix
       });
       loadedRules += 1;

@@ -65,7 +65,6 @@ function normalizeTextArray(values = [], maxItems = 500) {
 
 function cleanupFitmentApplicationText(value) {
   return normalizeText(value)
-    .replace(/^(?:fits|fit|compatible with|this part fits)\s+/i, '')
     .replace(/[.;,\s]+$/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
@@ -85,10 +84,11 @@ function normalizeFitmentRewriteOutput(value) {
     .filter(Boolean);
 
   if (applications.length === 0) {
-    return cleanupFitmentApplicationText(normalized);
+    const single = cleanupFitmentApplicationText(normalized);
+    return single ? `Fits ${single}` : '';
   }
 
-  return applications.join('; ');
+  return applications.map(item => `Fits ${item}`).join('; ');
 }
 
 class Phase4AiEvaluatorService {
@@ -1056,9 +1056,9 @@ class Phase4AiEvaluatorService {
               'Rewrite compatibility text into concise buyer-friendly wording.',
               'Preserve meaning, avoid verbatim copying, avoid unsupported assumptions, and do not add marketing fluff.',
               'Use this exact front-loaded application format for each fitment entry:',
-              '[Year or Year-Range] [Make] [Model] [Part] [Side/Detail].',
+              'Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail].',
               'If multiple applications exist, separate them with semicolons.',
-              'Do not begin with phrases like Fits or Compatible with.',
+              'Every application entry must begin with Fits.',
               'Do not use bullets or introductory text.'
             ].join(' ')
         },
@@ -1067,7 +1067,7 @@ class Phase4AiEvaluatorService {
           content: JSON.stringify({
             task: 'phase6_fitment_rewrite',
             formatRequirement:
-              '[Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]',
+              'Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]',
             expectedOutput: {
               fitment: 'rewritten_text_only'
             },

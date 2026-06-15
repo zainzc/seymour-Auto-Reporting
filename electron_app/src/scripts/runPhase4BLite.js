@@ -132,11 +132,8 @@ function firstNonEmptyField(fields = {}, names = []) {
   return '';
 }
 
-function enforceAllowedValue(candidateValue, allowedValues = []) {
-  const value = normalizeText(candidateValue);
-  if (!value) return '';
-  if (!Array.isArray(allowedValues) || allowedValues.length === 0) return value;
-  return allowedValues.includes(value) ? value : '';
+function normalizeEvaluatedValue(candidateValue) {
+  return normalizeText(candidateValue);
 }
 
 function resolveListingIpn(fields = {}) {
@@ -423,14 +420,8 @@ function resolveListingIpnFromCSpecifics(fields = {}, cSpecificMap = null) {
   );
 }
 
-function resolveListingConditionsAndOptions(fields = {}, cSpecificMap = null) {
-  const direct = firstNonEmptyField(fields, [
-    EBAY_LISTING_CONDITIONS_FIELD,
-    'c: partshunter203 ebay MOTORS conditions & options',
-    'Listing Conditions and Options'
-  ]);
-  if (direct) return direct;
-  return getListingCSpecificValue(fields, cSpecificMap, 'c: partshunter203 ebay MOTORS conditions & options');
+function resolveListingConditionsAndOptions(fields = {}) {
+  return normalizeText(getFieldValueByName(fields, EBAY_LISTING_CONDITIONS_FIELD));
 }
 
 function resolveListingDescription(fields = {}, cSpecificMap = null) {
@@ -540,11 +531,7 @@ async function fetchEbayContextByIpn(service, tableName, ipn) {
   const selectFields = [
     ...EBAY_LISTING_LOOKUP_KEY_FIELDS,
     EBAY_LISTING_TITLE_FIELD,
-    'Product Title',
-    'Product Title(New)',
     EBAY_LISTING_CONDITIONS_FIELD,
-    'c: partshunter203 ebay MOTORS conditions & options',
-    'Listing Conditions and Options',
     ...EBAY_LISTING_DESCRIPTION_FIELDS,
     LISTING_ITEM_SPECIFICS_FIELD,
     LISTING_C_SPECIFICS_FIELD
@@ -570,12 +557,7 @@ async function fetchEbayContextByIpn(service, tableName, ipn) {
     for (const row of records) {
       const fields = row?.fields || {};
       const cSpecificMap = parseListingCSpecificMap(fields);
-      const productTitle = firstNonEmptyField(fields, [
-        EBAY_LISTING_TITLE_FIELD,
-        'Product Title',
-        'Product Title(New)',
-        'Listing Title'
-      ]);
+      const productTitle = normalizeText(getFieldValueByName(fields, EBAY_LISTING_TITLE_FIELD));
       const listingConditionsAndOptions = resolveListingConditionsAndOptions(fields, cSpecificMap);
       const listingDescriptionRaw = resolveListingDescription(fields, cSpecificMap);
       const extraction = extractStrictFitmentBlock(listingDescriptionRaw);
@@ -848,7 +830,6 @@ function buildLegacyFieldRuleMap(ruleEntries = new Map()) {
     out.set(fieldName, {
       fieldName,
       ruleType: normalizeText(ruleMeta?.ruleType || '').toUpperCase(),
-      allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
       value: normalizeText(ruleMeta?.value || '')
     });
   }
@@ -969,15 +950,6 @@ async function fetchAllRecordsWithFallbackAndProgress(
   }
 }
 
-function parseAllowedValues(raw) {
-  const text = normalizeText(raw);
-  if (!text) return [];
-  return text
-    .split(/[\n|;,]+/)
-    .map(item => normalizeText(item))
-    .filter(Boolean);
-}
-
 async function processWithConcurrency(items = [], concurrency = 4, handler = async () => {}, onProgress = () => {}) {
   const total = items.length;
   if (total === 0) return;
@@ -1027,55 +999,14 @@ function extractMasterPartsContext(fields = {}) {
 }
 
 function buildVmfMasterPartsContext(fields = {}) {
-  const context = {};
-  const currentInventoryConditions = firstNonEmptyField(fields, [
-    'ConditionsAndOptions',
-    'Conditions & Options',
-    'Condition and Options',
-    'Listing Conditions and Options'
-  ]);
-  const referenceNumber = firstNonEmptyField(fields, ['ReferenceNumber', 'Reference Number']);
-  const manufacturerPartNumber = firstNonEmptyField(fields, [
-    'C:Manufacturer Part Number',
-    'Manufacturer Part Number',
-    'MPN'
-  ]);
-  const oemPartNumber = firstNonEmptyField(fields, [
-    'OE/OEM Part Number',
-    'OEM Part Number',
-    'OEM Number'
-  ]);
-  const partslinkReference = firstNonEmptyField(fields, [
-    'Interchange Part Number',
-    'InterchangeNumber',
-    'Interchange Number',
-    'Part Number'
-  ]);
-
-  if (currentInventoryConditions) {
-    context['Current Inventory - Condition and Options'] = currentInventoryConditions;
-  }
-  if (referenceNumber) {
-    context['Published Reference Number'] = referenceNumber;
-  }
-  if (manufacturerPartNumber) {
-    context['Published Manufacturer Part Number'] = manufacturerPartNumber;
-  }
-  if (oemPartNumber) {
-    context['Published OEM Part Number'] = oemPartNumber;
-  }
-  if (partslinkReference) {
-    context['Published Partslink / Interchange Reference'] = partslinkReference;
-  }
-
-  return context;
+  return {};
 }
 
 function buildVmfFieldInstructions(fieldName = '') {
   const safeField = normalizeText(fieldName) || 'the target field';
   return [
     `Resolve '${safeField}' for rule type VMF.`,
-    'Use only these evidence sources: Current Inventory - Condition and Options, Listing Title, Listing Conditions and Options, and the published reference/OEM/Partslink fields tied to this IPN.',
+    "Use only the exact eBay Listings (API) columns 'Title' and 'Conditions & Options' plus any IPN-linked published reference/OEM/Partslink values explicitly supplied in the request context.",
     'Use the IPN as the primary lookup key when deriving or web-searching the answer.',
     'Ignore any existing value equal to Does not apply.',
     'Do not use listing description, existing listing item specifics, or Item Specifics - All C values as evidence for VMF.',
@@ -2479,7 +2410,6 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
           fieldName,
           ruleType,
           context: ruleType === 'VMF' ? vmfContext : context,
-          allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
           listingTitle: normalizeText(ebayContext.productTitle),
           listingDescription: ruleType === 'VMF' ? '' : normalizeText(ebayContext.listingDescription),
           listingConditionsAndOptions: normalizeText(ebayContext.listingConditionsAndOptions),
@@ -2512,7 +2442,6 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       fieldName: candidate.fieldName,
       ruleType: candidate.ruleType,
       masterPartsData: candidate.context,
-      allowedValues: candidate.allowedValues,
       listingTitle: candidate.listingTitle,
       listingDescription: candidate.listingDescription,
       listingConditionsAndOptions: candidate.listingConditionsAndOptions,
@@ -2567,10 +2496,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         webSearchUsed: false,
         webSources: []
       };
-      const rawCandidateValue = enforceAllowedValue(
-        normalizeText(aiResult?.value),
-        candidate.allowedValues
-      );
+      const rawCandidateValue = normalizeEvaluatedValue(aiResult?.value);
       const candidateValue =
         candidate.ruleType === 'VMF' && isDoesNotApply(rawCandidateValue) ? '' : rawCandidateValue;
       const confidence = Number(aiResult?.confidence || 0);
@@ -2626,7 +2552,6 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         fieldName: candidate.fieldName,
         ruleType: candidate.ruleType,
         masterPartsData: candidate.context,
-        allowedValues: candidate.allowedValues,
         listingTitle: candidate.listingTitle,
         listingDescription: candidate.listingDescription,
         listingConditionsAndOptions: candidate.listingConditionsAndOptions,
@@ -2671,10 +2596,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         const candidate = pendingWebCandidates[p];
         const requestId = webPayloads[p].requestId;
         const webResult = webResultsByRequestId.get(requestId) || null;
-        const rawWebValue = enforceAllowedValue(
-          normalizeText(webResult?.value),
-          candidate.allowedValues
-        );
+        const rawWebValue = normalizeEvaluatedValue(webResult?.value);
         const webValue =
           candidate.ruleType === 'VMF' && isDoesNotApply(rawWebValue) ? '' : rawWebValue;
         const webConfidence = Number(webResult?.confidence || 0);
@@ -3720,8 +3642,6 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
     ...EBAY_LISTING_IPN_FIELDS,
     EBAY_LISTING_TITLE_FIELD,
     EBAY_LISTING_CONDITIONS_FIELD,
-    'c: partshunter203 ebay MOTORS conditions & options',
-    'Listing Conditions and Options',
     ...EBAY_LISTING_DESCRIPTION_FIELDS,
     LISTING_ITEM_SPECIFICS_FIELD,
     LISTING_C_SPECIFICS_FIELD
@@ -4172,9 +4092,8 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         ruleType,
         currentValue: effectiveCurrentValue,
         masterPartsData: buildAiMasterContext(master?.fields || {}),
-        allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
         listingTitle: compactText(
-          firstNonEmptyField(listingFields, [EBAY_LISTING_TITLE_FIELD, 'Product Title', 'Product Title(New)', 'Listing Title']),
+          getFieldValueByName(listingFields, EBAY_LISTING_TITLE_FIELD),
           1000
         ),
         listingConditionsAndOptions: compactText(
@@ -4234,7 +4153,6 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       fieldName: candidate.fieldName,
       ruleType: candidate.ruleType,
       masterPartsData: candidate.masterPartsData,
-      allowedValues: candidate.allowedValues,
       listingTitle: candidate.listingTitle,
       listingDescription: candidate.listingDescription,
       listingConditionsAndOptions: candidate.listingConditionsAndOptions,
@@ -4293,10 +4211,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
         webSources: []
       };
       const confidence = Number(aiResult?.confidence || 0);
-      const candidateValue = enforceAllowedValue(
-        normalizeText(aiResult?.value),
-        candidate.allowedValues
-      );
+      const candidateValue = normalizeEvaluatedValue(aiResult?.value);
       const nextValue = confidence >= LOW_CONFIDENCE_THRESHOLD && candidateValue ? candidateValue : '';
 
       if (!nextValue) {
@@ -4392,7 +4307,6 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       fieldName: candidate.fieldName,
       ruleType: candidate.ruleType,
       masterPartsData: candidate.masterPartsData,
-      allowedValues: candidate.allowedValues,
       listingTitle: candidate.listingTitle,
       listingDescription: candidate.listingDescription,
       listingConditionsAndOptions: candidate.listingConditionsAndOptions,
@@ -4449,10 +4363,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       }
       const requestId = webPayloads[p].requestId;
       const webResult = webResultsByRequestId.get(requestId) || null;
-      const webValue = enforceAllowedValue(
-        normalizeText(webResult?.value),
-        candidate.allowedValues
-      );
+      const webValue = normalizeEvaluatedValue(webResult?.value);
       const webConfidence = Number(webResult?.confidence || 0);
       const nextValue = webConfidence >= LOW_CONFIDENCE_THRESHOLD && webValue ? webValue : '';
 
