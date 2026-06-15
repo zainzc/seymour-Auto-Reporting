@@ -163,7 +163,9 @@ class Phase4AiEvaluatorService {
       listingItemSpecifics: normalizeText(payload.listingItemSpecifics),
       listingItemSpecificsAllCValuesRelevantToItem: normalizeText(
         payload.listingItemSpecificsAllCValuesRelevantToItem
-      )
+      ),
+      fieldInstructions: normalizeText(payload.fieldInstructions),
+      webEvidence: normalizeText(payload.webEvidence)
     };
   }
 
@@ -182,7 +184,9 @@ class Phase4AiEvaluatorService {
       listingItemSpecifics: normalizeText(promptInput.listingItemSpecifics),
       listingItemSpecificsAllCValuesRelevantToItem: normalizeText(
         promptInput.listingItemSpecificsAllCValuesRelevantToItem
-      )
+      ),
+      fieldInstructions: normalizeText(promptInput.fieldInstructions),
+      webEvidence: normalizeText(promptInput.webEvidence)
     });
   }
 
@@ -321,6 +325,7 @@ class Phase4AiEvaluatorService {
                 'Resolve multiple item-specific fields for one automotive part using allowed web_search domains only.',
                 `Allowed domains: ${this.webSearchAllowedDomains.join(', ')}.`,
                 'Do not guess.',
+                'Use only the provided evidence for each field (masterPartsData, listingTitle, listingDescription, listingConditionsAndOptions, listingItemSpecifics, listingItemSpecificsAllCValuesRelevantToItem, fieldInstructions, allowedValues, webEvidence).',
                 'For each requested field, if evidence is weak/missing/conflicting, return empty value and low confidence.',
                 'If allowedValues for a field is non-empty, value must exactly match one allowed value.',
                 'Output exact JSON shape: {"results":[{"fieldName":"string","value":"string_or_empty","confidence":0,"reason":"short_reason"}]}'
@@ -478,6 +483,7 @@ class Phase4AiEvaluatorService {
                   `Allowed domains: ${this.webSearchAllowedDomains.join(', ')}.`,
                   'Do not guess.',
                   'Each result must be evidence-based for that exact item.',
+                  'Use only each item input evidence (masterPartsData, listingTitle, listingDescription, listingConditionsAndOptions, listingItemSpecifics, listingItemSpecificsAllCValuesRelevantToItem, fieldInstructions, allowedValues, webEvidence).',
                   'If evidence is weak/missing/conflicting, return empty value and low confidence.',
                   'If allowedValues is non-empty, value must exactly match one allowed value.',
                   'Output exact JSON shape: {"results":[{"requestId":"string","value":"string_or_empty","confidence":0,"reason":"short_reason"}]}'
@@ -738,7 +744,7 @@ class Phase4AiEvaluatorService {
               'Return only valid JSON.',
               'Resolve multiple item-specific fields for multiple IPNs.',
               'Never guess.',
-              'Use only each item input evidence (masterPartsData, listingTitle, listingDescription, listingConditionsAndOptions, listingItemSpecifics, listingItemSpecificsAllCValuesRelevantToItem, allowedValues).',
+              'Use only each item input evidence (masterPartsData, listingTitle, listingDescription, listingConditionsAndOptions, listingItemSpecifics, listingItemSpecificsAllCValuesRelevantToItem, fieldInstructions, allowedValues, webEvidence).',
               'If evidence is weak or missing, return empty value and low confidence.',
               'If allowedValues is non-empty, value must exactly match one allowed value.',
               'Output exact JSON shape: {"results":[{"requestId":"string","value":"string_or_empty","confidence":0,"reason":"short_reason"}]}'

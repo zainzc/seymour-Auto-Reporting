@@ -1026,6 +1026,63 @@ function extractMasterPartsContext(fields = {}) {
   return context;
 }
 
+function buildVmfMasterPartsContext(fields = {}) {
+  const context = {};
+  const currentInventoryConditions = firstNonEmptyField(fields, [
+    'ConditionsAndOptions',
+    'Conditions & Options',
+    'Condition and Options',
+    'Listing Conditions and Options'
+  ]);
+  const referenceNumber = firstNonEmptyField(fields, ['ReferenceNumber', 'Reference Number']);
+  const manufacturerPartNumber = firstNonEmptyField(fields, [
+    'C:Manufacturer Part Number',
+    'Manufacturer Part Number',
+    'MPN'
+  ]);
+  const oemPartNumber = firstNonEmptyField(fields, [
+    'OE/OEM Part Number',
+    'OEM Part Number',
+    'OEM Number'
+  ]);
+  const partslinkReference = firstNonEmptyField(fields, [
+    'Interchange Part Number',
+    'InterchangeNumber',
+    'Interchange Number',
+    'Part Number'
+  ]);
+
+  if (currentInventoryConditions) {
+    context['Current Inventory - Condition and Options'] = currentInventoryConditions;
+  }
+  if (referenceNumber) {
+    context['Published Reference Number'] = referenceNumber;
+  }
+  if (manufacturerPartNumber) {
+    context['Published Manufacturer Part Number'] = manufacturerPartNumber;
+  }
+  if (oemPartNumber) {
+    context['Published OEM Part Number'] = oemPartNumber;
+  }
+  if (partslinkReference) {
+    context['Published Partslink / Interchange Reference'] = partslinkReference;
+  }
+
+  return context;
+}
+
+function buildVmfFieldInstructions(fieldName = '') {
+  const safeField = normalizeText(fieldName) || 'the target field';
+  return [
+    `Resolve '${safeField}' for rule type VMF.`,
+    'Use only these evidence sources: Current Inventory - Condition and Options, Listing Title, Listing Conditions and Options, and the published reference/OEM/Partslink fields tied to this IPN.',
+    'Use the IPN as the primary lookup key when deriving or web-searching the answer.',
+    'Ignore any existing value equal to Does not apply.',
+    'Do not use listing description, existing listing item specifics, or Item Specifics - All C values as evidence for VMF.',
+    'If the evidence does not support a confident answer, return empty value and low confidence.'
+  ].join(' ');
+}
+
 function summarizeContext(context = {}, maxPairs = 12) {
   const pairs = Object.entries(context).slice(0, maxPairs);
   return pairs.map(([k, v]) => `${k}: ${v}`).join('\n');
@@ -2177,6 +2234,8 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     vmfFieldsEvaluated: 0,
     vmfFieldsUpdated: 0,
     vmfFixedLockedSkipped: 0,
+    vmfPreviouslyFixedReused: 0,
+    vmfDoesNotApplyIgnored: 0,
     vmfLowConfidenceTasksCreated: 0,
     vmfLowConfidenceTasksUpdated: 0,
     vmfLowConfidenceTasksSkippedExisting: 0,
@@ -2230,6 +2289,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
     const table = routableTables[i];
     const tableName = normalizeText(table?.name);
     const tableId = normalizeText(table?.id);
+    const tableFieldNames = tableFieldsByName.get(tableName.toLowerCase()) || new Set();
     const prefix = parsePrefixFromTableName(tableName);
     const prefixListingsScopeIpns = listingsScopeByPrefix.get(prefix) || new Set();
     if (!tableId || !prefix) continue;
@@ -2342,7 +2402,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         continue;
       }
       const context = extractMasterPartsContext(master.fields || {});
-      if (Object.keys(context).length === 0) continue;
+      const vmfContext = buildVmfMasterPartsContext(master.fields || {});
       const ebayContext = (await getEbayContextForIpn(ipn)) || {};
       summary.ebayContextLookupCount = ebayContextStats.lookups;
       summary.ebayContextLookupHits = ebayContextStats.lookupHits;
@@ -2369,20 +2429,44 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
 
       for (const [fieldName, ruleMeta] of applicableRules.entries()) {
         const ruleType = normalizeText(ruleMeta?.ruleType).toUpperCase();
-        if (isFieldFixedLocked(rowFields, fieldName)) {
+        const rawCurrentValue = normalizeText(rowFields[fieldName]);
+        const currentValue =
+          ruleType === 'VMF' && isDoesNotApply(rawCurrentValue) ? '' : rawCurrentValue;
+        const fixedLocked = isFieldFixedLocked(rowFields, fieldName);
+        if (ruleType === 'VMF' && rawCurrentValue && isDoesNotApply(rawCurrentValue)) {
+          summary.vmfDoesNotApplyIgnored += 1;
+        }
+        if (fixedLocked && !(ruleType === 'VMF' && rawCurrentValue && isDoesNotApply(rawCurrentValue))) {
           if (ruleType === 'VF') summary.vfFixedLockedSkipped += 1;
-          if (ruleType === 'VMF') summary.vmfFixedLockedSkipped += 1;
+          if (ruleType === 'VMF') {
+            summary.vmfFixedLockedSkipped += 1;
+            if (currentValue) {
+              summary.vmfPreviouslyFixedReused += 1;
+            }
+          }
           continue;
         }
-        if (!isBlankCell(rowFields[fieldName])) continue;
+        if (ruleType === 'VMF') {
+          if (!isBlankCell(currentValue)) continue;
+        } else if (!isBlankCell(rowFields[fieldName])) {
+          continue;
+        }
 
         if (ruleType === 'VF') {
+          if (Object.keys(context).length === 0) continue;
           if (isDotNumberIpn(ipn)) {
             summary.vfDotNumberSkipped += 1;
             continue;
           }
           summary.vfFieldsEvaluated += 1;
         } else if (ruleType === 'VMF') {
+          if (
+            Object.keys(vmfContext).length === 0 &&
+            !normalizeText(ebayContext.productTitle) &&
+            !normalizeText(ebayContext.listingConditionsAndOptions)
+          ) {
+            continue;
+          }
           summary.vmfFieldsEvaluated += 1;
         } else {
           continue;
@@ -2394,15 +2478,16 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
           tableName,
           fieldName,
           ruleType,
-          context,
+          context: ruleType === 'VMF' ? vmfContext : context,
           allowedValues: Array.isArray(ruleMeta?.allowedValues) ? ruleMeta.allowedValues : [],
           listingTitle: normalizeText(ebayContext.productTitle),
-          listingDescription: normalizeText(ebayContext.listingDescription),
+          listingDescription: ruleType === 'VMF' ? '' : normalizeText(ebayContext.listingDescription),
           listingConditionsAndOptions: normalizeText(ebayContext.listingConditionsAndOptions),
-          listingItemSpecifics: normalizeText(ebayContext.listingItemSpecifics),
+          listingItemSpecifics: ruleType === 'VMF' ? '' : normalizeText(ebayContext.listingItemSpecifics),
           listingItemSpecificsAllCValuesRelevantToItem: normalizeText(
-            ebayContext.listingItemSpecificsAllCValuesRelevantToItem
-          )
+            ruleType === 'VMF' ? '' : ebayContext.listingItemSpecificsAllCValuesRelevantToItem
+          ),
+          fieldInstructions: ruleType === 'VMF' ? buildVmfFieldInstructions(fieldName) : ''
         });
       }
     }
@@ -2433,7 +2518,8 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       listingConditionsAndOptions: candidate.listingConditionsAndOptions,
       listingItemSpecifics: candidate.listingItemSpecifics,
       listingItemSpecificsAllCValuesRelevantToItem:
-        candidate.listingItemSpecificsAllCValuesRelevantToItem
+        candidate.listingItemSpecificsAllCValuesRelevantToItem,
+      fieldInstructions: candidate.fieldInstructions
     }));
 
     const batchFirstPass = await aiService.evaluateFieldChatBatch(evaluationPayloads, {
@@ -2481,16 +2567,24 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         webSearchUsed: false,
         webSources: []
       };
-      const candidateValue = enforceAllowedValue(
+      const rawCandidateValue = enforceAllowedValue(
         normalizeText(aiResult?.value),
         candidate.allowedValues
       );
+      const candidateValue =
+        candidate.ruleType === 'VMF' && isDoesNotApply(rawCandidateValue) ? '' : rawCandidateValue;
       const confidence = Number(aiResult?.confidence || 0);
       const isHighConfidence = candidateValue && confidence >= LOW_CONFIDENCE_THRESHOLD;
 
       if (isHighConfidence) {
         if (!updatesByRecord.has(candidate.rowId)) updatesByRecord.set(candidate.rowId, {});
         updatesByRecord.get(candidate.rowId)[candidate.fieldName] = candidateValue;
+        if (candidate.ruleType === 'VMF') {
+          Object.assign(
+            updatesByRecord.get(candidate.rowId),
+            buildFixedLockFields(tableFieldNames, candidate.fieldName)
+          );
+        }
         const existing = updateRuleCountByRecord.get(candidate.rowId) || { vf: 0, vmf: 0 };
         if (candidate.ruleType === 'VF') existing.vf += 1;
         if (candidate.ruleType === 'VMF') existing.vmf += 1;
@@ -2538,7 +2632,8 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         listingConditionsAndOptions: candidate.listingConditionsAndOptions,
         listingItemSpecifics: candidate.listingItemSpecifics,
         listingItemSpecificsAllCValuesRelevantToItem:
-          candidate.listingItemSpecificsAllCValuesRelevantToItem
+          candidate.listingItemSpecificsAllCValuesRelevantToItem,
+        fieldInstructions: candidate.fieldInstructions
       }));
       let webResultsByRequestId = new Map();
       try {
@@ -2576,10 +2671,12 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         const candidate = pendingWebCandidates[p];
         const requestId = webPayloads[p].requestId;
         const webResult = webResultsByRequestId.get(requestId) || null;
-        const webValue = enforceAllowedValue(
+        const rawWebValue = enforceAllowedValue(
           normalizeText(webResult?.value),
           candidate.allowedValues
         );
+        const webValue =
+          candidate.ruleType === 'VMF' && isDoesNotApply(rawWebValue) ? '' : rawWebValue;
         const webConfidence = Number(webResult?.confidence || 0);
         const useWebValue = webValue && webConfidence >= LOW_CONFIDENCE_THRESHOLD;
 
@@ -2596,6 +2693,12 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
         if (useWebValue) {
           if (!updatesByRecord.has(candidate.rowId)) updatesByRecord.set(candidate.rowId, {});
           updatesByRecord.get(candidate.rowId)[candidate.fieldName] = webValue;
+          if (candidate.ruleType === 'VMF') {
+            Object.assign(
+              updatesByRecord.get(candidate.rowId),
+              buildFixedLockFields(tableFieldNames, candidate.fieldName)
+            );
+          }
           const existing = updateRuleCountByRecord.get(candidate.rowId) || { vf: 0, vmf: 0 };
           if (candidate.ruleType === 'VF') existing.vf += 1;
           if (candidate.ruleType === 'VMF') existing.vmf += 1;

@@ -2593,6 +2593,29 @@ setPostPushHook(async payload => {
     }
 
     try {
+      let lastPhase4ProgressLogAt = 0;
+      let lastPhase4ProgressMessage = '';
+      const phase4ProgressBridge = payload => {
+        const progress = payload && typeof payload === 'object' ? payload : {};
+        const message = normalizeText(progress.message) || 'Running Phase4 mirroring...';
+        const stage = normalizeText(progress.stage).toLowerCase();
+        const percentValue = Number(progress.percent);
+        const percentLabel = Number.isFinite(percentValue) ? ` (${Math.round(percentValue)}%)` : '';
+        const logLine = `Phase4 mirroring auto-run${percentLabel}: ${message}`;
+        const now = Date.now();
+        const terminalStage = stage === 'completed' || stage === 'error';
+        if (
+          !terminalStage &&
+          logLine === lastPhase4ProgressMessage &&
+          now - lastPhase4ProgressLogAt < 2000
+        ) {
+          return;
+        }
+        lastPhase4ProgressLogAt = now;
+        lastPhase4ProgressMessage = logLine;
+        emitInventoryAutoChainLog(logLine, terminalStage && stage === 'error' ? 'error' : 'info');
+      };
+
       const phase4Summary = await runPhase4Mirroring({
         ...stored,
         sheetId: phase4Config.sheetId,
@@ -2603,7 +2626,7 @@ setPostPushHook(async payload => {
         phase4DryRun: phase4Config.dryRun,
         phase4IncrementalEnabled: phase4Config.incrementalEnabled,
         authContext: 'inventory'
-      }, () => {});
+      }, phase4ProgressBridge);
       emitInventoryAutoChainLog(
         `Phase4 mirroring auto-run completed after Phase3 success ` +
           `(masterScanned=${phase4Summary?.masterRecordsScanned || 0}, ` +
