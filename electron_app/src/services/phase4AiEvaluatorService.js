@@ -65,6 +65,7 @@ function normalizeTextArray(values = [], maxItems = 500) {
 
 function cleanupFitmentApplicationText(value) {
   return normalizeText(value)
+    .replace(/^(?:fits\b\s*)+/i, '')
     .replace(/[.;,\s]+$/g, '')
     .replace(/\s{2,}/g, ' ')
     .trim();
@@ -88,7 +89,7 @@ function normalizeFitmentRewriteOutput(value) {
     return single ? `Fits ${single}` : '';
   }
 
-  return applications.map(item => `Fits ${item}`).join('; ');
+  return [`Fits ${applications[0]}`, ...applications.slice(1)].join('; ');
 }
 
 class Phase4AiEvaluatorService {
@@ -1056,8 +1057,10 @@ class Phase4AiEvaluatorService {
               'Rewrite compatibility text into concise buyer-friendly wording.',
               'Preserve meaning, avoid verbatim copying, avoid unsupported assumptions, and do not add marketing fluff.',
               'Use this exact front-loaded format for each fitment entry:',
-              'Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; etc.',
-              'Repeat Fits at the start of every entry.',
+              'Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; etc.',
+              'Each semicolon-separated application should use the year, make, model, part, and detail values supported by the source text.',
+              'Put Fits only at the start of the first entry.',
+              'Do not repeat Fits after semicolons.',
               'Separate multiple applications with semicolons and a single space after each semicolon.',
               'Do not use bullets or introductory text.'
             ].join(' ')
@@ -1067,7 +1070,9 @@ class Phase4AiEvaluatorService {
           content: JSON.stringify({
             task: 'phase6_fitment_rewrite',
             formatRequirement:
-              'Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; etc.',
+              'Fits [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; [Year or Year-Range] [Make] [Model] [Part] [Side/Detail]; etc.',
+            entryVariation:
+              'Each entry should reflect the source text exactly and may or may not share values with other entries.',
             expectedOutput: {
               fitment: 'rewritten_text_only'
             },
