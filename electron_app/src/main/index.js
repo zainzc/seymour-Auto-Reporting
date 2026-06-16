@@ -2635,8 +2635,90 @@ setPostPushHook(async payload => {
           `mpnWritten=${phase4Summary?.manufacturerValuesWritten || 0}, ` +
           `dryRun=${Boolean(phase4Config?.dryRun)})`
       );
-      emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase4 by configuration.');
-      compactInventoryAutoChainLogsToSuccessOnly();
+
+      const phase4RulesDryRun =
+        typeof stored.phase4RulesDryRun === 'boolean'
+          ? stored.phase4RulesDryRun
+          : parseBoolean(stored.phase4RulesDryRun, false);
+      const phase4RulesTableName = String(
+        stored.phase4RulesTableName ||
+          stored.phase4RulesDriveFile ||
+          process.env.PHASE4_RULES_TABLE ||
+          'ebay Item Specific Rules'
+      ).trim();
+      const phase4GlobalDefaultsTable = String(
+        stored.phase4GlobalDefaultsTable ||
+          process.env.PHASE4_GLOBAL_DEFAULTS_TABLE ||
+          'Fixed Item Specifics (Global Defaults)'
+      ).trim();
+      const hasPhase4ARuntimeConfig =
+        Boolean(phase4RulesTableName) &&
+        Boolean(phase4Config?.airtableToken) &&
+        Boolean(phase4Config?.masterBaseId) &&
+        Boolean(phase4Config?.itemSpecificsBaseId);
+
+      if (!hasPhase4ARuntimeConfig) {
+        emitInventoryAutoChainLog('Phase4A skipped after Phase4 mirroring success: missing Phase4A config');
+        emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase4 by configuration.');
+        compactInventoryAutoChainLogsToSuccessOnly();
+        return;
+      }
+
+      emitInventoryAutoChainLog('Running Phase 4A...');
+      try {
+        let lastPhase4AProgressLogAt = 0;
+        let lastPhase4AProgressMessage = '';
+        const phase4AProgressBridge = payload => {
+          const progress = payload && typeof payload === 'object' ? payload : {};
+          const message = normalizeText(progress.message) || 'Running Phase4A...';
+          const stage = normalizeText(progress.stage).toLowerCase();
+          const percentValue = Number(progress.percent);
+          const percentLabel = Number.isFinite(percentValue) ? ` (${Math.round(percentValue)}%)` : '';
+          const logLine = `Phase4A auto-run${percentLabel}: ${message}`;
+          const now = Date.now();
+          const terminalStage = stage === 'completed' || stage === 'error';
+          if (
+            !terminalStage &&
+            logLine === lastPhase4AProgressMessage &&
+            now - lastPhase4AProgressLogAt < 2000
+          ) {
+            return;
+          }
+          lastPhase4AProgressLogAt = now;
+          lastPhase4AProgressMessage = logLine;
+          emitInventoryAutoChainLog(logLine, terminalStage && stage === 'error' ? 'error' : 'info');
+        };
+
+        const phase4ASummary = await runPhase4RulesPopulate({
+          ...stored,
+          dryRun: phase4RulesDryRun,
+          execute: !phase4RulesDryRun,
+          ruleTypes: ['F'],
+          authContext: 'inventory',
+          rulesTableName: phase4RulesTableName,
+          globalDefaultsTable: phase4GlobalDefaultsTable,
+          // Daily inventory runs should not depend on an eBay listings table.
+          restrictToListingsPrefixIpns: false,
+          phase4SharedMasterRows: null,
+          phase4SharedMasterIpnSet: null
+        }, phase4AProgressBridge);
+        emitInventoryAutoChainLog(
+          `Phase4A auto-run completed after Phase4 mirroring ` +
+            `(planned=${phase4ASummary?.fixedFieldsPlanned || 0}, ` +
+            `updated=${phase4ASummary?.fixedFieldsUpdated || 0}, ` +
+            `skippedFilled=${phase4ASummary?.fixedFieldsSkippedAlreadyFilled || 0}, ` +
+            `rowsInScope=${phase4ASummary?.rowsInListingsScope || 0}, ` +
+            `dryRun=${Boolean(phase4RulesDryRun)})`
+        );
+        emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase4A by configuration.');
+        compactInventoryAutoChainLogsToSuccessOnly();
+      } catch (error) {
+        emitInventoryAutoChainLog(
+          `Phase4A failed after Phase4 mirroring: ${error.message}`,
+          'error'
+        );
+        emitInventoryAutoChainLog('Nightly auto-run chain completed at Phase4 by configuration.');
+      }
     } catch (error) {
       emitInventoryAutoChainLog(
         `Phase4 mirroring failed after Phase3 success: ${error.message}`,
