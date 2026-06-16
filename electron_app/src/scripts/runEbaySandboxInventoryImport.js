@@ -2259,6 +2259,24 @@ function alignFieldsToExisting(fields = {}, existingFields = new Set()) {
   return out;
 }
 
+function preserveExistingSpecifics(fields = {}, existingRecordFields = null) {
+  if (!existingRecordFields || typeof existingRecordFields !== 'object') {
+    return fields;
+  }
+  const protectedFieldNames = [
+    'Item Specifics',
+    'Item Specifics - All C: values relevant to item'
+  ];
+  const next = { ...(fields || {}) };
+  for (const fieldName of protectedFieldNames) {
+    const existingValue = normalizeText(existingRecordFields[fieldName]);
+    if (existingValue) {
+      next[fieldName] = existingRecordFields[fieldName];
+    }
+  }
+  return next;
+}
+
 function buildUpsertFields(
   item = {},
   offer = {},
@@ -3378,16 +3396,24 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
     const payloadHashFields = parseCsvList(runOptions.phase5PayloadHashFields || '');
 
     const airtableService = new AirtableService({ token: airtableToken, baseId: airtableBaseId });
+    const existingRecordFieldsByKey = new Map();
     try {
-      if (hasPayloadHashField) {
-        const existingRows = await airtableService.fetchAllRecords(
-          tableName,
-          [PRIMARY_KEY_FIELD, LEGACY_PRIMARY_KEY_FIELD, payloadHashFieldName]
-        );
-        for (const row of existingRows) {
-          const existingFields = row?.fields || {};
-          const recordKey = resolvePrimaryKeyFromFields(existingFields);
-          if (!recordKey) continue;
+      const existingRows = await airtableService.fetchAllRecords(
+        tableName,
+        [
+          PRIMARY_KEY_FIELD,
+          LEGACY_PRIMARY_KEY_FIELD,
+          payloadHashFieldName,
+          'Item Specifics',
+          'Item Specifics - All C: values relevant to item'
+        ].filter(Boolean)
+      );
+      for (const row of existingRows) {
+        const existingFields = row?.fields || {};
+        const recordKey = resolvePrimaryKeyFromFields(existingFields);
+        if (!recordKey) continue;
+        existingRecordFieldsByKey.set(recordKey, existingFields);
+        if (hasPayloadHashField) {
           const hash = normalizeText(existingFields[payloadHashFieldName]);
           if (!hash) continue;
           existingPayloadHashByRecordKey.set(recordKey, hash);
@@ -3436,6 +3462,14 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
         }
         fields['Item Specifics'] = stringifyJsonObject(filteredPayloads.itemSpecifics);
         fields['Item Specifics - All C: values relevant to item'] = stringifyJsonObject(filteredPayloads.cSpecifics);
+        const recordKey = resolvePrimaryKeyFromFields(fields);
+        const preservedSpecifics = preserveExistingSpecifics(
+          fields,
+          existingRecordFieldsByKey.get(recordKey)
+        );
+        fields['Item Specifics'] = preservedSpecifics['Item Specifics'];
+        fields['Item Specifics - All C: values relevant to item'] =
+          preservedSpecifics['Item Specifics - All C: values relevant to item'];
       }
 
       if (isPublishedIdentity(fields, publishedIdentitySet)) {
