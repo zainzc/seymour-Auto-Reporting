@@ -1939,6 +1939,7 @@ async function runEbayListingSync(options = {}, progressCallback = () => {}) {
       totalPages = pageParsed.totalPages;
     }
     lastFetchedPage = pageNumber;
+    const pageItemCount = Array.isArray(pageParsed.listings) ? pageParsed.listings.length : 0;
     const remaining = maxBulkListings > 0 ? Math.max(0, maxBulkListings - bulkListings.length) : pageParsed.listings.length;
     bulkListings.push(...(maxBulkListings > 0 ? pageParsed.listings.slice(0, remaining) : pageParsed.listings));
     emitProgress(progressCallback, {
@@ -1947,10 +1948,18 @@ async function runEbayListingSync(options = {}, progressCallback = () => {}) {
       counts: {
         pageNumber,
         totalPages,
-        bulkCount: bulkListings.length
+        bulkCount: bulkListings.length,
+        pageItemCount,
+        parsedTotalPages: pageParsed.totalPages || 0
       },
-      message: `Fetched page ${pageNumber}/${Math.max(totalPages, 1)} (bulk listings=${bulkListings.length}).`
+      message:
+        `Fetched page ${pageNumber}/${Math.max(totalPages, 1)} ` +
+        `(pageItems=${pageItemCount}, bulk listings=${bulkListings.length}, parsedTotalPages=${pageParsed.totalPages || 0}).`
     });
+    console.log(
+      `[runEbayListingSync] page=${pageNumber} totalPages=${Math.max(totalPages, 1)} ` +
+      `pageItems=${pageItemCount} bulkListings=${bulkListings.length} parsedTotalPages=${pageParsed.totalPages || 0}`
+    );
     if (maxBulkListings > 0 && bulkListings.length >= maxBulkListings) {
       break;
     }
@@ -3135,7 +3144,7 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
             maxBulkListings: fetchLimit,
             getItemConcurrency: Number(runOptions.ebayTradingGetItemConcurrency || runOptions.getItemConcurrency || 3) || 3
           },
-          () => {}
+          progressCallback
         );
         const collections = buildTradingImportCollections(listingSyncResult, fetchLimit);
         inventoryItems = collections.inventoryItems;
@@ -3220,7 +3229,7 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
             maxBulkListings: fetchLimit,
             getItemConcurrency: Number(runOptions.ebayTradingGetItemConcurrency || runOptions.getItemConcurrency || 3) || 3
           },
-          () => {}
+          progressCallback
         );
         const collections = buildTradingImportCollections(listingSyncResult, fetchLimit);
         inventoryItems = collections.inventoryItems;

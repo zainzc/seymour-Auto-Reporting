@@ -81,6 +81,8 @@ class Phase3ShipstationService {
 
     let page = 1;
     const shipments = [];
+    let pagesFetched = 0;
+    let totalPagesAvailable = 0;
 
     while (page <= maxPages) {
       const params = {
@@ -96,16 +98,23 @@ class Phase3ShipstationService {
 
       const data = await this.request('/shipments', params);
       const rows = Array.isArray(data?.shipments) ? data.shipments : [];
+      const reportedPages = Number(data?.pages);
+      if (Number.isFinite(reportedPages) && reportedPages > 0) {
+        totalPagesAvailable = reportedPages;
+      }
       shipments.push(...rows);
+      pagesFetched += 1;
 
       progressCallback({
         page,
         fetchedThisPage: rows.length,
-        shipmentsFetched: shipments.length
+        shipmentsFetched: shipments.length,
+        totalPages: totalPagesAvailable,
+        pageSize: this.pageSize,
+        lookbackDays
       });
 
-      const totalPages = Number(data?.pages);
-      const hasMoreByPageCount = Number.isFinite(totalPages) ? page < totalPages : rows.length > 0;
+      const hasMoreByPageCount = Number.isFinite(reportedPages) ? page < reportedPages : rows.length > 0;
       if (!hasMoreByPageCount || rows.length === 0) {
         break;
       }
@@ -117,7 +126,9 @@ class Phase3ShipstationService {
       shipments,
       lookbackDays,
       pageSize: this.pageSize,
-      pagesFetched: page
+      maxPages,
+      pagesFetched,
+      totalPagesAvailable
     };
   }
 }

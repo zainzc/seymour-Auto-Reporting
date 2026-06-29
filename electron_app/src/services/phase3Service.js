@@ -61,6 +61,14 @@ function buildPhase3Config(options = {}) {
       merged.phase3LookbackDays || process.env.PHASE3_LOOKBACK_DAYS,
       90
     ),
+    phase3PageSize: toPositiveInt(
+      merged.phase3PageSize || process.env.PHASE3_PAGE_SIZE,
+      50
+    ),
+    phase3MaxPages: toPositiveInt(
+      merged.phase3MaxPages || process.env.PHASE3_MAX_PAGES,
+      300
+    ),
     phase3DryRun: parseBoolean(
       typeof merged.phase3DryRun !== 'undefined'
         ? merged.phase3DryRun
@@ -74,6 +82,9 @@ function buildPhase3Config(options = {}) {
 function buildSummary() {
   return {
     shipmentsFetched: 0,
+    shipstationPageSize: 0,
+    shipstationMaxPages: 0,
+    shipstationPagesAvailable: 0,
     skusExtracted: 0,
     skusWithCompleteDims: 0,
     skusMappedToIpn: 0,
@@ -152,22 +163,31 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
     apiSecret: config.shipstationApiSecret,
     storeId: config.shipstationStoreId,
     lookbackDays: config.phase3LookbackDays,
-    pageSize: 50
+    pageSize: config.phase3PageSize,
+    maxPages: config.phase3MaxPages
   });
+  summary.shipstationPageSize = Number(config.phase3PageSize || 0) || 0;
+  summary.shipstationMaxPages = Number(config.phase3MaxPages || 0) || 0;
 
   const shipstationResult = await shipstationService.fetchShipments(
-    { lookbackDays: config.phase3LookbackDays },
+    { lookbackDays: config.phase3LookbackDays, maxPages: config.phase3MaxPages },
     pageUpdate => {
+      summary.shipstationPagesAvailable = Number(pageUpdate?.totalPages || summary.shipstationPagesAvailable || 0) || 0;
       emitProgress(progressCallback, {
         stage: 'stage2_fetch_shipstation',
         percent: 25,
         counts: summary,
-        message: `ShipStation page ${pageUpdate.page}: +${pageUpdate.fetchedThisPage} shipments (${pageUpdate.shipmentsFetched} total)`
+        message:
+          `ShipStation page ${pageUpdate.page}: +${pageUpdate.fetchedThisPage} shipments ` +
+          `(${pageUpdate.shipmentsFetched} total, available pages ${pageUpdate.totalPages || 'unknown'}).`
       });
     }
   );
 
   summary.shipmentsFetched = shipstationResult.shipments.length;
+  summary.shipstationPageSize = Number(shipstationResult.pageSize || config.phase3PageSize || 0) || 0;
+  summary.shipstationMaxPages = Number(shipstationResult.maxPages || config.phase3MaxPages || 0) || 0;
+  summary.shipstationPagesAvailable = Number(shipstationResult.totalPagesAvailable || summary.shipstationPagesAvailable || 0) || 0;
   const skuBuild = buildSkuToDims(shipstationResult.shipments);
   summary.skusExtracted = skuBuild.skusExtracted;
   summary.skusWithCompleteDims = skuBuild.skusWithCompleteDims;

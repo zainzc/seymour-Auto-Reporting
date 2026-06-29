@@ -974,6 +974,20 @@
                 <input id="phase3-lookback-days" type="number" min="1" step="1" value="90">
                 <div id="err-phase3-lookback-days" class="field-error"></div>
               </div>
+              <div class="form-group">
+                <label for="phase3-page-size">ShipStation Page Size</label>
+                <input id="phase3-page-size" type="number" min="1" max="500" step="1" value="50">
+                <div id="err-phase3-page-size" class="field-error"></div>
+              </div>
+              <div class="form-group">
+                <label for="phase3-max-pages">ShipStation Max Pages</label>
+                <input id="phase3-max-pages" type="number" min="1" step="1" value="300">
+                <div id="err-phase3-max-pages" class="field-error"></div>
+              </div>
+              <div class="phase3-readonly-note">The run checks the page count ShipStation reports and shows it in the summary below.</div>
+              <div class="form-group" style="margin-top: 12px;">
+                <button id="run-phase3-btn" class="btn btn-primary" type="button" onclick="runPhase3()">Run Phase 3 Only</button>
+              </div>
               <input id="item-specific-base-id" type="hidden">
                 <div class="phase3-status-line" id="phase3-status-text">ShipStation sync status: automated</div>
               </div>
@@ -1764,6 +1778,9 @@
       </div>
       <div class="summary-grid" style="margin-top: 10px;">
         <div class="summary-item"><div class="summary-label">Phase3 Shipments</div><div class="summary-value" id="sum3-shipments">0</div></div>
+        <div class="summary-item"><div class="summary-label">Phase3 Pages Available</div><div class="summary-value" id="sum3-pages-available">0</div></div>
+        <div class="summary-item"><div class="summary-label">Phase3 Page Size</div><div class="summary-value" id="sum3-page-size">0</div></div>
+        <div class="summary-item"><div class="summary-label">Phase3 Max Pages</div><div class="summary-value" id="sum3-max-pages">0</div></div>
         <div class="summary-item"><div class="summary-label">Phase3 SKUs Mapped</div><div class="summary-value" id="sum3-mapped">0</div></div>
         <div class="summary-item"><div class="summary-label">Phase3 Airtable Updated</div><div class="summary-value" id="sum3-updated">0</div></div>
         <div class="summary-item"><div class="summary-label">Phase3 Skipped Filled</div><div class="summary-value" id="sum3-skipped-filled">0</div></div>
@@ -2562,6 +2579,28 @@
         clearFieldError('phase3-lookback-days');
       }
 
+      const pageSizeRaw = document.getElementById('phase3-page-size').value.trim();
+      const pageSize = Number(pageSizeRaw);
+      if (!Number.isFinite(pageSize) || pageSize <= 0) {
+        valid = false;
+        if (showErrors) {
+          setFieldError('phase3-page-size', 'ShipStation Page Size must be greater than 0.');
+        }
+      } else {
+        clearFieldError('phase3-page-size');
+      }
+
+      const maxPagesRaw = document.getElementById('phase3-max-pages').value.trim();
+      const maxPages = Number(maxPagesRaw);
+      if (!Number.isFinite(maxPages) || maxPages <= 0) {
+        valid = false;
+        if (showErrors) {
+          setFieldError('phase3-max-pages', 'ShipStation Max Pages must be greater than 0.');
+        }
+      } else {
+        clearFieldError('phase3-max-pages');
+      }
+
       return valid;
     }
 
@@ -3260,6 +3299,8 @@
         document.getElementById('shipstation-api-secret').value = config.shipstationApiSecret || '';
         document.getElementById('shipstation-store-id').value = String(config.shipstationStoreId || DEFAULT_PHASE3_STORE_ID);
         document.getElementById('phase3-lookback-days').value = String(config.phase3LookbackDays || DEFAULT_PHASE3_LOOKBACK_DAYS);
+        document.getElementById('phase3-page-size').value = String(config.phase3PageSize || 50);
+        document.getElementById('phase3-max-pages').value = String(config.phase3MaxPages || 300);
         const phase3DryRunEl = document.getElementById('phase3-dry-run');
         if (phase3DryRunEl) {
           phase3DryRunEl.value = 'false';
@@ -4053,6 +4094,8 @@
         shipstationApiSecret: document.getElementById('shipstation-api-secret').value.trim(),
         shipstationStoreId: DEFAULT_PHASE3_STORE_ID,
         phase3LookbackDays: Number(document.getElementById('phase3-lookback-days').value.trim()) || DEFAULT_PHASE3_LOOKBACK_DAYS,
+        phase3PageSize: Number(document.getElementById('phase3-page-size').value.trim()) || 50,
+        phase3MaxPages: Number(document.getElementById('phase3-max-pages').value.trim()) || 300,
         phase3DryRun: false,
         itemSpecificsBaseId: document.getElementById('item-specific-base-id').value.trim(),
         phase4DryRun: false,
@@ -6263,6 +6306,9 @@
 
     function renderPhase3Summary(summary) {
       document.getElementById('sum3-shipments').textContent = summary.shipmentsFetched || 0;
+      document.getElementById('sum3-pages-available').textContent = summary.shipstationPagesAvailable || 0;
+      document.getElementById('sum3-page-size').textContent = summary.shipstationPageSize || 0;
+      document.getElementById('sum3-max-pages').textContent = summary.shipstationMaxPages || 0;
       document.getElementById('sum3-mapped').textContent = summary.skusMappedToIpn || 0;
       document.getElementById('sum3-updated').textContent = summary.ipnsUpdated || 0;
       document.getElementById('sum3-skipped-filled').textContent = summary.ipnsSkippedAlreadyFilled || 0;

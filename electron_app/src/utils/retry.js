@@ -19,7 +19,17 @@ function isTransientError(error) {
   if (status === 429) return true;
   if (status >= 500 && status <= 599) return true;
 
-  return Boolean(error?.code === 'ECONNABORTED' || error?.code === 'ETIMEDOUT');
+  const code = String(error?.code || '').trim().toUpperCase();
+  const message = String(error?.message || '').toLowerCase();
+  return Boolean(
+    code === 'ECONNABORTED' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ECONNRESET' ||
+    code === 'EPIPE' ||
+    code === 'UND_ERR_ABORTED' ||
+    (code === 'ERR_BAD_RESPONSE' && message.includes('stream has been aborted')) ||
+    message.includes('stream has been aborted')
+  );
 }
 
 async function retryWithBackoff(fn, options = {}) {
@@ -57,4 +67,3 @@ module.exports = {
   isTransientError,
   retryWithBackoff
 };
-

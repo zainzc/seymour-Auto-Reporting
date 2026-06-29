@@ -3004,6 +3004,8 @@ ipcMain.handle('phase2-get-config', async () => {
     shipstationApiSecret: stored.shipstationApiSecret || phase3Config.shipstationApiSecret || '',
     shipstationStoreId: Number(phase3Config.shipstationStoreId || PARTSHUNTER_STORE_ID),
     phase3LookbackDays: Number(phase3Config.phase3LookbackDays || 90),
+    phase3PageSize: Number(phase3Config.phase3PageSize || 50),
+    phase3MaxPages: Number(phase3Config.phase3MaxPages || 300),
     phase3DryRun: Boolean(phase3Config.phase3DryRun),
     itemSpecificsBaseId: stored.itemSpecificsBaseId || '',
     phase4RulesDriveFile:
@@ -3397,6 +3399,8 @@ ipcMain.handle('phase3:get-config', async () => {
     shipstationApiSecret: stored.shipstationApiSecret || merged.shipstationApiSecret || '',
     shipstationStoreId: Number(merged.shipstationStoreId || PARTSHUNTER_STORE_ID),
     phase3LookbackDays: Number(merged.phase3LookbackDays || 90),
+    phase3PageSize: Number(merged.phase3PageSize || 50),
+    phase3MaxPages: Number(merged.phase3MaxPages || 300),
     phase3DryRun: Boolean(merged.phase3DryRun)
   };
 });
