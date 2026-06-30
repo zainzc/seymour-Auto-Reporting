@@ -1,8 +1,10 @@
 const AirtableService = require('./airtableService');
+const path = require('path');
 const { readSheetRows } = require('./phase2SheetsService');
 const { getInventoryConfig } = require('../config/configStore');
 const { buildPowerlinkMapping } = require('./phase3PowerlinkMappingService');
 const Phase3ShipstationService = require('./phase3ShipstationService');
+const { exportShipstationDebugWorkbook } = require('./phase3ShipstationDebugExportService');
 const {
   buildSkuToDims,
   buildIpnToDims,
@@ -183,6 +185,32 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
       });
     }
   );
+
+  try {
+    emitProgress(progressCallback, {
+      stage: 'stage2_fetch_shipstation',
+      percent: 38,
+      counts: summary,
+      message: 'Exporting ShipStation debug workbook for manual review...'
+    });
+    const debugExport = await exportShipstationDebugWorkbook({
+      shipments: shipstationResult.shipments,
+      rnumToIpn: mapping.rnumToIpn,
+      outputPath: path.resolve(__dirname, '..', '..', 'dev-output', 'phase3-shipstation-debug.xlsx')
+    });
+    emitProgress(progressCallback, {
+      stage: 'stage2_fetch_shipstation',
+      percent: 40,
+      counts: summary,
+      message: `ShipStation debug workbook saved: ${debugExport.filePath} (${debugExport.rawRows} raw rows, ${debugExport.uniqueSkus} unique SKUs).`
+    });
+    console.log(
+      `Phase3 debug export saved to ${debugExport.filePath} ` +
+        `(${debugExport.rawRows} raw rows, ${debugExport.uniqueSkus} unique SKUs).`
+    );
+  } catch (error) {
+    summary.errors.push(`ShipStation debug export failed: ${error.message}`);
+  }
 
   summary.shipmentsFetched = shipstationResult.shipments.length;
   summary.shipstationPageSize = Number(shipstationResult.pageSize || config.phase3PageSize || 0) || 0;
