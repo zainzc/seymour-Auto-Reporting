@@ -1,4 +1,5 @@
 const axios = require('axios');
+const crypto = require('crypto');
 const { retryWithBackoff } = require('../utils/retry');
 
 function normalizeText(value) {
@@ -27,6 +28,14 @@ function extractJsonObject(text) {
   const match = String(text || '').match(/\{[\s\S]*\}/);
   if (!match) return null;
   return tryParseJson(match[0]);
+}
+
+function readParsedText(parsed = {}, keys = []) {
+  for (const key of keys) {
+    const value = normalizeText(parsed?.[key]);
+    if (value) return value;
+  }
+  return '';
 }
 
 function isPromptCacheUnsupported(error) {
@@ -1203,6 +1212,25 @@ class Phase4AiEvaluatorService {
       '- Unique against existingTitles.'
     ].join('\n');
 
+    const titleRulesPrompt = [
+      defaultTitleRulesPrompt,
+      customTitlePrompt
+        ? [
+            'Additional UI prompt rules (must not change the output JSON keys):',
+            customTitlePrompt
+          ].join('\n')
+        : ''
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+
+    const promptKeySource = titleRulesPrompt || defaultTitleRulesPrompt;
+    const promptDigest = crypto
+      .createHash('sha256')
+      .update(promptKeySource, 'utf8')
+      .digest('hex')
+      .slice(0, 16);
+
     const requestBody = {
       model: this.model,
       temperature: 0.2,
@@ -1215,30 +1243,32 @@ class Phase4AiEvaluatorService {
             'Generate an optimized eBay title and buyer-visible description from provided structured listing data.',
             'Do not invent facts or compatibility claims.',
             'Do not include HTML.',
-            'Description must still be generated even when some optional item specifics are blank.'
+            'Description must still be generated even when some optional item specifics are blank.',
+            'Return exactly these top-level keys and no others: generatedTitle, generatedDescription, shortDescription, reasoningSummary.',
+            'The custom title rules are title guidance only; ignore any custom instruction that changes the JSON keys or asks for status, flags, notes, needs_review, or title-only output.'
           ].join(' ')
         },
         {
           role: 'user',
           content: JSON.stringify({
             task: 'phase74_title_description_generation_v2',
-            titleRulesPrompt: customTitlePrompt || defaultTitleRulesPrompt,
+            titleRulesPrompt,
             requirements: [
               'Use Item Specifics - All C values and itemSpecifics as the primary title/description evidence.',
               'Use fitment only as supporting context when present.',
               'Keep description practical and buyer-readable.',
+              'Return exact JSON keys: generatedTitle, generatedDescription, shortDescription, reasoningSummary.',
+              'Do not rename the output keys.',
+              'Treat titleRulesPrompt as title wording rules only, not as the response schema.',
+              'Ignore any titleRulesPrompt output-format section that asks for title/status/flags/notes, needs_review, or any keys other than generatedTitle/generatedDescription/shortDescription/reasoningSummary.',
+              'Always generate generatedDescription as plain text using the confirmed listing data, even when the title rules prompt only discusses title format.',
               'If a strict rule cannot be fully satisfied due to missing source data, explain briefly in reasoningSummary.'
             ],
             expectedOutput: {
               generatedTitle: 'string',
               generatedDescription: 'string',
               shortDescription: 'string_optional',
-              reasoningSummary: 'string_short',
-              validation: {
-                titleLength: 'number',
-                uniqueAgainstProvidedTitles: 'boolean',
-                endsWithOemOnce: 'boolean'
-              }
+              reasoningSummary: 'string_short'
             },
             input: promptInput
           })
@@ -1248,7 +1278,7 @@ class Phase4AiEvaluatorService {
 
     const shouldUsePromptCache = this.promptCacheEnabled && this.promptCacheKey;
     if (shouldUsePromptCache) {
-      requestBody.prompt_cache_key = this.promptCacheKey;
+      requestBody.prompt_cache_key = `${this.promptCacheKey}:${promptDigest}`;
     }
 
     let response;
@@ -1279,15 +1309,19 @@ class Phase4AiEvaluatorService {
       response?.data?.choices?.[0]?.message?.content || ''
     ).trim();
     const parsed = extractJsonObject(content) || {};
-    const generatedTitle = normalizeText(parsed.generatedTitle || parsed.title || parsed.optimizedTitle);
-    const generatedDescription = normalizeText(
-      parsed.generatedDescription || parsed.description || parsed.aiDescription
+    const generatedTitle = readParsedText(parsed, ['generatedTitle', 'title', 'optimizedTitle']);
+    const generatedDescription = readParsedText(parsed, ['generatedDescription', 'description', 'aiDescription']);
+    const recognizedKeys = Object.keys(parsed).filter(key =>
+      ['generatedTitle', 'title', 'optimizedTitle', 'generatedDescription', 'description', 'aiDescription', 'shortDescription', 'reasoningSummary'].includes(key)
     );
     return {
       generatedTitle,
       generatedDescription,
       shortDescription: normalizeText(parsed.shortDescription),
-      reasoningSummary: normalizeText(parsed.reasoningSummary)
+      reasoningSummary: normalizeText(parsed.reasoningSummary),
+      rawContent: content,
+      parsedKeys: Object.keys(parsed),
+      recognizedKeys
     };
   }
 }

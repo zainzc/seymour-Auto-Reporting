@@ -405,6 +405,15 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     selectFields.push(`${LISTING_SHORT_DESCRIPTION_FIELD} Manual`);
   }
 
+  if (phase74TitleRulesPrompt) {
+    emitProgress(progressCallback, {
+      stage: 'phase74_prepare',
+      percent: 8,
+      counts: summary,
+      message: `Using custom Phase 7.4 title prompt from UI (chars=${phase74TitleRulesPrompt.length}).`
+    });
+  }
+
   emitProgress(progressCallback, {
     stage: 'phase74_load_listings',
     percent: 15,
@@ -572,6 +581,12 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       summary.aiFailures += 1;
       if (summary.errors.length < sampleLimit) {
         summary.errors.push(`ipn='${ipn}' AI failed: ${error.message}`);
+        emitProgress(progressCallback, {
+          stage: 'phase74_ai_error',
+          percent: Math.min(92, 20 + Math.floor(((i + 1) / Math.max(1, rowsForGeneration.length)) * 72)),
+          counts: summary,
+          message: `AI failed for IPN '${ipn}': ${compactText(error.message, 220)}`
+        });
       }
       continue;
     }
@@ -581,11 +596,28 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     const nextDescription = normalizeText(generated?.generatedDescription);
     const nextShortDescription = normalizeText(generated?.shortDescription);
 
-    if (!nextTitle && !nextDescription) {
+    if (!nextTitle || !nextDescription) {
       summary.aiFailures += 1;
       if (summary.errors.length < sampleLimit) {
-        summary.errors.push(`ipn='${ipn}' AI returned empty title and description.`);
+        const blankMessage =
+          `ipn='${ipn}' AI returned blank title/description. keys=${Array.isArray(generated?.parsedKeys) ? generated.parsedKeys.join(',') : 'none'} ` +
+            `recognized=${Array.isArray(generated?.recognizedKeys) ? generated.recognizedKeys.join(',') : 'none'} ` +
+            `reasoning='${compactText(generated?.reasoningSummary, 120)}' raw='${compactText(generated?.rawContent, 320)}'`;
+        summary.errors.push(blankMessage);
+        emitProgress(progressCallback, {
+          stage: 'phase74_ai_blank',
+          percent: Math.min(92, 20 + Math.floor(((i + 1) / Math.max(1, rowsForGeneration.length)) * 72)),
+          counts: summary,
+          message: blankMessage
+        });
       }
+      console.warn(
+        `[Phase7.4] AI blank output for ipn='${ipn}' ` +
+          `title='${compactText(nextTitle, 80)}' desc='${compactText(nextDescription, 80)}' ` +
+          `keys=${Array.isArray(generated?.parsedKeys) ? generated.parsedKeys.join(',') : 'none'} ` +
+          `recognized=${Array.isArray(generated?.recognizedKeys) ? generated.recognizedKeys.join(',') : 'none'} ` +
+          `raw='${compactText(generated?.rawContent, 320)}'`
+      );
       continue;
     }
 
@@ -700,6 +732,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       `Phase 7.4 completed. Titles=${summary.titleGenerated}, Descriptions=${summary.descriptionGenerated}, ` +
       `AlreadyEnrichedSkipped=${summary.skippedAlreadyEnriched}, ManualSkipped=${summary.skippedManualOverride}, ` +
       `PublishedSkipped=${summary.skippedAlreadyPublished}, ` +
+      `AIFailures=${summary.aiFailures}, SkippedNoChange=${summary.skippedNoChange}, ` +
       `WritesAttempted=${summary.writesAttempted}, WritesSucceeded=${summary.writesSucceeded}, WritesFailed=${summary.writeFailures}.`
   });
 

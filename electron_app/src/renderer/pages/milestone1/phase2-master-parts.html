@@ -1679,7 +1679,7 @@
       </div>
     </section>
 
-    <section class="card auto-phase-hidden">
+    <section class="card">
       <h2 class="card-title">Phase 7.2 (Fitment Image)</h2>
       <div class="grid-2">
         <div>
@@ -1702,7 +1702,7 @@
       </div>
     </section>
 
-    <section class="card auto-phase-hidden">
+    <section class="card">
       <h2 class="card-title">Phase 7.4 (Title & Description)</h2>
       <div class="grid-2">
         <div>
@@ -1720,7 +1720,7 @@
           <div class="form-group">
             <label for="phase74-test-ipns">Test IPNs (optional)</label>
             <textarea id="phase74-test-ipns" placeholder="Enter IPNs separated by comma or new lines"></textarea>
-            <div class="hint">Generated title writes to <code>Title</code>.</div>
+            <div class="hint">Generated output writes to <code>Item Title</code> and <code>Item Description</code>.</div>
           </div>
           <div class="btn-group">
             <button id="run-phase74-btn" class="btn btn-primary" onclick="runPhase74()">Run Phase 7.4 Title/Description</button>
@@ -2710,7 +2710,10 @@
         isItemSpecificSyncRunning;
       const hasItemSpecificBaseId = Boolean(document.getElementById('item-specific-base-id').value.trim());
       const hasRulesDriveFile = Boolean(document.getElementById('phase4-rules-drive-file').value.trim());
-      const hasOpenAiKey = Boolean(document.getElementById('openai-api-key').value.trim());
+      const hasOpenAiKey = Boolean(
+        document.getElementById('openai-api-key').value.trim() ||
+        document.getElementById('phase4-unified-openai-api-key')?.value?.trim()
+      );
       const hasAirtableCore =
         Boolean(document.getElementById('airtable-token').value.trim()) &&
         Boolean(document.getElementById('airtable-base-id').value.trim());
@@ -5018,8 +5021,12 @@
         return;
       }
 
+      syncPhase4UnifiedInputsToLegacy();
       const listingsTable = document.getElementById('phase74-listings-table').value.trim();
-      const openaiApiKey = document.getElementById('openai-api-key').value.trim();
+      const openaiApiKey =
+        document.getElementById('openai-api-key').value.trim() ||
+        document.getElementById('phase4-unified-openai-api-key')?.value?.trim() ||
+        '';
       if (!listingsTable) {
         setFieldError('phase74-listings-table', 'Listings table name is required.');
         showStatus('run-status', 'error', 'Enter listings table name before running Phase 7.4.');

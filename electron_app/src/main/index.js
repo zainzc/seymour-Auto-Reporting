@@ -1277,6 +1277,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
   emitInventoryAutoChainLog(
     `Post-import automation: Phase 7.4 completed ` +
       `(titles=${summary.phase74?.titleGenerated || 0}, descriptions=${summary.phase74?.descriptionGenerated || 0}, ` +
+      `aiFailures=${summary.phase74?.aiFailures || 0}, skippedNoChange=${summary.phase74?.skippedNoChange || 0}, ` +
       `writesAttempted=${summary.phase74?.writesAttempted || 0}, writesSucceeded=${summary.phase74?.writesSucceeded || 0}, ` +
       `writesFailed=${summary.phase74?.writeFailures || 0})`
   );
@@ -5845,14 +5846,14 @@ app.on('before-quit', () => {
   phase2AutoRunService.stop();
   phase2WritebackPoller.stop();
   stopPhase4WritebackPoller();
-  stopWorkOrdersSchedule();
+  stopWorkOrdersSchedule({ persistInactive: false });
 });
 
 app.on('window-all-closed', () => {
   phase2AutoRunService.stop();
   phase2WritebackPoller.stop();
   stopPhase4WritebackPoller();
-  stopWorkOrdersSchedule();
+  stopWorkOrdersSchedule({ persistInactive: false });
   if (process.platform !== 'darwin') app.quit();
 });
 

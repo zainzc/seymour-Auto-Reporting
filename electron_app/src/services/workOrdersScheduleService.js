@@ -55,25 +55,28 @@ function clearWorkOrdersExecutionLogs() {
   saveReportingConfig('workOrdersExecutionLogs', []);
 }
 
-function stopWorkOrdersSchedule() {
+function stopWorkOrdersSchedule(options = {}) {
+  const persistInactive = options.persistInactive !== false;
   if (activeJob) {
     activeJob.stop();
     activeJob = null;
   }
 
-  const current = getReportingConfig('workOrdersActiveSchedule');
-  if (current) {
-    saveReportingConfig('workOrdersActiveSchedule', {
-      ...current,
-      active: false
-    });
+  if (persistInactive) {
+    const current = getReportingConfig('workOrdersActiveSchedule');
+    if (current) {
+      saveReportingConfig('workOrdersActiveSchedule', {
+        ...current,
+        active: false
+      });
+    }
   }
 
   console.log('[WorkOrders] Schedule stopped');
 }
 
 function startWorkOrdersSchedule(config) {
-  stopWorkOrdersSchedule();
+  stopWorkOrdersSchedule({ persistInactive: false });
   const cronExpression = getCronExpression(config.frequency);
 
   activeJob = cron.schedule(
