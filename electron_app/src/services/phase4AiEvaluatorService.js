@@ -1148,11 +1148,13 @@ class Phase4AiEvaluatorService {
       condition: normalizeText(payload.condition),
       conditionNote: normalizeText(payload.conditionNote),
       itemSpecifics: payload.itemSpecifics || {},
+      donorVehicle: payload.donorVehicle || {},
       currentTitle: normalizeText(payload.currentTitle),
       currentLegacyTitle: normalizeText(payload.currentLegacyTitle),
       titleEvidence: {
         currentTitle: normalizeText(payload.currentTitle),
         currentLegacyTitle: normalizeText(payload.currentLegacyTitle),
+        donorVehicle: payload.donorVehicle || {},
         itemSpecifics: payload.itemSpecifics || {},
         conditionsAndOptions: normalizeText(payload.conditionsAndOptions),
         categoryContext: payload.categoryContext || {}
@@ -1313,7 +1315,8 @@ class Phase4AiEvaluatorService {
             'Generate an optimized eBay title and buyer-visible description from provided structured listing data.',
             'Do not invent facts or compatibility claims.',
             'Do not include HTML.',
-            'For generatedTitle, use only input.titleEvidence, currentTitle, currentLegacyTitle, itemSpecifics, conditionsAndOptions, categoryContext, customLabelSku, condition, and conditionNote.',
+            'For generatedTitle, use only input.titleEvidence, currentTitle, currentLegacyTitle, donorVehicle, itemSpecifics, conditionsAndOptions, categoryContext, customLabelSku, condition, and conditionNote.',
+            'When currentTitle/currentLegacyTitle conflicts with confirmed donorVehicle and itemSpecifics, prefer donorVehicle plus itemSpecifics for title identity and explain the conflict in review notes.',
             'Do not use input.descriptionContext.partFitment or any fitment/interchange list to choose title year, make, model, side, or core part identity.',
             'Fitment/interchange text may list multiple compatible vehicles and is description context only.',
             'Description must still be generated even when some optional item specifics are blank.',
@@ -1329,6 +1332,8 @@ class Phase4AiEvaluatorService {
             titleRulesPrompt,
             requirements: [
               'Use Item Specifics - All C values and itemSpecifics as the primary title/description evidence.',
+              'Use donorVehicle.model and donorVehicle.year as confirmed title evidence when present.',
+              'If donorVehicle plus itemSpecifics confirms year/make/model but currentTitle has a conflicting fitment/model phrase, do not copy that conflicting phrase into generatedTitle.',
               'For generatedTitle, do not use descriptionContext.partFitment or any fitment/interchange list to choose year, make, model, side, or part identity.',
               'Use titleEvidence as the title evidence bundle.',
               'Use descriptionContext.partFitment only for generatedDescription or shortDescription when present.',

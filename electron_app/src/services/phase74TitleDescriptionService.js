@@ -11,6 +11,7 @@ const LISTING_LEGACY_TITLE_FIELD = 'Title';
 const LISTING_OUTPUT_TITLE_FIELD = 'Item Title';
 const LISTING_OUTPUT_DESCRIPTION_FIELD = 'Item Description';
 const LISTING_SHORT_DESCRIPTION_FIELD = 'Short Description';
+const LISTING_SOURCE_DESCRIPTION_FIELD = 'Description';
 const LISTING_TITLE_REVIEW_STATUS_FIELD = 'Title Review Status';
 const LISTING_TITLE_REVIEW_REASON_FIELD = 'Title Review Reason';
 const LISTING_TITLE_REVIEW_NOTES_FIELD = 'Title Review Notes';
@@ -68,6 +69,76 @@ function normalizeIpn(value) {
 
 function normalizeKey(value) {
   return normalizeText(value).toLowerCase();
+}
+
+function decodeHtmlEntities(value = '') {
+  return normalizeText(value)
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function stripHtmlToText(value = '') {
+  return decodeHtmlEntities(value)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(?:div|p|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s+/g, '\n')
+    .trim();
+}
+
+function decodeHexCommentValue(value = '') {
+  const text = normalizeText(value).replace(/\s+/g, '');
+  if (!text || text.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(text)) return '';
+  try {
+    return Buffer.from(text, 'hex').toString('utf8').trim();
+  } catch (_) {
+    return '';
+  }
+}
+
+function readHtmlCommentValue(html = '', key = '') {
+  const escaped = normalizeText(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!escaped) return '';
+  const match = normalizeText(html).match(new RegExp(`<!--\\s*${escaped}\\s*:\\s*([\\s\\S]*?)\\s*-->`, 'i'));
+  return normalizeText(match?.[1]);
+}
+
+function readLabeledTextBlock(text = '', label = '') {
+  const escaped = normalizeText(label).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!escaped) return '';
+  const labels = 'Model|Year|Mileage|Stock Number|Notes';
+  const match = normalizeText(text).match(new RegExp(`${escaped}\\s*:\\s*([\\s\\S]*?)(?=\\s*(?:${labels})\\s*:|\\s*This Part Will Fit|$)`, 'i'));
+  return normalizeText(match?.[1]).replace(/\s+/g, ' ').trim();
+}
+
+function extractDonorVehicleEvidence(descriptionHtml = '') {
+  const html = normalizeText(descriptionHtml);
+  if (!html) return {};
+
+  const text = stripHtmlToText(html);
+  const donor = {};
+
+  const modelFromHtml = readLabeledTextBlock(text, 'Model');
+  const yearFromHtml = readLabeledTextBlock(text, 'Year');
+  const notesFromHtml = readLabeledTextBlock(text, 'Notes');
+  const stockFromHtml = readLabeledTextBlock(text, 'Stock Number');
+
+  if (modelFromHtml) donor.model = modelFromHtml;
+  if (yearFromHtml) donor.year = yearFromHtml;
+  if (notesFromHtml) donor.notes = notesFromHtml;
+  if (stockFromHtml) donor.stockNumber = stockFromHtml;
+
+  const plModel = decodeHexCommentValue(readHtmlCommentValue(html, 'PLModel'));
+  const plYear = decodeHexCommentValue(readHtmlCommentValue(html, 'PLYear'));
+  if (!donor.model && plModel) donor.model = plModel;
+  if (!donor.year && plYear) donor.year = plYear;
+
+  return donor;
 }
 
 function getFieldValueByName(fields = {}, name = '') {
@@ -525,6 +596,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     LISTING_CONDITIONS_FIELD,
     LISTING_CONDITIONS_FALLBACK_FIELD,
     LISTING_C_SPECIFICS_FIELD,
+    LISTING_SOURCE_DESCRIPTION_FIELD,
     'Condition',
     'Condition Note',
     ...LISTING_CATEGORY_FIELDS,
@@ -698,6 +770,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     const itemSpecifics = buildItemSpecifics(fields, cSpecifics);
     const currentLegacyTitle = normalizeText(getFieldValueByName(fields, LISTING_LEGACY_TITLE_FIELD));
     const currentOutputTitle = normalizeText(getFieldValueByName(fields, LISTING_OUTPUT_TITLE_FIELD));
+    const donorVehicle = extractDonorVehicleEvidence(getFieldValueByName(fields, LISTING_SOURCE_DESCRIPTION_FIELD));
     const customLabelSku =
       normalizeText(getFieldValueByName(fields, 'SKU')) ||
       normalizeText(getFieldValueByName(fields, 'Custom Label')) ||
@@ -744,6 +817,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         partFitment: normalizeText(master?.fields?.[MASTER_FITMENT_FIELD]),
         currentLegacyTitle,
         currentTitle: currentOutputTitle || currentLegacyTitle,
+        donorVehicle,
         customLabelSku,
         phase74TitleRulesPrompt
       });
