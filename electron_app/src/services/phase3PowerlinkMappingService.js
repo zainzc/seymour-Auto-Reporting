@@ -6,6 +6,25 @@ function normalizeLinkKey(value) {
   return normalizeText(value).toUpperCase();
 }
 
+function getLinkKeyVariants(value) {
+  const key = normalizeLinkKey(value);
+  if (!key) return [];
+  const variants = new Set([key]);
+  const withoutR = key.replace(/^R/i, '');
+  if (withoutR && withoutR !== key) variants.add(withoutR);
+  const withoutR0 = key.replace(/^R0+/i, '');
+  if (withoutR0 && withoutR0 !== key) variants.add(withoutR0);
+  if (/^\d+$/.test(withoutR)) {
+    variants.add(`R${withoutR}`);
+    variants.add(`R0${withoutR}`);
+  }
+  if (/^\d+$/.test(key)) {
+    variants.add(`R${key}`);
+    variants.add(`R0${key}`);
+  }
+  return Array.from(variants);
+}
+
 function toNumber(value) {
   if (value === null || value === undefined) return null;
   const text = String(value).trim();
@@ -76,7 +95,6 @@ function buildPowerlinkMapping(values) {
       continue;
     }
 
-    const key = normalizeLinkKey(rnumber);
     const incoming = {
       rnumber,
       ipn,
@@ -84,6 +102,7 @@ function buildPowerlinkMapping(values) {
       lastModifiedMs: lastModifiedIdx >= 0 ? toDateMs(row[lastModifiedIdx]) : null
     };
 
+    const key = normalizeLinkKey(rnumber);
     const existing = map.get(key);
     if (existing) {
       const selected = selectBetterCandidate(existing, incoming);
@@ -99,18 +118,23 @@ function buildPowerlinkMapping(values) {
 
   const rnumToIpn = new Map();
   for (const [key, candidate] of map.entries()) {
-    rnumToIpn.set(key, candidate.ipn);
+    for (const variant of getLinkKeyVariants(key)) {
+      if (!rnumToIpn.has(variant)) {
+        rnumToIpn.set(variant, candidate.ipn);
+      }
+    }
   }
 
   return {
     rnumToIpn,
     rowsScanned: Math.max(0, values.length - 1),
-    mappedCount: rnumToIpn.size,
+    mappedCount: map.size,
     duplicateWarnings: duplicates
   };
 }
 
 module.exports = {
   buildPowerlinkMapping,
-  normalizeLinkKey
+  normalizeLinkKey,
+  getLinkKeyVariants
 };

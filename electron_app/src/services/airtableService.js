@@ -332,6 +332,37 @@ class AirtableService {
     return names;
   }
 
+  async ensureMasterTextField(fieldName) {
+    const normalizedFieldName = String(fieldName || '').trim();
+    if (!normalizedFieldName) {
+      throw new Error('Airtable master text field name is required.');
+    }
+
+    const existing = await this.getMasterFieldNames();
+    if (existing.has(normalizedFieldName)) {
+      return normalizedFieldName;
+    }
+
+    const tables = await this.getSchemaTables();
+    const masterTable = this.findSchemaTable(tables, this.masterTableId, this.masterTable);
+    const masterTableId = String(masterTable?.id || this.masterTableId || '').trim();
+    if (!masterTableId) {
+      throw new Error('Unable to resolve Airtable Master Parts table schema.');
+    }
+
+    const schemaService = new AirtableSchemaService({
+      token: this.token,
+      baseId: this.baseId
+    });
+    await schemaService.createField(masterTableId, {
+      name: normalizedFieldName,
+      type: 'singleLineText'
+    });
+
+    this.clearSchemaCache();
+    return normalizedFieldName;
+  }
+
   async resolveMasterCategoryLinkFieldName(preferredName = '') {
     if (this._categoryLinkFieldNameCache) {
       return this._categoryLinkFieldNameCache;

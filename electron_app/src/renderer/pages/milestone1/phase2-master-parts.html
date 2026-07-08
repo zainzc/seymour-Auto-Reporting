@@ -985,7 +985,7 @@
                 <div id="err-phase3-max-pages" class="field-error"></div>
               </div>
               <div class="phase3-readonly-note">The run checks the page count ShipStation reports and shows it in the summary below.</div>
-              <div class="form-group auto-phase-hidden" style="margin-top: 12px;">
+              <div class="form-group" style="margin-top: 12px;">
                 <button id="run-phase3-btn" class="btn btn-primary" type="button" onclick="runPhase3()">Run Phase 3 Only</button>
               </div>
               <input id="item-specific-base-id" type="hidden">
@@ -1702,7 +1702,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" hidden>
       <h2 class="card-title">Phase 7.4 (Title & Description)</h2>
       <div class="grid-2">
         <div>
@@ -1730,7 +1730,7 @@
       </div>
     </section>
 
-    <section class="card auto-phase-hidden">
+    <section class="card" hidden>
       <h2 class="card-title">3. Run and Automation</h2>
       <div class="form-group">
         <label>
@@ -1739,7 +1739,7 @@
         <div class="hint">Resolved field: <code>Category Identifier Selection</code> | Source status: <code>Category Determined</code> | Complete status: <code>Completed</code> | Poll: <code>1 min</code></div>
       </div>
       <div class="btn-group">
-        <button id="run-sync-btn" class="btn btn-primary" onclick="runPhase2()">Run Sync</button>
+        <button id="run-sync-btn" class="btn btn-primary" onclick="runPhase2()">Run Phase 2 Sync</button>
       </div>
       <div class="btn-group" style="margin-top: 10px;">
         <button class="btn btn-secondary" onclick="startWritebackPoller()">Start Write-back</button>

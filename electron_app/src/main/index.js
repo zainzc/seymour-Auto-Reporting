@@ -3368,7 +3368,7 @@ ipcMain.handle('phase2-run', async (event, options = {}) => {
       ...options
     };
 
-    const summary = await runPhase2(runOptions, progress => {
+    const summary = await runPhase2(runOptionsBase, progress => {
       event.sender.send('phase2-progress', progress);
     });
 

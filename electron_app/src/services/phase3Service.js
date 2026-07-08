@@ -2,16 +2,67 @@ const AirtableService = require('./airtableService');
 const path = require('path');
 const { readSheetRows } = require('./phase2SheetsService');
 const { getInventoryConfig } = require('../config/configStore');
-const { buildPowerlinkMapping } = require('./phase3PowerlinkMappingService');
+const { buildPowerlinkMapping, getLinkKeyVariants } = require('./phase3PowerlinkMappingService');
 const Phase3ShipstationService = require('./phase3ShipstationService');
 const { exportShipstationDebugWorkbook } = require('./phase3ShipstationDebugExportService');
 const {
   buildSkuToDims,
   buildIpnToDims,
-  buildShipstationFieldsForBlankTargets
+  buildShipstationFieldsForBlankTargets,
+  isExcludedIpn,
+  normalizeSku
 } = require('./phase3PlanningService');
 
 const PARTSHUNTER_STORE_ID = 333796;
+
+function normalizeText(value) {
+  return String(value || '').trim();
+}
+
+function splitRNumberValues(value = '') {
+  return String(value || '')
+    .split(/[\n,;|]+/)
+    .map(item => normalizeSku(item))
+    .filter(Boolean);
+}
+
+function shouldReplaceDims(existing, incoming) {
+  if (!existing) return true;
+  const existingMs = Number(existing?.createDateMs);
+  const incomingMs = Number(incoming?.createDateMs);
+  if (Number.isFinite(incomingMs) && Number.isFinite(existingMs)) return incomingMs > existingMs;
+  if (Number.isFinite(incomingMs) && !Number.isFinite(existingMs)) return true;
+  return false;
+}
+
+function buildMasterRNumberLookup(masterRecords = [], rNumberFieldName = 'RNumber') {
+  const lookup = new Map();
+  const duplicates = [];
+
+  for (const record of masterRecords || []) {
+    const fields = record?.fields || {};
+    const ipn = normalizeText(fields.IPN);
+    for (const rNumber of splitRNumberValues(fields[rNumberFieldName])) {
+      if (!rNumber) continue;
+      for (const key of getLinkKeyVariants(rNumber)) {
+        if (lookup.has(key)) {
+          const existing = lookup.get(key);
+          if (existing?.recordId !== record.id) {
+            duplicates.push(`Duplicate RNumber '${key}' on IPNs ${existing?.ipn || 'unknown'} and ${ipn || 'unknown'}.`);
+          }
+          continue;
+        }
+        lookup.set(key, {
+          recordId: record.id,
+          ipn,
+          record
+        });
+      }
+    }
+  }
+
+  return { lookup, duplicates };
+}
 
 function parseBoolean(value, defaultValue = false) {
   if (typeof value === 'boolean') return value;
@@ -77,6 +128,12 @@ function buildPhase3Config(options = {}) {
         : process.env.PHASE3_DRY_RUN,
       false
     ),
+    phase3UsePowerlinkFallback: parseBoolean(
+      typeof merged.phase3UsePowerlinkFallback !== 'undefined'
+        ? merged.phase3UsePowerlinkFallback
+        : process.env.PHASE3_USE_POWERLINK_FALLBACK,
+      false
+    ),
     authContext: 'inventory'
   };
 }
@@ -90,11 +147,15 @@ function buildSummary() {
     skusExtracted: 0,
     skusWithCompleteDims: 0,
     skusMappedToIpn: 0,
+    skusMappedByMasterRNumber: 0,
+    skusMappedByPowerlink: 0,
     ipnsFoundInAirtable: 0,
     ipnsUpdated: 0,
     ipnsSkippedAlreadyFilled: 0,
     ipnsSkippedExcludedPrefix: 0,
+    skusUnmatchedByMasterRNumber: 0,
     skusUnmappedInPowerlink: 0,
+    powerlinkFallbackEnabled: false,
     updatedIpnLogs: [],
     errors: []
   };
@@ -132,8 +193,10 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
     tabName: config.tabName,
     storeId: config.shipstationStoreId,
     lookbackDays: config.phase3LookbackDays,
-    dryRun: config.phase3DryRun
+    dryRun: config.phase3DryRun,
+    powerlinkFallbackEnabled: config.phase3UsePowerlinkFallback
   });
+  summary.powerlinkFallbackEnabled = Boolean(config.phase3UsePowerlinkFallback);
 
   emitProgress(progressCallback, {
     stage: 'stage1_powerlink_mapping',
@@ -186,21 +249,58 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
     }
   );
 
+  summary.shipmentsFetched = shipstationResult.shipments.length;
+  summary.shipstationPageSize = Number(shipstationResult.pageSize || config.phase3PageSize || 0) || 0;
+  summary.shipstationMaxPages = Number(shipstationResult.maxPages || config.phase3MaxPages || 0) || 0;
+  summary.shipstationPagesAvailable = Number(shipstationResult.totalPagesAvailable || summary.shipstationPagesAvailable || 0) || 0;
+
+  const airtableService = new AirtableService({
+    token: config.airtableToken,
+    baseId: config.airtableBaseId,
+    masterTable: config.airtableMasterTable
+  });
+  const rNumberFieldName = await airtableService.ensureMasterTextField('RNumber');
+
+  emitProgress(progressCallback, {
+    stage: 'stage3_translate_sku_to_ipn',
+    percent: 50,
+    counts: summary,
+    message: 'Loading Master Parts RNumber index for direct ShipStation SKU matching...'
+  });
+
+  const masterRNumberRecords = await airtableService.fetchAllRecords(config.airtableMasterTable);
+  const masterRNumberRecordById = new Map(
+    masterRNumberRecords.map(record => [record.id, record])
+  );
+  const masterRNumberLookup = buildMasterRNumberLookup(masterRNumberRecords, rNumberFieldName);
+  for (const warning of masterRNumberLookup.duplicates.slice(0, 30)) {
+    summary.errors.push(`RNumber mapping warning: ${warning}`);
+  }
+  if (masterRNumberLookup.duplicates.length > 30) {
+    summary.errors.push(
+      `RNumber mapping warning: ...and ${masterRNumberLookup.duplicates.length - 30} additional duplicate RNumber warnings.`
+    );
+  }
+  const directSkuToIpn = new Map(
+    Array.from(masterRNumberLookup.lookup.entries()).map(([sku, value]) => [sku, normalizeText(value?.ipn)])
+  );
+
   try {
     emitProgress(progressCallback, {
       stage: 'stage2_fetch_shipstation',
-      percent: 38,
+      percent: 55,
       counts: summary,
-      message: 'Exporting ShipStation debug workbook for manual review...'
+      message: 'Exporting ShipStation debug workbook with Master RNumber mapping...'
     });
     const debugExport = await exportShipstationDebugWorkbook({
       shipments: shipstationResult.shipments,
-      rnumToIpn: mapping.rnumToIpn,
+      rnumToIpn: config.phase3UsePowerlinkFallback ? mapping.rnumToIpn : new Map(),
+      directSkuToIpn,
       outputPath: path.resolve(__dirname, '..', '..', 'dev-output', 'phase3-shipstation-debug.xlsx')
     });
     emitProgress(progressCallback, {
       stage: 'stage2_fetch_shipstation',
-      percent: 40,
+      percent: 58,
       counts: summary,
       message: `ShipStation debug workbook saved: ${debugExport.filePath} (${debugExport.rawRows} raw rows, ${debugExport.uniqueSkus} unique SKUs).`
     });
@@ -212,39 +312,71 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
     summary.errors.push(`ShipStation debug export failed: ${error.message}`);
   }
 
-  summary.shipmentsFetched = shipstationResult.shipments.length;
-  summary.shipstationPageSize = Number(shipstationResult.pageSize || config.phase3PageSize || 0) || 0;
-  summary.shipstationMaxPages = Number(shipstationResult.maxPages || config.phase3MaxPages || 0) || 0;
-  summary.shipstationPagesAvailable = Number(shipstationResult.totalPagesAvailable || summary.shipstationPagesAvailable || 0) || 0;
   const skuBuild = buildSkuToDims(shipstationResult.shipments);
   summary.skusExtracted = skuBuild.skusExtracted;
   summary.skusWithCompleteDims = skuBuild.skusWithCompleteDims;
 
-  emitProgress(progressCallback, {
-    stage: 'stage3_translate_sku_to_ipn',
-    percent: 50,
-    counts: summary,
-    message: 'Translating ShipStation SKU -> IPN via Powerlink map...'
-  });
-
   let unmappedLogCount = 0;
   let excludedLogCount = 0;
-  const ipnToDims = buildIpnToDims(skuBuild.skuToDims, mapping.rnumToIpn, summary, {
-    onUnmappedSku: sku => {
-      if (unmappedLogCount < 50) {
-        summary.errors.push(`Unmapped SKU in Powerlink map: ${sku}`);
-      }
-      unmappedLogCount += 1;
-    },
-    onExcludedIpn: (ipn, sku) => {
+  const directRecordTargets = new Map();
+  const fallbackSkuToDims = new Map();
+
+  for (const [sku, dims] of skuBuild.skuToDims.entries()) {
+    const direct = masterRNumberLookup.lookup.get(normalizeSku(sku));
+    if (!direct?.recordId) {
+      fallbackSkuToDims.set(sku, dims);
+      continue;
+    }
+
+    summary.skusMappedToIpn += 1;
+    summary.skusMappedByMasterRNumber += 1;
+    if (isExcludedIpn(direct.ipn)) {
+      summary.ipnsSkippedExcludedPrefix += 1;
       if (excludedLogCount < 50) {
-        summary.errors.push(`Excluded IPN skipped (${ipn}) from SKU ${sku}`);
+        summary.errors.push(`Excluded IPN skipped (${direct.ipn}) from Master RNumber SKU ${sku}`);
       }
       excludedLogCount += 1;
+      continue;
     }
-  });
 
-  if (unmappedLogCount > 50) {
+    const existing = directRecordTargets.get(direct.recordId);
+    if (!existing || shouldReplaceDims(existing.dims, dims)) {
+      directRecordTargets.set(direct.recordId, {
+        recordId: direct.recordId,
+        ipn: direct.ipn,
+        dims,
+        matchMethod: 'master_rnumber'
+      });
+    }
+  }
+
+  summary.skusUnmatchedByMasterRNumber = fallbackSkuToDims.size;
+  let ipnToDims = new Map();
+  if (config.phase3UsePowerlinkFallback) {
+    const mappedBeforePowerlink = summary.skusMappedToIpn;
+    ipnToDims = buildIpnToDims(fallbackSkuToDims, mapping.rnumToIpn, summary, {
+      onUnmappedSku: sku => {
+        if (unmappedLogCount < 50) {
+          summary.errors.push(`Unmapped SKU in Powerlink map: ${sku}`);
+        }
+        unmappedLogCount += 1;
+      },
+      onExcludedIpn: (ipn, sku) => {
+        if (excludedLogCount < 50) {
+          summary.errors.push(`Excluded IPN skipped (${ipn}) from SKU ${sku}`);
+        }
+        excludedLogCount += 1;
+      }
+    });
+    summary.skusMappedByPowerlink = summary.skusMappedToIpn - mappedBeforePowerlink;
+  } else if (fallbackSkuToDims.size > 0) {
+    unmappedLogCount = fallbackSkuToDims.size;
+    summary.errors.push(
+      `Powerlink fallback disabled for test run. ${fallbackSkuToDims.size} SKU(s) did not match Master Parts RNumber.`
+    );
+  }
+
+  if (config.phase3UsePowerlinkFallback && unmappedLogCount > 50) {
     summary.errors.push(`...and ${unmappedLogCount - 50} additional unmapped SKU entries.`);
   }
   if (excludedLogCount > 50) {
@@ -260,15 +392,53 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
       : 'Updating Airtable Master Parts (blank dims + corrected ShipStation lbs weight)...'
   });
 
-  const airtableService = new AirtableService({
-    token: config.airtableToken,
-    baseId: config.airtableBaseId,
-    masterTable: config.airtableMasterTable
-  });
-
-  const totalIpns = ipnToDims.size;
+  const totalTargets = directRecordTargets.size + ipnToDims.size;
   let processed = 0;
   const maxUpdatedLogs = 300;
+
+  for (const target of directRecordTargets.values()) {
+    processed += 1;
+    try {
+      summary.ipnsFoundInAirtable += 1;
+      const sourceRecord = masterRNumberRecordById.get(target.recordId);
+      const fieldsToSet = buildShipstationFieldsForBlankTargets(sourceRecord?.fields || {}, target.dims);
+      if (Object.keys(fieldsToSet).length === 0) {
+        summary.ipnsSkippedAlreadyFilled += 1;
+      } else if (!config.phase3DryRun) {
+        await airtableService.updateMasterShipstationFields(target.recordId, fieldsToSet);
+        summary.ipnsUpdated += 1;
+        if (summary.updatedIpnLogs.length < maxUpdatedLogs) {
+          summary.updatedIpnLogs.push({
+            ipn: target.ipn,
+            mode: 'updated_by_master_rnumber',
+            fields: fieldsToSet
+          });
+        }
+      } else {
+        summary.ipnsUpdated += 1;
+        if (summary.updatedIpnLogs.length < maxUpdatedLogs) {
+          summary.updatedIpnLogs.push({
+            ipn: target.ipn,
+            mode: 'dry_run_would_update_by_master_rnumber',
+            fields: fieldsToSet
+          });
+        }
+      }
+    } catch (error) {
+      const detail =
+        typeof AirtableService.getAirtableErrorMessage === 'function'
+          ? AirtableService.getAirtableErrorMessage(error)
+          : error.message;
+      summary.errors.push(`Phase3 direct RNumber update failed for IPN ${target.ipn}: ${detail}`);
+    } finally {
+      emitProgress(progressCallback, {
+        stage: 'stage4_update_airtable',
+        percent: 70 + Math.floor((processed / Math.max(totalTargets, 1)) * 28),
+        counts: summary,
+        message: `Processed ${processed}/${totalTargets} mapped ShipStation targets`
+      });
+    }
+  }
 
   for (const [ipn, dims] of ipnToDims.entries()) {
     processed += 1;
@@ -311,9 +481,9 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
     } finally {
       emitProgress(progressCallback, {
         stage: 'stage4_update_airtable',
-        percent: 70 + Math.floor((processed / Math.max(totalIpns, 1)) * 28),
+        percent: 70 + Math.floor((processed / Math.max(totalTargets, 1)) * 28),
         counts: summary,
-        message: `Processed ${processed}/${totalIpns} mapped IPNs`
+        message: `Processed ${processed}/${totalTargets} mapped ShipStation targets`
       });
     }
   }

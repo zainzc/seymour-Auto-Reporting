@@ -356,6 +356,7 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
   const categoryLinkFieldName = await airtableService.ensureMasterCategoryLinkField(
     config.categoryLinkFieldName || 'Category Definitions Link'
   );
+  await airtableService.ensureMasterTextField('RNumber');
   const masterFieldNames = await airtableService.getMasterFieldNames();
 
   emitProgress(progressCallback, { stage: 'load_existing_master_parts', percent: 55, counts: summary });

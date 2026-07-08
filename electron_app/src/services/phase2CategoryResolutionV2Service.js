@@ -32,6 +32,37 @@ function getExistingQoh(fields) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function splitRNumberList(value = '') {
+  return String(value || '')
+    .split(/[\n,;|]+/)
+    .map(item => normalizeText(item))
+    .filter(Boolean);
+}
+
+function buildRNumberValueByIpn(normalizedRows = []) {
+  const valuesByIpn = new Map();
+  for (const row of normalizedRows || []) {
+    const ipnKey = normalizeIpnKey(row?.ipn);
+    const rNumber = normalizeText(row?.rNumber);
+    if (!ipnKey || !rNumber) continue;
+    if (!valuesByIpn.has(ipnKey)) valuesByIpn.set(ipnKey, new Map());
+    valuesByIpn.get(ipnKey).set(rNumber.toUpperCase(), rNumber);
+  }
+
+  const out = new Map();
+  for (const [ipnKey, valueMap] of valuesByIpn.entries()) {
+    out.set(ipnKey, Array.from(valueMap.values()).join(', '));
+  }
+  return out;
+}
+
+function normalizeRNumberListForCompare(value = '') {
+  return splitRNumberList(value)
+    .map(item => item.toUpperCase())
+    .sort()
+    .join('|');
+}
+
 function buildCategoryDefinitionsIndex(categoryRecords = []) {
   const index = new Map();
 
@@ -99,6 +130,7 @@ function buildPhase2PlanV2({
   const tracking = selectTrackingFields(masterFieldNames);
   const unmappedPrefixes = new Set();
   const plannedCreateByIpn = new Set();
+  const rNumberValueByIpn = buildRNumberValueByIpn(normalizedRows);
 
   const summary = {
     deterministicPlanned: 0,
@@ -155,6 +187,8 @@ function buildPhase2PlanV2({
         IPN: row.ipn,
         'Quantity (QOH)': row.qoh
       };
+      const rNumberValue = rNumberValueByIpn.get(ipnKey);
+      if (rNumberValue) fields.RNumber = rNumberValue;
 
       if (decision.type !== 'deterministic' && tracking.statusField) {
         fields[tracking.statusField] = decision.type === 'multi' ? 'Unresolved' : 'Exception';
@@ -175,6 +209,13 @@ function buildPhase2PlanV2({
       const existingQoh = getExistingQoh(existingFields);
       if (existingQoh !== row.qoh) {
         fields['Quantity (QOH)'] = row.qoh;
+      }
+      const rNumberValue = rNumberValueByIpn.get(ipnKey);
+      if (
+        rNumberValue &&
+        normalizeRNumberListForCompare(existingFields.RNumber) !== normalizeRNumberListForCompare(rNumberValue)
+      ) {
+        fields.RNumber = rNumberValue;
       }
 
       if (!existingHasCategory && decision.type !== 'deterministic' && tracking.statusField) {

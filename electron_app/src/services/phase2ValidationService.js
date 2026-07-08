@@ -215,6 +215,7 @@ function normalizeRow(row, rowNumber) {
   return {
     rowNumber,
     skipReason: null,
+    rNumber: normalizeString(row.RNumber),
     ipn,
     ipnUpper: upperIpn,
     ipnPrefix,

@@ -92,7 +92,19 @@ function isExcludedIpn(ipn) {
   return normalized.startsWith('900') || normalized.startsWith('950') || normalized.startsWith('999');
 }
 
-function buildRawShipmentItemRows(shipments = [], rnumToIpn = new Map()) {
+function resolveMappedIpn(sku = '', rnumToIpn = new Map(), directSkuToIpn = new Map()) {
+  const directIpn = normalizeText(directSkuToIpn.get(sku));
+  if (directIpn) {
+    return { mappedIpn: directIpn, mappingMethod: 'Master RNumber' };
+  }
+  const powerlinkIpn = normalizeText(rnumToIpn.get(sku));
+  if (powerlinkIpn) {
+    return { mappedIpn: powerlinkIpn, mappingMethod: 'Powerlink RNumber' };
+  }
+  return { mappedIpn: '', mappingMethod: '' };
+}
+
+function buildRawShipmentItemRows(shipments = [], rnumToIpn = new Map(), directSkuToIpn = new Map()) {
   const rows = [];
   const uniqueSkus = new Set();
   let itemsWithCompleteDims = 0;
@@ -108,7 +120,8 @@ function buildRawShipmentItemRows(shipments = [], rnumToIpn = new Map()) {
       const sku = normalizeSku(item?.sku);
       if (sku) uniqueSkus.add(sku);
 
-      const mappedIpn = sku ? normalizeText(rnumToIpn.get(sku)) : '';
+      const mapping = sku ? resolveMappedIpn(sku, rnumToIpn, directSkuToIpn) : {};
+      const mappedIpn = normalizeText(mapping.mappedIpn);
       const row = {
         ShipmentID: shipment?.shipmentId || shipment?.shipmentNumber || '',
         ShipmentNumber: shipment?.shipmentNumber || '',
@@ -127,6 +140,7 @@ function buildRawShipmentItemRows(shipments = [], rnumToIpn = new Map()) {
         WeightSourceUnit: complete?.weightSourceUnit || '',
         HasCompleteDims: complete ? 'Yes' : 'No',
         MappedIPN: mappedIpn,
+        MappingMethod: mappedIpn ? normalizeText(mapping.mappingMethod) : '',
         MappingStatus: mappedIpn
           ? isExcludedIpn(mappedIpn)
             ? 'Excluded IPN'
@@ -149,15 +163,18 @@ function buildRawShipmentItemRows(shipments = [], rnumToIpn = new Map()) {
   };
 }
 
-function buildSkuSummaryRows(shipments = [], rnumToIpn = new Map()) {
+function buildSkuSummaryRows(shipments = [], rnumToIpn = new Map(), directSkuToIpn = new Map()) {
   const { skuToDims } = buildSkuToDims(shipments);
   const rows = [];
   let mappedCount = 0;
+  let masterRNumberMappedCount = 0;
+  let powerlinkMappedCount = 0;
   let unmappedCount = 0;
   let excludedCount = 0;
 
   for (const [sku, dims] of skuToDims.entries()) {
-    const mappedIpn = normalizeText(rnumToIpn.get(sku));
+    const mapping = resolveMappedIpn(sku, rnumToIpn, directSkuToIpn);
+    const mappedIpn = normalizeText(mapping.mappedIpn);
     let mappingStatus = 'Unmapped';
     if (mappedIpn) {
       if (isExcludedIpn(mappedIpn)) {
@@ -166,6 +183,8 @@ function buildSkuSummaryRows(shipments = [], rnumToIpn = new Map()) {
       } else {
         mappingStatus = 'Mapped';
         mappedCount += 1;
+        if (mapping.mappingMethod === 'Master RNumber') masterRNumberMappedCount += 1;
+        if (mapping.mappingMethod === 'Powerlink RNumber') powerlinkMappedCount += 1;
       }
     } else {
       unmappedCount += 1;
@@ -174,6 +193,7 @@ function buildSkuSummaryRows(shipments = [], rnumToIpn = new Map()) {
     rows.push({
       SKU: sku,
       MappedIPN: mappedIpn,
+      MappingMethod: mappedIpn ? normalizeText(mapping.mappingMethod) : '',
       MappingStatus: mappingStatus,
       ShipmentID: dims?.shipmentId || '',
       CreateDate: dims?.createDate || '',
@@ -188,6 +208,8 @@ function buildSkuSummaryRows(shipments = [], rnumToIpn = new Map()) {
     rows,
     uniqueSkuCount: rows.length,
     mappedCount,
+    masterRNumberMappedCount,
+    powerlinkMappedCount,
     unmappedCount,
     excludedCount
   };
@@ -214,6 +236,7 @@ function applyWorksheetStyling(worksheet, freezeHeader = true) {
 async function exportShipstationDebugWorkbook({
   shipments = [],
   rnumToIpn = new Map(),
+  directSkuToIpn = new Map(),
   outputPath
 } = {}) {
   const workbook = new ExcelJS.Workbook();
@@ -226,8 +249,8 @@ async function exportShipstationDebugWorkbook({
     path.resolve(__dirname, '..', '..', 'dev-output', 'phase3-shipstation-debug.xlsx');
   fs.mkdirSync(path.dirname(safeOutputPath), { recursive: true });
 
-  const rawData = buildRawShipmentItemRows(shipments, rnumToIpn);
-  const skuSummary = buildSkuSummaryRows(shipments, rnumToIpn);
+  const rawData = buildRawShipmentItemRows(shipments, rnumToIpn, directSkuToIpn);
+  const skuSummary = buildSkuSummaryRows(shipments, rnumToIpn, directSkuToIpn);
 
   const rawSheet = workbook.addWorksheet('Raw Shipment Items');
   rawSheet.columns = [
@@ -248,6 +271,7 @@ async function exportShipstationDebugWorkbook({
     { header: 'WeightSourceUnit', key: 'WeightSourceUnit', width: 14 },
     { header: 'HasCompleteDims', key: 'HasCompleteDims', width: 14 },
     { header: 'MappedIPN', key: 'MappedIPN', width: 18 },
+    { header: 'MappingMethod', key: 'MappingMethod', width: 18 },
     { header: 'MappingStatus', key: 'MappingStatus', width: 14 }
   ];
   rawSheet.addRows(rawData.rows);
@@ -266,6 +290,8 @@ async function exportShipstationDebugWorkbook({
     { metric: 'Raw rows with mapped IPN', value: rawData.mappedRows },
     { metric: 'Unique SKU summary rows', value: skuSummary.uniqueSkuCount },
     { metric: 'Unique SKU summary mapped', value: skuSummary.mappedCount },
+    { metric: 'Unique SKU summary mapped by Master RNumber', value: skuSummary.masterRNumberMappedCount },
+    { metric: 'Unique SKU summary mapped by Powerlink RNumber', value: skuSummary.powerlinkMappedCount },
     { metric: 'Unique SKU summary unmapped', value: skuSummary.unmappedCount },
     { metric: 'Unique SKU summary excluded', value: skuSummary.excludedCount },
     { metric: 'Output file', value: safeOutputPath }
@@ -276,6 +302,7 @@ async function exportShipstationDebugWorkbook({
   skuSheet.columns = [
     { header: 'SKU', key: 'SKU', width: 18 },
     { header: 'MappedIPN', key: 'MappedIPN', width: 18 },
+    { header: 'MappingMethod', key: 'MappingMethod', width: 18 },
     { header: 'MappingStatus', key: 'MappingStatus', width: 14 },
     { header: 'ShipmentID', key: 'ShipmentID', width: 18 },
     { header: 'CreateDate', key: 'CreateDate', width: 24 },
