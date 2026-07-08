@@ -311,7 +311,12 @@ function summarizeBatchGaps({
         const fields = row?.fields || {};
         const title = normalizeText(fields['Item Title']);
         const description = normalizeText(fields['Item Description']);
-        return !title || !description;
+        const titleReviewStatus = normalizeText(fields['Title Review Status']).toLowerCase();
+        const routedToReview =
+          titleReviewStatus === 'needs review' ||
+          titleReviewStatus === 'airbag - locked' ||
+          titleReviewStatus === 'skipped - manual override';
+        return (!title || !description) && !routedToReview;
       });
       if (hasAnyMissingListingOutput) missingTitleDescriptionIpns.push(ipn);
     }
@@ -357,7 +362,8 @@ async function evaluateBatchOutputGaps({
     selectFields: [
       'IPN (Interchange Part Number)',
       'Item Title',
-      'Item Description'
+      'Item Description',
+      'Title Review Status'
     ]
   });
   const masterRows = await fetchAirtableRowsByIpnSet({

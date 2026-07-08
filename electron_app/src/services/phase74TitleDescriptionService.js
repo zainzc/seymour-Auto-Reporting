@@ -11,6 +11,9 @@ const LISTING_LEGACY_TITLE_FIELD = 'Title';
 const LISTING_OUTPUT_TITLE_FIELD = 'Item Title';
 const LISTING_OUTPUT_DESCRIPTION_FIELD = 'Item Description';
 const LISTING_SHORT_DESCRIPTION_FIELD = 'Short Description';
+const LISTING_TITLE_REVIEW_STATUS_FIELD = 'Title Review Status';
+const LISTING_TITLE_REVIEW_REASON_FIELD = 'Title Review Reason';
+const LISTING_TITLE_REVIEW_NOTES_FIELD = 'Title Review Notes';
 const LISTING_CONDITIONS_FIELD = 'Conditions & Options';
 const LISTING_CONDITIONS_FALLBACK_FIELD = 'Conditions & Options';
 const LISTING_C_SPECIFICS_FIELD = 'Item Specifics - All C: values relevant to item';
@@ -24,6 +27,31 @@ const LISTING_ITEM_SPECIFIC_FIELDS = [
 ];
 
 const LISTING_CATEGORY_FIELDS = ['Category'];
+const LISTING_SKU_FIELDS = ['SKU', 'Custom Label', 'CustomLabel'];
+
+const NOISY_ITEM_SPECIFIC_KEYS = new Set([
+  'country/region of manufacture',
+  'manufacturer warranty',
+  'labels & certification',
+  'package weight unit',
+  'universal fitment',
+  'vintage part',
+  'performance part'
+]);
+
+const NOISY_ITEM_SPECIFIC_VALUES = new Set([
+  'does not apply',
+  'n/a',
+  'na',
+  'none',
+  'unknown',
+  'not specified'
+]);
+
+const TITLE_REVIEW_STATUS_COMPLETED = 'Completed';
+const TITLE_REVIEW_STATUS_NEEDS_REVIEW = 'Needs Review';
+const TITLE_REVIEW_STATUS_AIRBAG_LOCKED = 'Airbag - Locked';
+const TITLE_REVIEW_STATUS_MANUAL_OVERRIDE = 'Skipped - Manual Override';
 
 function normalizeText(value) {
   if (Array.isArray(value)) {
@@ -166,14 +194,24 @@ function buildItemSpecifics(fields = {}, cSpecifics = {}) {
   const out = {};
   for (const name of LISTING_ITEM_SPECIFIC_FIELDS) {
     const value = normalizeText(fields[name]);
-    if (!value) continue;
+    if (!shouldSendItemSpecificToAi(name, value)) continue;
     out[name] = value;
   }
   for (const [name, value] of Object.entries(cSpecifics || {})) {
-    if (!normalizeText(name) || !normalizeText(value)) continue;
-    out[name] = normalizeText(value);
+    if (!shouldSendItemSpecificToAi(name, value)) continue;
+    out[normalizeText(name)] = normalizeText(value);
   }
   return out;
+}
+
+function shouldSendItemSpecificToAi(name = '', value = '') {
+  const normalizedName = normalizeKey(name).replace(/^c:/, '');
+  const normalizedValue = normalizeText(value);
+  if (!normalizedName || !normalizedValue) return false;
+  if (NOISY_ITEM_SPECIFIC_KEYS.has(normalizedName)) return false;
+  if (NOISY_ITEM_SPECIFIC_VALUES.has(normalizedValue.toLowerCase())) return false;
+  if (normalizedName === 'country/region of manufacture' && normalizedValue.toLowerCase() === 'oem') return false;
+  return true;
 }
 
 function buildCategoryContext(fields = {}) {
@@ -207,33 +245,73 @@ function normalizeTitleForKey(value) {
   return normalizeText(value).replace(/\s+/g, ' ').toLowerCase();
 }
 
+function collapseConsecutiveDuplicateWords(value) {
+  let text = normalizeText(value).replace(/\s+/g, ' ').trim();
+  let previous = '';
+  while (text && text !== previous) {
+    previous = text;
+    text = text.replace(/\b([A-Za-z0-9]+)(\s+\1\b)+/gi, '$1').replace(/\s+/g, ' ').trim();
+  }
+  return text;
+}
+
+function extractTrailingSku(value) {
+  const text = normalizeText(value);
+  const afterOem = text.match(/\bOEM\s+([A-Z0-9][A-Z0-9.-]{3,})$/i);
+  if (afterOem) return afterOem[1];
+  const beforeOem = text.match(/\s+([0-9]{5,})\s+OEM$/i);
+  if (beforeOem) return beforeOem[1];
+  return '';
+}
+
 function ensureSingleOemAtEnd(value) {
-  let title = normalizeText(value).replace(/\bOEM\b/gi, '').replace(/\s+/g, ' ').trim();
+  const source = collapseConsecutiveDuplicateWords(value);
+  const sku = extractTrailingSku(source);
+  let title = source.replace(/\bOEM\b/gi, '').replace(/\s+/g, ' ').trim();
+  if (sku) {
+    title = title
+      .replace(new RegExp(`\\s+${sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'), '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
   if (!title) return '';
   title = title.replace(/[,\-:/|]+$/, '').trim();
-  return `${title} OEM`;
+  return collapseConsecutiveDuplicateWords(`${title} OEM${sku ? ` ${sku}` : ''}`);
 }
 
 function enforceTitleLength(value, min = 65, max = 80) {
   let title = ensureSingleOemAtEnd(value);
   if (!title) return '';
   if (title.length > max) {
-    const suffix = ' OEM';
+    const sku = extractTrailingSku(title);
+    const suffix = ` OEM${sku ? ` ${sku}` : ''}`;
     const keep = Math.max(1, max - suffix.length);
-    const core = title.slice(0, keep).replace(/[,\-:/| ]+$/, '').trim();
+    const core = title
+      .replace(new RegExp(`\\s+OEM${sku ? `\\s+${sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` : ''}$`, 'i'), '')
+      .slice(0, keep)
+      .replace(/[,\-:/| ]+$/, '')
+      .trim();
     title = `${core}${suffix}`;
   }
-  if (title.length < min) {
-    const fillers = [' Assembly', ' Unit', ' Tested'];
-    for (const filler of fillers) {
-      const next = ensureSingleOemAtEnd(title.replace(/\s+OEM$/i, '') + filler);
-      if (next.length >= min && next.length <= max) {
-        title = next;
-        break;
-      }
-    }
-  }
-  return title;
+  return collapseConsecutiveDuplicateWords(title);
+}
+
+function replaceOemQualifier(value, qualifier = 'OEM') {
+  const title = ensureSingleOemAtEnd(value);
+  if (!title) return '';
+  const sku = extractTrailingSku(title);
+  const suffixPattern = new RegExp(`\\s+OEM${sku ? `\\s+${sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` : ''}$`, 'i');
+  const core = title.replace(suffixPattern, '').trim();
+  return collapseConsecutiveDuplicateWords(`${core} ${qualifier}${sku ? ` ${sku}` : ''}`);
+}
+
+function ensureTitleHasSku(value, skuValue = '') {
+  const sku = normalizeText(skuValue);
+  const title = ensureSingleOemAtEnd(value);
+  if (!title || !sku) return title;
+  const escapedSku = sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`\\b${escapedSku}$`, 'i').test(title)) return title;
+  return ensureSingleOemAtEnd(`${title} ${sku}`);
 }
 
 function makeTitleUnique(candidate, usedTitleKeys = new Set(), min = 65, max = 80) {
@@ -242,13 +320,55 @@ function makeTitleUnique(candidate, usedTitleKeys = new Set(), min = 65, max = 8
   const baseKey = normalizeTitleForKey(base);
   if (!baseKey || !usedTitleKeys.has(baseKey)) return base;
 
-  const descriptors = [' Assembly', ' Unit', ' w/ Motor', ' Tested'];
-  for (const descriptor of descriptors) {
-    const variant = enforceTitleLength(base.replace(/\s+OEM$/i, '') + descriptor, min, max);
+  const qualifiers = ['Used OEM', 'Genuine OEM', 'Original OEM', 'Factory OEM'];
+  for (const qualifier of qualifiers) {
+    const variant = enforceTitleLength(replaceOemQualifier(base, qualifier), min, max);
     const key = normalizeTitleForKey(variant);
     if (variant && key && !usedTitleKeys.has(key)) return variant;
   }
   return base;
+}
+
+function titleContainsAirbag(value) {
+  return /\bair\s*bag\b|\bairbag\b/i.test(normalizeText(value));
+}
+
+function normalizeTitleReviewStatus(value, fallback = TITLE_REVIEW_STATUS_COMPLETED) {
+  const key = normalizeText(value).toLowerCase();
+  if (!key) return fallback;
+  if (key === 'completed' || key === 'complete' || key === 'ok') return TITLE_REVIEW_STATUS_COMPLETED;
+  if (key === 'needs review' || key === 'need review' || key === 'manual review') return TITLE_REVIEW_STATUS_NEEDS_REVIEW;
+  if (key === 'airbag - locked' || key === 'airbag locked' || key === 'airbag') return TITLE_REVIEW_STATUS_AIRBAG_LOCKED;
+  if (key === 'skipped - manual override' || key === 'manual override' || key === 'skipped manual override') {
+    return TITLE_REVIEW_STATUS_MANUAL_OVERRIDE;
+  }
+  return fallback;
+}
+
+function inferTitleReviewStatus(generated = {}) {
+  const explicit = normalizeTitleReviewStatus(generated.titleReviewStatus, '');
+  if (explicit) return explicit;
+  const text = [
+    generated.reasoningSummary,
+    generated.titleReviewReason,
+    generated.titleReviewNotes
+  ]
+    .map(item => normalizeText(item).toLowerCase())
+    .filter(Boolean)
+    .join(' ');
+  if (/\bair\s*bag\b|\bairbag\b/.test(text)) return TITLE_REVIEW_STATUS_AIRBAG_LOCKED;
+  if (/\b(flag|manual review|uncertain|missing|unknown|multi-year|multiple year|unmapped|cannot determine|not certain)\b/.test(text)) {
+    return TITLE_REVIEW_STATUS_NEEDS_REVIEW;
+  }
+  return TITLE_REVIEW_STATUS_COMPLETED;
+}
+
+function addFieldIfChanged(writeFields = {}, existingFields = {}, fieldName = '', nextValue = '') {
+  const value = normalizeText(nextValue);
+  if (!fieldName || !value) return false;
+  if (normalizeText(existingFields[fieldName]) === value) return false;
+  writeFields[fieldName] = value;
+  return true;
 }
 
 function isManualOverrideForField(listingFields = {}, fieldName = '') {
@@ -298,6 +418,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   const promptCacheEnabled =
     normalizeText(options.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true').toLowerCase() !==
     'false';
+  const logAiPayload = parseBoolean(options.phase74LogAiPayload ?? process.env.PHASE74_LOG_AI_PAYLOAD ?? 'false', false);
   const promptCacheKey = normalizeText(
     options.phase74PromptCacheKey ||
       process.env.PHASE74_PROMPT_CACHE_KEY ||
@@ -330,7 +451,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     maxAttempts: Number(options.aiMaxAttempts || process.env.PHASE74_AI_MAX_ATTEMPTS || 3) || 3,
     baseDelayMs: 600,
     promptCacheEnabled,
-    promptCacheKey
+    promptCacheKey,
+    logPhase74AiPayload: logAiPayload
   });
 
   const summary = {
@@ -351,6 +473,11 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     skippedManualOverride: 0,
     skippedNoChange: 0,
     aiFailures: 0,
+    titleReviewCompleted: 0,
+    titleReviewNeedsReview: 0,
+    titleReviewAirbagLocked: 0,
+    titleReviewManualOverride: 0,
+    titleReviewWritten: 0,
     writesAttempted: 0,
     writesSucceeded: 0,
     writeFailures: 0,
@@ -367,7 +494,10 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
 
   const ensureResult = await ensureFields(schemaService, listingsTable, [
     LISTING_OUTPUT_TITLE_FIELD,
-    LISTING_OUTPUT_DESCRIPTION_FIELD
+    LISTING_OUTPUT_DESCRIPTION_FIELD,
+    LISTING_TITLE_REVIEW_STATUS_FIELD,
+    LISTING_TITLE_REVIEW_REASON_FIELD,
+    LISTING_TITLE_REVIEW_NOTES_FIELD
   ]);
   summary.listingFieldsCreated = (ensureResult?.createdFields || []).length;
 
@@ -378,6 +508,9 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     LISTING_LEGACY_TITLE_FIELD,
     LISTING_OUTPUT_TITLE_FIELD,
     LISTING_OUTPUT_DESCRIPTION_FIELD,
+    LISTING_TITLE_REVIEW_STATUS_FIELD,
+    LISTING_TITLE_REVIEW_REASON_FIELD,
+    LISTING_TITLE_REVIEW_NOTES_FIELD,
     `${LISTING_OUTPUT_TITLE_FIELD} Manual Override`,
     `${LISTING_OUTPUT_TITLE_FIELD} Override`,
     `${LISTING_OUTPUT_TITLE_FIELD} Locked`,
@@ -395,7 +528,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     'Condition',
     'Condition Note',
     ...LISTING_CATEGORY_FIELDS,
-    ...LISTING_ITEM_SPECIFIC_FIELDS
+    ...LISTING_ITEM_SPECIFIC_FIELDS,
+    ...LISTING_SKU_FIELDS
   ];
   if (hasShortDescriptionField) {
     selectFields.push(LISTING_SHORT_DESCRIPTION_FIELD);
@@ -411,6 +545,15 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       percent: 8,
       counts: summary,
       message: `Using custom Phase 7.4 title prompt from UI (chars=${phase74TitleRulesPrompt.length}).`
+    });
+  }
+
+  if (logAiPayload) {
+    emitProgress(progressCallback, {
+      stage: 'phase74_prepare',
+      percent: 9,
+      counts: summary,
+      message: 'Phase 7.4 AI payload debug logging is enabled. Full request bodies will print as [Phase7.4 AI Payload] in the app logs.'
     });
   }
 
@@ -459,7 +602,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
 
     const existingTitle = normalizeText(fields[LISTING_OUTPUT_TITLE_FIELD]);
     const existingDescription = normalizeText(fields[LISTING_OUTPUT_DESCRIPTION_FIELD]);
-    if (existingTitle && existingDescription) {
+    const existingReviewStatus = normalizeText(fields[LISTING_TITLE_REVIEW_STATUS_FIELD]);
+    if (existingTitle && existingDescription && existingReviewStatus) {
       summary.skippedAlreadyEnriched += 1;
       continue;
     }
@@ -552,6 +696,34 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     const conditionsAndOptions = resolveListingConditionsAndOptions(fields, cSpecifics);
     const categoryContext = buildCategoryContext(fields);
     const itemSpecifics = buildItemSpecifics(fields, cSpecifics);
+    const currentLegacyTitle = normalizeText(getFieldValueByName(fields, LISTING_LEGACY_TITLE_FIELD));
+    const currentOutputTitle = normalizeText(getFieldValueByName(fields, LISTING_OUTPUT_TITLE_FIELD));
+    const customLabelSku =
+      normalizeText(getFieldValueByName(fields, 'SKU')) ||
+      normalizeText(getFieldValueByName(fields, 'Custom Label')) ||
+      normalizeText(getFieldValueByName(fields, 'CustomLabel'));
+    const titleManualOverride = isManualOverrideForField(fields, LISTING_OUTPUT_TITLE_FIELD);
+    const descriptionManualOverride = isManualOverrideForField(fields, LISTING_OUTPUT_DESCRIPTION_FIELD);
+    const shortDescriptionManualOverride =
+      hasShortDescriptionField && isManualOverrideForField(fields, LISTING_SHORT_DESCRIPTION_FIELD);
+
+    if (titleContainsAirbag(currentOutputTitle || currentLegacyTitle)) {
+      const writeFields = {};
+      addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_STATUS_FIELD, TITLE_REVIEW_STATUS_AIRBAG_LOCKED);
+      addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_REASON_FIELD, 'airbag_guard');
+      addFieldIfChanged(
+        writeFields,
+        fields,
+        LISTING_TITLE_REVIEW_NOTES_FIELD,
+        'Airbag title detected. Client rule says title automation must not alter airbag listings.'
+      );
+      if (Object.keys(writeFields).length > 0) {
+        updates.push({ id: row.id, fields: writeFields });
+        summary.titleReviewWritten += 1;
+      }
+      summary.titleReviewAirbagLocked += 1;
+      continue;
+    }
 
     emitProgress(progressCallback, {
       stage: 'phase74_generate',
@@ -570,11 +742,9 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         conditionNote: normalizeText(fields['Condition Note']),
         itemSpecifics,
         partFitment: normalizeText(master?.fields?.[MASTER_FITMENT_FIELD]),
-        currentLegacyTitle: normalizeText(getFieldValueByName(fields, LISTING_LEGACY_TITLE_FIELD)),
-        currentTitle:
-          normalizeText(getFieldValueByName(fields, LISTING_OUTPUT_TITLE_FIELD)) ||
-          normalizeText(getFieldValueByName(fields, LISTING_LEGACY_TITLE_FIELD)),
-        existingTitles: usedTitles.slice(-250),
+        currentLegacyTitle,
+        currentTitle: currentOutputTitle || currentLegacyTitle,
+        customLabelSku,
         phase74TitleRulesPrompt
       });
     } catch (error) {
@@ -591,12 +761,30 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       continue;
     }
 
-    const aiTitle = normalizeText(generated?.generatedTitle);
+    const aiTitle = ensureTitleHasSku(generated?.generatedTitle, customLabelSku);
     const nextTitle = makeTitleUnique(aiTitle, usedTitleKeys, titleMinLength, titleMaxLength);
     const nextDescription = normalizeText(generated?.generatedDescription);
     const nextShortDescription = normalizeText(generated?.shortDescription);
+    let nextReviewStatus = inferTitleReviewStatus(generated);
+    let nextReviewReason = normalizeText(generated?.titleReviewReason);
+    let nextReviewNotes =
+      normalizeText(generated?.titleReviewNotes) || normalizeText(generated?.reasoningSummary);
 
     if (!nextTitle || !nextDescription) {
+      const writeFields = {};
+      addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_STATUS_FIELD, TITLE_REVIEW_STATUS_NEEDS_REVIEW);
+      addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_REASON_FIELD, 'ai_blank_output');
+      addFieldIfChanged(
+        writeFields,
+        fields,
+        LISTING_TITLE_REVIEW_NOTES_FIELD,
+        `AI returned blank title or description. ${compactText(generated?.reasoningSummary, 180)}`
+      );
+      if (Object.keys(writeFields).length > 0) {
+        updates.push({ id: row.id, fields: writeFields });
+        summary.titleReviewWritten += 1;
+        summary.titleReviewNeedsReview += 1;
+      }
       summary.aiFailures += 1;
       if (summary.errors.length < sampleLimit) {
         const blankMessage =
@@ -624,12 +812,20 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     const existingTitleNew = normalizeText(fields[LISTING_OUTPUT_TITLE_FIELD]);
     const existingDescriptionOut = normalizeText(fields[LISTING_OUTPUT_DESCRIPTION_FIELD]);
     const existingShort = hasShortDescriptionField ? normalizeText(fields[LISTING_SHORT_DESCRIPTION_FIELD]) : '';
-    const titleManualOverride = isManualOverrideForField(fields, LISTING_OUTPUT_TITLE_FIELD);
-    const descriptionManualOverride = isManualOverrideForField(fields, LISTING_OUTPUT_DESCRIPTION_FIELD);
-    const shortDescriptionManualOverride =
-      hasShortDescriptionField && isManualOverrideForField(fields, LISTING_SHORT_DESCRIPTION_FIELD);
 
     const writeFields = {};
+
+    if (titleManualOverride) {
+      nextReviewStatus = TITLE_REVIEW_STATUS_MANUAL_OVERRIDE;
+      nextReviewReason = nextReviewReason || 'manual_override';
+      nextReviewNotes = nextReviewNotes || 'Item Title is marked as manually overridden, so Phase 7.4 did not replace it.';
+    } else if (nextReviewStatus === TITLE_REVIEW_STATUS_COMPLETED) {
+      nextReviewReason = nextReviewReason || 'completed';
+      nextReviewNotes = nextReviewNotes || 'Title generated from confirmed listing data.';
+    } else if (nextReviewStatus === TITLE_REVIEW_STATUS_NEEDS_REVIEW) {
+      nextReviewReason = nextReviewReason || 'manual_review_required';
+      nextReviewNotes = nextReviewNotes || 'Title rules flagged this row for manual review.';
+    }
 
     if (!titleManualOverride && nextTitle && nextTitle !== existingTitleNew) {
       writeFields[LISTING_OUTPUT_TITLE_FIELD] = nextTitle;
@@ -655,6 +851,17 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       summary.skippedManualOverride += 1;
     }
 
+    if (addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_STATUS_FIELD, nextReviewStatus)) {
+      summary.titleReviewWritten += 1;
+    }
+    addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_REASON_FIELD, nextReviewReason);
+    addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_NOTES_FIELD, nextReviewNotes);
+
+    if (nextReviewStatus === TITLE_REVIEW_STATUS_COMPLETED) summary.titleReviewCompleted += 1;
+    if (nextReviewStatus === TITLE_REVIEW_STATUS_NEEDS_REVIEW) summary.titleReviewNeedsReview += 1;
+    if (nextReviewStatus === TITLE_REVIEW_STATUS_AIRBAG_LOCKED) summary.titleReviewAirbagLocked += 1;
+    if (nextReviewStatus === TITLE_REVIEW_STATUS_MANUAL_OVERRIDE) summary.titleReviewManualOverride += 1;
+
     if (Object.keys(writeFields).length === 0) {
       summary.skippedNoChange += 1;
       continue;
@@ -668,7 +875,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     if (!sampleSeen.has(ipn) && summary.samples.length < sampleLimit) {
       sampleSeen.add(ipn);
       summary.samples.push(
-        `ipn='${ipn}' title='${compactText(nextTitle, 90)}' desc='${compactText(nextDescription, 120)}'`
+        `ipn='${ipn}' title='${compactText(nextTitle, 90)}' review='${nextReviewStatus}' desc='${compactText(nextDescription, 120)}'`
       );
     }
 
@@ -731,6 +938,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     message:
       `Phase 7.4 completed. Titles=${summary.titleGenerated}, Descriptions=${summary.descriptionGenerated}, ` +
       `AlreadyEnrichedSkipped=${summary.skippedAlreadyEnriched}, ManualSkipped=${summary.skippedManualOverride}, ` +
+      `ReviewWritten=${summary.titleReviewWritten}, ReviewNeeds=${summary.titleReviewNeedsReview}, ` +
       `PublishedSkipped=${summary.skippedAlreadyPublished}, ` +
       `AIFailures=${summary.aiFailures}, SkippedNoChange=${summary.skippedNoChange}, ` +
       `WritesAttempted=${summary.writesAttempted}, WritesSucceeded=${summary.writesSucceeded}, WritesFailed=${summary.writeFailures}.`

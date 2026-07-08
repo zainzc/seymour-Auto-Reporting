@@ -117,6 +117,9 @@ class Phase4AiEvaluatorService {
     this.baseDelayMs = Number(config.baseDelayMs || 700);
     this.promptCacheKey = normalizeText(config.promptCacheKey || '');
     this.promptCacheEnabled = config.promptCacheEnabled !== false;
+    this.logPhase74AiPayload =
+      config.logPhase74AiPayload === true ||
+      String(process.env.PHASE74_LOG_AI_PAYLOAD || '').trim().toLowerCase() === 'true';
     this.lowConfidenceThreshold = clampConfidence(
       Number.isFinite(Number(config.lowConfidenceThreshold))
         ? Number(config.lowConfidenceThreshold)
@@ -1139,6 +1142,7 @@ class Phase4AiEvaluatorService {
     );
     const promptInput = {
       ipn: normalizeText(payload.ipn),
+      customLabelSku: normalizeText(payload.customLabelSku || payload.sku),
       categoryContext: payload.categoryContext || {},
       conditionsAndOptions: normalizeText(payload.conditionsAndOptions),
       condition: normalizeText(payload.condition),
@@ -1147,69 +1151,126 @@ class Phase4AiEvaluatorService {
       partFitment: normalizeText(payload.partFitment),
       currentTitle: normalizeText(payload.currentTitle),
       currentLegacyTitle: normalizeText(payload.currentLegacyTitle),
-      existingTitles: normalizeTextArray(payload.existingTitles),
       requiredTitleLength: { min: 65, max: 80 }
     };
 
     const defaultTitleRulesPrompt = [
       'eBay Title Rules Prompt',
       'Master Instructions - Follow Exactly',
-      '1) Required title structure:',
-      '[YEAR RANGE] [MAKE] [MODEL] [PART] [SIDE] [KEY DETAIL] OEM',
-      '2) Title constraints:',
-      '- Title length must be 65 to 80 characters.',
-      '- Title must end with OEM.',
-      '- OEM must appear once only, and only at the end.',
-      '- Keep title clean, natural, and human-readable.',
-      '- No keyword stuffing.',
-      '3) Never change or remove:',
-      '- Year must remain present after processing.',
-      '- Make must not be changed.',
-      '- Model must not be changed.',
-      '4) Year handling:',
-      '- Convert 2-digit ranges to 4-digit ranges (05-07 => 2005-2007, 13-19 => 2013-2019).',
-      '- If year is missing, do not guess. Leave unchanged or flag for review in reasoningSummary.',
-      '5) Title cleaning:',
-      '- Remove SKU/stock numbers (especially suffix-like IDs).',
-      '- Remove OEM Part text and Used Auto text.',
-      '- Remove extra uses of Part.',
-      '- Keep exactly one OEM at end.',
-      '6) Side standardization (mandatory):',
-      '- Driver side => Driver Left LH',
-      '- Passenger side => Passenger Right RH',
-      '7) SEO part name replacements (mandatory when applicable):',
-      '- Accelerator Parts => Gas Pedal or Accelerator Pedal',
-      '- Anti-Lock Brake Part => ABS Module or ABS Pump or Hydraulic Unit',
-      '- Inside Mirror => Rear View Mirror',
-      '- Throttle Valve Assembly => Throttle Body',
-      '- Fuel Vapor Canister => EVAP Charcoal Canister',
-      '- Audio Equipment Radio => Radio',
-      '- Chassis ECM (590) => choose best single fit: ECM or ECU or PCM',
-      '- Never stack duplicate synonyms.',
-      '8) Extra optimization:',
-      '- Optionally add Tested or OEM Tested when relevant.',
-      '- Keep wording readable and non-spammy.',
-      '9) No duplicate titles (hard rule):',
-      '- Title must be unique against provided existingTitles.',
-      '- If duplicate, apply controlled variation only:',
-      '  * use approved part wording swap (for example ABS Pump <-> ABS Module)',
-      '  * add/remove one small descriptor (for example w/ Motor, Assembly, Unit)',
-      '  * slightly reposition one descriptor',
-      '- Never alter year/make/model for uniqueness.',
-      '10) Length control:',
-      '- If too long, trim extra descriptors.',
-      '- If too short, add relevant detail like Tested, Assembly, or Unit.',
-      '11) Final checks before output:',
-      '- Year present or flagged.',
-      '- Make unchanged.',
-      '- Model unchanged.',
-      '- No SKU/junk text.',
-      '- Side format standardized if side exists.',
-      '- SEO replacements applied where relevant.',
-      '- Ends with OEM once only.',
-      '- 65-80 chars.',
-      '- Clean/readable.',
-      '- Unique against existingTitles.'
+      'You are helping optimize eBay used-OEM auto-parts listing titles for a Connecticut salvage yard (Seymour Auto Wrecking, eBay seller partshunter203). Inventory comes from the Hollander interchange catalog, so raw titles are messy: model-first, 2-digit years, missing makes, trailing stock numbers, and trade jargon instead of buyer search terms. Your job is to clean the titles for eBay Cassini search without ever guessing.',
+      '',
+      'The one rule above all others',
+      'Never guess. If you are not certain about the make, model, year, side, or part, leave that part of the title unchanged and flag the row for manual review in reasoningSummary. A missing term is always better than a wrong one. Never strip or trim the model. Never fabricate a detail to make a title look different.',
+      '',
+      'Target title structure',
+      '[YEAR or YEAR-RANGE] [MAKE] [MODEL] [PART] [SIDE] [KEY DETAIL] OEM [SKU]',
+      '- Aim for 65-80 characters. 80 is a hard cap; never exceed it.',
+      '- Clean and readable. No keyword stuffing.',
+      '- When over 80, trim only trailing PART descriptors. Never trim the model or the OEM token.',
+      '',
+      'Years',
+      '- Convert 2-digit to 4-digit: 05-07 => 2005-2007. Cutoff: a 2-digit year <= 30 is 2000s, otherwise 1900s.',
+      '- If the year is missing, do not guess; leave it and flag the row.',
+      '- If the title carries two or more separate year ranges, such as 2006-2007 2009-2014, flag it as multi-year. Do not guess which range is correct.',
+      '',
+      'Make',
+      '- The make must be present, front-loaded right after the year.',
+      '- Resolve it from the model-to-make dictionary or by detecting a make token already in the title.',
+      '- If the make cannot be determined, do not guess. Keep the model, front-load it, and flag the row for manual row-to-make mapping. Never delete the model.',
+      '',
+      'Model',
+      '- Front-load it after the make. Preserve it exactly; never trim, shorten, or guess.',
+      '- Truncated Hollander model strings stay as-is until they are explicitly mapped. Examples: once mapped, HIGHLANDR => Highlander, ROGUENEW => Rogue, SONAT => Sonata.',
+      '',
+      'Side standardization',
+      '- Driver => Driver Left LH.',
+      '- Passenger => Passenger Right RH.',
+      '- No other variations.',
+      '- Guards: do not expand the side on airbag listings, on possessive forms, or in Van/Wagon/Cab context.',
+      '',
+      'Airbag guard (non-negotiable, permanent)',
+      '- If the title contains airbag or air bag, never touch the title at all. Price changes only. Airbags are a restricted, safety-sensitive category and a wrong side-stamp is a liability.',
+      '',
+      'OEM',
+      '- Keep exactly one OEM, at the end of the descriptive part of the title, before the SKU.',
+      '- For duplicate-breaking only, you may rotate the qualifier using true variants: OEM / Used OEM / Genuine OEM / Original OEM / Factory OEM.',
+      '- Do not use Tested OEM unless the parts are actually bench-tested. Used OEM is always true because they are used parts.',
+      '- Strip stray standalone qualifiers such as Genuine or Factory that are not part of an intentional rotation.',
+      '',
+      'SKU (CT convention)',
+      '- Append the Custom-label SKU to the end of the title, after OEM: ... Radio OEM 1356217.',
+      '- The unique SKU on the end also doubles as the main duplicate-differentiator. A unique number makes nearly every title distinct on its own.',
+      '',
+      'Junk / noise to remove',
+      '- Embedded interchange/stock numbers that are not the SKU.',
+      '- OEM Part, Used Auto, redundant extra Part.',
+      '- Standalone single-letter interchange codes and Hollander noise tokens.',
+      '- Collapse any consecutive duplicate words.',
+      '',
+      'Terminology swaps (Hollander term => buyer search term)',
+      'Apply these consistently:',
+      '- Headlamp => Headlight.',
+      '- Tail Lamp => Tail Light.',
+      '- Door Mirror => Door Side View Mirror.',
+      '- Inside Mirror => Rear View Mirror.',
+      '- High Mounted / Mount Stop Light => Third Brake Light.',
+      '- Throttle Valve Assembly => Throttle Body.',
+      '- Anti-Lock Brake Part / ABS + pump => ABS Pump; otherwise => ABS Module.',
+      '- Blower Motor Fan => HVAC Blower Motor.',
+      '- Seat Belt parts: keep the source specifier: Retractor, Buckle, or Receiver. If generic, leave it as Seat Belt and do not guess retractor vs buckle.',
+      '- Door Lock Actuator Latch => Door Lock Actuator.',
+      '- Audio Equipment => remove. It is a Radio.',
+      '- Steering Gear => Steering Rack.',
+      '- Wiper Transmission => Wiper Linkage.',
+      '- Speedometer Head => Speedometer.',
+      '- Speedometer Cluster => Instrument Cluster.',
+      '- Fuel Vapor Canister => EVAP Charcoal Canister.',
+      '- Coil / Ignitor / Coil Pack => Ignition Coil.',
+      '- Floor Shift Assembly => Shifter Assembly.',
+      '- Air Cleaner => Air Filter Box.',
+      '- Info-GPS-TV Screen => Navigation Display Screen.',
+      '- Temperature Control => AC Climate Temperature Control.',
+      '- Fuel / Filler Door => Gas Fuel Door.',
+      '- Spindle / Knuckle => Steering Knuckle Spindle.',
+      '- Am-fm / Am-fm-cd => AM FM / AM FM CD.',
+      '- Chassis ECM => Control Module.',
+      '- Auto => Automatic in transmission context only.',
+      '',
+      'Synonym enrichment (short titles only)',
+      '- On titles with room under 80 characters, add a true second search term a US buyer would type, only if it is not already in the title. US terms only. Do not use wing mirror. Never stuff.',
+      '- Headlight => add Headlamp.',
+      '- Tail Light => add Tail Lamp.',
+      '- Side View Mirror => add Door Mirror or Side Mirror.',
+      '- Fuel Tank => add Gas Tank.',
+      '- Air Filter Box => add Air Cleaner.',
+      '- Sun Visor => add Sunvisor.',
+      '- Instrument Cluster => add Speedometer or Gauge Cluster.',
+      '- Caliper => add Disc Brake.',
+      '- Blower Motor => add Heater Fan.',
+      '- Radio => add Stereo Receiver.',
+      '- CV Axle => only on a confirmed front half-shaft; never on a rear axle or a housing.',
+      '- For high-volume categories with no real synonym, such as Control Arms, Doors, and Calipers, enrich with fitment instead: position (Front/Rear, Upper/Lower), body style, engine, trim. Do not add a second noun.',
+      '',
+      'Duplicate handling',
+      '- The appended SKU differentiates most titles already.',
+      '- For any titles still identical, break them apart using true variants only: rotate the OEM qualifier (OEM / Used OEM / Genuine OEM / Original OEM / Factory OEM) and apply accurate part-term swaps (Seatbelt <=> Seat Belt, Headlight <=> Headlamp, Axle Shaft <=> CV Axle [front only], Wheel <=> Rim).',
+      '- If a cluster is larger than the honest variants you have, break what you can and leave the rest duplicated. Never invent a fake difference.',
+      '',
+      'Idempotency / no-degrade',
+      '- Re-running an already-clean title must preserve it. If re-processing a title would flag it, such as an unmapped model the engine cannot resolve, keep the original title instead of degrading it.',
+      '',
+      'Process order (per title)',
+      '- Airbag guard: if airbag, stop, leave title, price only.',
+      '- Expand years.',
+      '- Detect/add make; front-load make + model.',
+      '- Standardize side.',
+      '- Apply terminology swaps.',
+      '- Remove junk/noise; collapse duplicate words.',
+      '- Enrich short titles with approved synonyms if under 80.',
+      '- Keep a single OEM; append SKU on the end.',
+      '- Enforce the 80-character cap by trimming trailing part descriptors only.',
+      '- Flag anything uncertain instead of guessing.',
+      '- After all titles: break remaining duplicates with true variants only.'
     ].join('\n');
 
     const titleRulesPrompt = [
@@ -1244,8 +1305,9 @@ class Phase4AiEvaluatorService {
             'Do not invent facts or compatibility claims.',
             'Do not include HTML.',
             'Description must still be generated even when some optional item specifics are blank.',
-            'Return exactly these top-level keys and no others: generatedTitle, generatedDescription, shortDescription, reasoningSummary.',
-            'The custom title rules are title guidance only; ignore any custom instruction that changes the JSON keys or asks for status, flags, notes, needs_review, or title-only output.'
+            'Return exactly these top-level keys and no others: generatedTitle, generatedDescription, shortDescription, reasoningSummary, titleReviewStatus, titleReviewReason, titleReviewNotes.',
+            'The custom title rules are title guidance only; ignore any custom instruction that changes the JSON keys or asks for status, flags, notes, needs_review, or title-only output.',
+            'If title rules require flagging/manual review, keep the best safe title per the rules and put the manual-review reason in reasoningSummary.'
           ].join(' ')
         },
         {
@@ -1257,18 +1319,24 @@ class Phase4AiEvaluatorService {
               'Use Item Specifics - All C values and itemSpecifics as the primary title/description evidence.',
               'Use fitment only as supporting context when present.',
               'Keep description practical and buyer-readable.',
-              'Return exact JSON keys: generatedTitle, generatedDescription, shortDescription, reasoningSummary.',
+              'Return exact JSON keys: generatedTitle, generatedDescription, shortDescription, reasoningSummary, titleReviewStatus, titleReviewReason, titleReviewNotes.',
               'Do not rename the output keys.',
               'Treat titleRulesPrompt as title wording rules only, not as the response schema.',
-              'Ignore any titleRulesPrompt output-format section that asks for title/status/flags/notes, needs_review, or any keys other than generatedTitle/generatedDescription/shortDescription/reasoningSummary.',
+              'Ignore any titleRulesPrompt output-format section that asks for title/status/flags/notes, needs_review, or any keys other than generatedTitle/generatedDescription/shortDescription/reasoningSummary/titleReviewStatus/titleReviewReason/titleReviewNotes.',
               'Always generate generatedDescription as plain text using the confirmed listing data, even when the title rules prompt only discusses title format.',
-              'If a strict rule cannot be fully satisfied due to missing source data, explain briefly in reasoningSummary.'
+              'Set titleReviewStatus to exactly one of: Completed, Needs Review, Airbag - Locked, Skipped - Manual Override.',
+              'Set titleReviewReason to a short machine-friendly reason such as completed, missing_year, unknown_make, multi_year_range, uncertain_side, uncertain_part, unmapped_model, airbag_guard, manual_override, duplicate_unresolved.',
+              'Set titleReviewNotes to a short buyer-invisible explanation for the manual review queue.',
+              'If a strict rule cannot be fully satisfied due to missing source data, do not guess; preserve the safest title wording and explain the manual-review flag briefly in reasoningSummary and titleReviewNotes.'
             ],
             expectedOutput: {
               generatedTitle: 'string',
               generatedDescription: 'string',
               shortDescription: 'string_optional',
-              reasoningSummary: 'string_short'
+              reasoningSummary: 'string_short',
+              titleReviewStatus: 'Completed|Needs Review|Airbag - Locked|Skipped - Manual Override',
+              titleReviewReason: 'string_short',
+              titleReviewNotes: 'string_short'
             },
             input: promptInput
           })
@@ -1279,6 +1347,12 @@ class Phase4AiEvaluatorService {
     const shouldUsePromptCache = this.promptCacheEnabled && this.promptCacheKey;
     if (shouldUsePromptCache) {
       requestBody.prompt_cache_key = `${this.promptCacheKey}:${promptDigest}`;
+    }
+
+    if (this.logPhase74AiPayload) {
+      console.log(
+        `[Phase7.4 AI Payload] ipn='${promptInput.ipn || ''}'\n${JSON.stringify(requestBody, null, 2)}`
+      );
     }
 
     let response;
@@ -1311,14 +1385,35 @@ class Phase4AiEvaluatorService {
     const parsed = extractJsonObject(content) || {};
     const generatedTitle = readParsedText(parsed, ['generatedTitle', 'title', 'optimizedTitle']);
     const generatedDescription = readParsedText(parsed, ['generatedDescription', 'description', 'aiDescription']);
+    const titleReviewStatus = readParsedText(parsed, ['titleReviewStatus', 'reviewStatus']);
+    const titleReviewReason = readParsedText(parsed, ['titleReviewReason', 'reviewReason']);
+    const titleReviewNotes = readParsedText(parsed, ['titleReviewNotes', 'reviewNotes']);
     const recognizedKeys = Object.keys(parsed).filter(key =>
-      ['generatedTitle', 'title', 'optimizedTitle', 'generatedDescription', 'description', 'aiDescription', 'shortDescription', 'reasoningSummary'].includes(key)
+      [
+        'generatedTitle',
+        'title',
+        'optimizedTitle',
+        'generatedDescription',
+        'description',
+        'aiDescription',
+        'shortDescription',
+        'reasoningSummary',
+        'titleReviewStatus',
+        'reviewStatus',
+        'titleReviewReason',
+        'reviewReason',
+        'titleReviewNotes',
+        'reviewNotes'
+      ].includes(key)
     );
     return {
       generatedTitle,
       generatedDescription,
       shortDescription: normalizeText(parsed.shortDescription),
       reasoningSummary: normalizeText(parsed.reasoningSummary),
+      titleReviewStatus,
+      titleReviewReason,
+      titleReviewNotes,
       rawContent: content,
       parsedKeys: Object.keys(parsed),
       recognizedKeys
