@@ -2,6 +2,21 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 
+const terminalConsole = global.console;
+const workOrdersVerboseTerminalLogs =
+  String(process.env.WORK_ORDERS_VERBOSE_LOGS || process.env.WORK_ORDERS_TERMINAL_LOGS || '')
+    .trim()
+    .toLowerCase() === 'true';
+const console = {
+  log: (...args) => {
+    if (workOrdersVerboseTerminalLogs) terminalConsole.log(...args);
+  },
+  warn: (...args) => {
+    if (workOrdersVerboseTerminalLogs) terminalConsole.warn(...args);
+  },
+  error: (...args) => terminalConsole.error(...args)
+};
+
 function resolveDefaultCachePath() {
   const configured = String(process.env.GOOGLE_DRIVE_IMAGE_CACHE_PATH || '').trim();
   if (configured) return configured;

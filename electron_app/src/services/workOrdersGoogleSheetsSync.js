@@ -19,6 +19,21 @@ const {
   timeZoneDateToUtc
 } = require('../utils/timezone');
 
+const terminalConsole = global.console;
+const workOrdersVerboseTerminalLogs =
+  String(process.env.WORK_ORDERS_VERBOSE_LOGS || process.env.WORK_ORDERS_TERMINAL_LOGS || '')
+    .trim()
+    .toLowerCase() === 'true';
+const console = {
+  log: (...args) => {
+    if (workOrdersVerboseTerminalLogs) terminalConsole.log(...args);
+  },
+  warn: (...args) => {
+    if (workOrdersVerboseTerminalLogs) terminalConsole.warn(...args);
+  },
+  error: (...args) => terminalConsole.error(...args)
+};
+
 const DEFAULT_WORK_ORDERS_SHEET_NAME = process.env.WORK_ORDERS_SHEET_NAME || 'Work Orders';
 const CLICKUP_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_OPEN_STATUS = 'OPEN';

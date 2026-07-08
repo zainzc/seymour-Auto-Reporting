@@ -3,6 +3,21 @@ const { getReportingConfig, saveReportingConfig, getInventoryConfig } = require(
 const oauth2Service = require('./oauth2Service');
 const { runWorkOrdersSync, DEFAULT_WORK_ORDERS_SHEET_NAME } = require('./workOrdersGoogleSheetsSync');
 
+const terminalConsole = global.console;
+const workOrdersVerboseTerminalLogs =
+  String(process.env.WORK_ORDERS_VERBOSE_LOGS || process.env.WORK_ORDERS_TERMINAL_LOGS || '')
+    .trim()
+    .toLowerCase() === 'true';
+const console = {
+  log: (...args) => {
+    if (workOrdersVerboseTerminalLogs) terminalConsole.log(...args);
+  },
+  warn: (...args) => {
+    if (workOrdersVerboseTerminalLogs) terminalConsole.warn(...args);
+  },
+  error: (...args) => terminalConsole.error(...args)
+};
+
 let activeJob = null;
 let isWorkOrdersSyncRunning = false;
 const MAX_SUCCESSFUL_RUNS_IN_HISTORY = 20;
