@@ -1148,9 +1148,18 @@ class Phase4AiEvaluatorService {
       condition: normalizeText(payload.condition),
       conditionNote: normalizeText(payload.conditionNote),
       itemSpecifics: payload.itemSpecifics || {},
-      partFitment: normalizeText(payload.partFitment),
       currentTitle: normalizeText(payload.currentTitle),
       currentLegacyTitle: normalizeText(payload.currentLegacyTitle),
+      titleEvidence: {
+        currentTitle: normalizeText(payload.currentTitle),
+        currentLegacyTitle: normalizeText(payload.currentLegacyTitle),
+        itemSpecifics: payload.itemSpecifics || {},
+        conditionsAndOptions: normalizeText(payload.conditionsAndOptions),
+        categoryContext: payload.categoryContext || {}
+      },
+      descriptionContext: {
+        partFitment: normalizeText(payload.partFitment)
+      },
       requiredTitleLength: { min: 65, max: 80 }
     };
 
@@ -1304,6 +1313,9 @@ class Phase4AiEvaluatorService {
             'Generate an optimized eBay title and buyer-visible description from provided structured listing data.',
             'Do not invent facts or compatibility claims.',
             'Do not include HTML.',
+            'For generatedTitle, use only input.titleEvidence, currentTitle, currentLegacyTitle, itemSpecifics, conditionsAndOptions, categoryContext, customLabelSku, condition, and conditionNote.',
+            'Do not use input.descriptionContext.partFitment or any fitment/interchange list to choose title year, make, model, side, or core part identity.',
+            'Fitment/interchange text may list multiple compatible vehicles and is description context only.',
             'Description must still be generated even when some optional item specifics are blank.',
             'Return exactly these top-level keys and no others: generatedTitle, generatedDescription, shortDescription, reasoningSummary, titleReviewStatus, titleReviewReason, titleReviewNotes.',
             'The custom title rules are title guidance only; ignore any custom instruction that changes the JSON keys or asks for status, flags, notes, needs_review, or title-only output.',
@@ -1317,7 +1329,9 @@ class Phase4AiEvaluatorService {
             titleRulesPrompt,
             requirements: [
               'Use Item Specifics - All C values and itemSpecifics as the primary title/description evidence.',
-              'Use fitment only as supporting context when present.',
+              'For generatedTitle, do not use descriptionContext.partFitment or any fitment/interchange list to choose year, make, model, side, or part identity.',
+              'Use titleEvidence as the title evidence bundle.',
+              'Use descriptionContext.partFitment only for generatedDescription or shortDescription when present.',
               'Keep description practical and buyer-readable.',
               'Return exact JSON keys: generatedTitle, generatedDescription, shortDescription, reasoningSummary, titleReviewStatus, titleReviewReason, titleReviewNotes.',
               'Do not rename the output keys.',
