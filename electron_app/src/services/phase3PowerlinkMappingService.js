@@ -7,22 +7,8 @@ function normalizeLinkKey(value) {
 }
 
 function getLinkKeyVariants(value) {
-  const key = normalizeLinkKey(value);
-  if (!key) return [];
-  const variants = new Set([key]);
-  const withoutR = key.replace(/^R/i, '');
-  if (withoutR && withoutR !== key) variants.add(withoutR);
-  const withoutR0 = key.replace(/^R0+/i, '');
-  if (withoutR0 && withoutR0 !== key) variants.add(withoutR0);
-  if (/^\d+$/.test(withoutR)) {
-    variants.add(`R${withoutR}`);
-    variants.add(`R0${withoutR}`);
-  }
-  if (/^\d+$/.test(key)) {
-    variants.add(`R${key}`);
-    variants.add(`R0${key}`);
-  }
-  return Array.from(variants);
+  const key = String(value || '');
+  return key ? [key] : [];
 }
 
 function toNumber(value) {
@@ -89,7 +75,7 @@ function buildPowerlinkMapping(values) {
 
   for (let rowIdx = 1; rowIdx < values.length; rowIdx += 1) {
     const row = values[rowIdx] || [];
-    const rnumber = normalizeText(row[rnumberIdx]);
+    const rnumber = String(row[rnumberIdx] || '');
     const ipn = normalizeText(row[ipnIdx]);
     if (!rnumber || !ipn) {
       continue;
@@ -102,7 +88,7 @@ function buildPowerlinkMapping(values) {
       lastModifiedMs: lastModifiedIdx >= 0 ? toDateMs(row[lastModifiedIdx]) : null
     };
 
-    const key = normalizeLinkKey(rnumber);
+    const key = rnumber;
     const existing = map.get(key);
     if (existing) {
       const selected = selectBetterCandidate(existing, incoming);

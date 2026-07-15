@@ -13,12 +13,12 @@ const {
   saveReportingConfig
 } = require('../config/configStore');
 const {
-  DEFAULT_TIME_ZONE,
   formatDateInTimeZone,
   getTimeZoneParts,
   timeZoneDateToUtc
 } = require('../utils/timezone');
 
+const WORK_ORDERS_EST_TIME_ZONE = 'Etc/GMT+5';
 const terminalConsole = global.console;
 const workOrdersVerboseTerminalLogs =
   String(process.env.WORK_ORDERS_VERBOSE_LOGS || process.env.WORK_ORDERS_TERMINAL_LOGS || '')
@@ -38,7 +38,8 @@ const DEFAULT_WORK_ORDERS_SHEET_NAME = process.env.WORK_ORDERS_SHEET_NAME || 'Wo
 const CLICKUP_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_OPEN_STATUS = 'OPEN';
 const CLICKUP_COMPLETED_STATUS_TOKENS = ['COMPLETE', 'COMPLETED', 'CLOSED', 'DONE', 'RESOLVED'];
-const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT']);
+const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT', 'FLATRATEFREIGHT']);
+const OPEN_POWERLINK_STATUS_TOKENS = new Set(['O', 'OPEN']);
 const WORK_ORDERS_TASK_NAME_PREFIX = '[WorkOrderSync]';
 const WORK_ORDERS_COMPLETED_QUOTE_NUMBERS_CONFIG_KEY = 'workOrdersCompletedQuoteNumbers';
 const WORK_ORDERS_TASK_FIELD_NAMES = {
@@ -107,6 +108,22 @@ function isCheckPartQuote(row = {}) {
   return isQuoteRow(row) && normalizeUpper(row['Ship Via']) === 'CHECK PART';
 }
 
+function isOpenPowerlinkStatus(value = '') {
+  return OPEN_POWERLINK_STATUS_TOKENS.has(normalizeUpper(value));
+}
+
+function isEligibleWorkOrdersSourceRow(row = {}) {
+  const recordType = normalizeUpper(row['Record Type']);
+  if (recordType !== 'WORK ORDER' && recordType !== 'QUOTE') return false;
+  if (!isOpenPowerlinkStatus(row.Status)) return false;
+
+  const lineItemStatus = normalizeCell(row['Line Item Status']);
+  if (lineItemStatus && !isOpenPowerlinkStatus(lineItemStatus)) return false;
+
+  if (recordType === 'QUOTE' && normalizeUpper(row['Ship Via']) !== 'CHECK PART') return false;
+  return true;
+}
+
 function buildTaskKey(row = {}) {
   const lineItemId = normalizeCell(row['Line Item ID']);
   if (lineItemId) {
@@ -124,28 +141,15 @@ function buildSheetRowKey(row = {}) {
 }
 
 function buildWorkOrderTaskTitleParts(row = {}) {
-  const customerName = normalizeCell(row['Shipping Customer Name'] || row['Billing Customer Name']);
+  const customerName = normalizeCell(row['Billing Customer Name']);
   const interchangeNumber = normalizeCell(row['Detail (IPN)']).split('|')[0].trim();
 
-  const parts = [];
-  if (customerName) parts.push(customerName);
-  if (interchangeNumber) parts.push(interchangeNumber);
-
-  return parts;
+  return [customerName, interchangeNumber];
 }
 
 function buildTaskName(row = {}) {
   const parts = buildWorkOrderTaskTitleParts(row);
-  if (parts.length > 0) {
-    return parts.join(' - ').slice(0, 240);
-  }
-
-  const recordType = normalizeUpper(row['Record Type']);
-  const number = normalizeCell(row['W/O or Quote Number']);
-  const detail = normalizeCell(row['Detail (IPN)']).split('|')[0].trim();
-  const prefix = recordType === 'WORK ORDER' ? 'WO' : recordType === 'QUOTE' ? 'Quote' : normalizeCell(row['Record Type']);
-  const title = `${prefix} ${number}${detail ? ` - ${detail}` : ''}`.trim();
-  return title.slice(0, 240);
+  return parts.join(' - ').slice(0, 240);
 }
 
 function parseTaskKeyFromName(taskName = '') {
@@ -307,13 +311,69 @@ async function getQuoteCompletionStateFromClickUp(clickup, completedStatusNames 
 function parseRowDate(value) {
   const text = normalizeCell(value);
   if (!text) return null;
+  if (!hasExplicitTimeZone(text)) {
+    const localParts = parseLocalDateParts(text);
+    if (localParts) {
+      return zonedDateToUtc(localParts);
+    }
+  }
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
 }
 
+function hasExplicitTimeZone(text = '') {
+  return /(?:\b(?:GMT|UTC)\b|Z$|[+-]\d{2}:?\d{2}(?:\s|$|\)))/i.test(String(text).trim());
+}
+
+function applyMeridiem(hour, meridiem = '') {
+  const normalized = normalizeUpper(meridiem);
+  const numericHour = Number(hour || 0);
+  if (normalized === 'AM') {
+    return numericHour === 12 ? 0 : numericHour;
+  }
+  if (normalized === 'PM') {
+    return numericHour === 12 ? 12 : numericHour + 12;
+  }
+  return numericHour;
+}
+
+function parseLocalDateParts(text = '') {
+  const value = String(text || '').trim();
+  const isoMatch = value.match(
+    /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]+(\d{1,2})(?::(\d{2})(?::(\d{2}))?)?\s*(AM|PM)?)?$/i
+  );
+  if (isoMatch) {
+    return {
+      year: Number(isoMatch[1]),
+      month: Number(isoMatch[2]),
+      day: Number(isoMatch[3]),
+      hour: applyMeridiem(isoMatch[4] || 0, isoMatch[7]),
+      minute: Number(isoMatch[5] || 0),
+      second: Number(isoMatch[6] || 0)
+    };
+  }
+
+  const usMatch = value.match(
+    /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[,\s]+(\d{1,2})(?::(\d{2})(?::(\d{2}))?)?\s*(AM|PM)?)?$/i
+  );
+  if (usMatch) {
+    const rawYear = Number(usMatch[3]);
+    return {
+      year: rawYear < 100 ? rawYear + 2000 : rawYear,
+      month: Number(usMatch[1]),
+      day: Number(usMatch[2]),
+      hour: applyMeridiem(usMatch[4] || 0, usMatch[7]),
+      minute: Number(usMatch[5] || 0),
+      second: Number(usMatch[6] || 0)
+    };
+  }
+
+  return null;
+}
+
 function getZonedParts(date) {
-  const parts = getTimeZoneParts(date, DEFAULT_TIME_ZONE);
+  const parts = getTimeZoneParts(date, WORK_ORDERS_EST_TIME_ZONE);
   if (!parts) {
     return {
       year: 0,
@@ -358,7 +418,7 @@ function zonedDateToUtc(localParts) {
       minute: localParts.minute,
       second: localParts.second || 0
     },
-    DEFAULT_TIME_ZONE
+    WORK_ORDERS_EST_TIME_ZONE
   );
 }
 
@@ -1374,6 +1434,10 @@ async function syncRowsToClickUp({
   for (const row of latestRows) {
     const key = buildTaskKey(row);
     if (!key) continue;
+    if (!isEligibleWorkOrdersSourceRow(row)) {
+      console.log(`[WorkOrders] Row skipped before ClickUp sync (not open/eligible): ${key}`);
+      continue;
+    }
     const existingTask = taskByKey.get(key);
     if (isCheckPartQuote(row) && existingTask && isCompleteStatus(existingTask?.status?.status || existingTask?.status, completedStatusNames)) {
       const quoteNumber = normalizeCell(row['W/O or Quote Number']);
@@ -1736,6 +1800,13 @@ async function runWorkOrdersSync({
     throw Object.assign(new Error(message), { summary });
   }
 
+  const fetchedBeforeEligibilityFilter = rows.length;
+  rows = rows.filter(isEligibleWorkOrdersSourceRow);
+  const ineligibleRowsFiltered = fetchedBeforeEligibilityFilter - rows.length;
+  if (ineligibleRowsFiltered > 0) {
+    console.log(`[WorkOrders] Ineligible/closed Powerlink rows filtered before sheet sync: count=${ineligibleRowsFiltered}`);
+  }
+
   if (normalizeCell(clickupToken) && normalizeCell(clickupListId)) {
     try {
       const clickup = new ClickUpService({
@@ -1828,7 +1899,7 @@ async function runWorkOrdersSync({
     imagesFailed: stats.failed
   });
 
-  const sheetSyncTimestamp = formatDateInTimeZone(new Date(), DEFAULT_TIME_ZONE);
+  const sheetSyncTimestamp = formatDateInTimeZone(new Date(), WORK_ORDERS_EST_TIME_ZONE);
   rows.forEach(row => {
     row['Date/Time Last Synced'] = sheetSyncTimestamp;
   });

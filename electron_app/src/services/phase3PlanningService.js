@@ -5,7 +5,7 @@ function isPositiveNumber(value) {
 }
 
 function normalizeSku(value) {
-  return String(value || '').trim().toUpperCase();
+  return String(value || '');
 }
 
 function normalizeIpn(value) {

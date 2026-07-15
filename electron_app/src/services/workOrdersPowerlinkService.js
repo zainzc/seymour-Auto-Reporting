@@ -2,6 +2,8 @@ const { getDB } = require('./db');
 
 const { formatDateInTimeZone } = require('../utils/timezone');
 
+const WORK_ORDERS_EST_TIME_ZONE = 'Etc/GMT+5';
+
 const WORK_ORDERS_QUERY = `
 DECLARE @LastSynced DATETIME = GETDATE();
 
@@ -77,7 +79,11 @@ SELECT
     wo.WorkOrderNumber AS [W/O or Quote Number],
     wold.LineItemID AS [Line Item ID],
 
-    'Open' AS [Status],
+    CASE
+        WHEN wo.WorkOrderStatus = 'O' THEN 'Open'
+        WHEN wo.WorkOrderStatus = 'C' THEN 'Closed'
+        ELSE wo.WorkOrderStatus
+    END AS [Status],
     wold.LineItemStatus AS [Line Item Status],
 
     COALESCE(woemp.EmployeeName, CAST(wo.CreatedBy AS varchar(50))) AS [Created By],
@@ -148,7 +154,11 @@ SELECT
     q.QuoteNumber AS [W/O or Quote Number],
     qld.LineItemID AS [Line Item ID],
 
-    'Open' AS [Status],
+    CASE
+        WHEN q.QuoteStatus = 'O' THEN 'Open'
+        WHEN q.QuoteStatus = 'C' THEN 'Closed'
+        ELSE q.QuoteStatus
+    END AS [Status],
     qld.LineItemStatus AS [Line Item Status],
 
     COALESCE(qemp.EmployeeName, CAST(q.CreatedBy AS varchar(50))) AS [Created By],
@@ -215,7 +225,7 @@ WHERE q.IsLastRevision = 1
 
 function normalizeValue(value) {
   if (value === null || value === undefined) return '';
-  if (value instanceof Date) return formatDateInTimeZone(value);
+  if (value instanceof Date) return formatDateInTimeZone(value, WORK_ORDERS_EST_TIME_ZONE);
   return String(value);
 }
 

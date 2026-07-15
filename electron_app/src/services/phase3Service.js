@@ -2,7 +2,7 @@ const AirtableService = require('./airtableService');
 const path = require('path');
 const { readSheetRows } = require('./phase2SheetsService');
 const { getInventoryConfig } = require('../config/configStore');
-const { buildPowerlinkMapping, getLinkKeyVariants } = require('./phase3PowerlinkMappingService');
+const { buildPowerlinkMapping } = require('./phase3PowerlinkMappingService');
 const Phase3ShipstationService = require('./phase3ShipstationService');
 const { exportShipstationDebugWorkbook } = require('./phase3ShipstationDebugExportService');
 const {
@@ -44,20 +44,18 @@ function buildMasterRNumberLookup(masterRecords = [], rNumberFieldName = 'RNumbe
     const ipn = normalizeText(fields.IPN);
     for (const rNumber of splitRNumberValues(fields[rNumberFieldName])) {
       if (!rNumber) continue;
-      for (const key of getLinkKeyVariants(rNumber)) {
-        if (lookup.has(key)) {
-          const existing = lookup.get(key);
-          if (existing?.recordId !== record.id) {
-            duplicates.push(`Duplicate RNumber '${key}' on IPNs ${existing?.ipn || 'unknown'} and ${ipn || 'unknown'}.`);
-          }
-          continue;
+      if (lookup.has(rNumber)) {
+        const existing = lookup.get(rNumber);
+        if (existing?.recordId !== record.id) {
+          duplicates.push(`Duplicate RNumber '${rNumber}' on IPNs ${existing?.ipn || 'unknown'} and ${ipn || 'unknown'}.`);
         }
-        lookup.set(key, {
-          recordId: record.id,
-          ipn,
-          record
-        });
+        continue;
       }
+      lookup.set(rNumber, {
+        recordId: record.id,
+        ipn,
+        record
+      });
     }
   }
 
@@ -198,22 +196,29 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
   });
   summary.powerlinkFallbackEnabled = Boolean(config.phase3UsePowerlinkFallback);
 
-  emitProgress(progressCallback, {
-    stage: 'stage1_powerlink_mapping',
-    percent: 10,
-    counts: summary,
-    message: 'Building Powerlink mapping (RNumber -> IPN)...'
-  });
+  let mapping = {
+    rnumToIpn: new Map(),
+    duplicateWarnings: []
+  };
 
-  const values = await readSheetRows(config.sheetId, config.tabName, config.authContext);
-  const mapping = buildPowerlinkMapping(values);
-  for (const warning of mapping.duplicateWarnings.slice(0, 30)) {
-    summary.errors.push(`Mapping warning: ${warning}`);
-  }
-  if (mapping.duplicateWarnings.length > 30) {
-    summary.errors.push(
-      `Mapping warning: ...and ${mapping.duplicateWarnings.length - 30} additional duplicate RNumber warnings.`
-    );
+  if (config.phase3UsePowerlinkFallback) {
+    emitProgress(progressCallback, {
+      stage: 'stage1_powerlink_mapping',
+      percent: 10,
+      counts: summary,
+      message: 'Building Powerlink fallback mapping (RNumber -> IPN)...'
+    });
+
+    const values = await readSheetRows(config.sheetId, config.tabName, config.authContext);
+    mapping = buildPowerlinkMapping(values);
+    for (const warning of mapping.duplicateWarnings.slice(0, 30)) {
+      summary.errors.push(`Mapping warning: ${warning}`);
+    }
+    if (mapping.duplicateWarnings.length > 30) {
+      summary.errors.push(
+        `Mapping warning: ...and ${mapping.duplicateWarnings.length - 30} additional duplicate RNumber warnings.`
+      );
+    }
   }
 
   emitProgress(progressCallback, {
@@ -294,7 +299,7 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
     });
     const debugExport = await exportShipstationDebugWorkbook({
       shipments: shipstationResult.shipments,
-      rnumToIpn: config.phase3UsePowerlinkFallback ? mapping.rnumToIpn : new Map(),
+      rnumToIpn: mapping.rnumToIpn,
       directSkuToIpn,
       outputPath: path.resolve(__dirname, '..', '..', 'dev-output', 'phase3-shipstation-debug.xlsx')
     });
@@ -322,7 +327,7 @@ async function runPhase3(options = {}, progressCallback = () => {}) {
   const fallbackSkuToDims = new Map();
 
   for (const [sku, dims] of skuBuild.skuToDims.entries()) {
-    const direct = masterRNumberLookup.lookup.get(normalizeSku(sku));
+    const direct = masterRNumberLookup.lookup.get(sku);
     if (!direct?.recordId) {
       fallbackSkuToDims.set(sku, dims);
       continue;
@@ -504,4 +509,3 @@ module.exports = {
   buildPhase3Config,
   PARTSHUNTER_STORE_ID
 };
-
