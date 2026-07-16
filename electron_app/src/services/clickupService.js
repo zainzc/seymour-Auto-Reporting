@@ -288,6 +288,21 @@ class ClickUpService {
     return this.request('PUT', `/task/${taskId}`, { data: { status } });
   }
 
+  async updateTaskAssignees(taskId, { add = [], rem = [] } = {}) {
+    if (!taskId) throw new Error('ClickUp task ID is required.');
+    const additions = Array.from(new Set(add.map(id => Number(id)).filter(id => Number.isFinite(id))));
+    const removals = Array.from(new Set(rem.map(id => Number(id)).filter(id => Number.isFinite(id))));
+    if (additions.length === 0 && removals.length === 0) return null;
+    return this.request('PUT', `/task/${taskId}`, {
+      data: {
+        assignees: {
+          add: additions,
+          rem: removals
+        }
+      }
+    });
+  }
+
   async addTaskComment(taskId, commentText, notifyAll = false) {
     if (!taskId) throw new Error('ClickUp task ID is required.');
     const text = String(commentText || '').trim();

@@ -97,6 +97,7 @@ SELECT
     wold.LineItemTotal AS [Line Total],
 
     wo.CustomerPO AS [Customer PO],
+    wo.CustomerNumber AS [Customer Number],
 
     COALESCE(NULLIF(wo.BillToBusinessName, ''), wo.BillToContactName) AS [Billing Customer Name],
     COALESCE(NULLIF(wo.ShipToBusinessName, ''), wo.ShipToContactName) AS [Shipping Customer Name],
@@ -172,6 +173,7 @@ SELECT
     NULL AS [Line Total],
 
     q.CustomerPO AS [Customer PO],
+    q.CustomerNumber AS [Customer Number],
 
     COALESCE(NULLIF(q.BillToBusinessName, ''), q.BillToContactName) AS [Billing Customer Name],
     COALESCE(NULLIF(q.ShipToBusinessName, ''), q.ShipToContactName) AS [Shipping Customer Name],

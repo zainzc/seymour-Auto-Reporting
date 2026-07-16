@@ -37,9 +37,14 @@ const console = {
 const DEFAULT_WORK_ORDERS_SHEET_NAME = process.env.WORK_ORDERS_SHEET_NAME || 'Work Orders';
 const CLICKUP_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_OPEN_STATUS = 'OPEN';
+const CLICKUP_CANCELED_STATUS = 'CANCELED';
+const CLICKUP_ISSUE_STATUS = 'ISSUE';
 const CLICKUP_COMPLETED_STATUS_TOKENS = ['COMPLETE', 'COMPLETED', 'CLOSED', 'DONE', 'RESOLVED'];
 const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT', 'FLATRATEFREIGHT']);
 const OPEN_POWERLINK_STATUS_TOKENS = new Set(['O', 'OPEN']);
+const ISSUE_GROUP_A_CUSTOMER_NUMBERS = new Set(['41192531', '2042132421', '2', '35610191', '127141941']);
+const ISSUE_GROUP_A_ASSIGNEE_IDS = [87315876, 48250194, 12723152, 75503244];
+const ISSUE_GROUP_B_ASSIGNEE_IDS = [81484764, 81566276, 75438333, 42404835, 48250194];
 const WORK_ORDERS_TASK_NAME_PREFIX = '[WorkOrderSync]';
 const WORK_ORDERS_COMPLETED_QUOTE_NUMBERS_CONFIG_KEY = 'workOrdersCompletedQuoteNumbers';
 const WORK_ORDERS_TASK_FIELD_NAMES = {
@@ -76,6 +81,7 @@ const WORK_ORDERS_HEADERS = [
   'Ship Via',
   'Amount (Total)',
   'Customer PO',
+  'Customer Number',
   'Billing Customer Name',
   'Shipping Customer Name',
   'Shipping Customer Address',
@@ -112,9 +118,51 @@ function isOpenPowerlinkStatus(value = '') {
   return OPEN_POWERLINK_STATUS_TOKENS.has(normalizeUpper(value));
 }
 
+function isCanceledCustomerPo(row = {}) {
+  return /canc/i.test(normalizeCell(row['Customer PO']));
+}
+
+function isCanceledStatus(status = '') {
+  return normalizeUpper(status) === CLICKUP_CANCELED_STATUS;
+}
+
+function isIssueStatus(status = '') {
+  return normalizeUpper(status) === CLICKUP_ISSUE_STATUS;
+}
+
+function normalizeCustomerNumber(value = '') {
+  return normalizeCell(value).replace(/\s+/g, '');
+}
+
+function getIssueAssigneeIds(row = {}) {
+  const customerNumber = normalizeCustomerNumber(row['Customer Number']);
+  return ISSUE_GROUP_A_CUSTOMER_NUMBERS.has(customerNumber)
+    ? ISSUE_GROUP_A_ASSIGNEE_IDS
+    : ISSUE_GROUP_B_ASSIGNEE_IDS;
+}
+
+function getClickUpAssigneeIds(task = {}) {
+  const assignees = Array.isArray(task?.assignees) ? task.assignees : [];
+  return assignees
+    .map(assignee => Number(assignee?.id || assignee?.user?.id || assignee))
+    .filter(id => Number.isFinite(id));
+}
+
+function buildAssigneePatch(existingTask = {}, desiredAssigneeIds = []) {
+  const desired = Array.from(new Set(desiredAssigneeIds.map(id => Number(id)).filter(id => Number.isFinite(id))));
+  const existing = Array.from(new Set(getClickUpAssigneeIds(existingTask)));
+  const desiredSet = new Set(desired);
+  const existingSet = new Set(existing);
+  const add = desired.filter(id => !existingSet.has(id));
+  const rem = existing.filter(id => !desiredSet.has(id));
+  if (add.length === 0 && rem.length === 0) return null;
+  return { add, rem };
+}
+
 function isEligibleWorkOrdersSourceRow(row = {}) {
   const recordType = normalizeUpper(row['Record Type']);
   if (recordType !== 'WORK ORDER' && recordType !== 'QUOTE') return false;
+  if (isCanceledCustomerPo(row)) return true;
   if (!isOpenPowerlinkStatus(row.Status)) return false;
 
   const lineItemStatus = normalizeCell(row['Line Item Status']);
@@ -1338,6 +1386,7 @@ async function syncRowsToClickUp({
     updated: 0,
     skippedUnchanged: 0,
     closed: 0,
+    issueAssignments: 0,
     skippedCompleteQuotes: 0,
     skippedCompleteQuoteNumbers: [],
     verifiedTasks: 0,
@@ -1463,6 +1512,7 @@ async function syncRowsToClickUp({
     const key = buildTaskKey(row);
     if (!key) return;
     const existingTask = taskByKey.get(key);
+    const isCancellation = isCanceledCustomerPo(row);
     const dueDate = computeDueDate(row.Created, row['Ship Via']);
     const customFields = buildTaskCustomFields(row, customFieldMeta, dueDate).map(field => {
       const fieldMeta = resolveCustomFieldMeta(customFieldMeta, field.fieldName);
@@ -1490,7 +1540,7 @@ async function syncRowsToClickUp({
       if (!existingTask) {
         const createPayload = {
           ...taskPayload,
-          status: CLICKUP_OPEN_STATUS
+          status: isCancellation ? CLICKUP_CANCELED_STATUS : CLICKUP_OPEN_STATUS
         };
         let createdTask = null;
         try {
@@ -1498,7 +1548,7 @@ async function syncRowsToClickUp({
             data: createPayload
           });
         } catch (createError) {
-          if (Number(createError?.response?.status || 0) === 400) {
+          if (!isCancellation && Number(createError?.response?.status || 0) === 400) {
             const fallbackPayload = { ...createPayload };
             delete fallbackPayload.status;
             createdTask = await clickup.request('POST', `/list/${clickupListId}/task`, {
@@ -1520,12 +1570,21 @@ async function syncRowsToClickUp({
           if (resolvedAssignee && assigneeField?.id && reserveAssigneeVerificationSlot()) {
             await verifyAssigneeFieldValue(clickup, createdTaskId, assigneeField.id, resolvedAssignee, key);
           }
-          console.log(`[WorkOrders] Task created: ${key}`);
+          console.log(
+            `[WorkOrders] Task created${isCancellation ? ' as CANCELED' : ''}: ${key}`
+          );
         }
         result.created += 1;
       } else {
-        if (!isCompleteStatus(existingTask?.status?.status || existingTask?.status, completedStatusNames)) {
+        const existingStatus = existingTask?.status?.status || existingTask?.status;
+        const issueAssigneePatch = !isCancellation && isIssueStatus(existingStatus)
+          ? buildAssigneePatch(existingTask, getIssueAssigneeIds(row))
+          : null;
+        if (isCancellation || !isCompleteStatus(existingStatus, completedStatusNames)) {
           const changedTaskPayload = buildChangedTaskPayload(existingTask, taskPayload);
+          if (isCancellation && !isCanceledStatus(existingStatus)) {
+            changedTaskPayload.status = CLICKUP_CANCELED_STATUS;
+          }
           const changedCustomFields = customFields.filter(field => hasCustomFieldChanged(existingTask, field));
           if (changedCustomFields.length > 0) {
             const changedNames = changedCustomFields
@@ -1535,7 +1594,11 @@ async function syncRowsToClickUp({
             console.log(`[WorkOrders] Changed custom fields for ${key}: ${changedNames}`);
           }
 
-          if (Object.keys(changedTaskPayload).length === 0 && changedCustomFields.length === 0) {
+          if (
+            Object.keys(changedTaskPayload).length === 0 &&
+            changedCustomFields.length === 0 &&
+            !issueAssigneePatch
+          ) {
             console.log(`[WorkOrders] Task skipped (unchanged): ${key}`);
             result.skippedUnchanged += 1;
             return;
@@ -1559,7 +1622,14 @@ async function syncRowsToClickUp({
           if (resolvedAssignee && assigneeField?.id && reserveAssigneeVerificationSlot()) {
             await verifyAssigneeFieldValue(clickup, existingTask.id, assigneeField.id, resolvedAssignee, key);
           }
-          console.log(`[WorkOrders] Task updated: ${key}`);
+          if (issueAssigneePatch) {
+            await clickup.updateTaskAssignees(existingTask.id, issueAssigneePatch);
+            console.log(
+              `[WorkOrders] ISSUE assignees updated for ${key}: add=${issueAssigneePatch.add.join(',') || 'none'}, rem=${issueAssigneePatch.rem.join(',') || 'none'}`
+            );
+            result.issueAssignments += 1;
+          }
+          console.log(`[WorkOrders] Task updated${isCancellation ? ' / canceled' : ''}: ${key}`);
           result.updated += 1;
         } else {
           console.log(`[WorkOrders] Task skipped (status preserved): ${key}`);
@@ -1578,6 +1648,7 @@ async function syncRowsToClickUp({
   const latestKeys = new Set(uniqueFilteredRows.map(row => buildTaskKey(row)).filter(Boolean));
   for (const [key, task] of taskByKey.entries()) {
     if (latestKeys.has(key)) continue;
+    if (isCanceledStatus(task?.status?.status || task?.status)) continue;
     if (isCompleteStatus(task?.status?.status || task?.status, completedStatusNames)) continue;
     try {
       await clickup.updateTaskStatus(task.id, CLICKUP_COMPLETE_STATUS);
@@ -1675,6 +1746,7 @@ async function runClickUpSyncFromSheet({
     tasksCreated: 0,
     tasksUpdated: 0,
     tasksCompleted: 0,
+    issueAssignments: 0,
     quoteRowsRemovedFromSheet: 0,
     skippedCompleteQuoteNumbers: [],
     verifiedTasks: 0,
@@ -1702,6 +1774,7 @@ async function runClickUpSyncFromSheet({
   summary.tasksCreated = Number(clickupResult.created || 0);
   summary.tasksUpdated = Number(clickupResult.updated || 0);
   summary.tasksCompleted = Number(clickupResult.closed || 0);
+  summary.issueAssignments = Number(clickupResult.issueAssignments || 0);
   summary.quoteRowsRemovedFromSheet = Number(clickupResult.skippedCompleteQuotes || 0);
   summary.skippedCompleteQuoteNumbers = Array.isArray(clickupResult.skippedCompleteQuoteNumbers)
     ? [...clickupResult.skippedCompleteQuoteNumbers]
@@ -1726,7 +1799,7 @@ async function runClickUpSyncFromSheet({
   }
 
   console.log(
-    `[WorkOrders] ClickUp sync completed: created=${summary.tasksCreated}, updated=${summary.tasksUpdated}, completed=${summary.tasksCompleted}, quoteRemoved=${summary.quoteRowsRemovedFromSheet}, verifiedTasks=${summary.verifiedTasks}, verifiedFields=${summary.verifiedFields}, verifyMismatches=${summary.verifyMismatches}, verifyErrors=${summary.verifyErrors}`
+    `[WorkOrders] ClickUp sync completed: created=${summary.tasksCreated}, updated=${summary.tasksUpdated}, completed=${summary.tasksCompleted}, issueAssignments=${summary.issueAssignments}, quoteRemoved=${summary.quoteRowsRemovedFromSheet}, verifiedTasks=${summary.verifiedTasks}, verifiedFields=${summary.verifiedFields}, verifyMismatches=${summary.verifyMismatches}, verifyErrors=${summary.verifyErrors}`
   );
   return summary;
 }
@@ -1769,6 +1842,7 @@ async function runWorkOrdersSync({
     clickupTasksCreated: 0,
     clickupTasksUpdated: 0,
     clickupTasksCompleted: 0,
+    clickupIssueAssignments: 0,
     clickupRowsSkippedCompleteOverride: 0,
     verifiedTasks: 0,
     verifiedFields: 0,
@@ -1948,6 +2022,7 @@ async function runWorkOrdersSync({
     summary.clickupTasksCreated = Number(clickupSummary.tasksCreated || 0);
     summary.clickupTasksUpdated = Number(clickupSummary.tasksUpdated || 0);
     summary.clickupTasksCompleted = Number(clickupSummary.tasksCompleted || 0);
+    summary.clickupIssueAssignments = Number(clickupSummary.issueAssignments || 0);
     summary.clickupRowsSkippedCompleteOverride = Number(clickupSummary.quoteRowsRemovedFromSheet || 0);
     summary.verifiedTasks = Number(clickupSummary.verifiedTasks || 0);
     summary.verifiedFields = Number(clickupSummary.verifiedFields || 0);
@@ -1968,6 +2043,7 @@ async function runWorkOrdersSync({
       tasksCreated: summary.clickupTasksCreated,
       tasksUpdated: summary.clickupTasksUpdated,
       tasksCompleted: summary.clickupTasksCompleted,
+      issueAssignments: summary.clickupIssueAssignments,
       verifiedFields: summary.verifiedFields,
       verifyMismatches: summary.verifyMismatches,
       verifyErrors: summary.verifyErrors
