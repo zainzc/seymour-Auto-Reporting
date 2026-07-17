@@ -44,6 +44,17 @@ const CLICKUP_COMPLETED_STATUS_TOKENS = ['COMPLETE', 'COMPLETED', 'CLOSED', 'DON
 const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT', 'FLATRATEFREIGHT']);
 const DELIVERY_AUTOMATION_LIST_ID = process.env.WORK_ORDERS_DELIVERY_AUTOMATION_LIST_ID || '901114138163';
 const DELIVERY_AUTOMATION_SHIP_VIA = new Set(['DELIVER', 'HUB', 'CDC', 'RCD', 'RTV', 'PUDO']);
+const DELIVERY_AUTOMATION_CUSTOM_FIELD_NAMES = [
+  'Record Key',
+  'Original Work Order URL',
+  'Billing Name',
+  'Shipping Name',
+  'Shipping Address',
+  'Shipping City',
+  'Shipping State',
+  'Ship Via',
+  'Delivery Date'
+];
 const OPEN_POWERLINK_STATUS_TOKENS = new Set(['O', 'OPEN']);
 const ISSUE_GROUP_A_CUSTOMER_NUMBERS = new Set(['41192531', '2042132421', '2', '35610191', '127141941']);
 const ISSUE_GROUP_A_ASSIGNEE_IDS = [87315876, 48250194, 12723152, 75503244];
@@ -487,7 +498,7 @@ function applyMeridiem(hour, meridiem = '') {
 function parseLocalDateParts(text = '') {
   const value = String(text || '').trim();
   const isoMatch = value.match(
-    /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]+(\d{1,2})(?::(\d{2})(?::(\d{2}))?)?\s*(AM|PM)?)?$/i
+    /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T\s]+(\d{1,2})(?::(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?)?\s*(AM|PM)?)?$/i
   );
   if (isoMatch) {
     return {
@@ -501,7 +512,7 @@ function parseLocalDateParts(text = '') {
   }
 
   const usMatch = value.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[,\s]+(\d{1,2})(?::(\d{2})(?::(\d{2}))?)?\s*(AM|PM)?)?$/i
+    /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})(?:[,\s]+(\d{1,2})(?::(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?)?\s*(AM|PM)?)?$/i
   );
   if (usMatch) {
     const rawYear = Number(usMatch[3]);
@@ -1150,6 +1161,12 @@ function buildDeliveryAutomationCustomFields(row = {}, originalTask = null, fiel
   }
 
   return customFields;
+}
+
+function getMissingDeliveryAutomationCustomFieldNames(fieldMetaLookup = null) {
+  return DELIVERY_AUTOMATION_CUSTOM_FIELD_NAMES.filter(
+    fieldName => !resolveCustomFieldMeta(fieldMetaLookup, fieldName)
+  );
 }
 
 function getTaskCustomFieldById(task = {}, fieldId = '') {
@@ -1927,6 +1944,16 @@ async function syncRowsToDeliveryAutomation({
     return result;
   }
   const deliveryFieldMeta = getCustomFieldMetaMap(deliveryList);
+  const missingDeliveryFieldNames = getMissingDeliveryAutomationCustomFieldNames(deliveryFieldMeta);
+  if (missingDeliveryFieldNames.length > 0) {
+    const availableFieldNames = (deliveryFieldMeta.fields || [])
+      .map(field => normalizeCell(field?.name))
+      .filter(Boolean)
+      .join(', ');
+    result.errors.push(
+      `Delivery Automation custom fields missing from list ${normalizedDeliveryClickupListId}: ${missingDeliveryFieldNames.join(', ')}. Available fields: ${availableFieldNames || 'none'}`
+    );
+  }
   const mainTaskByKey = buildTaskMap(mainTasks);
   const deliveryTaskByKey = buildTaskMap(deliveryTasks);
 
