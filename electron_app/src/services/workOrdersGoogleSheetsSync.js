@@ -53,6 +53,7 @@ const WORK_ORDERS_TASK_FIELD_NAMES = {
   alert: 'Alert',
   location: 'Location',
   detail: 'Interchange Number / Detail',
+  deliveryDate: 'Delivery Date',
   woQuoteNumber: 'WO/QuoteNumber',
   totalPrice: 'Total Price',
   poNumber: 'PO Number',
@@ -82,6 +83,7 @@ const WORK_ORDERS_HEADERS = [
   'Amount (Total)',
   'Customer PO',
   'Customer Number',
+  'Delivery Date',
   'Billing Customer Name',
   'Shipping Customer Name',
   'Shipping Customer Address',
@@ -368,6 +370,12 @@ function parseRowDate(value) {
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed;
+}
+
+function parseOptionalDate(value) {
+  const text = normalizeCell(value);
+  if (!text) return null;
+  return parseRowDate(text);
 }
 
 function hasExplicitTimeZone(text = '') {
@@ -846,6 +854,7 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
     [WORK_ORDERS_TASK_FIELD_NAMES.alert]: buildPriorityAlert(row['Ship Via']),
     [WORK_ORDERS_TASK_FIELD_NAMES.location]: normalizeCell(row.Location),
     [WORK_ORDERS_TASK_FIELD_NAMES.detail]: normalizeCell(row['Detail (IPN)']),
+    [WORK_ORDERS_TASK_FIELD_NAMES.deliveryDate]: parseOptionalDate(row['Delivery Date']),
     [WORK_ORDERS_TASK_FIELD_NAMES.woQuoteNumber]: normalizeCell(row['W/O or Quote Number']),
     [WORK_ORDERS_TASK_FIELD_NAMES.totalPrice]: normalizeCell(row['Amount (Total)']),
     [WORK_ORDERS_TASK_FIELD_NAMES.poNumber]: normalizeCell(row['Customer PO']),
@@ -861,7 +870,7 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
   const missingFieldNames = [];
   for (const [name, value] of Object.entries(valuesByFieldName)) {
     const fieldMeta = resolveCustomFieldMeta(fieldMetaLookup, name);
-    if (!fieldMeta || value === '') {
+    if (!fieldMeta || value === '' || value === null) {
       if (!fieldMeta && value !== '' && name !== 'Due Date') missingFieldNames.push(name);
       continue;
     }
