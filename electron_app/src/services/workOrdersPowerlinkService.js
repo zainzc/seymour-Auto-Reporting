@@ -112,6 +112,8 @@ SELECT
         NULLIF(wo.ShipToCountry, '')
     ) AS [Shipping Customer Address],
 
+    wo.ShipToCity AS [Shipping City],
+    wo.ShipToStateOrProvince AS [Shipping State],
     wo.ShipToContactPhone AS [Shipping Customer Phone Number],
     wo.EbayOrderNumber AS [eBay Order Number],
     wold.EBayItemId AS [eBay Item ID],
@@ -189,6 +191,8 @@ SELECT
         NULLIF(q.ShipToCountry, '')
     ) AS [Shipping Customer Address],
 
+    NULL AS [Shipping City],
+    NULL AS [Shipping State],
     q.ShipToContactPhone AS [Shipping Customer Phone Number],
     NULL AS [eBay Order Number],
     NULL AS [eBay Item ID],

@@ -39,8 +39,11 @@ const CLICKUP_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_OPEN_STATUS = 'OPEN';
 const CLICKUP_CANCELED_STATUS = 'CANCELED';
 const CLICKUP_ISSUE_STATUS = 'ISSUE';
+const CLICKUP_DELIVERY_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_COMPLETED_STATUS_TOKENS = ['COMPLETE', 'COMPLETED', 'CLOSED', 'DONE', 'RESOLVED'];
 const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT', 'FLATRATEFREIGHT']);
+const DELIVERY_AUTOMATION_LIST_ID = process.env.WORK_ORDERS_DELIVERY_AUTOMATION_LIST_ID || '6-901114138163-1';
+const DELIVERY_AUTOMATION_SHIP_VIA = new Set(['DELIVER', 'HUB', 'CDC', 'RCD', 'RTV', 'PUDO']);
 const OPEN_POWERLINK_STATUS_TOKENS = new Set(['O', 'OPEN']);
 const ISSUE_GROUP_A_CUSTOMER_NUMBERS = new Set(['41192531', '2042132421', '2', '35610191', '127141941']);
 const ISSUE_GROUP_A_ASSIGNEE_IDS = [87315876, 48250194, 12723152, 75503244];
@@ -87,6 +90,8 @@ const WORK_ORDERS_HEADERS = [
   'Billing Customer Name',
   'Shipping Customer Name',
   'Shipping Customer Address',
+  'Shipping City',
+  'Shipping State',
   'Shipping Customer Phone Number',
   'eBay Order Number',
   'Detail (IPN)',
@@ -200,6 +205,62 @@ function buildWorkOrderTaskTitleParts(row = {}) {
 function buildTaskName(row = {}) {
   const parts = buildWorkOrderTaskTitleParts(row);
   return parts.join(' - ').slice(0, 240);
+}
+
+function buildDeliveryTaskName(row = {}) {
+  const billingName = normalizeCell(row['Billing Customer Name']);
+  const shippingName = normalizeCell(row['Shipping Customer Name']);
+  return [billingName, shippingName].join(' - ').slice(0, 240);
+}
+
+function isDeliveryAutomationEligibleRow(row = {}) {
+  if (normalizeUpper(row['Record Type']) !== 'WORK ORDER') return false;
+  if (isCanceledCustomerPo(row)) return false;
+  if (!isOpenPowerlinkStatus(row.Status)) return false;
+
+  const lineItemStatus = normalizeCell(row['Line Item Status']);
+  if (lineItemStatus && !isOpenPowerlinkStatus(lineItemStatus)) return false;
+
+  return DELIVERY_AUTOMATION_SHIP_VIA.has(normalizeUpper(row['Ship Via']));
+}
+
+function getDeliveryAutomationStatus(row = {}) {
+  const deliveryDate = parseOptionalDate(row['Delivery Date']);
+  if (!deliveryDate) return 'To Do';
+
+  const weekday = normalizeCell(getZonedParts(deliveryDate).weekday).toLowerCase();
+  const map = {
+    mon: 'Monday',
+    tue: 'Tuesday',
+    wed: 'Wednesday',
+    thu: 'Thursday',
+    fri: 'Friday'
+  };
+  return map[weekday] || 'To Do';
+}
+
+function getClickUpTaskUrl(task = {}) {
+  return normalizeCell(task?.url)
+    || (normalizeCell(task?.id) ? `https://app.clickup.com/t/${normalizeCell(task.id)}` : '');
+}
+
+function buildDeliveryTaskDescription(row = {}, originalTask = null) {
+  const originalUrl = getClickUpTaskUrl(originalTask);
+  const lines = [
+    `Record Key: ${buildTaskKey(row)}`,
+    `Original Work Order URL: ${originalUrl}`,
+    `W/O or Quote Number: ${normalizeCell(row['W/O or Quote Number'])}`,
+    `Line Item ID: ${normalizeCell(row['Line Item ID'])}`,
+    `Billing Name: ${normalizeCell(row['Billing Customer Name'])}`,
+    `Shipping Name: ${normalizeCell(row['Shipping Customer Name'])}`,
+    `Shipping Address: ${normalizeCell(row['Shipping Customer Address'])}`,
+    `Shipping City: ${normalizeCell(row['Shipping City'])}`,
+    `Shipping State: ${normalizeCell(row['Shipping State'])}`,
+    `Ship Via: ${normalizeCell(row['Ship Via'])}`,
+    `Delivery Date: ${normalizeCell(row['Delivery Date'])}`,
+    `Original Jobs Task ID: ${normalizeCell(originalTask?.id)}`
+  ];
+  return lines.join('\n');
 }
 
 function parseTaskKeyFromName(taskName = '') {
@@ -657,7 +718,7 @@ async function ensureSheetExists(sheets, spreadsheetId, sheetName) {
 async function readExistingRows(sheets, spreadsheetId, sheetName) {
   const response = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${sheetName}!A:Z`
+    range: `${sheetName}!A:AZ`
   });
   const values = Array.isArray(response?.data?.values) ? response.data.values : [];
   if (!values.length) {
@@ -672,7 +733,7 @@ async function readExistingRows(sheets, spreadsheetId, sheetName) {
     const row = {};
     WORK_ORDERS_HEADERS.forEach((header, index) => {
       const sourceIndex = sourceHeaders.indexOf(header);
-      const value = sourceIndex >= 0 ? line[sourceIndex] : line[index];
+      const value = sourceIndex >= 0 ? line[sourceIndex] : '';
       row[header] = normalizeCell(value);
     });
     return row;
@@ -692,7 +753,7 @@ async function overwriteSheetSnapshot(sheets, spreadsheetId, sheetName, rows) {
 
   await sheets.spreadsheets.values.clear({
     spreadsheetId,
-    range: `${sheetName}!A:Z`
+    range: `${sheetName}!A:AZ`
   });
 
   await sheets.spreadsheets.values.update({
@@ -991,6 +1052,77 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
   return customFields;
 }
 
+function buildDeliveryAutomationCustomFields(row = {}, originalTask = null, fieldMetaLookup = null, options = {}) {
+  const includeClearFields = Boolean(options?.includeClearFields);
+  const rowKey = buildTaskKey(row);
+  const originalUrl = getClickUpTaskUrl(originalTask);
+  const valuesByFieldName = {
+    'Record Key': rowKey,
+    'Original Work Order URL': originalUrl,
+    'Billing Name': normalizeCell(row['Billing Customer Name']),
+    'Shipping Name': normalizeCell(row['Shipping Customer Name']),
+    'Shipping Address': normalizeCell(row['Shipping Customer Address']),
+    'Shipping City': normalizeCell(row['Shipping City']),
+    'Shipping State': normalizeCell(row['Shipping State']),
+    'Ship Via': normalizeCell(row['Ship Via']),
+    'Delivery Date': parseOptionalDate(row['Delivery Date'])
+  };
+
+  const customFields = [];
+  const missingFieldNames = [];
+  for (const [name, value] of Object.entries(valuesByFieldName)) {
+    const fieldMeta = resolveCustomFieldMeta(fieldMetaLookup, name);
+    const rawValue = name === 'Delivery Date' ? normalizeCell(row['Delivery Date']) : normalizeCell(value);
+
+    if (!fieldMeta) {
+      if (rawValue !== '') missingFieldNames.push(name);
+      continue;
+    }
+
+    const fieldType = normalizeUpper(fieldMeta?.type);
+    if (rawValue === '' || value === null) {
+      if (includeClearFields) {
+        customFields.push({
+          id: fieldMeta.id,
+          clear: true,
+          fieldName: name,
+          fieldType
+        });
+      }
+      continue;
+    }
+
+    if (fieldType === 'DATE') {
+      if (!(value instanceof Date) || Number.isNaN(value.getTime())) continue;
+      customFields.push({
+        id: fieldMeta.id,
+        payload: {
+          value: Number(value.getTime()),
+          time: true
+        },
+        fieldName: name,
+        fieldType
+      });
+      continue;
+    }
+
+    customFields.push({
+      id: fieldMeta.id,
+      value: normalizeCell(value),
+      fieldName: name,
+      fieldType
+    });
+  }
+
+  if (missingFieldNames.length > 0) {
+    console.warn(
+      `[WorkOrders] Missing Delivery Automation custom fields for ${rowKey || 'unknown'}: ${missingFieldNames.join(', ')}`
+    );
+  }
+
+  return customFields;
+}
+
 function getTaskCustomFieldById(task = {}, fieldId = '') {
   const id = normalizeCell(fieldId);
   if (!id) return null;
@@ -1216,6 +1348,16 @@ function buildChangedTaskPayload(existingTask = {}, taskPayload = {}) {
     }
   }
 
+  return changes;
+}
+
+function buildChangedDeliveryTaskPayload(existingTask = {}, taskPayload = {}) {
+  const changes = buildChangedTaskPayload(existingTask, taskPayload);
+  const existingStatus = normalizeUpper(existingTask?.status?.status || existingTask?.status);
+  const desiredStatus = normalizeUpper(taskPayload?.status);
+  if (desiredStatus && desiredStatus !== existingStatus) {
+    changes.status = normalizeCell(taskPayload.status);
+  }
   return changes;
 }
 
@@ -1708,6 +1850,137 @@ async function syncRowsToClickUp({
   };
 }
 
+async function syncRowsToDeliveryAutomation({
+  clickupToken = '',
+  mainClickupListId = '',
+  deliveryClickupListId = DELIVERY_AUTOMATION_LIST_ID,
+  latestRows = []
+}) {
+  const result = {
+    enabled: false,
+    created: 0,
+    updated: 0,
+    completed: 0,
+    skippedUnchanged: 0,
+    errors: []
+  };
+
+  if (!normalizeCell(clickupToken) || !normalizeCell(mainClickupListId) || !normalizeCell(deliveryClickupListId)) {
+    return result;
+  }
+  result.enabled = true;
+
+  const mainClickup = new ClickUpService({
+    token: clickupToken,
+    listId: mainClickupListId
+  });
+  const deliveryClickup = new ClickUpService({
+    token: clickupToken,
+    listId: deliveryClickupListId
+  });
+
+  const deliveryList = await deliveryClickup.getList();
+  const deliveryFieldMeta = getCustomFieldMetaMap(deliveryList);
+  const mainTasks = await mainClickup.fetchTasksByStatuses([], {
+    includeClosed: true,
+    subtasks: false
+  });
+  const deliveryTasks = await deliveryClickup.fetchTasksByStatuses([], {
+    includeClosed: true,
+    subtasks: false
+  });
+  const mainTaskByKey = buildTaskMap(mainTasks);
+  const deliveryTaskByKey = buildTaskMap(deliveryTasks);
+
+  const uniqueEligibleRows = [];
+  const seenKeys = new Set();
+  for (const row of latestRows) {
+    if (!isDeliveryAutomationEligibleRow(row)) continue;
+    const key = buildTaskKey(row);
+    if (!key || seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    uniqueEligibleRows.push(row);
+  }
+
+  for (const row of uniqueEligibleRows) {
+    const key = buildTaskKey(row);
+    const originalTask = mainTaskByKey.get(key) || null;
+    const existingTask = deliveryTaskByKey.get(key) || null;
+    const status = getDeliveryAutomationStatus(row);
+    const taskPayload = {
+      name: buildDeliveryTaskName(row),
+      description: buildDeliveryTaskDescription(row, originalTask),
+      status
+    };
+    const customFields = buildDeliveryAutomationCustomFields(row, originalTask, deliveryFieldMeta, {
+      includeClearFields: Boolean(existingTask)
+    });
+
+    try {
+      if (!existingTask) {
+        const createdTask = await deliveryClickup.request('POST', `/list/${deliveryClickupListId}/task`, {
+          data: taskPayload
+        });
+        const createdTaskId = normalizeCell(createdTask?.id || createdTask?.task?.id);
+        if (createdTaskId) {
+          await applyTaskCustomFields(deliveryClickup, createdTaskId, customFields, key, result);
+        }
+        console.log(`[WorkOrders] Delivery Automation task created: ${key} -> ${status}`);
+        result.created += 1;
+        continue;
+      }
+
+      const changedTaskPayload = buildChangedDeliveryTaskPayload(existingTask, taskPayload);
+      const changedCustomFields = customFields.filter(field => hasCustomFieldChanged(existingTask, field));
+
+      if (Object.keys(changedTaskPayload).length === 0 && changedCustomFields.length === 0) {
+        result.skippedUnchanged += 1;
+        continue;
+      }
+
+      if (Object.keys(changedTaskPayload).length > 0) {
+        await deliveryClickup.request('PUT', `/task/${existingTask.id}`, {
+          data: changedTaskPayload
+        });
+      }
+
+      if (changedCustomFields.length > 0) {
+        await applyTaskCustomFields(deliveryClickup, existingTask.id, changedCustomFields, key, result);
+      }
+
+      console.log(`[WorkOrders] Delivery Automation task updated: ${key} -> ${status}`);
+      result.updated += 1;
+    } catch (error) {
+      const message =
+        error?.response?.data?.err ||
+        error?.response?.data?.error ||
+        error?.message ||
+        String(error);
+      result.errors.push(`Delivery Automation sync failed for ${key}: ${message}`);
+    }
+  }
+
+  const eligibleKeys = new Set(uniqueEligibleRows.map(row => buildTaskKey(row)).filter(Boolean));
+  for (const [key, task] of deliveryTaskByKey.entries()) {
+    if (eligibleKeys.has(key)) continue;
+    if (isCompleteStatus(task?.status?.status || task?.status, new Set([CLICKUP_DELIVERY_COMPLETE_STATUS]))) continue;
+    try {
+      await deliveryClickup.updateTaskStatus(task.id, CLICKUP_DELIVERY_COMPLETE_STATUS);
+      console.log(`[WorkOrders] Delivery Automation task completed (no longer eligible): ${key}`);
+      result.completed += 1;
+    } catch (error) {
+      const message =
+        error?.response?.data?.err ||
+        error?.response?.data?.error ||
+        error?.message ||
+        String(error);
+      result.errors.push(`Delivery Automation complete failed for ${key}: ${message}`);
+    }
+  }
+
+  return result;
+}
+
 async function syncWorkOrdersRowsToSheet({ authClient, spreadsheetId, latestRows, sheetName = DEFAULT_WORK_ORDERS_SHEET_NAME }) {
   const sheets = await getSheetsClient(authClient);
   await ensureSheetExists(sheets, spreadsheetId, sheetName);
@@ -1781,6 +2054,9 @@ async function runClickUpSyncFromSheet({
     tasksUpdated: 0,
     tasksCompleted: 0,
     issueAssignments: 0,
+    deliveryTasksCreated: 0,
+    deliveryTasksUpdated: 0,
+    deliveryTasksCompleted: 0,
     quoteRowsRemovedFromSheet: 0,
     skippedCompleteQuoteNumbers: [],
     verifiedTasks: 0,
@@ -1804,11 +2080,20 @@ async function runClickUpSyncFromSheet({
     latestRows: sheetRows,
     summary
   });
+  const deliverySourceRows = Array.isArray(clickupResult.filteredRows) ? clickupResult.filteredRows : sheetRows;
+  const deliveryResult = await syncRowsToDeliveryAutomation({
+    clickupToken,
+    mainClickupListId: clickupListId,
+    latestRows: deliverySourceRows
+  });
 
   summary.tasksCreated = Number(clickupResult.created || 0);
   summary.tasksUpdated = Number(clickupResult.updated || 0);
   summary.tasksCompleted = Number(clickupResult.closed || 0);
   summary.issueAssignments = Number(clickupResult.issueAssignments || 0);
+  summary.deliveryTasksCreated = Number(deliveryResult.created || 0);
+  summary.deliveryTasksUpdated = Number(deliveryResult.updated || 0);
+  summary.deliveryTasksCompleted = Number(deliveryResult.completed || 0);
   summary.quoteRowsRemovedFromSheet = Number(clickupResult.skippedCompleteQuotes || 0);
   summary.skippedCompleteQuoteNumbers = Array.isArray(clickupResult.skippedCompleteQuoteNumbers)
     ? [...clickupResult.skippedCompleteQuoteNumbers]
@@ -1817,6 +2102,9 @@ async function runClickUpSyncFromSheet({
   summary.verifiedFields = Number(clickupResult.verifiedFields || 0);
   summary.verifyMismatches = Number(clickupResult.verifyMismatches || 0);
   summary.verifyErrors = Number(clickupResult.verifyErrors || 0);
+  if (Array.isArray(deliveryResult.errors) && deliveryResult.errors.length > 0) {
+    summary.errors.push(...deliveryResult.errors);
+  }
 
   if (Array.isArray(clickupResult.filteredRows) && clickupResult.filteredRows.length !== sheetRows.length) {
     await syncWorkOrdersRowsToSheet({
@@ -1833,7 +2121,7 @@ async function runClickUpSyncFromSheet({
   }
 
   console.log(
-    `[WorkOrders] ClickUp sync completed: created=${summary.tasksCreated}, updated=${summary.tasksUpdated}, completed=${summary.tasksCompleted}, issueAssignments=${summary.issueAssignments}, quoteRemoved=${summary.quoteRowsRemovedFromSheet}, verifiedTasks=${summary.verifiedTasks}, verifiedFields=${summary.verifiedFields}, verifyMismatches=${summary.verifyMismatches}, verifyErrors=${summary.verifyErrors}`
+    `[WorkOrders] ClickUp sync completed: created=${summary.tasksCreated}, updated=${summary.tasksUpdated}, completed=${summary.tasksCompleted}, issueAssignments=${summary.issueAssignments}, deliveryCreated=${summary.deliveryTasksCreated}, deliveryUpdated=${summary.deliveryTasksUpdated}, deliveryCompleted=${summary.deliveryTasksCompleted}, quoteRemoved=${summary.quoteRowsRemovedFromSheet}, verifiedTasks=${summary.verifiedTasks}, verifiedFields=${summary.verifiedFields}, verifyMismatches=${summary.verifyMismatches}, verifyErrors=${summary.verifyErrors}`
   );
   return summary;
 }
@@ -1877,6 +2165,9 @@ async function runWorkOrdersSync({
     clickupTasksUpdated: 0,
     clickupTasksCompleted: 0,
     clickupIssueAssignments: 0,
+    deliveryTasksCreated: 0,
+    deliveryTasksUpdated: 0,
+    deliveryTasksCompleted: 0,
     clickupRowsSkippedCompleteOverride: 0,
     verifiedTasks: 0,
     verifiedFields: 0,
@@ -2057,6 +2348,9 @@ async function runWorkOrdersSync({
     summary.clickupTasksUpdated = Number(clickupSummary.tasksUpdated || 0);
     summary.clickupTasksCompleted = Number(clickupSummary.tasksCompleted || 0);
     summary.clickupIssueAssignments = Number(clickupSummary.issueAssignments || 0);
+    summary.deliveryTasksCreated = Number(clickupSummary.deliveryTasksCreated || 0);
+    summary.deliveryTasksUpdated = Number(clickupSummary.deliveryTasksUpdated || 0);
+    summary.deliveryTasksCompleted = Number(clickupSummary.deliveryTasksCompleted || 0);
     summary.clickupRowsSkippedCompleteOverride = Number(clickupSummary.quoteRowsRemovedFromSheet || 0);
     summary.verifiedTasks = Number(clickupSummary.verifiedTasks || 0);
     summary.verifiedFields = Number(clickupSummary.verifiedFields || 0);
@@ -2078,6 +2372,9 @@ async function runWorkOrdersSync({
       tasksUpdated: summary.clickupTasksUpdated,
       tasksCompleted: summary.clickupTasksCompleted,
       issueAssignments: summary.clickupIssueAssignments,
+      deliveryTasksCreated: summary.deliveryTasksCreated,
+      deliveryTasksUpdated: summary.deliveryTasksUpdated,
+      deliveryTasksCompleted: summary.deliveryTasksCompleted,
       verifiedFields: summary.verifiedFields,
       verifyMismatches: summary.verifyMismatches,
       verifyErrors: summary.verifyErrors
