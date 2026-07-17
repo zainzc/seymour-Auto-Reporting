@@ -45,8 +45,8 @@ const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', '
 const DELIVERY_AUTOMATION_LIST_ID = process.env.WORK_ORDERS_DELIVERY_AUTOMATION_LIST_ID || '901114138163';
 const DELIVERY_AUTOMATION_SHIP_VIA = new Set(['DELIVER', 'HUB', 'CDC', 'RCD', 'RTV', 'PUDO']);
 const DELIVERY_AUTOMATION_CUSTOM_FIELD_NAMES = [
-  'Record Key',
-  'Original Work Order URL',
+  'RNumber',
+  'Original ClickUp Task ID',
   'Billing Name',
   'Shipping Name',
   'Shipping Address',
@@ -1095,10 +1095,9 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
 function buildDeliveryAutomationCustomFields(row = {}, originalTask = null, fieldMetaLookup = null, options = {}) {
   const includeClearFields = Boolean(options?.includeClearFields);
   const rowKey = buildTaskKey(row);
-  const originalUrl = getClickUpTaskUrl(originalTask);
   const valuesByFieldName = {
-    'Record Key': rowKey,
-    'Original Work Order URL': originalUrl,
+    RNumber: normalizeCell(row['R#']),
+    'Original ClickUp Task ID': normalizeCell(originalTask?.id),
     'Billing Name': normalizeCell(row['Billing Customer Name']),
     'Shipping Name': normalizeCell(row['Shipping Customer Name']),
     'Shipping Address': normalizeCell(row['Shipping Customer Address']),
@@ -1547,27 +1546,24 @@ async function applyTaskCustomFields(clickup, taskId, customFields = [], recordK
     if (!fieldId) continue;
     try {
       if (field?.clear) {
-        await clickup.request('DELETE', `/task/${id}/field/${fieldId}`);
+        await clickup.request('DELETE', `/task/${encodeURIComponent(id)}/field/${encodeURIComponent(fieldId)}`);
         updatedCount += 1;
         continue;
       }
       const body = field && typeof field.payload === 'object' && field.payload !== null
         ? field.payload
         : { value: field.value };
-      await clickup.request('POST', `/task/${id}/field/${fieldId}`, {
+      await clickup.request('POST', `/task/${encodeURIComponent(id)}/field/${encodeURIComponent(fieldId)}`, {
         data: body
       });
       updatedCount += 1;
     } catch (error) {
-      const message =
-        error?.response?.data?.err ||
-        error?.response?.data?.error ||
-        error?.message ||
-        String(error);
-      console.error(`[WorkOrders] Custom field write failed for ${recordKey || id} (field=${fieldId}): ${message}`);
+      const fieldName = normalizeCell(field?.fieldName) || fieldId;
+      const message = getClickUpErrorMessage(error);
+      console.error(`[WorkOrders] Custom field write failed for ${recordKey || id} (field=${fieldName}, id=${fieldId}): ${message}`);
       if (result && Array.isArray(result.errors)) {
         result.errors.push(
-          `ClickUp custom field update failed for ${recordKey || id} (field=${fieldId}): ${message}`
+          `ClickUp custom field update failed for ${recordKey || id} (field=${fieldName}, id=${fieldId}): ${message}`
         );
       }
     }
@@ -1977,7 +1973,10 @@ async function syncRowsToDeliveryAutomation({
       description: buildDeliveryTaskDescription(row, originalTask),
       status
     };
-    const customFields = buildDeliveryAutomationCustomFields(row, originalTask, deliveryFieldMeta, {
+    const rowDeliveryFieldMeta = existingTask
+      ? mergeFieldMetaLookups(deliveryFieldMeta, buildFieldMetaLookupFromTask(existingTask))
+      : deliveryFieldMeta;
+    const customFields = buildDeliveryAutomationCustomFields(row, originalTask, rowDeliveryFieldMeta, {
       includeClearFields: Boolean(existingTask)
     });
 
