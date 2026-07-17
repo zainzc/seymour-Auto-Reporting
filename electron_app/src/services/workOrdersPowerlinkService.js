@@ -98,7 +98,7 @@ SELECT
 
     wo.CustomerPO AS [Customer PO],
     wo.CustomerNumber AS [Customer Number],
-    wo.DeliveryDate AS [Delivery Date],
+    CONVERT(varchar(23), wo.DeliveryDate, 121) AS [Delivery Date],
 
     COALESCE(NULLIF(wo.BillToBusinessName, ''), wo.BillToContactName) AS [Billing Customer Name],
     COALESCE(NULLIF(wo.ShipToBusinessName, ''), wo.ShipToContactName) AS [Shipping Customer Name],
