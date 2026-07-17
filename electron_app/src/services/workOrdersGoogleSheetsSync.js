@@ -836,9 +836,11 @@ function resolveLabelOptionId(fieldMeta = null, targetLabel = '') {
   return String(option.id || option.orderindex || '').trim() || null;
 }
 
-function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null) {
+function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null, options = {}) {
+  const includeClearFields = Boolean(options?.includeClearFields);
   const resolvedAssignee = resolveLocationAssigneeLabel(row.Location);
   const rawLocation = normalizeCell(row.Location);
+  const rawDeliveryDate = normalizeCell(row['Delivery Date']);
   const rowKey = buildRecordKey(row);
   if (rawLocation && !resolvedAssignee) {
     console.warn(`[WorkOrders] No assignee mapping found for Location: ${rawLocation}`);
@@ -854,7 +856,7 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
     [WORK_ORDERS_TASK_FIELD_NAMES.alert]: buildPriorityAlert(row['Ship Via']),
     [WORK_ORDERS_TASK_FIELD_NAMES.location]: normalizeCell(row.Location),
     [WORK_ORDERS_TASK_FIELD_NAMES.detail]: normalizeCell(row['Detail (IPN)']),
-    [WORK_ORDERS_TASK_FIELD_NAMES.deliveryDate]: parseOptionalDate(row['Delivery Date']),
+    [WORK_ORDERS_TASK_FIELD_NAMES.deliveryDate]: parseOptionalDate(rawDeliveryDate),
     [WORK_ORDERS_TASK_FIELD_NAMES.woQuoteNumber]: normalizeCell(row['W/O or Quote Number']),
     [WORK_ORDERS_TASK_FIELD_NAMES.totalPrice]: normalizeCell(row['Amount (Total)']),
     [WORK_ORDERS_TASK_FIELD_NAMES.poNumber]: normalizeCell(row['Customer PO']),
@@ -870,6 +872,21 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null)
   const missingFieldNames = [];
   for (const [name, value] of Object.entries(valuesByFieldName)) {
     const fieldMeta = resolveCustomFieldMeta(fieldMetaLookup, name);
+    if (
+      fieldMeta &&
+      includeClearFields &&
+      name === WORK_ORDERS_TASK_FIELD_NAMES.deliveryDate &&
+      rawDeliveryDate === '' &&
+      value === null
+    ) {
+      customFields.push({
+        id: fieldMeta.id,
+        clear: true,
+        fieldName: name,
+        fieldType: normalizeUpper(fieldMeta?.type)
+      });
+      continue;
+    }
     if (!fieldMeta || value === '' || value === null) {
       if (!fieldMeta && value !== '' && name !== 'Due Date') missingFieldNames.push(name);
       continue;
@@ -1128,6 +1145,7 @@ function extractTaskFieldRawComparableValue(taskField = null) {
 
 function extractPlannedFieldComparableValue(plannedField = null) {
   if (!plannedField || typeof plannedField !== 'object') return '';
+  if (plannedField.clear) return '';
   const plannedFieldType = normalizeUpper(plannedField?.fieldType);
   const options = Array.isArray(plannedField?.options) ? plannedField.options : [];
   if (plannedFieldType === 'DATE') {
@@ -1340,6 +1358,11 @@ async function applyTaskCustomFields(clickup, taskId, customFields = [], recordK
     const fieldId = normalizeCell(field?.id);
     if (!fieldId) continue;
     try {
+      if (field?.clear) {
+        await clickup.request('DELETE', `/task/${id}/field/${fieldId}`);
+        updatedCount += 1;
+        continue;
+      }
       const body = field && typeof field.payload === 'object' && field.payload !== null
         ? field.payload
         : { value: field.value };
@@ -1523,7 +1546,9 @@ async function syncRowsToClickUp({
     const existingTask = taskByKey.get(key);
     const isCancellation = isCanceledCustomerPo(row);
     const dueDate = computeDueDate(row.Created, row['Ship Via']);
-    const customFields = buildTaskCustomFields(row, customFieldMeta, dueDate).map(field => {
+    const customFields = buildTaskCustomFields(row, customFieldMeta, dueDate, {
+      includeClearFields: Boolean(existingTask)
+    }).map(field => {
       const fieldMeta = resolveCustomFieldMeta(customFieldMeta, field.fieldName);
       const options = Array.isArray(fieldMeta?.type_config?.options) ? fieldMeta.type_config.options : [];
       return {
