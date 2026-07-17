@@ -54,6 +54,14 @@ class ClickUpService {
     );
   }
 
+  getEncodedListId() {
+    return encodeURIComponent(String(this.listId || '').trim());
+  }
+
+  getEncodedTaskId(taskId) {
+    return encodeURIComponent(String(taskId || '').trim());
+  }
+
   async createTask(task) {
     if (!this.listId) {
       throw new Error('ClickUp list ID is missing.');
@@ -90,7 +98,7 @@ class ClickUpService {
     const preferredStatus = String(task.preferredStatus || '').trim() || 'Open / To-Do - Select Category';
 
     try {
-      return await this.request('POST', `/list/${this.listId}/task`, {
+      return await this.request('POST', `/list/${this.getEncodedListId()}/task`, {
         data: {
           ...body,
           status: preferredStatus
@@ -101,7 +109,7 @@ class ClickUpService {
       const statusCode = error?.response?.status;
       if (statusCode === 400) {
         try {
-          return await this.request('POST', `/list/${this.listId}/task`, { data: body });
+          return await this.request('POST', `/list/${this.getEncodedListId()}/task`, { data: body });
         } catch (fallbackError) {
           const clickupErrorText =
             fallbackError?.response?.data?.err ||
@@ -128,7 +136,7 @@ class ClickUpService {
     if (updates.status) payload.status = String(updates.status);
     if (Array.isArray(updates.custom_fields)) payload.custom_fields = updates.custom_fields;
     if (Object.keys(payload).length === 0) return null;
-    return this.request('PUT', `/task/${id}`, { data: payload });
+    return this.request('PUT', `/task/${this.getEncodedTaskId(id)}`, { data: payload });
   }
 
   static buildCategoryTaskPayload(task = {}) {
@@ -264,7 +272,7 @@ class ClickUpService {
     if (!this.listId) {
       throw new Error('ClickUp list ID is missing.');
     }
-    return this.request('GET', `/list/${this.listId}`);
+    return this.request('GET', `/list/${this.getEncodedListId()}`);
   }
 
   async validateAccess() {
@@ -279,13 +287,13 @@ class ClickUpService {
     if (!taskId) {
       throw new Error('ClickUp task ID is required.');
     }
-    return this.request('GET', `/task/${taskId}`);
+    return this.request('GET', `/task/${this.getEncodedTaskId(taskId)}`);
   }
 
   async updateTaskStatus(taskId, status) {
     if (!taskId) throw new Error('ClickUp task ID is required.');
     if (!status) throw new Error('ClickUp status is required.');
-    return this.request('PUT', `/task/${taskId}`, { data: { status } });
+    return this.request('PUT', `/task/${this.getEncodedTaskId(taskId)}`, { data: { status } });
   }
 
   async updateTaskAssignees(taskId, { add = [], rem = [] } = {}) {
@@ -293,7 +301,7 @@ class ClickUpService {
     const additions = Array.from(new Set(add.map(id => Number(id)).filter(id => Number.isFinite(id))));
     const removals = Array.from(new Set(rem.map(id => Number(id)).filter(id => Number.isFinite(id))));
     if (additions.length === 0 && removals.length === 0) return null;
-    return this.request('PUT', `/task/${taskId}`, {
+    return this.request('PUT', `/task/${this.getEncodedTaskId(taskId)}`, {
       data: {
         assignees: {
           add: additions,
@@ -308,7 +316,7 @@ class ClickUpService {
     const text = String(commentText || '').trim();
     if (!text) throw new Error('ClickUp comment text is required.');
 
-    return this.request('POST', `/task/${taskId}/comment`, {
+    return this.request('POST', `/task/${this.getEncodedTaskId(taskId)}/comment`, {
       data: {
         comment_text: text,
         notify_all: Boolean(notifyAll)
@@ -351,7 +359,7 @@ class ClickUpService {
       params.limit = Math.floor(options.limit);
     }
 
-    const data = await this.request('GET', `/list/${this.listId}/task`, { params });
+    const data = await this.request('GET', `/list/${this.getEncodedListId()}/task`, { params });
     return {
       tasks: Array.isArray(data?.tasks) ? data.tasks : [],
       lastPage: Boolean(data?.last_page)

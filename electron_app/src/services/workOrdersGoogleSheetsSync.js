@@ -42,7 +42,7 @@ const CLICKUP_ISSUE_STATUS = 'ISSUE';
 const CLICKUP_DELIVERY_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_COMPLETED_STATUS_TOKENS = ['COMPLETE', 'COMPLETED', 'CLOSED', 'DONE', 'RESOLVED'];
 const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT', 'FLATRATEFREIGHT']);
-const DELIVERY_AUTOMATION_LIST_ID = process.env.WORK_ORDERS_DELIVERY_AUTOMATION_LIST_ID || '6-901114138163-1';
+const DELIVERY_AUTOMATION_LIST_ID = process.env.WORK_ORDERS_DELIVERY_AUTOMATION_LIST_ID || '901114138163';
 const DELIVERY_AUTOMATION_SHIP_VIA = new Set(['DELIVER', 'HUB', 'CDC', 'RCD', 'RTV', 'PUDO']);
 const OPEN_POWERLINK_STATUS_TOKENS = new Set(['O', 'OPEN']);
 const ISSUE_GROUP_A_CUSTOMER_NUMBERS = new Set(['41192531', '2042132421', '2', '35610191', '127141941']);
@@ -111,6 +111,12 @@ function normalizeCell(value) {
 
 function normalizeUpper(value) {
   return normalizeCell(value).toUpperCase();
+}
+
+function normalizeClickUpApiListId(value = '') {
+  const raw = normalizeCell(value);
+  const clickUpViewListMatch = raw.match(/^6-(\d+)-\d+$/);
+  return clickUpViewListMatch ? clickUpViewListMatch[1] : raw;
 }
 
 function isQuoteRow(row = {}) {
@@ -242,6 +248,29 @@ function getDeliveryAutomationStatus(row = {}) {
 function getClickUpTaskUrl(task = {}) {
   return normalizeCell(task?.url)
     || (normalizeCell(task?.id) ? `https://app.clickup.com/t/${normalizeCell(task.id)}` : '');
+}
+
+function getClickUpErrorMessage(error) {
+  const data = error?.response?.data;
+  if (typeof data === 'string' && data.trim()) return data.trim();
+  if (data && typeof data === 'object') {
+    const parts = [
+      data.err,
+      data.error,
+      data.message,
+      data.ECODE ? `ECODE=${data.ECODE}` : '',
+      data.code ? `code=${data.code}` : ''
+    ]
+      .map(value => normalizeCell(value))
+      .filter(Boolean);
+    if (parts.length > 0) return parts.join(' | ');
+    try {
+      return JSON.stringify(data);
+    } catch (_) {
+      // Fall through to generic message.
+    }
+  }
+  return error?.message || String(error);
 }
 
 function buildDeliveryTaskDescription(row = {}, originalTask = null) {
@@ -1865,7 +1894,8 @@ async function syncRowsToDeliveryAutomation({
     errors: []
   };
 
-  if (!normalizeCell(clickupToken) || !normalizeCell(mainClickupListId) || !normalizeCell(deliveryClickupListId)) {
+  const normalizedDeliveryClickupListId = normalizeClickUpApiListId(deliveryClickupListId);
+  if (!normalizeCell(clickupToken) || !normalizeCell(mainClickupListId) || !normalizeCell(normalizedDeliveryClickupListId)) {
     return result;
   }
   result.enabled = true;
@@ -1876,19 +1906,27 @@ async function syncRowsToDeliveryAutomation({
   });
   const deliveryClickup = new ClickUpService({
     token: clickupToken,
-    listId: deliveryClickupListId
+    listId: normalizedDeliveryClickupListId
   });
 
-  const deliveryList = await deliveryClickup.getList();
+  let deliveryList = null;
+  let mainTasks = [];
+  let deliveryTasks = [];
+  try {
+    deliveryList = await deliveryClickup.getList();
+    mainTasks = await mainClickup.fetchTasksByStatuses([], {
+      includeClosed: true,
+      subtasks: false
+    });
+    deliveryTasks = await deliveryClickup.fetchTasksByStatuses([], {
+      includeClosed: true,
+      subtasks: false
+    });
+  } catch (error) {
+    result.errors.push(`Delivery Automation setup failed: ${getClickUpErrorMessage(error)}`);
+    return result;
+  }
   const deliveryFieldMeta = getCustomFieldMetaMap(deliveryList);
-  const mainTasks = await mainClickup.fetchTasksByStatuses([], {
-    includeClosed: true,
-    subtasks: false
-  });
-  const deliveryTasks = await deliveryClickup.fetchTasksByStatuses([], {
-    includeClosed: true,
-    subtasks: false
-  });
   const mainTaskByKey = buildTaskMap(mainTasks);
   const deliveryTaskByKey = buildTaskMap(deliveryTasks);
 
@@ -1918,9 +1956,13 @@ async function syncRowsToDeliveryAutomation({
 
     try {
       if (!existingTask) {
-        const createdTask = await deliveryClickup.request('POST', `/list/${deliveryClickupListId}/task`, {
+        const createdTask = await deliveryClickup.request(
+          'POST',
+          `/list/${encodeURIComponent(normalizedDeliveryClickupListId)}/task`,
+          {
           data: taskPayload
-        });
+          }
+        );
         const createdTaskId = normalizeCell(createdTask?.id || createdTask?.task?.id);
         if (createdTaskId) {
           await applyTaskCustomFields(deliveryClickup, createdTaskId, customFields, key, result);
@@ -1951,11 +1993,7 @@ async function syncRowsToDeliveryAutomation({
       console.log(`[WorkOrders] Delivery Automation task updated: ${key} -> ${status}`);
       result.updated += 1;
     } catch (error) {
-      const message =
-        error?.response?.data?.err ||
-        error?.response?.data?.error ||
-        error?.message ||
-        String(error);
+      const message = getClickUpErrorMessage(error);
       result.errors.push(`Delivery Automation sync failed for ${key}: ${message}`);
     }
   }
@@ -1969,11 +2007,7 @@ async function syncRowsToDeliveryAutomation({
       console.log(`[WorkOrders] Delivery Automation task completed (no longer eligible): ${key}`);
       result.completed += 1;
     } catch (error) {
-      const message =
-        error?.response?.data?.err ||
-        error?.response?.data?.error ||
-        error?.message ||
-        String(error);
+      const message = getClickUpErrorMessage(error);
       result.errors.push(`Delivery Automation complete failed for ${key}: ${message}`);
     }
   }
@@ -2388,7 +2422,7 @@ async function runWorkOrdersSync({
       });
     }
   } catch (error) {
-    const message = `ClickUp sync failed: ${error.message}`;
+    const message = `ClickUp sync failed: ${getClickUpErrorMessage(error)}`;
     console.error(`[WorkOrders] ${message}`);
     summary.errors.push(message);
     emitProgress('ClickUp sync failed', {
