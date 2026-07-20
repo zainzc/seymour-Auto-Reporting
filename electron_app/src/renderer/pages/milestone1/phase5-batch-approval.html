@@ -156,6 +156,28 @@
     .metric .label { font-size: 12px; color: var(--muted); }
     .metric .value { font-size: 24px; font-weight: 800; margin-top: 4px; }
 
+    .publish-controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(180px, 1fr)) auto auto auto;
+      gap: 10px;
+      align-items: end;
+    }
+    .field-label {
+      display: grid;
+      gap: 5px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+    }
+    .field-label select {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 9px 10px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+    }
+
     .table-wrap {
       border: 1px solid var(--border);
       border-radius: 12px;
@@ -216,6 +238,37 @@
       border-radius: 8px;
     }
 
+    .logs-toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .logs {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #f8fbff;
+      max-height: 280px;
+      overflow: auto;
+      padding: 8px;
+    }
+    .log-entry {
+      border-bottom: 1px solid #e3ebf5;
+      padding: 8px 6px;
+      font-size: 12px;
+      color: #29435f;
+      line-height: 1.45;
+    }
+    .log-entry:last-child { border-bottom: none; }
+    .log-entry.error { color: var(--danger); }
+    .log-entry.success { color: var(--success); }
+    .log-time {
+      color: var(--muted);
+      font-weight: 700;
+      margin-right: 6px;
+    }
+
     .drawer-backdrop {
       position: fixed;
       inset: 0;
@@ -256,6 +309,7 @@
 
     @media (max-width: 980px) {
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .publish-controls { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -289,6 +343,32 @@
     </section>
 
     <section class="card">
+      <h3 style="margin:0 0 10px;">Publish Approved Items</h3>
+      <div class="publish-controls">
+        <label class="field-label">
+          Publishing Mode
+          <select id="publish-mode-select">
+            <option value="manual">Manual</option>
+            <option value="scheduled">Scheduled</option>
+          </select>
+        </label>
+        <label class="field-label">
+          eBay Environment
+          <select id="publish-env-select">
+            <option value="sandbox">Sandbox</option>
+            <option value="production">Production</option>
+          </select>
+        </label>
+        <button class="btn primary" id="publish-run-btn" onclick="runSelectedPublishMode()">Run Publish</button>
+        <button class="btn" id="publish-start-schedule-btn" onclick="startScheduledPublish()">Start Scheduled</button>
+        <button class="btn" id="publish-stop-schedule-btn" onclick="stopScheduledPublish()">Stop Scheduled</button>
+      </div>
+      <div class="hint" style="margin-top:8px;">
+        Successful item publishes are logged to Google Sheets and removed from listing batches. Failed, blocked, or log-pending items remain in their batch.
+      </div>
+    </section>
+
+    <section class="card">
       <div class="table-wrap">
         <table>
           <thead>
@@ -308,7 +388,18 @@
           </tbody>
         </table>
       </div>
-      <div class="hint" style="margin-top:8px;">Approved action is blocked when blocked/exception counts are greater than zero.</div>
+      <div class="hint" style="margin-top:8px;">Approved batches may include problem items. Publishing will process only eligible items and leave blocked/exception items behind.</div>
+    </section>
+
+    <section class="card">
+      <h3 style="margin:0 0 10px;">Activity Log</h3>
+      <div class="logs-toolbar">
+        <button class="btn small" id="toggle-phase5-logs-btn" onclick="togglePhase5Logs()">Collapse Logs</button>
+        <button class="btn small" onclick="clearPhase5Logs()">Clear Logs</button>
+      </div>
+      <div class="logs" id="phase5-log-list" aria-live="polite">
+        <div class="log-entry">No Phase 5 activity yet.</div>
+      </div>
     </section>
   </div>
 
@@ -336,8 +427,8 @@
                 <th>Description</th>
                 <th>eBay Category ID</th>
                 <th>Eligibility Computed</th>
-                <th>Has Exception</th>
-                <th>Master Part Record</th>
+                <th>Eligibility Reason</th>
+                <th>Airtable Row</th>
               </tr>
             </thead>
             <tbody id="listing-table-body">
@@ -360,6 +451,8 @@
     let isRefreshing = false;
     let activeDetailLoadToken = 0;
     let lastRefreshClickAt = 0;
+    let phase5LogsCollapsed = false;
+    let phase5LogEntries = [];
     const SUMMARY_CACHE_MS = 30000;
     const REFRESH_DEBOUNCE_MS = 1000;
 
@@ -422,10 +515,67 @@
       return `<span class="badge ${badgeClass(text)}">${esc(text || 'Pending')}</span>`;
     }
 
-    function computeApprovalDisableReason(batch) {
+    async function openExternalUrl(url) {
+      const target = String(url || '').trim();
+      if (!target) return;
+      if (window.phase5API && typeof window.phase5API.openExternal === 'function') {
+        await window.phase5API.openExternal(target);
+        return;
+      }
+      window.open(target, '_blank', 'noopener,noreferrer');
+    }
+
+    function renderPhase5Logs() {
+      const list = document.getElementById('phase5-log-list');
+      if (!list) return;
+      list.style.display = phase5LogsCollapsed ? 'none' : 'block';
+      if (phase5LogEntries.length === 0) {
+        list.innerHTML = '<div class="log-entry">No Phase 5 activity yet.</div>';
+        return;
+      }
+      list.innerHTML = phase5LogEntries.map(entry => {
+        const typeClass = entry.type === 'error' ? 'error' : entry.type === 'success' ? 'success' : '';
+        return `
+          <div class="log-entry ${typeClass}">
+            <span class="log-time">${esc(entry.time)}</span>
+            ${esc(entry.message)}
+          </div>
+        `;
+      }).join('');
+    }
+
+    function appendPhase5Log(message, type = '') {
+      const entry = {
+        time: new Date().toLocaleTimeString(),
+        message: String(message || '').trim() || 'Phase 5 update',
+        type
+      };
+      phase5LogEntries.unshift(entry);
+      if (phase5LogEntries.length > 200) {
+        phase5LogEntries = phase5LogEntries.slice(0, 200);
+      }
+      renderPhase5Logs();
+    }
+
+    function clearPhase5Logs() {
+      phase5LogEntries = [];
+      renderPhase5Logs();
+    }
+
+    function togglePhase5Logs() {
+      phase5LogsCollapsed = !phase5LogsCollapsed;
+      const btn = document.getElementById('toggle-phase5-logs-btn');
+      if (btn) btn.textContent = phase5LogsCollapsed ? 'Expand Logs' : 'Collapse Logs';
+      renderPhase5Logs();
+    }
+
+    function computeApprovalWarning(batch) {
       if (!batch) return '';
-      if (asNum(batch.blockedItemsCount) > 0) return 'Cannot approve: blocked items are present.';
-      if (asNum(batch.exceptionItemsCount) > 0) return 'Cannot approve: exception items are present.';
+      const blocked = asNum(batch.blockedItemsCount);
+      const exceptions = asNum(batch.exceptionItemsCount);
+      if (blocked > 0 || exceptions > 0) {
+        return `Warning: ${blocked} blocked and ${exceptions} exception item(s) will remain in the batch.`;
+      }
       return '';
     }
 
@@ -448,6 +598,120 @@
       };
     }
 
+    function getPublishSelections() {
+      const mode = document.getElementById('publish-mode-select')?.value === 'scheduled' ? 'scheduled' : 'manual';
+      const env = document.getElementById('publish-env-select')?.value === 'production' ? 'production' : 'sandbox';
+      return { mode, env };
+    }
+
+    function buildPublishOptions() {
+      const selections = getPublishSelections();
+      return {
+        ...appConfig,
+        phase5Mode: selections.mode === 'scheduled' ? 'B' : 'A',
+        phase5EbayEnvironment: selections.env
+      };
+    }
+
+    function confirmProductionPublish(env) {
+      if (env !== 'production') return true;
+      return confirm('You selected Production. This can publish live eBay listings. Continue?');
+    }
+
+    function setPublishingBusy(isBusy) {
+      ['publish-run-btn', 'publish-start-schedule-btn', 'publish-stop-schedule-btn', 'publish-mode-select', 'publish-env-select']
+        .forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.disabled = Boolean(isBusy);
+        });
+    }
+
+    function summarizePublishResult(summary) {
+      if (!summary) return 'No summary returned.';
+      return [
+        `success=${asNum(summary.publishedSuccess)}`,
+        `failed=${asNum(summary.publishedFailed)}`,
+        `logged=${asNum(summary.loggedToSheets)}`,
+        `removed=${asNum(summary.removedFromQueue)}`,
+        `batchesDeleted=${asNum(summary.batchesDeleted)}`,
+        `batchesRetained=${asNum(summary.batchesRetainedWithRemainingItems)}`
+      ].join(', ');
+    }
+
+    async function ensureConfigLoaded() {
+      if (!appConfig) {
+        await loadConfig();
+      }
+      return appConfig;
+    }
+
+    async function runSelectedPublishMode() {
+      try {
+        setPublishingBusy(true);
+        await ensureConfigLoaded();
+        const selections = getPublishSelections();
+        if (!confirmProductionPublish(selections.env)) return;
+        appendPhase5Log(`Run publish clicked. mode=${selections.mode}, environment=${selections.env}`);
+        setStatus(`Running ${selections.mode} publish to ${selections.env}...`, '');
+        const options = buildPublishOptions();
+        const result = selections.mode === 'scheduled'
+          ? await window.phase5API.runAutoPushNow(options)
+          : await window.phase5API.publishApproved(options);
+        if (!result?.success) throw new Error(result?.message || 'Publish failed.');
+        const summary = result.summary || result.result?.summary || {};
+        appendPhase5Log(`Publish completed: ${summarizePublishResult(summary)}`, 'success');
+        setStatus(`Publish completed: ${summarizePublishResult(summary)}`, 'success');
+        cachedSummaryRows = [];
+        lastSummaryFetchedAt = 0;
+        await refreshAll({ force: true });
+      } catch (error) {
+        appendPhase5Log(`Publish failed: ${error.message}`, 'error');
+        setStatus(`Publish failed: ${error.message}`, 'error');
+      } finally {
+        setPublishingBusy(false);
+      }
+    }
+
+    async function startScheduledPublish() {
+      try {
+        setPublishingBusy(true);
+        await ensureConfigLoaded();
+        const options = {
+          ...buildPublishOptions(),
+          phase5Mode: 'B'
+        };
+        if (!confirmProductionPublish(options.phase5EbayEnvironment)) return;
+        appendPhase5Log(`Start scheduled publish clicked. environment=${options.phase5EbayEnvironment}`);
+        setStatus(`Starting scheduled publish to ${options.phase5EbayEnvironment}...`, '');
+        const result = await window.phase5API.startAutoPush(options);
+        if (!result?.success) throw new Error(result?.message || 'Failed to start scheduled publish.');
+        appendPhase5Log('Scheduled publish started.', 'success');
+        setStatus('Scheduled publish started.', 'success');
+      } catch (error) {
+        appendPhase5Log(`Failed to start scheduled publish: ${error.message}`, 'error');
+        setStatus(`Failed to start scheduled publish: ${error.message}`, 'error');
+      } finally {
+        setPublishingBusy(false);
+      }
+    }
+
+    async function stopScheduledPublish() {
+      try {
+        setPublishingBusy(true);
+        appendPhase5Log('Stop scheduled publish clicked.');
+        setStatus('Stopping scheduled publish...', '');
+        const result = await window.phase5API.stopAutoPush();
+        if (!result?.success) throw new Error(result?.message || 'Failed to stop scheduled publish.');
+        appendPhase5Log('Scheduled publish stopped.', 'success');
+        setStatus('Scheduled publish stopped.', 'success');
+      } catch (error) {
+        appendPhase5Log(`Failed to stop scheduled publish: ${error.message}`, 'error');
+        setStatus(`Failed to stop scheduled publish: ${error.message}`, 'error');
+      } finally {
+        setPublishingBusy(false);
+      }
+    }
+
     async function loadConfig() {
       if (!window.phase2API || !window.phase5API) {
         throw new Error('Phase 5 APIs are unavailable in preload.');
@@ -455,6 +719,14 @@
       const baseCfg = await window.phase2API.getConfig();
       const phase5Cfg = await window.phase5API.getConfig();
       appConfig = buildRuntimeConfig(baseCfg || {}, phase5Cfg || {});
+      const envSelect = document.getElementById('publish-env-select');
+      if (envSelect) {
+        envSelect.value = appConfig.phase5EbayEnvironment === 'production' ? 'production' : 'sandbox';
+      }
+      const modeSelect = document.getElementById('publish-mode-select');
+      if (modeSelect) {
+        modeSelect.value = String(appConfig.phase5Mode || '').trim().toUpperCase() === 'B' ? 'scheduled' : 'manual';
+      }
       return appConfig;
     }
 
@@ -481,13 +753,12 @@
       }
 
       tbody.innerHTML = rows.map((batch, idx) => {
-        const disableReason = computeApprovalDisableReason(batch);
-        const canApprove = !disableReason;
+        const approvalWarning = computeApprovalWarning(batch);
         const createdAt = batch.createdTime ? new Date(batch.createdTime).toLocaleString() : '-';
         const safeRowIndex = String(idx);
         return `
           <tr>
-            <td>${esc(batch.batchRecordId || batch.batchId || '-')}</td>
+            <td>${esc(batch.batchId || batch.batchRecordId || '-')}</td>
             <td>${badge(batch.batchStatus || 'Pending')}</td>
             <td>${asNum(batch.totalItems)}</td>
             <td>${asNum(batch.eligibleItemsCount)}</td>
@@ -497,10 +768,10 @@
             <td>
               <div class="row-actions">
                 <button class="btn small" onclick="viewBatchDetailsByIndex(${safeRowIndex})">View Details</button>
-                <button class="btn small primary" ${canApprove ? '' : `disabled title="${esc(disableReason)}"`} onclick="setStatusForRow(${safeRowIndex}, 'Approved')">Set Approved</button>
+                <button class="btn small primary" onclick="setStatusForRow(${safeRowIndex}, 'Approved')">Set Approved</button>
                 <button class="btn small" onclick="setStatusForRow(${safeRowIndex}, 'Hold')">Set Hold</button>
               </div>
-              ${disableReason ? `<div class="hint" style="margin-top:4px;">${esc(disableReason)}</div>` : ''}
+              ${approvalWarning ? `<div class="hint" style="margin-top:4px;">${esc(approvalWarning)}</div>` : ''}
             </td>
           </tr>
         `;
@@ -519,15 +790,6 @@
         refreshBtn.disabled = true;
         await loadConfig();
 
-        if (!isSchemaValidated) {
-          setStatus('Validating Phase 5 batch schema...', '');
-          const validation = await window.phase5API.validateBatchSchema(appConfig);
-          if (!validation?.success || validation?.result?.ok === false) {
-            throw new Error(validation?.result?.message || validation?.message || 'Batch schema validation failed.');
-          }
-          isSchemaValidated = true;
-        }
-
         if (!force && cachedSummaryRows.length > 0 && now - lastSummaryFetchedAt < SUMMARY_CACHE_MS) {
           batchRows = cachedSummaryRows.slice();
           renderSummaryCards(batchRows);
@@ -543,6 +805,7 @@
         batchRows = Array.isArray(result.batches) ? result.batches : [];
         cachedSummaryRows = batchRows.slice();
         lastSummaryFetchedAt = Date.now();
+        isSchemaValidated = true;
         renderSummaryCards(batchRows);
         renderBatchTable(batchRows);
         setStatus(`Loaded ${batchRows.length} batch(es).`, 'success');
@@ -577,8 +840,8 @@
           <td title="${esc(item.description || '')}">${esc((item.description || '').slice(0, 140) || '-')}</td>
           <td>${esc(item.ebayCategoryId || '-')}</td>
           <td>${badge(item.eligibilityComputed || 'Pending')}</td>
-          <td>${badge(item.hasException || 'No')}</td>
-          <td>${esc(item.masterPartRecord || '-')}</td>
+          <td title="${esc(item.eligibilityReason || '')}">${esc(item.eligibilityReason || '-')}</td>
+          <td>${item.airtableRecordUrl ? `<button class="btn small js-open-external" type="button" data-url="${esc(item.airtableRecordUrl)}">Open</button>` : '-'}</td>
         </tr>
       `;
     }
@@ -588,9 +851,10 @@
       if (!row) return;
       const loadToken = ++activeDetailLoadToken;
       selectedBatch = row;
-      document.getElementById('drawer-subtitle').textContent = `Batch ${row.batchRecordId || '-'} | Status: ${row.batchStatus || 'Pending'}`;
+      const visibleBatchId = row.batchId || row.batchRecordId || '-';
+      document.getElementById('drawer-subtitle').textContent = `Batch ${visibleBatchId} | Status: ${row.batchStatus || 'Pending'}`;
       document.getElementById('drawer-meta').innerHTML = `
-        <strong>Batch ID:</strong> ${esc(row.batchRecordId || '-')}<br>
+        <strong>Batch ID:</strong> ${esc(visibleBatchId)}<br>
         <strong>Status:</strong> ${badge(row.batchStatus || 'Pending')}<br>
         <strong>Total Items:</strong> ${asNum(row.totalItems)}<br>
         <strong>Eligible:</strong> ${asNum(row.eligibleItemsCount)}<br>
@@ -604,7 +868,7 @@
       openDrawer();
 
       try {
-        const pageSize = 10;
+        const pageSize = 50;
         let cursor = '';
         let total = 0;
         let loaded = 0;
@@ -669,13 +933,6 @@
       if (!row) return;
       const next = String(nextStatus || '').trim();
       if (!next) return;
-      if (next === 'Approved') {
-        const reason = computeApprovalDisableReason(row);
-        if (reason) {
-          setStatus(reason, 'error');
-          return;
-        }
-      }
       try {
         setStatus(`Setting batch '${row.batchRecordId}' to '${next}'...`, '');
         const result = await window.phase5API.setBatchStatus({
@@ -695,6 +952,24 @@
     }
 
     document.addEventListener('DOMContentLoaded', async () => {
+      document.addEventListener('click', async event => {
+        const button = event.target?.closest?.('.js-open-external');
+        if (!button) return;
+        event.preventDefault();
+        try {
+          await openExternalUrl(button.dataset.url || '');
+        } catch (error) {
+          setStatus(`Failed to open Airtable row: ${error.message}`, 'error');
+        }
+      });
+      renderPhase5Logs();
+      if (window.phase5API && typeof window.phase5API.onProgress === 'function') {
+        window.phase5API.onProgress((event, payload) => {
+          const message = payload?.message || payload?.stage || 'Phase 5 progress update';
+          const type = payload?.stage === 'error' ? 'error' : payload?.stage === 'completed' ? 'success' : '';
+          appendPhase5Log(message, type);
+        });
+      }
       await refreshAll();
     });
   </script>

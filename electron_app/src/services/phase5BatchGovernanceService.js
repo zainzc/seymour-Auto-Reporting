@@ -8,8 +8,47 @@ const {
   extractLinkedRecordIds
 } = require('./phase5GovernanceService');
 
+const SCHEMA_TABLE_CACHE_TTL_MS = 5 * 60 * 1000;
+const schemaTableCache = new Map();
+
 function normalizeTextOrComparable(value) {
   return normalizeText(normalizeComparableValue(value));
+}
+
+async function listTablesCached(schemaService, cacheKey = '') {
+  const key = normalizeText(cacheKey || schemaService?.baseId || '');
+  if (!key) return schemaService.listTables();
+  const cached = schemaTableCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < SCHEMA_TABLE_CACHE_TTL_MS) {
+    return cached.tables;
+  }
+  const tables = await schemaService.listTables();
+  schemaTableCache.set(key, {
+    fetchedAt: Date.now(),
+    tables
+  });
+  return tables;
+}
+
+function attachCachedListTables(schemaService, cacheKey = '') {
+  if (!schemaService || schemaService.__phase5CachedListTablesAttached) return schemaService;
+  const originalListTables = schemaService.listTables.bind(schemaService);
+  schemaService.listTables = async () => {
+    const key = normalizeText(cacheKey || schemaService.baseId || '');
+    if (!key) return originalListTables();
+    const cached = schemaTableCache.get(key);
+    if (cached && Date.now() - cached.fetchedAt < SCHEMA_TABLE_CACHE_TTL_MS) {
+      return cached.tables;
+    }
+    const tables = await originalListTables();
+    schemaTableCache.set(key, {
+      fetchedAt: Date.now(),
+      tables
+    });
+    return tables;
+  };
+  schemaService.__phase5CachedListTablesAttached = true;
+  return schemaService;
 }
 
 function detectLinkedRecordField(fields = [], linkedTableId = '', preferred = []) {
@@ -103,7 +142,10 @@ async function resolvePhase5Schema(options = {}) {
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!airtableBaseId) throw new Error('Missing AIRTABLE_BASE_ID.');
 
-  const schemaService = new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId });
+  const schemaService = attachCachedListTables(
+    new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId }),
+    airtableBaseId
+  );
   const approvalService = new Phase5ApprovalService({
     listingsTableName,
     approvalFieldName: options.phase5ApprovalFieldName,
@@ -152,10 +194,32 @@ function resolveBatchSchemaFieldNames(options = {}) {
   };
 }
 
+function selectExistingFields(fieldNames = [], candidates = []) {
+  const available = new Map(
+    (Array.isArray(fieldNames) ? fieldNames : [])
+      .map(name => [normalizeText(name).toLowerCase(), normalizeText(name)])
+      .filter(([key, name]) => key && name)
+  );
+  const selected = [];
+  const seen = new Set();
+  for (const candidate of candidates) {
+    const name = normalizeText(candidate);
+    if (!name) continue;
+    const actual = available.get(name.toLowerCase());
+    if (!actual || seen.has(actual)) continue;
+    seen.add(actual);
+    selected.push(actual);
+  }
+  return selected;
+}
+
 async function validateBatchGovernanceSchema(options = {}) {
   const { schema, airtableToken, airtableBaseId } = await resolvePhase5Schema(options);
-  const schemaService = new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId });
-  const tables = await schemaService.listTables();
+  const schemaService = attachCachedListTables(
+    new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId }),
+    airtableBaseId
+  );
+  const tables = await listTablesCached(schemaService, airtableBaseId);
   const batchTableName = normalizeText(options.phase5BatchesTable || schema.batchTableName || 'Listing Batches');
   const batchTable = (tables || []).find(t => normalizeText(t?.name).toLowerCase() === batchTableName.toLowerCase());
   if (!batchTable?.id) {
@@ -198,7 +262,10 @@ async function validateBatchGovernanceSchema(options = {}) {
 async function getBatchSummaries(options = {}) {
   const { schema, airtableToken, airtableBaseId } = await resolvePhase5Schema(options);
   const airtableService = new AirtableService({ token: airtableToken, baseId: airtableBaseId });
-  const schemaService = new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId });
+  const schemaService = attachCachedListTables(
+    new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId }),
+    airtableBaseId
+  );
 
   const batchTableName = normalizeText(options.phase5BatchesTable || schema.batchTableName || 'Listing Batches');
   const batchStatusField = normalizeText(options.phase5BatchStatusFieldName || schema.batchStatusFieldName || 'Batch Status');
@@ -208,7 +275,7 @@ async function getBatchSummaries(options = {}) {
     throw new Error('Batch link field is required to compute batch summaries.');
   }
 
-  const tables = await schemaService.listTables();
+  const tables = await listTablesCached(schemaService, airtableBaseId);
   const batchTable = (tables || []).find(t => normalizeText(t?.name).toLowerCase() === batchTableName.toLowerCase());
   if (!batchTable?.id) {
     throw new Error(`Batch table '${batchTableName}' not found.`);
@@ -277,7 +344,10 @@ async function getBatchSummaries(options = {}) {
 async function setBatchStatus(options = {}) {
   const { schema, airtableToken, airtableBaseId } = await resolvePhase5Schema(options);
   const airtableService = new AirtableService({ token: airtableToken, baseId: airtableBaseId });
-  const schemaService = new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId });
+  const schemaService = attachCachedListTables(
+    new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId }),
+    airtableBaseId
+  );
 
   const batchTableName = normalizeText(options.phase5BatchesTable || schema.batchTableName || 'Listing Batches');
   const batchStatusField = normalizeText(options.phase5BatchStatusFieldName || schema.batchStatusFieldName || 'Batch Status');
@@ -286,7 +356,7 @@ async function setBatchStatus(options = {}) {
   if (!batchRecordId) throw new Error('batchRecordId is required.');
   if (!batchStatusValue) throw new Error('batchStatusValue is required.');
 
-  const tables = await schemaService.listTables();
+  const tables = await listTablesCached(schemaService, airtableBaseId);
   const batchTable = (tables || []).find(t => normalizeText(t?.name).toLowerCase() === batchTableName.toLowerCase());
   if (!batchTable?.id) {
     throw new Error(`Batch table '${batchTableName}' not found.`);
@@ -317,14 +387,17 @@ async function setBatchStatus(options = {}) {
 async function getBatchListings(options = {}) {
   const { schema, airtableToken, airtableBaseId } = await resolvePhase5Schema(options);
   const airtableService = new AirtableService({ token: airtableToken, baseId: airtableBaseId });
-  const schemaService = new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId });
+  const schemaService = attachCachedListTables(
+    new AirtableSchemaService({ token: airtableToken, baseId: airtableBaseId }),
+    airtableBaseId
+  );
   const batchRecordId = normalizeText(options.batchRecordId || '');
   if (!batchRecordId) throw new Error('batchRecordId is required.');
   const batchTableName = normalizeText(options.phase5BatchesTable || schema.batchTableName || 'Listing Batches');
   const batchSchemaFields = resolveBatchSchemaFieldNames(options);
   const configuredItemsField = normalizeText(batchSchemaFields.itemsField || 'Items');
 
-  const tables = await schemaService.listTables();
+  const tables = await listTablesCached(schemaService, airtableBaseId);
   const batchTable = (tables || []).find(t => normalizeText(t?.name).toLowerCase() === batchTableName.toLowerCase());
   if (!batchTable?.id) {
     throw new Error(`Batch table '${batchTableName}' not found.`);
@@ -352,12 +425,40 @@ async function getBatchListings(options = {}) {
 
   const rows = [];
   const uniqueIds = Array.from(new Set(linkedListingIds.map(id => normalizeText(id)).filter(Boolean)));
-  for (let i = 0; i < uniqueIds.length; i += 80) {
-    const group = uniqueIds.slice(i, i + 80);
+  const parsedPageSize = Number(options.pageSize);
+  const pageSize = Math.max(
+    1,
+    Math.min(500, Number.isFinite(parsedPageSize) && parsedPageSize > 0 ? parsedPageSize : uniqueIds.length || 200)
+  );
+  const parsedCursor = Number.parseInt(String(options.cursor || '0'), 10);
+  const start = Number.isFinite(parsedCursor) && parsedCursor > 0 ? parsedCursor : 0;
+  const end = Math.min(uniqueIds.length, start + pageSize);
+  const pageIds = uniqueIds.slice(start, end);
+  const selectedListingFields = selectExistingFields(schema.fieldNames, [
+    'SKU',
+    'Sku',
+    'sku',
+    'IPN (Interchange Part Number)',
+    'c: partshunter203 ebay MOTORS interchange part number',
+    'Item Title',
+    'Title',
+    'Product Title(New)',
+    'Item Description',
+    'Description',
+    'eBay Category ID',
+    schema.categoryIdField,
+    'Eligibility Computed',
+    'Eligibility Reason',
+    'Exception Reason',
+    'Has Exception'
+  ]);
+
+  for (let i = 0; i < pageIds.length; i += 80) {
+    const group = pageIds.slice(i, i + 80);
     const clauses = group.map(id => `RECORD_ID()='${id}'`);
     const formula = clauses.length === 1 ? clauses[0] : `OR(${clauses.join(',')})`;
     try {
-      const subset = await airtableService.fetchRecordsByFormula(schema.tableId, formula, []);
+      const subset = await airtableService.fetchRecordsByFormula(schema.tableId, formula, selectedListingFields);
       rows.push(...subset);
     } catch (_) {
       // Fallback to single-record requests for this chunk if formula is rejected.
@@ -371,11 +472,12 @@ async function getBatchListings(options = {}) {
   }
 
   const rowById = new Map(rows.map(r => [normalizeText(r?.id), r]));
-  const orderedRows = uniqueIds.map(id => rowById.get(id)).filter(Boolean);
+  const orderedRows = pageIds.map(id => rowById.get(id)).filter(Boolean);
 
   const listingRows = orderedRows.map(row => {
     const fields = row?.fields || {};
     const gate = passCoreGate(fields, schema, options);
+    const recordId = normalizeText(row?.id);
     const sku =
       normalizeTextOrComparable(fields['SKU']) ||
       normalizeTextOrComparable(fields['Sku']) ||
@@ -391,7 +493,11 @@ async function getBatchListings(options = {}) {
       normalizeTextOrComparable(fields['Item Description']) ||
       normalizeTextOrComparable(fields['Description']);
     return {
-      recordId: normalizeText(row?.id),
+      recordId,
+      airtableRecordUrl:
+        airtableBaseId && schema.tableId && recordId
+          ? `https://airtable.com/${encodeURIComponent(airtableBaseId)}/${encodeURIComponent(schema.tableId)}/${encodeURIComponent(recordId)}`
+          : '',
       createdTime: normalizeText(row?.createdTime || ''),
       sku,
       recordKey:
@@ -408,6 +514,11 @@ async function getBatchListings(options = {}) {
       eligibilityComputed:
         normalizeTextOrComparable(fields['Eligibility Computed']) ||
         (gate.eligible ? 'Eligible' : 'Not Eligible'),
+      eligibilityReason:
+        normalizeTextOrComparable(fields['Eligibility Reason']) ||
+        normalizeTextOrComparable(fields['Exception Reason']) ||
+        '',
+      exceptionReason: normalizeTextOrComparable(fields['Exception Reason']),
       hasException:
         normalizeTextOrComparable(fields['Has Exception']) ||
         (gate.hasException ? 'Yes' : 'No'),
@@ -418,8 +529,10 @@ async function getBatchListings(options = {}) {
   return {
     batchRecordId,
     batchLinkField: itemsField,
-    total: listingRows.length,
-    listings: listingRows
+    total: uniqueIds.length,
+    listings: listingRows,
+    hasMore: end < uniqueIds.length,
+    nextCursor: end < uniqueIds.length ? String(end) : ''
   };
 }
 

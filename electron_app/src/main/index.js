@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
 const { loadEnv } = require('../config/loadEnv');
 loadEnv();
@@ -4739,25 +4739,13 @@ ipcMain.handle('phase5:getBatchListings', async (_, options = {}) => {
       ...options
     };
     const result = await getBatchListings(runOptions);
-    const allListings = Array.isArray(result?.listings) ? result.listings : [];
-    const parsedPageSize = Number(options.pageSize);
-    const pageSize = Math.max(
-      1,
-      Math.min(500, Number.isFinite(parsedPageSize) ? parsedPageSize : allListings.length || 200)
-    );
-    const parsedCursor = Number.parseInt(String(options.cursor || '0'), 10);
-    const start = Number.isFinite(parsedCursor) && parsedCursor > 0 ? parsedCursor : 0;
-    const end = Math.min(allListings.length, start + pageSize);
-    const listings = allListings.slice(start, end);
-    const hasMore = end < allListings.length;
-
     return {
       success: true,
       ...result,
-      total: Number(result?.total || allListings.length) || allListings.length,
-      listings,
-      hasMore,
-      nextCursor: hasMore ? String(end) : ''
+      total: Number(result?.total || 0) || 0,
+      listings: Array.isArray(result?.listings) ? result.listings : [],
+      hasMore: result?.hasMore === true,
+      nextCursor: result?.nextCursor || ''
     };
   } catch (error) {
     return {
@@ -4769,6 +4757,15 @@ ipcMain.handle('phase5:getBatchListings', async (_, options = {}) => {
       nextCursor: ''
     };
   }
+});
+
+ipcMain.handle('phase5:openExternal', async (_, url = '') => {
+  const target = String(url || '').trim();
+  if (!/^https?:\/\//i.test(target)) {
+    return { success: false, message: 'Only http/https external links are allowed.' };
+  }
+  await shell.openExternal(target);
+  return { success: true };
 });
 
 ipcMain.handle('phase5:setBatchStatus', async (_, options = {}) => {
@@ -5791,7 +5788,6 @@ function createWindow() {
 // Start OAuth2 callback server
 const http = require('http');
 const url = require('url');
-const { shell } = require('electron');
 
 http.createServer(async (req, res) => {
   const queryUrl = url.parse(req.url, true);

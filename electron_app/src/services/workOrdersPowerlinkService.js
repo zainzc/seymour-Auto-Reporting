@@ -75,7 +75,7 @@ QuoteLineDedup AS (
 
 SELECT
     NULL AS [Date/Time Last Synced],
-    wo.DateCreated AS [Created],
+    CONVERT(varchar(23), wo.DateCreated, 121) AS [Created],
     wo.WorkOrderNumber AS [W/O or Quote Number],
     wold.LineItemID AS [Line Item ID],
 
@@ -154,7 +154,7 @@ UNION ALL
 
 SELECT
     NULL AS [Date/Time Last Synced],
-    q.DateCreated AS [Created],
+    CONVERT(varchar(23), q.DateCreated, 121) AS [Created],
     q.QuoteNumber AS [W/O or Quote Number],
     qld.LineItemID AS [Line Item ID],
 

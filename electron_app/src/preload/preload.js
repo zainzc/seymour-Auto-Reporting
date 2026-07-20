@@ -181,6 +181,7 @@ contextBridge.exposeInMainWorld('phase5API', {
   stopAutoPush: () => ipcRenderer.invoke('phase5:stopAutoPush'),
   getAutoPushStatus: () => ipcRenderer.invoke('phase5:getAutoPushStatus'),
   runAutoPushNow: (options) => ipcRenderer.invoke('phase5:runAutoPushNow', options),
+  openExternal: (url) => ipcRenderer.invoke('phase5:openExternal', url),
   onProgress: (callback) => ipcRenderer.on('phase5:progress', callback)
 });
 

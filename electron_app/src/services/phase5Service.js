@@ -137,6 +137,59 @@ async function patchListingRecordFields(airtableService, tableId, recordId, fiel
   });
 }
 
+async function cleanupPublishedBatches({
+  airtableService,
+  listingsTableId,
+  batchTableId,
+  batchLinkField,
+  batchIds = []
+}) {
+  const uniqueBatchIds = Array.from(
+    new Set((Array.isArray(batchIds) ? batchIds : []).map(id => normalizeText(id)).filter(Boolean))
+  );
+  const result = {
+    checked: uniqueBatchIds.length,
+    deleted: 0,
+    retained: 0,
+    errors: []
+  };
+
+  if (!airtableService || !listingsTableId || !batchTableId || !batchLinkField || uniqueBatchIds.length === 0) {
+    return result;
+  }
+
+  const remainingByBatch = new Set();
+  const remainingRows = await airtableService.fetchAllRecords(listingsTableId, [batchLinkField]);
+  for (const row of remainingRows) {
+    const links = extractLinkedRecordIds(row?.fields?.[batchLinkField]);
+    for (const batchId of links) {
+      if (uniqueBatchIds.includes(batchId)) {
+        remainingByBatch.add(batchId);
+      }
+    }
+  }
+
+  for (const batchId of uniqueBatchIds) {
+    if (remainingByBatch.has(batchId)) {
+      result.retained += 1;
+      continue;
+    }
+    try {
+      await airtableService.deleteRecord(batchTableId, batchId);
+      result.deleted += 1;
+    } catch (error) {
+      const detail =
+        error?.response?.data?.error?.message ||
+        error?.response?.data?.error ||
+        error?.message ||
+        String(error);
+      result.errors.push(`batch_delete_failed batch='${batchId}': ${detail}`);
+    }
+  }
+
+  return result;
+}
+
 async function loadBatchApprovalContext(airtableService, schemaService, schema, options = {}) {
   const enforceBatchApproval = parseBoolean(
     options.phase5EnforceBatchApproval ?? process.env.PHASE5_ENFORCE_BATCH_APPROVAL ?? 'true',
@@ -156,6 +209,7 @@ async function loadBatchApprovalContext(airtableService, schemaService, schema, 
       approvedBatchIds: new Set(),
       totalBatches: 0,
       approvedBatches: 0,
+      batchTableId: '',
       batchTableName,
       batchStatusFieldName,
       batchApprovedValue
@@ -191,6 +245,7 @@ async function loadBatchApprovalContext(airtableService, schemaService, schema, 
 
   return {
     enforceBatchApproval,
+    batchTableId: batchTable.id,
     batchLinkField,
     approvedBatchIds,
     totalBatches: rows.length,
@@ -253,6 +308,8 @@ function passesRequiredFieldGate(fields = {}, schema = {}, options = {}) {
     options.phase5ClickupResolvedValues || process.env.PHASE5_CLICKUP_RESOLVED_VALUES || 'resolved,done,closed,complete'
   );
 
+  const sku = firstNonEmptyField(fields, ['SKU', 'Sku', 'sku']);
+  if (!sku) return { ok: false, reason: 'missing_sku' };
   if (categoryIdField && !normalizeTextOrComparable(fields[categoryIdField])) return { ok: false, reason: 'missing_category_id' };
   if (titleField && !normalizeTextOrComparable(fields[titleField])) return { ok: false, reason: 'missing_title' };
   if (descriptionField && !normalizeTextOrComparable(fields[descriptionField])) return { ok: false, reason: 'missing_description' };
@@ -267,6 +324,21 @@ function passesRequiredFieldGate(fields = {}, schema = {}, options = {}) {
     return { ok: false, reason: 'unresolved_clickup_exception' };
   }
   return { ok: true, reason: '' };
+}
+
+function isManualEligibilityAllowed(value) {
+  const text = normalizeTextOrComparable(value).toLowerCase();
+  if (!text) return false;
+  return new Set([
+    'eligible',
+    'publish eligible',
+    'auto push eligible',
+    'ready',
+    'ready to publish',
+    'yes',
+    'true',
+    '1'
+  ]).has(text);
 }
 
 async function runPhase5PublishApproved(options = {}, progressCallback = () => {}) {
@@ -321,6 +393,9 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     loggedToSheets: 0,
     loggingPending: 0,
     logRetryOnlyCount: 0,
+    batchesCheckedForCleanup: 0,
+    batchesDeleted: 0,
+    batchesRetainedWithRemainingItems: 0,
     batchTable: '',
     batchStatusField: '',
     batchApprovedValue: '',
@@ -474,10 +549,23 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
       continue;
     }
 
+    if (phase5Mode === 'A' && schema.eligibilityField && !isManualEligibilityAllowed(fields[schema.eligibilityField])) {
+      summary.skippedMissingRequired += 1;
+      if (summary.sampleSkips.length < 20) {
+        summary.sampleSkips.push(
+          `skip=not_eligible record='${recordId}' field='${schema.eligibilityField}' value='${normalizeTextOrComparable(
+            fields[schema.eligibilityField]
+          )}'`
+        );
+      }
+      continue;
+    }
+
     const gate = passesRequiredFieldGate(fields, schema, options);
     if (!gate.ok) {
       if (gate.reason === 'blocked') summary.skippedBlocked += 1;
       else if (gate.reason === 'unresolved_clickup_exception') summary.skippedUnresolvedException += 1;
+      else if (gate.reason === 'missing_sku') summary.skippedMissingSku += 1;
       else summary.skippedMissingRequired += 1;
       if (summary.sampleSkips.length < 20) summary.sampleSkips.push(`skip=${gate.reason} record='${recordId}'`);
       continue;
@@ -496,6 +584,7 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
 
   const publishedIdentitySet = parseIdentitySet(options.phase5PublishedIdentities || []);
   const publishRunId = normalizeText(options.phase5PublishRunId || new Date().toISOString().replace(/[^\d]/g, '').slice(0, 14));
+  const touchedBatchIdsForCleanup = new Set();
 
   emitProgress(progressCallback, {
     stage: 'phase5_publish',
@@ -514,6 +603,7 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     const recordFields = record?.fields || {};
     const itemId = normalizeText(schema?.itemIdField ? recordFields[schema.itemIdField] : '');
     const sku = firstNonEmptyField(recordFields, ['SKU', 'Sku', 'sku']);
+    const linkedBatchIds = extractLinkedRecordIds(recordFields[batchContext.batchLinkField]);
 
     if (identity && publishedIdentitySet.has(identity)) {
       summary.skippedAlreadyPublished += 1;
@@ -521,6 +611,9 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
         try {
           await airtableService.deleteRecord(schema.tableId, recordId);
           summary.removedFromQueue += 1;
+          for (const batchId of linkedBatchIds) {
+            touchedBatchIdsForCleanup.add(batchId);
+          }
         } catch (error) {
           const detail =
             error?.response?.data?.error?.message ||
@@ -628,6 +721,9 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
 
           await airtableService.deleteRecord(schema.tableId, recordId);
           summary.removedFromQueue += 1;
+          for (const batchId of linkedBatchIds) {
+            touchedBatchIdsForCleanup.add(batchId);
+          }
 
         } catch (appendError) {
           summary.loggingPending += 1;
@@ -676,6 +772,29 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
 
   if (summary.errors.length > 200) {
     summary.errors = summary.errors.slice(0, 200);
+  }
+
+  if (!dryRun && touchedBatchIdsForCleanup.size > 0) {
+    emitProgress(progressCallback, {
+      stage: 'phase5_batch_cleanup',
+      percent: 96,
+      counts: summary,
+      message: `Phase 5: Checking ${touchedBatchIdsForCleanup.size} affected batch(es) for cleanup...`
+    });
+
+    const cleanup = await cleanupPublishedBatches({
+      airtableService,
+      listingsTableId: schema.tableId,
+      batchTableId: batchContext.batchTableId,
+      batchLinkField: batchContext.batchLinkField,
+      batchIds: Array.from(touchedBatchIdsForCleanup)
+    });
+    summary.batchesCheckedForCleanup = cleanup.checked;
+    summary.batchesDeleted = cleanup.deleted;
+    summary.batchesRetainedWithRemainingItems = cleanup.retained;
+    if (cleanup.errors.length > 0) {
+      summary.errors.push(...cleanup.errors);
+    }
   }
 
   const result = {

@@ -1968,73 +1968,40 @@ async function syncRowsToDeliveryAutomation({
     const originalTask = mainTaskByKey.get(key) || null;
     const existingTask = deliveryTaskByKey.get(key) || null;
     const status = getDeliveryAutomationStatus(row);
+
+    if (existingTask) {
+      // Deliveries Automation is a copied snapshot. Once copied, the delivery
+      // task is intentionally not kept linked to ongoing Work Order updates.
+      result.skippedUnchanged += 1;
+      continue;
+    }
+
     const taskPayload = {
       name: buildDeliveryTaskName(row),
       description: buildDeliveryTaskDescription(row, originalTask),
       status
     };
-    const rowDeliveryFieldMeta = existingTask
-      ? mergeFieldMetaLookups(deliveryFieldMeta, buildFieldMetaLookupFromTask(existingTask))
-      : deliveryFieldMeta;
-    const customFields = buildDeliveryAutomationCustomFields(row, originalTask, rowDeliveryFieldMeta, {
-      includeClearFields: Boolean(existingTask)
+    const customFields = buildDeliveryAutomationCustomFields(row, originalTask, deliveryFieldMeta, {
+      includeClearFields: false
     });
 
     try {
-      if (!existingTask) {
-        const createdTask = await deliveryClickup.request(
-          'POST',
-          `/list/${encodeURIComponent(normalizedDeliveryClickupListId)}/task`,
-          {
+      const createdTask = await deliveryClickup.request(
+        'POST',
+        `/list/${encodeURIComponent(normalizedDeliveryClickupListId)}/task`,
+        {
           data: taskPayload
-          }
-        );
-        const createdTaskId = normalizeCell(createdTask?.id || createdTask?.task?.id);
-        if (createdTaskId) {
-          await applyTaskCustomFields(deliveryClickup, createdTaskId, customFields, key, result);
         }
-        console.log(`[WorkOrders] Delivery Automation task created: ${key} -> ${status}`);
-        result.created += 1;
-        continue;
+      );
+      const createdTaskId = normalizeCell(createdTask?.id || createdTask?.task?.id);
+      if (createdTaskId) {
+        await applyTaskCustomFields(deliveryClickup, createdTaskId, customFields, key, result);
       }
-
-      const changedTaskPayload = buildChangedDeliveryTaskPayload(existingTask, taskPayload);
-      const changedCustomFields = customFields.filter(field => hasCustomFieldChanged(existingTask, field));
-
-      if (Object.keys(changedTaskPayload).length === 0 && changedCustomFields.length === 0) {
-        result.skippedUnchanged += 1;
-        continue;
-      }
-
-      if (Object.keys(changedTaskPayload).length > 0) {
-        await deliveryClickup.request('PUT', `/task/${existingTask.id}`, {
-          data: changedTaskPayload
-        });
-      }
-
-      if (changedCustomFields.length > 0) {
-        await applyTaskCustomFields(deliveryClickup, existingTask.id, changedCustomFields, key, result);
-      }
-
-      console.log(`[WorkOrders] Delivery Automation task updated: ${key} -> ${status}`);
-      result.updated += 1;
+      console.log(`[WorkOrders] Delivery Automation task created: ${key} -> ${status}`);
+      result.created += 1;
     } catch (error) {
       const message = getClickUpErrorMessage(error);
       result.errors.push(`Delivery Automation sync failed for ${key}: ${message}`);
-    }
-  }
-
-  const eligibleKeys = new Set(uniqueEligibleRows.map(row => buildTaskKey(row)).filter(Boolean));
-  for (const [key, task] of deliveryTaskByKey.entries()) {
-    if (eligibleKeys.has(key)) continue;
-    if (isCompleteStatus(task?.status?.status || task?.status, new Set([CLICKUP_DELIVERY_COMPLETE_STATUS]))) continue;
-    try {
-      await deliveryClickup.updateTaskStatus(task.id, CLICKUP_DELIVERY_COMPLETE_STATUS);
-      console.log(`[WorkOrders] Delivery Automation task completed (no longer eligible): ${key}`);
-      result.completed += 1;
-    } catch (error) {
-      const message = getClickUpErrorMessage(error);
-      result.errors.push(`Delivery Automation complete failed for ${key}: ${message}`);
     }
   }
 
