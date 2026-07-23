@@ -46,7 +46,6 @@ const DELIVERY_AUTOMATION_LIST_ID = process.env.WORK_ORDERS_DELIVERY_AUTOMATION_
 const DELIVERY_AUTOMATION_SHIP_VIA = new Set(['DELIVER', 'HUB', 'CDC', 'RCD', 'RTV', 'PUDO']);
 const DELIVERY_AUTOMATION_CUSTOM_FIELD_NAMES = [
   'RNumber',
-  'Original ClickUp Task ID',
   'Billing Name',
   'Shipping Name',
   'Shipping Address',
@@ -284,11 +283,9 @@ function getClickUpErrorMessage(error) {
   return error?.message || String(error);
 }
 
-function buildDeliveryTaskDescription(row = {}, originalTask = null) {
-  const originalUrl = getClickUpTaskUrl(originalTask);
+function buildDeliveryTaskDescription(row = {}) {
   const lines = [
     `Record Key: ${buildTaskKey(row)}`,
-    `Original Work Order URL: ${originalUrl}`,
     `W/O or Quote Number: ${normalizeCell(row['W/O or Quote Number'])}`,
     `Line Item ID: ${normalizeCell(row['Line Item ID'])}`,
     `Billing Name: ${normalizeCell(row['Billing Customer Name'])}`,
@@ -297,10 +294,26 @@ function buildDeliveryTaskDescription(row = {}, originalTask = null) {
     `Shipping City: ${normalizeCell(row['Shipping City'])}`,
     `Shipping State: ${normalizeCell(row['Shipping State'])}`,
     `Ship Via: ${normalizeCell(row['Ship Via'])}`,
-    `Delivery Date: ${normalizeCell(row['Delivery Date'])}`,
-    `Original Jobs Task ID: ${normalizeCell(originalTask?.id)}`
+    `Delivery Date: ${normalizeCell(row['Delivery Date'])}`
   ];
   return lines.join('\n');
+}
+
+function removeDeliveryOriginalTaskLinks(description = '') {
+  const original = normalizeCell(description);
+  if (!original) return '';
+  return original
+    .split(/\r?\n/)
+    .filter(line => {
+      const normalized = normalizeUpper(line);
+      return !(
+        normalized.startsWith('ORIGINAL WORK ORDER URL:') ||
+        normalized.startsWith('ORIGINAL JOBS TASK ID:') ||
+        normalized.startsWith('ORIGINAL CLICKUP TASK ID:')
+      );
+    })
+    .join('\n')
+    .trim();
 }
 
 function parseTaskKeyFromName(taskName = '') {
@@ -1113,12 +1126,11 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
   return customFields;
 }
 
-function buildDeliveryAutomationCustomFields(row = {}, originalTask = null, fieldMetaLookup = null, options = {}) {
+function buildDeliveryAutomationCustomFields(row = {}, fieldMetaLookup = null, options = {}) {
   const includeClearFields = Boolean(options?.includeClearFields);
   const rowKey = buildTaskKey(row);
   const valuesByFieldName = {
     RNumber: normalizeCell(row['R#']),
-    'Original ClickUp Task ID': normalizeCell(originalTask?.id),
     'Billing Name': normalizeCell(row['Billing Customer Name']),
     'Shipping Name': normalizeCell(row['Shipping Customer Name']),
     'Shipping Address': normalizeCell(row['Shipping Customer Address']),
@@ -1187,6 +1199,24 @@ function getMissingDeliveryAutomationCustomFieldNames(fieldMetaLookup = null) {
   return DELIVERY_AUTOMATION_CUSTOM_FIELD_NAMES.filter(
     fieldName => !resolveCustomFieldMeta(fieldMetaLookup, fieldName)
   );
+}
+
+function buildDeliveryLinkCleanupCustomFields(existingTask = {}, fieldMetaLookup = null) {
+  const fieldMeta = resolveCustomFieldMeta(fieldMetaLookup, 'Original ClickUp Task ID');
+  if (!fieldMeta?.id) return [];
+
+  const existingField = getTaskCustomFieldById(existingTask, fieldMeta.id);
+  const existingValue = extractTaskFieldRawComparableValue(existingField);
+  if (!existingValue) return [];
+
+  return [
+    {
+      id: fieldMeta.id,
+      clear: true,
+      fieldName: 'Original ClickUp Task ID',
+      fieldType: normalizeUpper(fieldMeta?.type)
+    }
+  ];
 }
 
 function getTaskCustomFieldById(task = {}, fieldId = '') {
@@ -1934,24 +1964,15 @@ async function syncRowsToDeliveryAutomation({
   }
   result.enabled = true;
 
-  const mainClickup = new ClickUpService({
-    token: clickupToken,
-    listId: mainClickupListId
-  });
   const deliveryClickup = new ClickUpService({
     token: clickupToken,
     listId: normalizedDeliveryClickupListId
   });
 
   let deliveryList = null;
-  let mainTasks = [];
   let deliveryTasks = [];
   try {
     deliveryList = await deliveryClickup.getList();
-    mainTasks = await mainClickup.fetchTasksByStatuses([], {
-      includeClosed: true,
-      subtasks: false
-    });
     deliveryTasks = await deliveryClickup.fetchTasksByStatuses([], {
       includeClosed: true,
       subtasks: false
@@ -1971,7 +1992,6 @@ async function syncRowsToDeliveryAutomation({
       `Delivery Automation custom fields missing from list ${normalizedDeliveryClickupListId}: ${missingDeliveryFieldNames.join(', ')}. Available fields: ${availableFieldNames || 'none'}`
     );
   }
-  const mainTaskByKey = buildTaskMap(mainTasks);
   const deliveryTaskByKey = buildTaskMap(deliveryTasks);
 
   const uniqueEligibleRows = [];
@@ -1986,23 +2006,50 @@ async function syncRowsToDeliveryAutomation({
 
   for (const row of uniqueEligibleRows) {
     const key = buildTaskKey(row);
-    const originalTask = mainTaskByKey.get(key) || null;
     const existingTask = deliveryTaskByKey.get(key) || null;
     const status = getDeliveryAutomationStatus(row);
 
     if (existingTask) {
       // Deliveries Automation is a copied snapshot. Once copied, the delivery
       // task is intentionally not kept linked to ongoing Work Order updates.
-      result.skippedUnchanged += 1;
+      const cleanedDescription = removeDeliveryOriginalTaskLinks(existingTask?.description || existingTask?.text_content || '');
+      const currentDescription = normalizeMultilineTextForCompare(existingTask?.description || existingTask?.text_content || '');
+      const cleanupFields = buildDeliveryLinkCleanupCustomFields(existingTask, deliveryFieldMeta);
+      let cleaned = false;
+
+      try {
+        if (cleanedDescription && normalizeMultilineTextForCompare(cleanedDescription) !== currentDescription) {
+          await deliveryClickup.request('PUT', `/task/${encodeURIComponent(existingTask.id)}`, {
+            data: {
+              description: cleanedDescription
+            }
+          });
+          cleaned = true;
+        }
+        if (cleanupFields.length > 0) {
+          await applyTaskCustomFields(deliveryClickup, existingTask.id, cleanupFields, key, result);
+          cleaned = true;
+        }
+      } catch (error) {
+        const message = getClickUpErrorMessage(error);
+        result.errors.push(`Delivery Automation unlink cleanup failed for ${key}: ${message}`);
+      }
+
+      if (cleaned) {
+        console.log(`[WorkOrders] Delivery Automation task unlinked from original Work Order: ${key}`);
+        result.updated += 1;
+      } else {
+        result.skippedUnchanged += 1;
+      }
       continue;
     }
 
     const taskPayload = {
       name: buildDeliveryTaskName(row),
-      description: buildDeliveryTaskDescription(row, originalTask),
+      description: buildDeliveryTaskDescription(row),
       status
     };
-    const customFields = buildDeliveryAutomationCustomFields(row, originalTask, deliveryFieldMeta, {
+    const customFields = buildDeliveryAutomationCustomFields(row, deliveryFieldMeta, {
       includeClearFields: false
     });
 
