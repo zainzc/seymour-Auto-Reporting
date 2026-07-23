@@ -88,7 +88,7 @@ SELECT
 
     COALESCE(woemp.EmployeeName, CAST(wo.CreatedBy AS varchar(50))) AS [Created By],
 
-    COALESCE(NULLIF(wold.LineShipVIA, ''), wo.ShipVIA) AS [Ship Via],
+    wo.ShipVIA AS [Ship Via],
     wold.TrackingNumber AS [Tracking Number],
 
     wo.Amount AS [Amount (Total)],
