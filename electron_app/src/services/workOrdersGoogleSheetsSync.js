@@ -62,6 +62,7 @@ const WORK_ORDERS_TASK_NAME_PREFIX = '[WorkOrderSync]';
 const WORK_ORDERS_COMPLETED_QUOTE_NUMBERS_CONFIG_KEY = 'workOrdersCompletedQuoteNumbers';
 const WORK_ORDERS_TASK_FIELD_NAMES = {
   customer: 'Customer',
+  createdBy: 'Created By',
   shipVia: 'Ship Via',
   alert: 'Alert',
   location: 'Location',
@@ -226,7 +227,10 @@ function buildTaskName(row = {}) {
 function buildDeliveryTaskName(row = {}) {
   const billingName = normalizeCell(row['Billing Customer Name']);
   const shippingName = normalizeCell(row['Shipping Customer Name']);
-  return [billingName, shippingName].join(' - ').slice(0, 240);
+  if (normalizeUpper(billingName) === normalizeUpper(shippingName)) {
+    return shippingName.slice(0, 240);
+  }
+  return [billingName, shippingName].filter(Boolean).join(' - ').slice(0, 240);
 }
 
 function isDeliveryAutomationEligibleRow(row = {}) {
@@ -698,6 +702,7 @@ function buildTaskDescription(row = {}) {
     `Line Item ID: ${normalizeCell(row['Line Item ID'])}`,
     `Status: ${normalizeCell(row.Status)}`,
     `Created: ${normalizeCell(row.Created)}`,
+    `Created By: ${normalizeCell(row['Created By'])}`,
     `Customer: ${normalizeCell(row['Shipping Customer Name'] || row['Billing Customer Name'])}`,
     `Ship Via: ${normalizeCell(row['Ship Via'])}`,
     `Location: ${normalizeCell(row.Location)}`,
@@ -987,6 +992,7 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
     [WORK_ORDERS_TASK_FIELD_NAMES.customer]: normalizeCell(
       row['Shipping Customer Name'] || row['Billing Customer Name']
     ),
+    [WORK_ORDERS_TASK_FIELD_NAMES.createdBy]: normalizeCell(row['Created By']),
     [WORK_ORDERS_TASK_FIELD_NAMES.shipVia]: normalizeCell(row['Ship Via']),
     [WORK_ORDERS_TASK_FIELD_NAMES.alert]: buildPriorityAlert(row['Ship Via']),
     [WORK_ORDERS_TASK_FIELD_NAMES.location]: normalizeCell(row.Location),
