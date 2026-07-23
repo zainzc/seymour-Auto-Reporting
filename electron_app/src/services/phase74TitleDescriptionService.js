@@ -350,6 +350,68 @@ function ensureSingleOemAtEnd(value) {
   return collapseConsecutiveDuplicateWords(`${title} OEM${sku ? ` ${sku}` : ''}`);
 }
 
+function trimAtWordBoundary(value, maxLength) {
+  const text = normalizeText(value).replace(/\s+/g, ' ').trim();
+  if (!text || text.length <= maxLength) return text;
+  const candidate = text.slice(0, Math.max(0, maxLength)).replace(/[,\-:/| ]+$/, '').trim();
+  const lastSpace = candidate.lastIndexOf(' ');
+  if (lastSpace > 0) {
+    return candidate.slice(0, lastSpace).replace(/[,\-:/| ]+$/, '').trim();
+  }
+  return candidate;
+}
+
+function extractProtectedSourceTitlePhrases(values = []) {
+  const phrases = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = normalizeText(value);
+    if (!text) continue;
+    const matches = text.match(/\bID\s+[A-Z0-9][A-Z0-9.-]{2,}\b/gi) || [];
+    for (const match of matches) {
+      const phrase = normalizeText(match).replace(/\s+/g, ' ');
+      const key = phrase.toLowerCase();
+      if (!phrase || seen.has(key)) continue;
+      seen.add(key);
+      phrases.push(phrase);
+    }
+  }
+  return phrases;
+}
+
+function preserveProtectedSourceTitlePhrases(candidate, sourceTitles = [], skuValue = '', max = 80) {
+  let title = ensureSingleOemAtEnd(candidate);
+  if (!title) return '';
+  const phrases = extractProtectedSourceTitlePhrases(sourceTitles);
+  if (phrases.length === 0) return title;
+
+  const normalizedTitle = () => normalizeTitleForKey(title);
+  for (const phrase of phrases) {
+    if (normalizedTitle().includes(phrase.toLowerCase())) continue;
+    const sku = extractTrailingSku(title) || normalizeText(skuValue);
+    const escapedSku = sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const suffixPattern = new RegExp(`\\s+OEM${sku ? `\\s+${escapedSku}` : ''}$`, 'i');
+    let core = title.replace(suffixPattern, '').trim();
+    core = core.replace(/\bID$/i, '').replace(/[,\-:/| ]+$/, '').trim();
+    const next = ensureSingleOemAtEnd(`${core} ${phrase} OEM${sku ? ` ${sku}` : ''}`);
+    if (next && next.length <= max) {
+      title = next;
+      continue;
+    }
+
+    const safeSource = sourceTitles
+      .map(sourceTitle => ensureSingleOemAtEnd(sourceTitle))
+      .find(sourceTitle => {
+        if (!sourceTitle || sourceTitle.length > max) return false;
+        if (!normalizeTitleForKey(sourceTitle).includes(phrase.toLowerCase())) return false;
+        if (sku && !new RegExp(`\\b${escapedSku}$`, 'i').test(sourceTitle)) return false;
+        return true;
+      });
+    if (safeSource) title = safeSource;
+  }
+  return title;
+}
+
 function enforceTitleLength(value, min = 65, max = 80) {
   let title = ensureSingleOemAtEnd(value);
   if (!title) return '';
@@ -359,10 +421,9 @@ function enforceTitleLength(value, min = 65, max = 80) {
     const keep = Math.max(1, max - suffix.length);
     const core = title
       .replace(new RegExp(`\\s+OEM${sku ? `\\s+${sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` : ''}$`, 'i'), '')
-      .slice(0, keep)
-      .replace(/[,\-:/| ]+$/, '')
       .trim();
-    title = `${core}${suffix}`;
+    const trimmedCore = trimAtWordBoundary(core, keep);
+    title = `${trimmedCore}${suffix}`;
   }
   return collapseConsecutiveDuplicateWords(title);
 }
@@ -835,7 +896,12 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       continue;
     }
 
-    const aiTitle = ensureTitleHasSku(generated?.generatedTitle, customLabelSku);
+    const aiTitle = preserveProtectedSourceTitlePhrases(
+      ensureTitleHasSku(generated?.generatedTitle, customLabelSku),
+      [currentOutputTitle, currentLegacyTitle],
+      customLabelSku,
+      titleMaxLength
+    );
     const nextTitle = makeTitleUnique(aiTitle, usedTitleKeys, titleMinLength, titleMaxLength);
     const nextDescription = normalizeText(generated?.generatedDescription);
     const nextShortDescription = normalizeText(generated?.shortDescription);

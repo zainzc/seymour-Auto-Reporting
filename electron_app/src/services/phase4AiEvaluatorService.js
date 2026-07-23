@@ -1284,17 +1284,7 @@ class Phase4AiEvaluatorService {
       '- After all titles: break remaining duplicates with true variants only.'
     ].join('\n');
 
-    const titleRulesPrompt = [
-      defaultTitleRulesPrompt,
-      customTitlePrompt
-        ? [
-            'Additional UI prompt rules (must not change the output JSON keys):',
-            customTitlePrompt
-          ].join('\n')
-        : ''
-    ]
-      .filter(Boolean)
-      .join('\n\n');
+    const titleRulesPrompt = customTitlePrompt || defaultTitleRulesPrompt;
 
     const promptKeySource = titleRulesPrompt || defaultTitleRulesPrompt;
     const promptDigest = crypto
@@ -1315,8 +1305,9 @@ class Phase4AiEvaluatorService {
             'Generate an optimized eBay title and buyer-visible description from provided structured listing data.',
             'Do not invent facts or compatibility claims.',
             'Do not include HTML.',
-            'For generatedTitle, use only input.titleEvidence, currentTitle, currentLegacyTitle, donorVehicle, itemSpecifics, conditionsAndOptions, categoryContext, customLabelSku, condition, and conditionNote.',
-            'When currentTitle/currentLegacyTitle conflicts with confirmed donorVehicle and itemSpecifics, prefer donorVehicle plus itemSpecifics for title identity and explain the conflict in review notes.',
+            'For generatedTitle, use currentTitle/currentLegacyTitle as the primary source title evidence, plus input.titleEvidence, donorVehicle, itemSpecifics, conditionsAndOptions, categoryContext, customLabelSku, condition, and conditionNote as supporting evidence.',
+            'Prefer facts already present in currentTitle/currentLegacyTitle, especially year range, make/model tokens, engine displacement, engine code, VIN digit, drivetrain, speed count, body style, trim, side, and part acronym, unless another provided source directly contradicts them.',
+            'If donorVehicle or itemSpecifics conflict with currentTitle/currentLegacyTitle, do not silently drop source title facts; keep the safest source-title wording and explain the conflict in review notes.',
             'Do not use input.descriptionContext.partFitment or any fitment/interchange list to choose title year, make, model, side, or core part identity.',
             'Fitment/interchange text may list multiple compatible vehicles and is description context only.',
             'Description must still be generated even when some optional item specifics are blank.',
@@ -1331,9 +1322,9 @@ class Phase4AiEvaluatorService {
             task: 'phase74_title_description_generation_v2',
             titleRulesPrompt,
             requirements: [
-              'Use Item Specifics - All C values and itemSpecifics as the primary title/description evidence.',
-              'Use donorVehicle.model and donorVehicle.year as confirmed title evidence when present.',
-              'If donorVehicle plus itemSpecifics confirms year/make/model but currentTitle has a conflicting fitment/model phrase, do not copy that conflicting phrase into generatedTitle.',
+              'Use currentTitle/currentLegacyTitle as the primary title evidence. Use Item Specifics - All C values, itemSpecifics, and donorVehicle as supporting evidence.',
+              'Preserve fitment/spec details already present in currentTitle/currentLegacyTitle, including engine displacement, engine codes, VIN digit, drivetrain, speed count, body style, trim, and part acronyms, unless directly contradicted by another provided source.',
+              'If donorVehicle plus itemSpecifics appears to conflict with currentTitle/currentLegacyTitle, keep the safest source-title wording and flag/explain the conflict rather than dropping source title details.',
               'For generatedTitle, do not use descriptionContext.partFitment or any fitment/interchange list to choose year, make, model, side, or part identity.',
               'Use titleEvidence as the title evidence bundle.',
               'Use descriptionContext.partFitment only for generatedDescription or shortDescription when present.',

@@ -415,6 +415,44 @@ function buildPackageWeightAndSize(fields = {}) {
   return Object.keys(output).length > 0 ? output : null;
 }
 
+function formatAspectNumber(value) {
+  const parsed = parseNumberValue(value);
+  if (!Number.isFinite(parsed)) return '';
+  return String(Number(parsed.toFixed(3))).replace(/\.0+$/, '');
+}
+
+function formatDimensionAspectValue(value, unit = '') {
+  const number = formatAspectNumber(value);
+  if (!number) return '';
+  const normalizedUnit = normalizeDimensionUnit(unit);
+  const displayUnit = normalizedUnit === 'CENTIMETER' ? 'cm' : 'in';
+  return `${number} ${displayUnit}`;
+}
+
+function formatWeightAspectValue(value, unit = '') {
+  const number = formatAspectNumber(value);
+  if (!number) return '';
+  const normalizedUnit = normalizeWeightUnit(unit);
+  const displayUnit = normalizedUnit === 'KILOGRAM' ? 'kg' : 'lb';
+  return `${number} ${displayUnit}`;
+}
+
+function mergePackageItemSpecifics(aspects = {}, packageWeightAndSize = null) {
+  const dimensions = packageWeightAndSize?.dimensions || {};
+  const weight = packageWeightAndSize?.weight || {};
+  const length = formatDimensionAspectValue(dimensions.length, dimensions.unit);
+  const width = formatDimensionAspectValue(dimensions.width, dimensions.unit);
+  const height = formatDimensionAspectValue(dimensions.height, dimensions.unit);
+  const weightValue = formatWeightAspectValue(weight.value, weight.unit);
+
+  // Keep shipping-package data visible to buyers without replacing any explicit listing specifics.
+  if (length) mergeAspect(aspects, 'Package Length', length);
+  if (width) mergeAspect(aspects, 'Package Width', width);
+  if (height) mergeAspect(aspects, 'Package Height', height);
+  if (weightValue) mergeAspect(aspects, 'Package Weight', weightValue);
+  return aspects;
+}
+
 function formatEbayError(error) {
   const status = Number(error?.response?.status || 0);
   const data = error?.response?.data;
@@ -665,8 +703,8 @@ class Phase5EbayPublishService {
     const conditionDescription = firstNonEmptyField(listingFields, ['Condition Description', 'conditionDescription']);
     const quantity = parseIntegerValue(firstNonEmptyField(listingFields, ['Quantity', 'AvailableQuantity']), 0);
     const locale = firstNonEmptyField(listingFields, ['Locale', 'locale']) || 'en_US';
-    const aspects = buildAspectsFromListing(listingFields);
     const packageWeightAndSize = buildPackageWeightAndSize(listingFields);
+    const aspects = mergePackageItemSpecifics(buildAspectsFromListing(listingFields), packageWeightAndSize);
     const imageUrls = parseImageUrlsFromListing(listingFields);
 
     const payload = {

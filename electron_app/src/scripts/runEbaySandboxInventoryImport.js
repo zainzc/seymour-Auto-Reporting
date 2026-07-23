@@ -3063,6 +3063,7 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
     recordsWritten: 0,
     skippedInvalidRows: 0,
     skippedAlreadyPublished: 0,
+    removedAlreadyPublished: 0,
     skippedAlreadyUpToDate: 0,
     skippedStagingUnchanged: 0,
     sandboxMirrored: 0,
@@ -3406,6 +3407,7 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
 
     const airtableService = new AirtableService({ token: airtableToken, baseId: airtableBaseId });
     const existingRecordFieldsByKey = new Map();
+    const existingRecordRowsByKey = new Map();
     try {
       const existingRows = await airtableService.fetchAllRecords(
         tableName,
@@ -3422,6 +3424,9 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
         const recordKey = resolvePrimaryKeyFromFields(existingFields);
         if (!recordKey) continue;
         existingRecordFieldsByKey.set(recordKey, existingFields);
+        const rowsForKey = existingRecordRowsByKey.get(recordKey) || [];
+        rowsForKey.push(row);
+        existingRecordRowsByKey.set(recordKey, rowsForKey);
         if (hasPayloadHashField) {
           const hash = normalizeText(existingFields[payloadHashFieldName]);
           if (!hash) continue;
@@ -3429,6 +3434,39 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
         }
       }
     } catch (_) {}
+
+    async function deleteExistingPublishedRowsByKey(recordKey, reason = 'published') {
+      const key = normalizeText(recordKey);
+      if (!key || dryRun) return 0;
+      const rowsForKey = existingRecordRowsByKey.get(key) || [];
+      let deleted = 0;
+      for (const existingRow of rowsForKey) {
+        const recordId = normalizeText(existingRow?.id);
+        if (!recordId) continue;
+        try {
+          await airtableService.deleteRecord(tableName, recordId);
+          deleted += 1;
+          summary.removedAlreadyPublished += 1;
+        } catch (error) {
+          const detail =
+            error?.response?.data?.error?.message ||
+            error?.response?.data?.error ||
+            error?.message ||
+            String(error);
+          if (summary.errors.length < 100) {
+            summary.errors.push(
+              `delete_published_import_row_failed key='${key}' record='${recordId}' reason='${reason}': ${detail}`
+            );
+          }
+        }
+      }
+      if (deleted > 0) {
+        existingRecordRowsByKey.delete(key);
+        existingRecordFieldsByKey.delete(key);
+        existingPayloadHashByRecordKey.delete(key);
+      }
+      return deleted;
+    }
 
     const records = [];
     for (let i = 0; i < inventoryItems.length; i += 1) {
@@ -3480,9 +3518,11 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
         fields['Item Specifics - All C: values relevant to item'] =
           preservedSpecifics['Item Specifics - All C: values relevant to item'];
       }
+      const recordKey = resolvePrimaryKeyFromFields(fields);
 
       if (isPublishedIdentity(fields, publishedIdentitySet)) {
         summary.skippedAlreadyPublished += 1;
+        await deleteExistingPublishedRowsByKey(recordKey, 'published_identity');
         continue;
       }
 
@@ -3511,11 +3551,11 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
         });
         if (legacyHash) hashCandidates.add(legacyHash);
       }
-      const recordKey = resolvePrimaryKeyFromFields(fields);
       const stagingHash = normalizeText(existingPayloadHashByRecordKey.get(recordKey));
 
       if (Array.from(hashCandidates).some(hash => publishedPayloadHashSet.has(hash))) {
         summary.skippedAlreadyUpToDate += 1;
+        await deleteExistingPublishedRowsByKey(recordKey, 'published_payload_hash');
         continue;
       }
       if (stagingHash && hashCandidates.has(stagingHash)) {

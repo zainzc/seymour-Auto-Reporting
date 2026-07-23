@@ -584,19 +584,40 @@ function isBusinessWeekday(weekday = '') {
   return ['mon', 'tue', 'wed', 'thu', 'fri'].includes(day);
 }
 
+function addLocalCalendarDays(localParts, days = 1) {
+  const cursor = new Date(
+    Date.UTC(
+      Number(localParts.year || 0),
+      Math.max(0, Number(localParts.month || 1) - 1),
+      Number(localParts.day || 1)
+    )
+  );
+  cursor.setUTCDate(cursor.getUTCDate() + Number(days || 0));
+  return {
+    year: cursor.getUTCFullYear(),
+    month: cursor.getUTCMonth() + 1,
+    day: cursor.getUTCDate()
+  };
+}
+
 function nextBusinessDayParts(baseParts) {
   let cursor = {
     year: baseParts.year,
     month: baseParts.month,
-    day: baseParts.day,
-    hour: 0,
-    minute: 0
+    day: baseParts.day
   };
   for (let i = 0; i < 10; i += 1) {
-    const utc = zonedDateToUtc(cursor);
-    const next = new Date(utc.getTime() + 24 * 60 * 60 * 1000);
-    const parts = getZonedParts(next);
-    cursor = { year: parts.year, month: parts.month, day: parts.day, hour: 0, minute: 0 };
+    cursor = addLocalCalendarDays(cursor, 1);
+    const parts = getZonedParts(
+      zonedDateToUtc({
+        year: cursor.year,
+        month: cursor.month,
+        day: cursor.day,
+        hour: 12,
+        minute: 0,
+        second: 0
+      })
+    );
     if (isBusinessWeekday(parts.weekday)) {
       return cursor;
     }
