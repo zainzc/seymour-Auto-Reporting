@@ -1132,25 +1132,18 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
   return customFields;
 }
 
-function buildDeliveryAutomationCustomFields(row = {}, fieldMetaLookup = null, options = {}) {
+function buildDeliveryAutomationCustomFieldsFromValues(valuesByFieldName = {}, fieldMetaLookup = null, options = {}) {
   const includeClearFields = Boolean(options?.includeClearFields);
-  const rowKey = buildTaskKey(row);
-  const valuesByFieldName = {
-    RNumber: normalizeCell(row['R#']),
-    'Billing Name': normalizeCell(row['Billing Customer Name']),
-    'Shipping Name': normalizeCell(row['Shipping Customer Name']),
-    'Shipping Address': normalizeCell(row['Shipping Customer Address']),
-    'Shipping City': normalizeCell(row['Shipping City']),
-    'Shipping State': normalizeCell(row['Shipping State']),
-    'Ship Via': normalizeCell(row['Ship Via']),
-    'Delivery Date': parseOptionalDate(row['Delivery Date'])
-  };
+  const rowKey = normalizeCell(options?.rowKey);
+  const rawValuesByFieldName = options?.rawValuesByFieldName || {};
 
   const customFields = [];
   const missingFieldNames = [];
   for (const [name, value] of Object.entries(valuesByFieldName)) {
     const fieldMeta = resolveCustomFieldMeta(fieldMetaLookup, name);
-    const rawValue = name === 'Delivery Date' ? normalizeCell(row['Delivery Date']) : normalizeCell(value);
+    const rawValue = Object.prototype.hasOwnProperty.call(rawValuesByFieldName, name)
+      ? normalizeCell(rawValuesByFieldName[name])
+      : normalizeCell(value);
 
     if (!fieldMeta) {
       if (rawValue !== '') missingFieldNames.push(name);
@@ -1199,6 +1192,77 @@ function buildDeliveryAutomationCustomFields(row = {}, fieldMetaLookup = null, o
   }
 
   return customFields;
+}
+
+function buildDeliveryAutomationCustomFields(row = {}, fieldMetaLookup = null, options = {}) {
+  return buildDeliveryAutomationCustomFieldsFromValues(
+    {
+      RNumber: normalizeCell(row['R#']),
+      'Billing Name': normalizeCell(row['Billing Customer Name']),
+      'Shipping Name': normalizeCell(row['Shipping Customer Name']),
+      'Shipping Address': normalizeCell(row['Shipping Customer Address']),
+      'Shipping City': normalizeCell(row['Shipping City']),
+      'Shipping State': normalizeCell(row['Shipping State']),
+      'Ship Via': normalizeCell(row['Ship Via']),
+      'Delivery Date': parseOptionalDate(row['Delivery Date'])
+    },
+    fieldMetaLookup,
+    {
+      ...options,
+      rowKey: buildTaskKey(row),
+      rawValuesByFieldName: {
+        'Delivery Date': normalizeCell(row['Delivery Date'])
+      }
+    }
+  );
+}
+
+function getDescriptionFieldValues(description = '') {
+  const values = new Map();
+  String(description || '')
+    .split(/\r?\n/)
+    .forEach(line => {
+      const separatorIndex = line.indexOf(':');
+      if (separatorIndex <= 0) return;
+      const key = canonicalFieldName(line.slice(0, separatorIndex));
+      if (!key || values.has(key)) return;
+      values.set(key, normalizeCell(line.slice(separatorIndex + 1)));
+    });
+  return values;
+}
+
+function getDescriptionValue(values = new Map(), names = []) {
+  for (const name of names) {
+    const value = values.get(canonicalFieldName(name));
+    if (normalizeCell(value)) return normalizeCell(value);
+  }
+  return '';
+}
+
+function buildDeliveryAutomationCustomFieldsFromTaskDescription(task = {}, fieldMetaLookup = null) {
+  const description = task?.description || task?.text_content || '';
+  const values = getDescriptionFieldValues(description);
+  const deliveryDate = getDescriptionValue(values, ['Delivery Date']);
+  return buildDeliveryAutomationCustomFieldsFromValues(
+    {
+      RNumber: getDescriptionValue(values, ['RNumber', 'R Number', 'R#']),
+      'Billing Name': getDescriptionValue(values, ['Billing Name', 'Billing Customer Name']),
+      'Shipping Name': getDescriptionValue(values, ['Shipping Name', 'Shipping Customer Name']),
+      'Shipping Address': getDescriptionValue(values, ['Shipping Address', 'Shipping Customer Address']),
+      'Shipping City': getDescriptionValue(values, ['Shipping City']),
+      'Shipping State': getDescriptionValue(values, ['Shipping State']),
+      'Ship Via': getDescriptionValue(values, ['Ship Via']),
+      'Delivery Date': parseOptionalDate(deliveryDate)
+    },
+    fieldMetaLookup,
+    {
+      includeClearFields: false,
+      rowKey: extractTaskKey(task) || normalizeCell(task?.name || task?.id),
+      rawValuesByFieldName: {
+        'Delivery Date': deliveryDate
+      }
+    }
+  );
 }
 
 function buildClickUpCreateCustomFields(customFields = []) {
@@ -2015,6 +2079,7 @@ async function syncRowsToDeliveryAutomation({
     );
   }
   const deliveryTaskByKey = buildTaskMap(deliveryTasks);
+  const deliveryTaskIdsSyncedFromRows = new Set();
 
   const uniqueEligibleRows = [];
   const seenKeys = new Set();
@@ -2032,6 +2097,8 @@ async function syncRowsToDeliveryAutomation({
     const status = getDeliveryAutomationStatus(row);
 
     if (existingTask) {
+      const existingTaskId = normalizeCell(existingTask.id);
+      if (existingTaskId) deliveryTaskIdsSyncedFromRows.add(existingTaskId);
       // Deliveries Automation is a copied snapshot. Once copied, the delivery
       // task is intentionally not kept linked to ongoing Work Order updates.
       const cleanedDescription = removeDeliveryOriginalTaskLinks(existingTask?.description || existingTask?.text_content || '');
@@ -2115,6 +2182,7 @@ async function syncRowsToDeliveryAutomation({
       }
       const createdTaskId = normalizeCell(createdTask?.id || createdTask?.task?.id);
       if (createdTaskId) {
+        deliveryTaskIdsSyncedFromRows.add(createdTaskId);
         await applyTaskCustomFields(deliveryClickup, createdTaskId, customFields, key, result);
       }
       console.log(`[WorkOrders] Delivery Automation task created: ${key} -> ${status}`);
@@ -2122,6 +2190,25 @@ async function syncRowsToDeliveryAutomation({
     } catch (error) {
       const message = getClickUpErrorMessage(error);
       result.errors.push(`Delivery Automation sync failed for ${key}: ${message}`);
+    }
+  }
+
+  for (const task of deliveryTasks) {
+    const taskId = normalizeCell(task?.id);
+    if (!taskId || deliveryTaskIdsSyncedFromRows.has(taskId)) continue;
+
+    const descriptionCustomFields = buildDeliveryAutomationCustomFieldsFromTaskDescription(task, deliveryFieldMeta);
+    const changedDescriptionFields = descriptionCustomFields.filter(field => hasCustomFieldChanged(task, field));
+    if (changedDescriptionFields.length === 0) continue;
+
+    const taskKey = extractTaskKey(task) || normalizeCell(task?.name) || taskId;
+    try {
+      await applyTaskCustomFields(deliveryClickup, taskId, changedDescriptionFields, taskKey, result);
+      console.log(`[WorkOrders] Delivery Automation task enriched from description: ${taskKey}`);
+      result.updated += 1;
+    } catch (error) {
+      const message = getClickUpErrorMessage(error);
+      result.errors.push(`Delivery Automation description enrichment failed for ${taskKey}: ${message}`);
     }
   }
 
