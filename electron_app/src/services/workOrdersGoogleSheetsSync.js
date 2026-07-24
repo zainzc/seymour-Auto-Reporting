@@ -1201,6 +1201,22 @@ function buildDeliveryAutomationCustomFields(row = {}, fieldMetaLookup = null, o
   return customFields;
 }
 
+function buildClickUpCreateCustomFields(customFields = []) {
+  if (!Array.isArray(customFields)) return [];
+  return customFields
+    .filter(field => !field?.clear && normalizeCell(field?.id))
+    .map(field => {
+      const value = field && typeof field.payload === 'object' && field.payload !== null
+        ? field.payload.value
+        : field.value;
+      return {
+        id: field.id,
+        value
+      };
+    })
+    .filter(field => field.value !== '' && field.value !== null && field.value !== undefined);
+}
+
 function getMissingDeliveryAutomationCustomFieldNames(fieldMetaLookup = null) {
   return DELIVERY_AUTOMATION_CUSTOM_FIELD_NAMES.filter(
     fieldName => !resolveCustomFieldMeta(fieldMetaLookup, fieldName)
@@ -2021,7 +2037,12 @@ async function syncRowsToDeliveryAutomation({
       const cleanedDescription = removeDeliveryOriginalTaskLinks(existingTask?.description || existingTask?.text_content || '');
       const currentDescription = normalizeMultilineTextForCompare(existingTask?.description || existingTask?.text_content || '');
       const cleanupFields = buildDeliveryLinkCleanupCustomFields(existingTask, deliveryFieldMeta);
-      let cleaned = false;
+      const refreshedDeliveryFields = buildDeliveryAutomationCustomFields(row, deliveryFieldMeta, {
+        includeClearFields: true
+      });
+      const changedDeliveryFields = refreshedDeliveryFields.filter(field => hasCustomFieldChanged(existingTask, field));
+      let descriptionCleaned = false;
+      let fieldsUpdated = false;
 
       try {
         if (cleanedDescription && normalizeMultilineTextForCompare(cleanedDescription) !== currentDescription) {
@@ -2030,19 +2051,24 @@ async function syncRowsToDeliveryAutomation({
               description: cleanedDescription
             }
           });
-          cleaned = true;
+          descriptionCleaned = true;
         }
         if (cleanupFields.length > 0) {
           await applyTaskCustomFields(deliveryClickup, existingTask.id, cleanupFields, key, result);
-          cleaned = true;
+          fieldsUpdated = true;
+        }
+
+        if (changedDeliveryFields.length > 0) {
+          await applyTaskCustomFields(deliveryClickup, existingTask.id, changedDeliveryFields, key, result);
+          fieldsUpdated = true;
         }
       } catch (error) {
         const message = getClickUpErrorMessage(error);
         result.errors.push(`Delivery Automation unlink cleanup failed for ${key}: ${message}`);
       }
 
-      if (cleaned) {
-        console.log(`[WorkOrders] Delivery Automation task unlinked from original Work Order: ${key}`);
+      if (descriptionCleaned || fieldsUpdated) {
+        console.log(`[WorkOrders] Delivery Automation task synced: ${key}`);
         result.updated += 1;
       } else {
         result.skippedUnchanged += 1;
@@ -2058,15 +2084,35 @@ async function syncRowsToDeliveryAutomation({
     const customFields = buildDeliveryAutomationCustomFields(row, deliveryFieldMeta, {
       includeClearFields: false
     });
+    const createCustomFields = buildClickUpCreateCustomFields(customFields);
+    if (createCustomFields.length > 0) {
+      taskPayload.custom_fields = createCustomFields;
+    }
 
     try {
-      const createdTask = await deliveryClickup.request(
-        'POST',
-        `/list/${encodeURIComponent(normalizedDeliveryClickupListId)}/task`,
-        {
-          data: taskPayload
+      let createdTask = null;
+      try {
+        createdTask = await deliveryClickup.request(
+          'POST',
+          `/list/${encodeURIComponent(normalizedDeliveryClickupListId)}/task`,
+          {
+            data: taskPayload
+          }
+        );
+      } catch (createError) {
+        if (createCustomFields.length === 0 || Number(createError?.response?.status || 0) !== 400) {
+          throw createError;
         }
-      );
+        const fallbackPayload = { ...taskPayload };
+        delete fallbackPayload.custom_fields;
+        createdTask = await deliveryClickup.request(
+          'POST',
+          `/list/${encodeURIComponent(normalizedDeliveryClickupListId)}/task`,
+          {
+            data: fallbackPayload
+          }
+        );
+      }
       const createdTaskId = normalizeCell(createdTask?.id || createdTask?.task?.id);
       if (createdTaskId) {
         await applyTaskCustomFields(deliveryClickup, createdTaskId, customFields, key, result);
