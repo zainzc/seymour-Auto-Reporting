@@ -2197,17 +2197,27 @@ async function syncRowsToDeliveryAutomation({
     const taskId = normalizeCell(task?.id);
     if (!taskId || deliveryTaskIdsSyncedFromRows.has(taskId)) continue;
 
-    const descriptionCustomFields = buildDeliveryAutomationCustomFieldsFromTaskDescription(task, deliveryFieldMeta);
-    const changedDescriptionFields = descriptionCustomFields.filter(field => hasCustomFieldChanged(task, field));
-    if (changedDescriptionFields.length === 0) continue;
-
-    const taskKey = extractTaskKey(task) || normalizeCell(task?.name) || taskId;
     try {
+      const taskDetail = await deliveryClickup.getTask(taskId);
+      const detailedTask = { ...task, ...(taskDetail || {}) };
+      const descriptionCustomFields = buildDeliveryAutomationCustomFieldsFromTaskDescription(detailedTask, deliveryFieldMeta);
+      if (descriptionCustomFields.length === 0 && normalizeCell(detailedTask?.description || detailedTask?.text_content)) {
+        console.warn(
+          `[WorkOrders] Delivery Automation description had no writable custom fields: ${
+            normalizeCell(detailedTask?.name) || taskId
+          }`
+        );
+      }
+      const changedDescriptionFields = descriptionCustomFields.filter(field => hasCustomFieldChanged(detailedTask, field));
+      if (changedDescriptionFields.length === 0) continue;
+
+      const taskKey = extractTaskKey(detailedTask) || normalizeCell(detailedTask?.name) || taskId;
       await applyTaskCustomFields(deliveryClickup, taskId, changedDescriptionFields, taskKey, result);
       console.log(`[WorkOrders] Delivery Automation task enriched from description: ${taskKey}`);
       result.updated += 1;
     } catch (error) {
       const message = getClickUpErrorMessage(error);
+      const taskKey = extractTaskKey(task) || normalizeCell(task?.name) || taskId;
       result.errors.push(`Delivery Automation description enrichment failed for ${taskKey}: ${message}`);
     }
   }
