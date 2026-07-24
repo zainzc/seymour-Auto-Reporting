@@ -196,6 +196,10 @@ contextBridge.exposeInMainWorld('ebayMockImportAPI', {
 contextBridge.exposeInMainWorld('ebaySandboxImportAPI', {
   getConfig: () => ipcRenderer.invoke('ebaysandbox:get-config'),
   run: (options) => ipcRenderer.invoke('ebaysandbox:run', options),
+  startSchedule: (options) => ipcRenderer.invoke('ebaylistings-schedule:start', options),
+  stopSchedule: (options) => ipcRenderer.invoke('ebaylistings-schedule:stop', options),
+  getScheduleStatus: () => ipcRenderer.invoke('ebaylistings-schedule:get-status'),
+  runScheduleNow: (options) => ipcRenderer.invoke('ebaylistings-schedule:run-now', options),
   onProgress: (callback) => ipcRenderer.on('ebaysandbox:progress', callback)
 });
 

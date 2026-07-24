@@ -65,6 +65,12 @@ const {
   runPhase5AutoPushNow,
   getPhase5AutoPushScheduleStatus
 } = require('../services/phase5AutoPushScheduleService');
+const {
+  startEbayListingsSchedule,
+  stopEbayListingsSchedule,
+  runEbayListingsScheduleNow,
+  getAllEbayListingsScheduleStatuses
+} = require('../services/ebayListingsScheduleService');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
 const phase2WritebackPoller = require('../services/phase2WritebackPollerService');
@@ -5430,9 +5436,120 @@ ipcMain.handle('ebaysandbox:get-config', async () => {
     dryRun:
       typeof stored.ebaySandboxDryRun === 'boolean'
         ? stored.ebaySandboxDryRun
-        : true
+        : true,
+    ebayListingsAutomation: {
+      statuses: getAllEbayListingsScheduleStatuses(),
+      productionToSandboxTime: String(stored.ebayListingsProductionToSandboxTime || '01:00').trim(),
+      sandboxToAirtableTime: String(stored.ebayListingsSandboxToAirtableTime || '03:00').trim(),
+      timezone: String(stored.ebayListingsScheduleTimezone || '').trim()
+    }
   };
 });
+
+const EBAY_LISTINGS_SCHEDULES = {
+  production_to_sandbox: {
+    environment: 'production',
+    label: 'Production to Sandbox',
+    activeKey: 'ebayListingsProductionToSandboxActive',
+    timeKey: 'ebayListingsProductionToSandboxTime',
+    cronKey: 'ebayListingsProductionToSandboxCron'
+  },
+  sandbox_to_airtable: {
+    environment: 'sandbox',
+    label: 'Sandbox to Airtable',
+    activeKey: 'ebayListingsSandboxToAirtableActive',
+    timeKey: 'ebayListingsSandboxToAirtableTime',
+    cronKey: 'ebayListingsSandboxToAirtableCron'
+  }
+};
+
+function normalizeEbayListingsScheduleKey(value = '') {
+  const key = String(value || '').trim().toLowerCase();
+  return EBAY_LISTINGS_SCHEDULES[key] ? key : '';
+}
+
+function buildDailyCronFromTime(value = '') {
+  const text = String(value || '').trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) throw new Error(`Invalid schedule time '${text}'. Use HH:MM.`);
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || hour < 0 || hour > 23 || !Number.isInteger(minute) || minute < 0 || minute > 59) {
+    throw new Error(`Invalid schedule time '${text}'. Use HH:MM.`);
+  }
+  return `${minute} ${hour} * * *`;
+}
+
+function emitEbayListingsScheduleProgress(sender, payload = {}) {
+  try {
+    if (sender && !sender.isDestroyed()) {
+      sender.send('ebaysandbox:progress', payload);
+      return;
+    }
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      mainWindow.webContents.send('ebaysandbox:progress', payload);
+    }
+  } catch (_) {}
+}
+
+function buildScheduledEbayListingsRunOptions(key = '', options = {}) {
+  const schedule = EBAY_LISTINGS_SCHEDULES[key];
+  if (!schedule) throw new Error('Unknown eBay listings schedule.');
+  const stored = getInventoryConfig('phase2Config') || {};
+  return {
+    ...stored,
+    ...options,
+    dryRun: false,
+    ebaySandboxDryRun: false,
+    phase5EbayEnvironment: schedule.environment,
+    ebaySandboxDestination: schedule.environment === 'production' ? 'sandbox' : 'airtable',
+    ebaySandboxTableName: resolveEbaySandboxTableName(
+      options.ebaySandboxTableName,
+      stored.ebaySandboxTableName,
+      stored.phase5ListingsTable,
+      stored.ebayMockTableName
+    ),
+    ebaySandboxFetchLimit: Number(options.ebaySandboxFetchLimit || stored.ebaySandboxFetchLimit || 200) || 200,
+    ebaySandboxFetchPagingMode: normalizeEbayFetchPagingMode(
+      options.ebaySandboxFetchPagingMode ||
+        options.ebaySandboxFetchMode ||
+        stored.ebaySandboxFetchPagingMode ||
+        stored.ebaySandboxFetchMode ||
+        DEFAULT_EBAY_FETCH_PAGING_MODE
+    )
+  };
+}
+
+function makeEbayListingsScheduleRunner(key = '', options = {}, sender = null) {
+  return async context => {
+    const schedule = EBAY_LISTINGS_SCHEDULES[key];
+    const runOptions = await attachPhase5PublishedState(
+      buildScheduledEbayListingsRunOptions(key, options),
+      `ebayListingsSchedule:${key}`
+    );
+    emitEbayListingsScheduleProgress(sender, {
+      stage: `ebaylistings_schedule_${key}`,
+      percent: 1,
+      counts: null,
+      message: `${schedule.label} scheduled run started (${context?.trigger || 'scheduled'}).`
+    });
+    const summary = await runEbaySandboxInventoryImport(runOptions, progress => {
+      emitEbayListingsScheduleProgress(sender, progress);
+    });
+    const stored = getInventoryConfig('phase2Config') || {};
+    saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
+      ...stored,
+      ...options,
+      phase5EbayEnvironment: runOptions.phase5EbayEnvironment,
+      ebaySandboxDryRun: false,
+      ebaySandboxTableName: runOptions.ebaySandboxTableName,
+      ebaySandboxFetchLimit: runOptions.ebaySandboxFetchLimit,
+      ebaySandboxFetchPagingMode: runOptions.ebaySandboxFetchPagingMode,
+      [schedule.activeKey]: true
+    }));
+    return { success: true, summary };
+  };
+}
 
 ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
   try {
@@ -5633,6 +5750,81 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
   }
 });
 
+ipcMain.handle('ebaylistings-schedule:start', async (event, options = {}) => {
+  try {
+    const key = normalizeEbayListingsScheduleKey(options.key);
+    if (!key) throw new Error('Choose a valid eBay listings schedule.');
+    const schedule = EBAY_LISTINGS_SCHEDULES[key];
+    const time = String(options.time || '').trim();
+    const cronExpression = buildDailyCronFromTime(time);
+    const timezone = String(options.timezone || '').trim();
+    const stored = getInventoryConfig('phase2Config') || {};
+    const runOptions = buildScheduledEbayListingsRunOptions(key, options);
+    const status = startEbayListingsSchedule(
+      key,
+      { cronExpression, timezone },
+      makeEbayListingsScheduleRunner(key, runOptions, event.sender)
+    );
+
+    saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
+      ...stored,
+      ...options,
+      ebaySandboxDryRun: false,
+      ebaySandboxTableName: runOptions.ebaySandboxTableName,
+      ebaySandboxFetchLimit: runOptions.ebaySandboxFetchLimit,
+      ebaySandboxFetchPagingMode: runOptions.ebaySandboxFetchPagingMode,
+      ebayListingsScheduleTimezone: timezone,
+      [schedule.activeKey]: true,
+      [schedule.timeKey]: time,
+      [schedule.cronKey]: cronExpression
+    }));
+
+    return { success: true, status };
+  } catch (error) {
+    return { success: false, message: formatDetailedErrorMessage(error) };
+  }
+});
+
+ipcMain.handle('ebaylistings-schedule:stop', async (_, options = {}) => {
+  try {
+    const key = normalizeEbayListingsScheduleKey(options.key);
+    if (!key) throw new Error('Choose a valid eBay listings schedule.');
+    const schedule = EBAY_LISTINGS_SCHEDULES[key];
+    const status = stopEbayListingsSchedule(key);
+    const stored = getInventoryConfig('phase2Config') || {};
+    saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
+      ...stored,
+      [schedule.activeKey]: false
+    }));
+    return { success: true, status };
+  } catch (error) {
+    return { success: false, message: formatDetailedErrorMessage(error) };
+  }
+});
+
+ipcMain.handle('ebaylistings-schedule:get-status', async () => ({
+  success: true,
+  statuses: getAllEbayListingsScheduleStatuses()
+}));
+
+ipcMain.handle('ebaylistings-schedule:run-now', async (event, options = {}) => {
+  try {
+    const key = normalizeEbayListingsScheduleKey(options.key);
+    if (!key) throw new Error('Choose a valid eBay listings schedule.');
+    const result = await runEbayListingsScheduleNow(
+      key,
+      makeEbayListingsScheduleRunner(key, buildScheduledEbayListingsRunOptions(key, options), event.sender)
+    );
+    return {
+      success: !!result?.success,
+      summary: result?.summary || null,
+      message: result?.message || ''
+    };
+  } catch (error) {
+    return { success: false, message: formatDetailedErrorMessage(error) };
+  }
+});
+
 ipcMain.handle('item-specific-sync:run', async (event, options = {}) => {
   try {
     const summary = await runItemSpecificTableSync(options, progress => {
@@ -5763,6 +5955,28 @@ function createWindow() {
         }
       } catch (phase5ResumeError) {
         console.error('Phase5 auto-push resume failed:', phase5ResumeError.message);
+      }
+
+      // Resume scheduled eBay listing transfer jobs if they were active.
+      try {
+        const storedPhase2 = getInventoryConfig('phase2Config') || {};
+        for (const [key, schedule] of Object.entries(EBAY_LISTINGS_SCHEDULES)) {
+          const shouldResume =
+            String(storedPhase2[schedule.activeKey] ?? 'false').trim().toLowerCase() === 'true';
+          if (!shouldResume) continue;
+          const time = String(storedPhase2[schedule.timeKey] || (key === 'production_to_sandbox' ? '01:00' : '03:00')).trim();
+          const cronExpression = String(storedPhase2[schedule.cronKey] || buildDailyCronFromTime(time)).trim();
+          const timezone = String(storedPhase2.ebayListingsScheduleTimezone || '').trim();
+          const runOptions = buildScheduledEbayListingsRunOptions(key, storedPhase2);
+          startEbayListingsSchedule(
+            key,
+            { cronExpression, timezone },
+            makeEbayListingsScheduleRunner(key, runOptions, null)
+          );
+          console.log(`eBay listings schedule resumed: ${schedule.label}`);
+        }
+      } catch (ebayListingsScheduleResumeError) {
+        console.error('eBay listings schedule resume failed:', ebayListingsScheduleResumeError.message);
       }
 
       const writebackConfig = buildPhase2WritebackConfig();

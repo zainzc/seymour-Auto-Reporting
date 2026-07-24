@@ -177,6 +177,36 @@
       color: var(--text);
       background: #fff;
     }
+    .field-label input {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 9px 10px;
+      font: inherit;
+      color: var(--text);
+      background: #fff;
+    }
+    .automation-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .automation-row {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) 160px auto auto auto;
+      gap: 10px;
+      align-items: end;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      background: #f8fbff;
+    }
+    .automation-title {
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+    .automation-status {
+      font-size: 12px;
+      color: var(--muted);
+    }
 
     .table-wrap {
       border: 1px solid var(--border);
@@ -310,6 +340,7 @@
     @media (max-width: 980px) {
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .publish-controls { grid-template-columns: 1fr; }
+      .automation-row { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -343,6 +374,64 @@
     </section>
 
     <section class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Batch ID</th>
+              <th>Batch Status</th>
+              <th>Total Items</th>
+              <th>Eligible Items Count</th>
+              <th>Blocked Items Count</th>
+              <th>Exception Items Count</th>
+              <th>Created At</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="batch-table-body">
+            <tr><td colspan="8">Loading...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="hint" style="margin-top:8px;">Approved batches may include problem items. Publishing will process only eligible items and leave blocked/exception items behind.</div>
+    </section>
+
+    <section class="card">
+      <h3 style="margin:0 0 10px;">eBay Listings Automation</h3>
+      <div class="automation-grid">
+        <div class="automation-row">
+          <div>
+            <div class="automation-title">Production to Sandbox</div>
+            <div class="automation-status" id="ebay-prod-sandbox-status">Idle</div>
+          </div>
+          <label class="field-label">
+            Daily Time
+            <input id="ebay-prod-sandbox-time" type="time" value="01:00">
+          </label>
+          <button class="btn primary" id="ebay-prod-sandbox-start-btn" onclick="startEbayListingSchedule('production_to_sandbox')">Start</button>
+          <button class="btn" id="ebay-prod-sandbox-stop-btn" onclick="stopEbayListingSchedule('production_to_sandbox')">Stop</button>
+          <button class="btn" id="ebay-prod-sandbox-run-btn" onclick="runEbayListingScheduleNow('production_to_sandbox')">Run Now</button>
+        </div>
+        <div class="automation-row">
+          <div>
+            <div class="automation-title">Sandbox to Airtable</div>
+            <div class="automation-status" id="ebay-sandbox-airtable-status">Idle</div>
+          </div>
+          <label class="field-label">
+            Daily Time
+            <input id="ebay-sandbox-airtable-time" type="time" value="03:00">
+          </label>
+          <button class="btn primary" id="ebay-sandbox-airtable-start-btn" onclick="startEbayListingSchedule('sandbox_to_airtable')">Start</button>
+          <button class="btn" id="ebay-sandbox-airtable-stop-btn" onclick="stopEbayListingSchedule('sandbox_to_airtable')">Stop</button>
+          <button class="btn" id="ebay-sandbox-airtable-run-btn" onclick="runEbayListingScheduleNow('sandbox_to_airtable')">Run Now</button>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:8px;">
+        Scheduled runs are write runs. Production mirrors active listings into eBay sandbox; sandbox imports listings into the Airtable listings table.
+      </div>
+    </section>
+
+    <section class="card">
       <h3 style="margin:0 0 10px;">Publish Approved Items</h3>
       <div class="publish-controls">
         <label class="field-label">
@@ -366,29 +455,6 @@
       <div class="hint" style="margin-top:8px;">
         Successful item publishes are logged to Google Sheets and removed from listing batches. Failed, blocked, or log-pending items remain in their batch.
       </div>
-    </section>
-
-    <section class="card">
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Batch ID</th>
-              <th>Batch Status</th>
-              <th>Total Items</th>
-              <th>Eligible Items Count</th>
-              <th>Blocked Items Count</th>
-              <th>Exception Items Count</th>
-              <th>Created At</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="batch-table-body">
-            <tr><td colspan="8">Loading...</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="hint" style="margin-top:8px;">Approved batches may include problem items. Publishing will process only eligible items and leave blocked/exception items behind.</div>
     </section>
 
     <section class="card">
@@ -455,6 +521,20 @@
     let phase5LogEntries = [];
     const SUMMARY_CACHE_MS = 30000;
     const REFRESH_DEBOUNCE_MS = 1000;
+    const EBAY_LISTING_SCHEDULE_UI = {
+      production_to_sandbox: {
+        label: 'Production to Sandbox',
+        timeId: 'ebay-prod-sandbox-time',
+        statusId: 'ebay-prod-sandbox-status',
+        buttonIds: ['ebay-prod-sandbox-start-btn', 'ebay-prod-sandbox-stop-btn', 'ebay-prod-sandbox-run-btn']
+      },
+      sandbox_to_airtable: {
+        label: 'Sandbox to Airtable',
+        timeId: 'ebay-sandbox-airtable-time',
+        statusId: 'ebay-sandbox-airtable-status',
+        buttonIds: ['ebay-sandbox-airtable-start-btn', 'ebay-sandbox-airtable-stop-btn', 'ebay-sandbox-airtable-run-btn']
+      }
+    };
 
     function navigateWorkspace(target) {
       const next = String(target || '').trim();
@@ -638,6 +718,137 @@
       ].join(', ');
     }
 
+    function summarizeEbayListingsResult(summary) {
+      if (!summary) return 'No summary returned.';
+      return [
+        `env=${summary.environment || ''}`,
+        `items=${asNum(summary.inventoryItemsFetched)}`,
+        `written=${asNum(summary.recordsWritten)}`,
+        `planned=${asNum(summary.recordsPlanned)}`,
+        `mirrored=${asNum(summary.sandboxCreated || summary.sandboxItemsCreated)}`,
+        `failed=${asNum(summary.failedGetItemCount)}`
+      ].join(', ');
+    }
+
+    function getLocalTimezone() {
+      try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function setEbayListingScheduleBusy(key, isBusy) {
+      const ui = EBAY_LISTING_SCHEDULE_UI[key];
+      if (!ui) return;
+      ui.buttonIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = Boolean(isBusy);
+      });
+      const timeEl = document.getElementById(ui.timeId);
+      if (timeEl) timeEl.disabled = Boolean(isBusy);
+    }
+
+    function renderEbayListingScheduleStatus(statuses = {}) {
+      Object.entries(EBAY_LISTING_SCHEDULE_UI).forEach(([key, ui]) => {
+        const status = statuses?.[key] || {};
+        const el = document.getElementById(ui.statusId);
+        if (!el) return;
+        const activeText = status.active ? 'Active' : 'Stopped';
+        const runningText = status.running ? ' | Running now' : '';
+        const lastText = status.lastRunAt ? ` | Last run ${new Date(status.lastRunAt).toLocaleString()}` : '';
+        el.textContent = `${activeText}${runningText}${lastText}`;
+      });
+    }
+
+    async function refreshEbayListingScheduleStatus() {
+      if (!window.ebaySandboxImportAPI || typeof window.ebaySandboxImportAPI.getScheduleStatus !== 'function') return;
+      const result = await window.ebaySandboxImportAPI.getScheduleStatus();
+      if (result?.success) renderEbayListingScheduleStatus(result.statuses || {});
+    }
+
+    function buildEbayListingScheduleOptions(key) {
+      const ui = EBAY_LISTING_SCHEDULE_UI[key];
+      if (!ui) throw new Error('Unknown eBay listings automation.');
+      const time = document.getElementById(ui.timeId)?.value || '';
+      if (!time) throw new Error(`Select a daily time for ${ui.label}.`);
+      return {
+        ...appConfig,
+        key,
+        time,
+        timezone: getLocalTimezone(),
+        dryRun: false,
+        ebaySandboxDryRun: false
+      };
+    }
+
+    async function startEbayListingSchedule(key) {
+      const ui = EBAY_LISTING_SCHEDULE_UI[key];
+      try {
+        setEbayListingScheduleBusy(key, true);
+        await ensureConfigLoaded();
+        if (!window.ebaySandboxImportAPI || typeof window.ebaySandboxImportAPI.startSchedule !== 'function') {
+          throw new Error('eBay listings schedule API is unavailable.');
+        }
+        const options = buildEbayListingScheduleOptions(key);
+        appendPhase5Log(`Starting eBay listings schedule: ${ui.label} at ${options.time}`);
+        const result = await window.ebaySandboxImportAPI.startSchedule(options);
+        if (!result?.success) throw new Error(result?.message || 'Failed to start eBay listings schedule.');
+        appendPhase5Log(`eBay listings schedule started: ${ui.label}`, 'success');
+        setStatus(`eBay listings schedule started: ${ui.label}`, 'success');
+        await refreshEbayListingScheduleStatus();
+      } catch (error) {
+        appendPhase5Log(`Failed to start eBay listings schedule: ${error.message}`, 'error');
+        setStatus(`Failed to start eBay listings schedule: ${error.message}`, 'error');
+      } finally {
+        setEbayListingScheduleBusy(key, false);
+      }
+    }
+
+    async function stopEbayListingSchedule(key) {
+      const ui = EBAY_LISTING_SCHEDULE_UI[key];
+      try {
+        setEbayListingScheduleBusy(key, true);
+        if (!window.ebaySandboxImportAPI || typeof window.ebaySandboxImportAPI.stopSchedule !== 'function') {
+          throw new Error('eBay listings schedule API is unavailable.');
+        }
+        appendPhase5Log(`Stopping eBay listings schedule: ${ui.label}`);
+        const result = await window.ebaySandboxImportAPI.stopSchedule({ key });
+        if (!result?.success) throw new Error(result?.message || 'Failed to stop eBay listings schedule.');
+        appendPhase5Log(`eBay listings schedule stopped: ${ui.label}`, 'success');
+        setStatus(`eBay listings schedule stopped: ${ui.label}`, 'success');
+        await refreshEbayListingScheduleStatus();
+      } catch (error) {
+        appendPhase5Log(`Failed to stop eBay listings schedule: ${error.message}`, 'error');
+        setStatus(`Failed to stop eBay listings schedule: ${error.message}`, 'error');
+      } finally {
+        setEbayListingScheduleBusy(key, false);
+      }
+    }
+
+    async function runEbayListingScheduleNow(key) {
+      const ui = EBAY_LISTING_SCHEDULE_UI[key];
+      try {
+        setEbayListingScheduleBusy(key, true);
+        await ensureConfigLoaded();
+        if (!window.ebaySandboxImportAPI || typeof window.ebaySandboxImportAPI.runScheduleNow !== 'function') {
+          throw new Error('eBay listings schedule API is unavailable.');
+        }
+        appendPhase5Log(`Running eBay listings automation now: ${ui.label}`);
+        setStatus(`Running eBay listings automation now: ${ui.label}...`, '');
+        const result = await window.ebaySandboxImportAPI.runScheduleNow(buildEbayListingScheduleOptions(key));
+        if (!result?.success) throw new Error(result?.message || 'eBay listings automation failed.');
+        appendPhase5Log(`eBay listings automation completed: ${summarizeEbayListingsResult(result.summary || {})}`, 'success');
+        setStatus(`eBay listings automation completed: ${ui.label}`, 'success');
+        await refreshEbayListingScheduleStatus();
+      } catch (error) {
+        appendPhase5Log(`eBay listings automation failed: ${error.message}`, 'error');
+        setStatus(`eBay listings automation failed: ${error.message}`, 'error');
+      } finally {
+        setEbayListingScheduleBusy(key, false);
+      }
+    }
+
     async function ensureConfigLoaded() {
       if (!appConfig) {
         await loadConfig();
@@ -719,6 +930,16 @@
       const baseCfg = await window.phase2API.getConfig();
       const phase5Cfg = await window.phase5API.getConfig();
       appConfig = buildRuntimeConfig(baseCfg || {}, phase5Cfg || {});
+      if (window.ebaySandboxImportAPI && typeof window.ebaySandboxImportAPI.getConfig === 'function') {
+        const ebayListingsCfg = await window.ebaySandboxImportAPI.getConfig();
+        appConfig = {
+          ...appConfig,
+          ebaySandboxTableName: ebayListingsCfg?.tableName || appConfig.ebaySandboxTableName,
+          ebaySandboxFetchLimit: ebayListingsCfg?.fetchLimit || appConfig.ebaySandboxFetchLimit,
+          ebaySandboxFetchPagingMode: ebayListingsCfg?.fetchPagingMode || appConfig.ebaySandboxFetchPagingMode,
+          ebayListingsAutomation: ebayListingsCfg?.ebayListingsAutomation || {}
+        };
+      }
       const envSelect = document.getElementById('publish-env-select');
       if (envSelect) {
         envSelect.value = appConfig.phase5EbayEnvironment === 'production' ? 'production' : 'sandbox';
@@ -727,6 +948,12 @@
       if (modeSelect) {
         modeSelect.value = String(appConfig.phase5Mode || '').trim().toUpperCase() === 'B' ? 'scheduled' : 'manual';
       }
+      const automationConfig = appConfig.ebayListingsAutomation || {};
+      const prodTimeEl = document.getElementById('ebay-prod-sandbox-time');
+      if (prodTimeEl) prodTimeEl.value = automationConfig.productionToSandboxTime || '01:00';
+      const sandboxTimeEl = document.getElementById('ebay-sandbox-airtable-time');
+      if (sandboxTimeEl) sandboxTimeEl.value = automationConfig.sandboxToAirtableTime || '03:00';
+      renderEbayListingScheduleStatus(automationConfig.statuses || {});
       return appConfig;
     }
 
@@ -970,7 +1197,15 @@
           appendPhase5Log(message, type);
         });
       }
+      if (window.ebaySandboxImportAPI && typeof window.ebaySandboxImportAPI.onProgress === 'function') {
+        window.ebaySandboxImportAPI.onProgress((event, payload) => {
+          const message = payload?.message || payload?.stage || 'eBay listings automation update';
+          const type = payload?.stage === 'error' ? 'error' : '';
+          appendPhase5Log(message, type);
+        });
+      }
       await refreshAll();
+      await refreshEbayListingScheduleStatus();
     });
   </script>
 </body>
