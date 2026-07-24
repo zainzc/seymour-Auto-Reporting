@@ -1318,7 +1318,7 @@
                     <option value="false">False (Create Table/Fields + Import Rows)</option>
                   </select>
                 </div>
-                <div class="form-group">
+                <div class="form-group" style="display:none;">
                   <label for="ebay-sandbox-fetch-limit">Listings Fetch Limit</label>
                   <input id="ebay-sandbox-fetch-limit" type="number" min="1" step="1" value="200">
                 </div>
@@ -1332,7 +1332,7 @@
                 </div>
                 <div class="btn-group">
                   <button id="run-ebay-mock-import-btn" class="btn btn-secondary" onclick="runEbayMockImport()">Run eBay Mock Import</button>
-                  <button id="run-ebay-sandbox-import-btn" class="btn btn-secondary" onclick="runEbaySandboxImport()">Fetch eBay Listings</button>
+                  <button id="run-ebay-sandbox-import-btn" class="btn btn-secondary" style="display:none;" onclick="runEbaySandboxImport()">Fetch eBay Listings</button>
                 </div>
                 <div class="hint" id="ebay-mock-status-text">eBay Mock Import status: idle</div>
                 <div class="hint" id="ebay-sandbox-status-text">eBay Listings Import status: idle</div>
@@ -1417,11 +1417,11 @@
                 <label for="phase5-ebay-sandbox-table-name">Listings Table Name</label>
                 <input id="phase5-ebay-sandbox-table-name" type="text" value="eBay Listings (API)">
               </div>
-              <div class="form-group">
+              <div class="form-group" style="display:none;">
                 <label for="phase5-ebay-sandbox-fetch-limit">Listings Fetch Limit</label>
                 <input id="phase5-ebay-sandbox-fetch-limit" type="number" min="1" step="1" value="200">
               </div>
-              <div class="form-group">
+              <div class="form-group" style="display:none;">
                 <label for="phase5-ebay-sandbox-fetch-paging-mode">Listings Fetch Mode</label>
                 <select id="phase5-ebay-sandbox-fetch-paging-mode">
                   <option value="first_page" selected>Start from first page</option>
@@ -1480,7 +1480,7 @@
 
             <div class="phase5-inline-actions">
               <button id="run-phase5-btn" class="btn btn-primary" style="display:none;" onclick="document.getElementById('phase5-mode').value='A'; runPhase5();">Publish Approved</button>
-              <button id="run-ebay-sandbox-import-phase5-btn" class="btn btn-primary" onclick="runEbaySandboxImport()">Fetch eBay Listings</button>
+              <button id="run-ebay-sandbox-import-phase5-btn" class="btn btn-primary" style="display:none;" onclick="runEbaySandboxImport()">Fetch eBay Listings</button>
               <button id="phase5-start-autopush-btn" class="btn btn-primary" style="display:none;" onclick="document.getElementById('phase5-mode').value='B'; document.getElementById('phase5-autopush-enabled').value='true'; startPhase5AutoPush();">Start Auto-Push</button>
               <button id="phase5-stop-autopush-btn" class="btn btn-secondary" style="display:none;" onclick="document.getElementById('phase5-mode').value='B'; document.getElementById('phase5-autopush-enabled').value='false'; stopPhase5AutoPush();">Stop Auto-Push</button>
               <button id="phase5-run-autopush-now-btn" class="btn btn-secondary" style="display:none;" onclick="document.getElementById('phase5-mode').value='B'; document.getElementById('phase5-autopush-enabled').value='true'; runPhase5AutoPushNow();">Run Auto-Push Now</button>
