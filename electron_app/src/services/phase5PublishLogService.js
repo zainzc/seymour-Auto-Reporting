@@ -33,6 +33,15 @@ function normalizeEbayItemId(value) {
   return text;
 }
 
+function toSheetEbayItemIdValue(value) {
+  const itemId = normalizeEbayItemId(value);
+  if (/^\d+$/.test(itemId)) {
+    const numeric = Number(itemId);
+    if (Number.isSafeInteger(numeric)) return numeric;
+  }
+  return itemId;
+}
+
 class Phase5PublishLogService {
   constructor(config = {}) {
     this.enabled = String(config.enabled ?? process.env.PHASE5_SHEETS_LOG_ENABLED ?? 'false').trim().toLowerCase() === 'true';
@@ -89,7 +98,7 @@ class Phase5PublishLogService {
     }
 
     const cleanRow = row.slice();
-    cleanRow[4] = normalizeEbayItemId(cleanRow[4]);
+    cleanRow[4] = toSheetEbayItemIdValue(cleanRow[4]);
 
     const sheets = await this.getSheetsClient();
     await this.ensureHeaders(sheets);

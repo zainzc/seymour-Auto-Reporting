@@ -172,6 +172,17 @@ function detectRequiredFieldNames(fieldNames = [], options = {}) {
   const itemSpecificsField =
     normalizeText(options.itemSpecificsFieldName) ||
     detectFieldByAliases(fieldNames, ['Item Specifics', 'Item Specific Values']);
+  const ipnField =
+    normalizeText(options.ipnFieldName) ||
+    detectFieldByAliases(fieldNames, [
+      'IPN (Interchange Part Number)',
+      'Interchange Part Number',
+      'IPN',
+      'Inventory Number',
+      'IP',
+      'c: partshunter203 ebay MOTORS interchange part number',
+      'C: partshunter203 ebay MOTORS interchange part number'
+    ]);
   const itemIdField =
     normalizeText(options.itemIdFieldName) ||
     detectFieldByAliases(fieldNames, ['Item ID', 'ItemID', 'eBay Item ID', 'Ebay Item ID']);
@@ -208,6 +219,7 @@ function detectRequiredFieldNames(fieldNames = [], options = {}) {
     titleField,
     descriptionField,
     itemSpecificsField,
+    ipnField,
     itemIdField,
     batchLinkField,
     blockedField,

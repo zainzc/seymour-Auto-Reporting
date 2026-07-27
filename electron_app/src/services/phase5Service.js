@@ -268,7 +268,17 @@ async function loadBatchApprovalContext(airtableService, schemaService, schema, 
 
 function buildLogRow(record = {}, schema = {}, publishState = {}) {
   const fields = record?.fields || {};
-  const ipn = firstNonEmptyField(fields, [schema.ipnField, 'IPN', 'Inventory Number', 'IP']);
+  const ipnFieldCandidates = [
+    schema.ipnField,
+    'IPN (Interchange Part Number)',
+    'Interchange Part Number',
+    'IPN',
+    'Inventory Number',
+    'IP',
+    'c: partshunter203 ebay MOTORS interchange part number',
+    'C: partshunter203 ebay MOTORS interchange part number'
+  ];
+  const ipn = firstNonEmptyField(fields, ipnFieldCandidates);
   const batchLinks = extractLinkedRecordIds(fields[schema.batchLinkField || '']);
   const batchId = batchLinks[0] || normalizeText(fields[schema.groupField || '']);
   const itemId = normalizeEbayItemId(
@@ -294,7 +304,7 @@ function buildLogRow(record = {}, schema = {}, publishState = {}) {
     publishedAtIso,
     batchId,
     ipn,
-    getIpnPrefix(fields, [schema.ipnField, 'IPN', 'Inventory Number', 'IP']),
+    getIpnPrefix(fields, ipnFieldCandidates),
     itemId,
     categoryId,
     categoryName,
