@@ -861,10 +861,17 @@ function buildTaskMap(tasks = []) {
   return map;
 }
 
+function extractFieldArray(data = {}) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.fields)) return data.fields;
+  if (Array.isArray(data?.custom_fields)) return data.custom_fields;
+  return [];
+}
+
 function getCustomFieldMetaMap(listData = {}) {
   const map = new Map();
   const canonicalMap = new Map();
-  const fields = Array.isArray(listData?.fields) ? listData.fields : [];
+  const fields = extractFieldArray(listData);
   fields.forEach(field => {
     const rawName = normalizeCell(field?.name);
     const name = normalizeUpper(rawName);
@@ -919,6 +926,33 @@ function buildFieldMetaLookupFromTask(task = {}) {
 
 function canonicalFieldName(value = '') {
   return normalizeCell(value).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function buildDeliveryIdentityFromParts(parts = {}) {
+  const values = [
+    parts.name,
+    parts.billingName,
+    parts.shippingName,
+    parts.shippingAddress,
+    parts.shippingCity,
+    parts.shippingState,
+    parts.shipVia
+  ]
+    .map(value => canonicalFieldName(value))
+    .filter(Boolean);
+  return values.join('|');
+}
+
+function buildDeliveryIdentityFromRow(row = {}) {
+  return buildDeliveryIdentityFromParts({
+    name: buildDeliveryTaskName(row),
+    billingName: row['Billing Customer Name'],
+    shippingName: row['Shipping Customer Name'],
+    shippingAddress: row['Shipping Customer Address'],
+    shippingCity: row['Shipping City'],
+    shippingState: row['Shipping State'],
+    shipVia: row['Ship Via']
+  });
 }
 
 function resolveCustomFieldMeta(fieldMetaLookup, targetName = '') {
@@ -1265,6 +1299,19 @@ function buildDeliveryAutomationCustomFieldsFromTaskDescription(task = {}, field
   );
 }
 
+function buildDeliveryIdentityFromTask(task = {}) {
+  const values = getDescriptionFieldValues(task?.description || task?.text_content || '');
+  return buildDeliveryIdentityFromParts({
+    name: task?.name,
+    billingName: getDescriptionValue(values, ['Billing Name', 'Billing Customer Name']),
+    shippingName: getDescriptionValue(values, ['Shipping Name', 'Shipping Customer Name']),
+    shippingAddress: getDescriptionValue(values, ['Shipping Address', 'Shipping Customer Address']),
+    shippingCity: getDescriptionValue(values, ['Shipping City']),
+    shippingState: getDescriptionValue(values, ['Shipping State']),
+    shipVia: getDescriptionValue(values, ['Ship Via'])
+  });
+}
+
 function buildClickUpCreateCustomFields(customFields = []) {
   if (!Array.isArray(customFields)) return [];
   return customFields
@@ -1285,6 +1332,72 @@ function getMissingDeliveryAutomationCustomFieldNames(fieldMetaLookup = null) {
   return DELIVERY_AUTOMATION_CUSTOM_FIELD_NAMES.filter(
     fieldName => !resolveCustomFieldMeta(fieldMetaLookup, fieldName)
   );
+}
+
+async function hydrateClickUpTasks(clickup, tasks = [], result = null, context = '') {
+  const hydrated = [];
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    const taskId = normalizeCell(task?.id);
+    if (!taskId) {
+      hydrated.push(task);
+      continue;
+    }
+    try {
+      const detail = await clickup.getTask(taskId);
+      hydrated.push({ ...task, ...(detail || {}) });
+    } catch (error) {
+      const message = getClickUpErrorMessage(error);
+      if (result && Array.isArray(result.errors)) {
+        result.errors.push(`${context || 'ClickUp task hydrate'} failed for ${taskId}: ${message}`);
+      }
+      hydrated.push(task);
+    }
+  }
+  return hydrated;
+}
+
+async function resolveDeliveryAutomationFieldMeta(clickup, listData = {}, tasks = [], result = null, listId = '') {
+  let fieldMeta = getCustomFieldMetaMap(listData);
+
+  try {
+    const fieldResponse = await clickup.getListCustomFields();
+    const apiFieldMeta = getCustomFieldMetaMap({ fields: extractFieldArray(fieldResponse) });
+    fieldMeta = mergeFieldMetaLookups(fieldMeta, apiFieldMeta);
+    console.log(
+      `[WorkOrders] Delivery Automation list field endpoint discovered: ${
+        Array.isArray(apiFieldMeta.fields) ? apiFieldMeta.fields.length : 0
+      }`
+    );
+  } catch (error) {
+    console.warn(`[WorkOrders] Delivery Automation list field endpoint failed: ${getClickUpErrorMessage(error)}`);
+  }
+
+  let missing = getMissingDeliveryAutomationCustomFieldNames(fieldMeta);
+  if (missing.length > 0 && Array.isArray(tasks) && tasks.length > 0) {
+    for (const task of tasks.slice(0, 5)) {
+      const taskFieldMeta = buildFieldMetaLookupFromTask(task);
+      fieldMeta = mergeFieldMetaLookups(fieldMeta, taskFieldMeta);
+      missing = getMissingDeliveryAutomationCustomFieldNames(fieldMeta);
+      if (missing.length === 0) break;
+    }
+  }
+
+  missing = getMissingDeliveryAutomationCustomFieldNames(fieldMeta);
+  if (missing.length > 0) {
+    const availableFieldNames = (fieldMeta.fields || [])
+      .map(field => normalizeCell(field?.name))
+      .filter(Boolean)
+      .join(', ');
+    if (result && Array.isArray(result.errors)) {
+      result.errors.push(
+        `Delivery Automation custom fields missing from list ${listId}: ${missing.join(', ')}. Available fields: ${
+          availableFieldNames || 'none'
+        }`
+      );
+    }
+  }
+
+  return fieldMeta;
 }
 
 function buildDeliveryLinkCleanupCustomFields(existingTask = {}, fieldMetaLookup = null) {
@@ -2067,18 +2180,22 @@ async function syncRowsToDeliveryAutomation({
     result.errors.push(`Delivery Automation setup failed: ${getClickUpErrorMessage(error)}`);
     return result;
   }
-  const deliveryFieldMeta = getCustomFieldMetaMap(deliveryList);
-  const missingDeliveryFieldNames = getMissingDeliveryAutomationCustomFieldNames(deliveryFieldMeta);
-  if (missingDeliveryFieldNames.length > 0) {
-    const availableFieldNames = (deliveryFieldMeta.fields || [])
-      .map(field => normalizeCell(field?.name))
-      .filter(Boolean)
-      .join(', ');
-    result.errors.push(
-      `Delivery Automation custom fields missing from list ${normalizedDeliveryClickupListId}: ${missingDeliveryFieldNames.join(', ')}. Available fields: ${availableFieldNames || 'none'}`
-    );
-  }
+  deliveryTasks = await hydrateClickUpTasks(deliveryClickup, deliveryTasks, result, 'Delivery Automation task hydrate');
+  const deliveryFieldMeta = await resolveDeliveryAutomationFieldMeta(
+    deliveryClickup,
+    deliveryList,
+    deliveryTasks,
+    result,
+    normalizedDeliveryClickupListId
+  );
   const deliveryTaskByKey = buildTaskMap(deliveryTasks);
+  const deliveryTasksByIdentity = new Map();
+  for (const task of deliveryTasks) {
+    const identity = buildDeliveryIdentityFromTask(task);
+    if (!identity) continue;
+    if (!deliveryTasksByIdentity.has(identity)) deliveryTasksByIdentity.set(identity, []);
+    deliveryTasksByIdentity.get(identity).push(task);
+  }
   const deliveryTaskIdsSyncedFromRows = new Set();
 
   const uniqueEligibleRows = [];
@@ -2090,10 +2207,21 @@ async function syncRowsToDeliveryAutomation({
     seenKeys.add(key);
     uniqueEligibleRows.push(row);
   }
+  const eligibleRowByDeliveryIdentity = new Map();
+  for (const row of uniqueEligibleRows) {
+    const identity = buildDeliveryIdentityFromRow(row);
+    if (identity && !eligibleRowByDeliveryIdentity.has(identity)) {
+      eligibleRowByDeliveryIdentity.set(identity, row);
+    }
+  }
 
   for (const row of uniqueEligibleRows) {
     const key = buildTaskKey(row);
-    const existingTask = deliveryTaskByKey.get(key) || null;
+    const rowIdentity = buildDeliveryIdentityFromRow(row);
+    const existingTask =
+      deliveryTaskByKey.get(key) ||
+      (rowIdentity ? (deliveryTasksByIdentity.get(rowIdentity) || []).find(task => !deliveryTaskIdsSyncedFromRows.has(normalizeCell(task?.id))) : null) ||
+      null;
     const status = getDeliveryAutomationStatus(row);
 
     if (existingTask) {
@@ -2198,8 +2326,23 @@ async function syncRowsToDeliveryAutomation({
     if (!taskId || deliveryTaskIdsSyncedFromRows.has(taskId)) continue;
 
     try {
-      const taskDetail = await deliveryClickup.getTask(taskId);
-      const detailedTask = { ...task, ...(taskDetail || {}) };
+      const detailedTask = task;
+      const taskIdentity = buildDeliveryIdentityFromTask(detailedTask);
+      const matchingRow = taskIdentity ? eligibleRowByDeliveryIdentity.get(taskIdentity) : null;
+      if (matchingRow) {
+        const rowCustomFields = buildDeliveryAutomationCustomFields(matchingRow, deliveryFieldMeta, {
+          includeClearFields: true
+        });
+        const changedRowFields = rowCustomFields.filter(field => hasCustomFieldChanged(detailedTask, field));
+        if (changedRowFields.length > 0) {
+          const taskKey = buildTaskKey(matchingRow) || extractTaskKey(detailedTask) || normalizeCell(detailedTask?.name) || taskId;
+          await applyTaskCustomFields(deliveryClickup, taskId, changedRowFields, taskKey, result);
+          console.log(`[WorkOrders] Delivery Automation task enriched from sheet row: ${taskKey}`);
+          result.updated += 1;
+          continue;
+        }
+      }
+
       const descriptionCustomFields = buildDeliveryAutomationCustomFieldsFromTaskDescription(detailedTask, deliveryFieldMeta);
       if (descriptionCustomFields.length === 0 && normalizeCell(detailedTask?.description || detailedTask?.text_content)) {
         console.warn(

@@ -275,6 +275,13 @@ class ClickUpService {
     return this.request('GET', `/list/${this.getEncodedListId()}`);
   }
 
+  async getListCustomFields() {
+    if (!this.listId) {
+      throw new Error('ClickUp list ID is missing.');
+    }
+    return this.request('GET', `/list/${this.getEncodedListId()}/field`);
+  }
+
   async validateAccess() {
     const data = await this.getList();
     return {
