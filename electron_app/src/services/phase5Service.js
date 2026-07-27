@@ -110,6 +110,16 @@ function normalizeEbayItemId(value) {
   return text;
 }
 
+function normalizeNumericIdentifier(value) {
+  const text = normalizeText(value)
+    .replace(/^[\s'"`]+/, '')
+    .replace(/[\s'"`]+$/, '');
+  if (/^[\d\s.,'-]+$/.test(text)) {
+    return text.replace(/\D+/g, '');
+  }
+  return text;
+}
+
 async function loadQueueRecordsWithProgress(airtableService, tableNameOrId, progressCallback, summaryRef) {
   const records = [];
   let offset = null;
@@ -284,7 +294,7 @@ function buildLogRow(record = {}, schema = {}, publishState = {}) {
   const itemId = normalizeEbayItemId(
     firstNonEmptyField(fields, [schema.itemIdField, 'Item ID', 'ItemID', 'eBay Item ID', 'Ebay Item ID'])
   );
-  const categoryId = firstNonEmptyField(fields, [schema.categoryIdField, 'eBay Category ID']);
+  const categoryId = normalizeNumericIdentifier(firstNonEmptyField(fields, [schema.categoryIdField, 'eBay Category ID']));
   const categoryName = firstNonEmptyField(fields, ['Category Name', 'Category']);
   const storeCategory = firstNonEmptyField(fields, ['eBay Store Category', 'Store Category', 'c: partshunter203 ebay MOTORS Store Category']);
   const aiTitle = firstNonEmptyField(fields, [

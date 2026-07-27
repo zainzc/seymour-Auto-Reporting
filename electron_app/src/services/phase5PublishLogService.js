@@ -42,6 +42,25 @@ function toSheetEbayItemIdValue(value) {
   return itemId;
 }
 
+function normalizeNumericIdentifier(value) {
+  const text = normalizeText(value)
+    .replace(/^[\s'"`]+/, '')
+    .replace(/[\s'"`]+$/, '');
+  if (/^[\d\s.,'-]+$/.test(text)) {
+    return text.replace(/\D+/g, '');
+  }
+  return text;
+}
+
+function toSheetNumericIdentifierValue(value) {
+  const identifier = normalizeNumericIdentifier(value);
+  if (/^\d+$/.test(identifier)) {
+    const numeric = Number(identifier);
+    if (Number.isSafeInteger(numeric)) return numeric;
+  }
+  return identifier;
+}
+
 class Phase5PublishLogService {
   constructor(config = {}) {
     this.enabled = String(config.enabled ?? process.env.PHASE5_SHEETS_LOG_ENABLED ?? 'false').trim().toLowerCase() === 'true';
@@ -99,6 +118,7 @@ class Phase5PublishLogService {
 
     const cleanRow = row.slice();
     cleanRow[4] = toSheetEbayItemIdValue(cleanRow[4]);
+    cleanRow[5] = toSheetNumericIdentifierValue(cleanRow[5]);
 
     const sheets = await this.getSheetsClient();
     await this.ensureHeaders(sheets);
