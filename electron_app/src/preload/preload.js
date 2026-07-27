@@ -182,6 +182,11 @@ contextBridge.exposeInMainWorld('phase5API', {
   getAutoPushStatus: () => ipcRenderer.invoke('phase5:getAutoPushStatus'),
   runAutoPushNow: (options) => ipcRenderer.invoke('phase5:runAutoPushNow', options),
   openExternal: (url) => ipcRenderer.invoke('phase5:openExternal', url),
+  getActivityLogs: () => ipcRenderer.invoke('phase5-get-activity-logs'),
+  appendActivityLog: (entry) => ipcRenderer.invoke('phase5-append-activity-log', entry),
+  clearActivityLogs: () => ipcRenderer.invoke('phase5-clear-activity-logs'),
+  onActivityLog: (callback) => ipcRenderer.on('phase5:activity-log', callback),
+  onActivityLogReset: (callback) => ipcRenderer.on('phase5:activity-log-reset', callback),
   onProgress: (callback) => ipcRenderer.on('phase5:progress', callback)
 });
 

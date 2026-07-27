@@ -191,8 +191,9 @@
     }
     .automation-settings {
       display: grid;
-      grid-template-columns: repeat(2, minmax(180px, 1fr));
+      grid-template-columns: repeat(2, minmax(180px, 1fr)) auto;
       gap: 10px;
+      align-items: end;
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 12px;
@@ -421,6 +422,7 @@
               <option value="continue_from_last_page">Continue from last page</option>
             </select>
           </label>
+          <button class="btn primary" id="ebay-listings-save-settings-btn" onclick="saveEbayListingAutomationSettings()">Save Settings</button>
         </div>
         <div class="automation-row">
           <div>
@@ -548,12 +550,14 @@
       production_to_sandbox: {
         label: 'Production to Sandbox',
         timeId: 'ebay-prod-sandbox-time',
+        timeConfigKey: 'ebayListingsProductionToSandboxTime',
         statusId: 'ebay-prod-sandbox-status',
         buttonIds: ['ebay-prod-sandbox-start-btn', 'ebay-prod-sandbox-stop-btn', 'ebay-prod-sandbox-run-btn']
       },
       sandbox_to_airtable: {
         label: 'Sandbox to Airtable',
         timeId: 'ebay-sandbox-airtable-time',
+        timeConfigKey: 'ebayListingsSandboxToAirtableTime',
         statusId: 'ebay-sandbox-airtable-status',
         buttonIds: ['ebay-sandbox-airtable-start-btn', 'ebay-sandbox-airtable-stop-btn', 'ebay-sandbox-airtable-run-btn']
       }
@@ -647,7 +651,37 @@
       }).join('');
     }
 
-    function appendPhase5Log(message, type = '') {
+    function normalizePhase5LogEntry(entry) {
+      const at = entry?.at || '';
+      return {
+        time: String(entry?.time || (at ? new Date(at).toLocaleTimeString() : new Date().toLocaleTimeString())),
+        message: String(entry?.message || entry?.text || '').trim() || 'Phase 5 update',
+        type: entry?.type === 'error' || entry?.level === 'error'
+          ? 'error'
+          : entry?.type === 'success' || entry?.level === 'success'
+            ? 'success'
+            : '',
+        at,
+        source: String(entry?.source || '').trim()
+      };
+    }
+
+    async function loadPhase5Logs() {
+      if (!window.phase5API || typeof window.phase5API.getActivityLogs !== 'function') return;
+      try {
+        const logs = await window.phase5API.getActivityLogs();
+        phase5LogEntries = Array.isArray(logs)
+          ? logs.map(normalizePhase5LogEntry).filter(entry => entry.message)
+          : [];
+        renderPhase5Logs();
+      } catch (error) {
+        phase5LogEntries = [];
+        renderPhase5Logs();
+      }
+    }
+
+    function appendPhase5Log(message, type = '', options = {}) {
+      const shouldPersist = options.persist !== false;
       const entry = {
         time: new Date().toLocaleTimeString(),
         message: String(message || '').trim() || 'Phase 5 update',
@@ -658,11 +692,23 @@
         phase5LogEntries = phase5LogEntries.slice(0, 200);
       }
       renderPhase5Logs();
+      if (shouldPersist && window.phase5API && typeof window.phase5API.appendActivityLog === 'function') {
+        window.phase5API.appendActivityLog({
+          message: entry.message,
+          type: entry.type,
+          source: 'phase5_ui'
+        }).catch(() => {});
+      }
     }
 
-    function clearPhase5Logs() {
+    async function clearPhase5Logs() {
       phase5LogEntries = [];
       renderPhase5Logs();
+      if (window.phase5API && typeof window.phase5API.clearActivityLogs === 'function') {
+        try {
+          await window.phase5API.clearActivityLogs();
+        } catch (_) {}
+      }
     }
 
     function togglePhase5Logs() {
@@ -749,6 +795,7 @@
         `written=${asNum(summary.recordsWritten)}`,
         `planned=${asNum(summary.recordsPlanned)}`,
         `mirrored=${asNum(summary.sandboxCreated || summary.sandboxItemsCreated)}`,
+        `ended=${asNum(summary.missingListingsMarkedEnded)}`,
         `failed=${asNum(summary.failedGetItemCount)}`
       ].join(', ');
     }
@@ -761,6 +808,14 @@
       }
     }
 
+    function setEbayListingSettingsBusy(isBusy) {
+      ['ebay-listings-save-settings-btn', 'ebay-listings-fetch-limit', 'ebay-listings-fetch-paging-mode']
+        .forEach(id => {
+          const el = document.getElementById(id);
+          if (el) el.disabled = Boolean(isBusy);
+        });
+    }
+
     function setEbayListingScheduleBusy(key, isBusy) {
       const ui = EBAY_LISTING_SCHEDULE_UI[key];
       if (!ui) return;
@@ -770,6 +825,13 @@
       });
       const timeEl = document.getElementById(ui.timeId);
       if (timeEl) timeEl.disabled = Boolean(isBusy);
+    }
+
+    function setEbayAutomationBusy(isBusy) {
+      Object.keys(EBAY_LISTING_SCHEDULE_UI).forEach(key => {
+        setEbayListingScheduleBusy(key, isBusy);
+      });
+      setPublishingBusy(isBusy);
     }
 
     function renderEbayListingScheduleStatus(statuses = {}) {
@@ -790,22 +852,109 @@
       if (result?.success) renderEbayListingScheduleStatus(result.statuses || {});
     }
 
+    function readEbayListingAutomationSettings() {
+      const prodTime = document.getElementById('ebay-prod-sandbox-time')?.value || '01:00';
+      const sandboxTime = document.getElementById('ebay-sandbox-airtable-time')?.value || '03:00';
+      if (!prodTime) throw new Error('Select a daily time for Production to Sandbox.');
+      if (!sandboxTime) throw new Error('Select a daily time for Sandbox to Airtable.');
+
+      const rawFetchLimit = Number(document.getElementById('ebay-listings-fetch-limit')?.value || appConfig?.ebaySandboxFetchLimit || 200);
+      const fetchLimit = Math.max(1, Math.min(Number.isFinite(rawFetchLimit) ? Math.floor(rawFetchLimit) : 200, 5000));
+      const rawFetchPagingMode = document.getElementById('ebay-listings-fetch-paging-mode')?.value || appConfig?.ebaySandboxFetchPagingMode || 'first_page';
+      const fetchPagingMode = rawFetchPagingMode === 'continue_from_last_page' ? 'continue_from_last_page' : 'first_page';
+
+      const fetchLimitEl = document.getElementById('ebay-listings-fetch-limit');
+      if (fetchLimitEl) fetchLimitEl.value = String(fetchLimit);
+      const fetchModeEl = document.getElementById('ebay-listings-fetch-paging-mode');
+      if (fetchModeEl) fetchModeEl.value = fetchPagingMode;
+
+      return {
+        ebayListingsProductionToSandboxTime: prodTime,
+        ebayListingsSandboxToAirtableTime: sandboxTime,
+        ebayListingsScheduleTimezone: getLocalTimezone(),
+        ebaySandboxFetchLimit: fetchLimit,
+        ebaySandboxFetchPagingMode: fetchPagingMode
+      };
+    }
+
+    function mergeEbayListingAutomationSettings(settings) {
+      appConfig = {
+        ...(appConfig || {}),
+        ...settings,
+        ebayListingsAutomation: {
+          ...(appConfig?.ebayListingsAutomation || {}),
+          productionToSandboxTime: settings.ebayListingsProductionToSandboxTime,
+          sandboxToAirtableTime: settings.ebayListingsSandboxToAirtableTime,
+          timezone: settings.ebayListingsScheduleTimezone
+        }
+      };
+      return appConfig;
+    }
+
+    async function saveEbayListingAutomationSettings({ silent = false } = {}) {
+      try {
+        setEbayListingSettingsBusy(true);
+        await ensureConfigLoaded();
+        if (!window.phase2API || typeof window.phase2API.saveConfig !== 'function') {
+          throw new Error('Config save API is unavailable.');
+        }
+        const settings = readEbayListingAutomationSettings();
+        const nextConfig = mergeEbayListingAutomationSettings(settings);
+        const result = await window.phase2API.saveConfig(nextConfig);
+        if (!result?.success) throw new Error(result?.message || 'Failed to save eBay listings automation settings.');
+        const restartedLabels = [];
+        if (
+          window.ebaySandboxImportAPI &&
+          typeof window.ebaySandboxImportAPI.getScheduleStatus === 'function' &&
+          typeof window.ebaySandboxImportAPI.startSchedule === 'function'
+        ) {
+          const statusResult = await window.ebaySandboxImportAPI.getScheduleStatus();
+          const statuses = statusResult?.success ? statusResult.statuses || {} : {};
+          for (const [key, ui] of Object.entries(EBAY_LISTING_SCHEDULE_UI)) {
+            if (!statuses?.[key]?.active) continue;
+            const restartResult = await window.ebaySandboxImportAPI.startSchedule(buildEbayListingScheduleOptions(key));
+            if (!restartResult?.success) {
+              throw new Error(restartResult?.message || `Failed to update active schedule: ${ui.label}.`);
+            }
+            restartedLabels.push(ui.label);
+          }
+          if (restartedLabels.length > 0) await refreshEbayListingScheduleStatus();
+        }
+        if (!silent) {
+          const suffix = restartedLabels.length > 0 ? ` Updated active schedules: ${restartedLabels.join(', ')}.` : '';
+          appendPhase5Log(`eBay listings automation settings saved.${suffix}`, 'success');
+          setStatus(`eBay listings automation settings saved.${suffix}`, 'success');
+        }
+        return nextConfig;
+      } catch (error) {
+        if (!silent) {
+          appendPhase5Log(`Failed to save eBay listings automation settings: ${error.message}`, 'error');
+          setStatus(`Failed to save eBay listings automation settings: ${error.message}`, 'error');
+        }
+        if (silent) throw error;
+        return null;
+      } finally {
+        setEbayListingSettingsBusy(false);
+      }
+    }
+
     function buildEbayListingScheduleOptions(key) {
       const ui = EBAY_LISTING_SCHEDULE_UI[key];
       if (!ui) throw new Error('Unknown eBay listings automation.');
-      const time = document.getElementById(ui.timeId)?.value || '';
+      const settings = readEbayListingAutomationSettings();
+      mergeEbayListingAutomationSettings(settings);
+      const time = settings[ui.timeConfigKey] || '';
       if (!time) throw new Error(`Select a daily time for ${ui.label}.`);
-      const fetchLimit = Number(document.getElementById('ebay-listings-fetch-limit')?.value || appConfig?.ebaySandboxFetchLimit || 200) || 200;
-      const fetchPagingMode = document.getElementById('ebay-listings-fetch-paging-mode')?.value || appConfig?.ebaySandboxFetchPagingMode || 'first_page';
       return {
         ...appConfig,
+        ...settings,
         key,
         time,
-        timezone: getLocalTimezone(),
+        timezone: settings.ebayListingsScheduleTimezone,
         dryRun: false,
         ebaySandboxDryRun: false,
-        ebaySandboxFetchLimit: Math.max(1, Math.min(fetchLimit, 5000)),
-        ebaySandboxFetchPagingMode: fetchPagingMode
+        ebaySandboxFetchLimit: settings.ebaySandboxFetchLimit,
+        ebaySandboxFetchPagingMode: settings.ebaySandboxFetchPagingMode
       };
     }
 
@@ -856,7 +1005,7 @@
     async function runEbayListingScheduleNow(key) {
       const ui = EBAY_LISTING_SCHEDULE_UI[key];
       try {
-        setEbayListingScheduleBusy(key, true);
+        setEbayAutomationBusy(true);
         await ensureConfigLoaded();
         if (!window.ebaySandboxImportAPI || typeof window.ebaySandboxImportAPI.runScheduleNow !== 'function') {
           throw new Error('eBay listings schedule API is unavailable.');
@@ -872,7 +1021,7 @@
         appendPhase5Log(`eBay listings automation failed: ${error.message}`, 'error');
         setStatus(`eBay listings automation failed: ${error.message}`, 'error');
       } finally {
-        setEbayListingScheduleBusy(key, false);
+        setEbayAutomationBusy(false);
       }
     }
 
@@ -885,7 +1034,7 @@
 
     async function runSelectedPublishMode() {
       try {
-        setPublishingBusy(true);
+        setEbayAutomationBusy(true);
         await ensureConfigLoaded();
         const selections = getPublishSelections();
         if (!confirmProductionPublish(selections.env)) return;
@@ -906,7 +1055,7 @@
         appendPhase5Log(`Publish failed: ${error.message}`, 'error');
         setStatus(`Publish failed: ${error.message}`, 'error');
       } finally {
-        setPublishingBusy(false);
+        setEbayAutomationBusy(false);
       }
     }
 
@@ -1220,19 +1369,44 @@
           setStatus(`Failed to open Airtable row: ${error.message}`, 'error');
         }
       });
+      await loadPhase5Logs();
       renderPhase5Logs();
+      if (window.phase5API && typeof window.phase5API.onActivityLog === 'function') {
+        window.phase5API.onActivityLog((event, payload) => {
+          const entry = normalizePhase5LogEntry(payload || {});
+          if (entry.source === 'ebay_automation_lock') {
+            const lockMessage = String(entry.message || '').toLowerCase();
+            if (lockMessage.includes(' started.')) {
+              setEbayAutomationBusy(true);
+            } else if (lockMessage.includes(' finished.') || lockMessage.includes('stopped after error')) {
+              setEbayAutomationBusy(false);
+            }
+          }
+          phase5LogEntries.unshift(entry);
+          if (phase5LogEntries.length > 200) {
+            phase5LogEntries = phase5LogEntries.slice(0, 200);
+          }
+          renderPhase5Logs();
+        });
+      }
+      if (window.phase5API && typeof window.phase5API.onActivityLogReset === 'function') {
+        window.phase5API.onActivityLogReset(() => {
+          phase5LogEntries = [];
+          renderPhase5Logs();
+        });
+      }
       if (window.phase5API && typeof window.phase5API.onProgress === 'function') {
         window.phase5API.onProgress((event, payload) => {
           const message = payload?.message || payload?.stage || 'Phase 5 progress update';
           const type = payload?.stage === 'error' ? 'error' : payload?.stage === 'completed' ? 'success' : '';
-          appendPhase5Log(message, type);
+          appendPhase5Log(message, type, { persist: false });
         });
       }
       if (window.ebaySandboxImportAPI && typeof window.ebaySandboxImportAPI.onProgress === 'function') {
         window.ebaySandboxImportAPI.onProgress((event, payload) => {
           const message = payload?.message || payload?.stage || 'eBay listings automation update';
           const type = payload?.stage === 'error' ? 'error' : '';
-          appendPhase5Log(message, type);
+          appendPhase5Log(message, type, { persist: false });
         });
       }
       await refreshAll();

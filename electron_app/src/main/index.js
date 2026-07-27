@@ -80,10 +80,12 @@ let mainWindow;
 let phase4WritebackInterval = null;
 let isPhase4WritebackPollerRunning = false;
 let dbReady = false;
+let ebayAutomationLock = null;
 const LEGACY_EBAY_MOCK_TABLE = 'eBay Listings (API) (Mock)';
 const DEFAULT_EBAY_SANDBOX_TABLE = 'eBay Listings (API)';
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const DEFAULT_EBAY_FETCH_PAGING_MODE = 'first_page';
+const PHASE5_ACTIVITY_LOGS_KEY = 'phase5ActivityLogs';
 const DEFAULT_PHASE74_TITLE_RULES_PROMPT = [
   'eBay Title Rules Prompt',
   'Master Instructions - Follow Exactly',
@@ -729,6 +731,148 @@ function emitInventoryAutoChainLog(text, level = 'info') {
     }
     saveInventoryConfig('inventoryAutoChainLogs', existing);
   } catch (_) {}
+}
+
+function normalizePhase5LogType(type = '') {
+  const value = String(type || '').trim().toLowerCase();
+  if (value === 'error' || value === 'success') return value;
+  return '';
+}
+
+function getPhase5ActivityLogs() {
+  const logs = getInventoryConfig(PHASE5_ACTIVITY_LOGS_KEY);
+  return Array.isArray(logs) ? logs : [];
+}
+
+function clearPhase5ActivityLogs(reason = '') {
+  saveInventoryConfig(PHASE5_ACTIVITY_LOGS_KEY, []);
+  try {
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      mainWindow.webContents.send('phase5:activity-log-reset', {
+        at: new Date().toISOString(),
+        reason: String(reason || '').trim()
+      });
+    }
+  } catch (_) {}
+}
+
+function appendPhase5ActivityLog(message, type = '', source = 'phase5') {
+  const text = String(message || '').trim();
+  if (!text) return null;
+  const now = new Date();
+  const entry = {
+    time: now.toLocaleTimeString(),
+    message: text,
+    type: normalizePhase5LogType(type),
+    source: String(source || 'phase5').trim() || 'phase5',
+    at: now.toISOString()
+  };
+  const logs = getPhase5ActivityLogs();
+  logs.unshift(entry);
+  if (logs.length > 300) logs.length = 300;
+  saveInventoryConfig(PHASE5_ACTIVITY_LOGS_KEY, logs);
+  return entry;
+}
+
+function emitPhase5ActivityLog(sender, message, type = '', source = 'phase5') {
+  const entry = appendPhase5ActivityLog(message, type, source);
+  if (!entry) return null;
+  try {
+    if (sender && !sender.isDestroyed()) {
+      sender.send('phase5:activity-log', entry);
+    } else if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      mainWindow.webContents.send('phase5:activity-log', entry);
+    }
+  } catch (_) {}
+  return entry;
+}
+
+function progressLogType(payload = {}) {
+  const stage = normalizeText(payload?.stage).toLowerCase();
+  const message = normalizeText(payload?.message).toLowerCase();
+  if (stage === 'error' || stage.includes('failed') || stage.includes('error') || message.includes('failed')) {
+    return 'error';
+  }
+  if (stage === 'completed' || stage.includes('complete') || message.includes(' completed')) {
+    return 'success';
+  }
+  return '';
+}
+
+function getEbayAutomationLockStatus() {
+  return ebayAutomationLock
+    ? {
+        running: true,
+        key: ebayAutomationLock.key,
+        label: ebayAutomationLock.label,
+        startedAt: ebayAutomationLock.startedAt
+      }
+    : {
+        running: false,
+        key: '',
+        label: '',
+        startedAt: ''
+      };
+}
+
+function acquireEbayAutomationLock(key = '', label = '') {
+  if (ebayAutomationLock) {
+    return {
+      acquired: false,
+      status: getEbayAutomationLockStatus(),
+      message:
+        `Another eBay automation is already running: ${ebayAutomationLock.label || ebayAutomationLock.key}. ` +
+        'Please wait for it to finish before starting another fetch or publish.'
+    };
+  }
+  clearPhase5ActivityLogs(`starting:${String(key || '').trim()}`);
+  ebayAutomationLock = {
+    key: String(key || 'ebay_automation').trim() || 'ebay_automation',
+    label: String(label || 'eBay automation').trim() || 'eBay automation',
+    startedAt: new Date().toISOString()
+  };
+  return {
+    acquired: true,
+    status: getEbayAutomationLockStatus()
+  };
+}
+
+function releaseEbayAutomationLock(key = '') {
+  if (!ebayAutomationLock) return;
+  if (key && ebayAutomationLock.key !== key) return;
+  ebayAutomationLock = null;
+}
+
+async function withEbayAutomationLock(key = '', label = '', sender = null, runner = async () => ({})) {
+  const lock = acquireEbayAutomationLock(key, label);
+  if (!lock.acquired) {
+    emitPhase5ActivityLog(sender, lock.message, 'error', 'ebay_automation_lock');
+    return {
+      success: false,
+      skipped: true,
+      reason: 'ebay_automation_already_running',
+      message: lock.message,
+      lock: lock.status
+    };
+  }
+  emitPhase5ActivityLog(sender, `${label} started.`, '', 'ebay_automation_lock');
+  let completed = false;
+  try {
+    const result = await runner();
+    completed = result?.success !== false;
+    return result;
+  } catch (error) {
+    completed = false;
+    throw error;
+  } finally {
+    releaseEbayAutomationLock(key);
+    emitPhase5ActivityLog(
+      sender,
+      completed ? `${label} finished.` : `${label} stopped after error.`,
+      completed ? 'success' : 'error',
+      'ebay_automation_lock'
+    );
+  }
 }
 
 function buildInventoryAutoChainLogEntry(text, level = 'info') {
@@ -3196,6 +3340,27 @@ ipcMain.handle('phase2-clear-task-cache', async () => {
   return { success: true, message: 'Phase 2 task cache cleared.' };
 });
 
+ipcMain.handle('phase5-get-activity-logs', async () => {
+  return getPhase5ActivityLogs();
+});
+
+ipcMain.handle('phase5-append-activity-log', async (_, entry = {}) => {
+  const saved = appendPhase5ActivityLog(
+    entry.message || entry.text,
+    entry.type || entry.level,
+    entry.source || 'phase5_ui'
+  );
+  if (!saved) {
+    return { success: false, message: 'Log message is required.' };
+  }
+  return { success: true, entry: saved };
+});
+
+ipcMain.handle('phase5-clear-activity-logs', async () => {
+  clearPhase5ActivityLogs('manual_clear');
+  return { success: true };
+});
+
 ipcMain.handle('phase2-writeback-start', async (_, options = {}) => {
   try {
     const config = buildPhase2WritebackConfig(options);
@@ -4815,12 +4980,35 @@ ipcMain.handle('phase5:createBatchFromListings', async (_, options = {}) => {
 });
 
 ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
+  let acquiredEbayAutomationLockKey = '';
+  let acquiredEbayAutomationLockLabel = '';
+  let completedEbayAutomation = false;
   try {
     const stored = getInventoryConfig('phase2Config') || {};
     const phase5Mode = String(options.phase5Mode || stored.phase5Mode || 'A').trim().toUpperCase() === 'B' ? 'B' : 'A';
     if (phase5Mode === 'B') {
       throw new Error('Phase 5 Option B is scheduled auto-push. Use Start Auto-Push or Run Auto-Push Now.');
     }
+    const lockLabel = 'Publish approved items';
+    const lock = acquireEbayAutomationLock('phase5:publishApproved', lockLabel);
+    if (!lock.acquired) {
+      emitPhase5Progress(event.sender, {
+        stage: 'error',
+        percent: 100,
+        counts: null,
+        message: lock.message
+      });
+      return {
+        success: false,
+        skipped: true,
+        reason: 'ebay_automation_already_running',
+        message: lock.message,
+        lock: lock.status
+      };
+    }
+    acquiredEbayAutomationLockKey = 'phase5:publishApproved';
+    acquiredEbayAutomationLockLabel = lockLabel;
+    emitPhase5ActivityLog(event.sender, `${lockLabel} started.`, '', 'ebay_automation_lock');
     stopPhase5AutoPushSchedule();
     const runOptionsBase = {
       ...stored,
@@ -4846,7 +5034,7 @@ ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
     };
     const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase5:publishApproved');
 
-    event.sender.send('phase5:progress', {
+    emitPhase5Progress(event.sender, {
       stage: 'phase5_load_schema',
       percent: 1,
       counts: null,
@@ -4854,7 +5042,7 @@ ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
     });
 
     const summary = await runPhase5PublishApproved(runOptions, progress => {
-      event.sender.send('phase5:progress', progress);
+      emitPhase5Progress(event.sender, progress);
     });
 
     const merged = {
@@ -4875,13 +5063,14 @@ ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
     };
     saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache(merged));
 
+    completedEbayAutomation = true;
     return {
       success: true,
       summary
     };
   } catch (error) {
     const message = formatDetailedErrorMessage(error);
-    event.sender.send('phase5:progress', {
+    emitPhase5Progress(event.sender, {
       stage: 'error',
       percent: 100,
       counts: null,
@@ -4891,6 +5080,18 @@ ipcMain.handle('phase5:publishApproved', async (event, options = {}) => {
       success: false,
       message
     };
+  } finally {
+    if (acquiredEbayAutomationLockKey) {
+      releaseEbayAutomationLock(acquiredEbayAutomationLockKey);
+      emitPhase5ActivityLog(
+        event.sender,
+        completedEbayAutomation
+          ? `${acquiredEbayAutomationLockLabel || 'eBay automation'} finished.`
+          : `${acquiredEbayAutomationLockLabel || 'eBay automation'} stopped after error.`,
+        completedEbayAutomation ? 'success' : 'error',
+        'ebay_automation_lock'
+      );
+    }
   }
 });
 
@@ -4992,49 +5193,46 @@ ipcMain.handle('phase5:startAutoPush', async (event, options = {}) => {
     };
     const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase5:startAutoPush');
 
-    const execute = async ({ trigger }) => {
-      try {
-        if (event?.sender && !event.sender.isDestroyed()) {
-          event.sender.send('phase5:progress', {
-            stage: 'phase5_publish',
-            percent: 1,
-            counts: null,
-            message: `Phase 5 Option B tick started (${trigger}).`
-          });
-        }
-      } catch (_) {}
-      const runOptionsForTick = await attachPhase5PublishedState(runOptionsBase, 'phase5:startAutoPush:tick');
-      const summary = await runPhase5PublishApproved(runOptionsForTick, progress => {
-        try {
-          if (event?.sender && !event.sender.isDestroyed()) {
-            event.sender.send('phase5:progress', progress);
-          }
-        } catch (_) {}
-      });
-      const merged = {
-        ...stored,
-        ...options,
-        phase5Mode: 'B',
-        phase5AutoPushEnabled: true,
-        phase5AutoPushCron: runOptionsBase.phase5AutoPushCron,
-        phase5AutoPushTimezone: runOptionsBase.phase5AutoPushTimezone,
-        phase5AutoPushEligibilityFieldName: runOptionsBase.phase5AutoPushEligibilityFieldName,
-        phase5AutoPushEligibilityValues: runOptionsBase.phase5AutoPushEligibilityValues,
-        phase5EbayEnvironment: runOptionsBase.phase5EbayEnvironment,
-        phase5EbayClientId: runOptionsBase.phase5EbayClientId,
-        phase5EbayDevId: runOptionsBase.phase5EbayDevId,
-        phase5EbayClientSecret: runOptionsBase.phase5EbayClientSecret,
-        phase5EbayRuName: runOptionsBase.phase5EbayRuName,
-        phase5ListingsTable: runOptionsBase.phase5ListingsTable,
-        phase5ApprovalFieldName: runOptionsBase.phase5ApprovalFieldName,
-        phase5GroupFieldName: runOptionsBase.phase5GroupFieldName,
-        phase5GroupValue: runOptionsBase.phase5GroupValue,
-        phase5SchemaCsvPath: runOptionsBase.phase5SchemaCsvPath,
-        phase5AutoPushActive: true
-      };
-      saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache(merged));
-      return { success: true, summary };
-    };
+    const execute = async ({ trigger }) => withEbayAutomationLock(
+      'phase5:autoPushTick',
+      'Scheduled publish approved items',
+      event?.sender || null,
+      async () => {
+        emitPhase5Progress(event?.sender || null, {
+          stage: 'phase5_publish',
+          percent: 1,
+          counts: null,
+          message: `Phase 5 Option B tick started (${trigger}).`
+        });
+        const runOptionsForTick = await attachPhase5PublishedState(runOptionsBase, 'phase5:startAutoPush:tick');
+        const summary = await runPhase5PublishApproved(runOptionsForTick, progress => {
+          emitPhase5Progress(event?.sender || null, progress);
+        });
+        const merged = {
+          ...stored,
+          ...options,
+          phase5Mode: 'B',
+          phase5AutoPushEnabled: true,
+          phase5AutoPushCron: runOptionsBase.phase5AutoPushCron,
+          phase5AutoPushTimezone: runOptionsBase.phase5AutoPushTimezone,
+          phase5AutoPushEligibilityFieldName: runOptionsBase.phase5AutoPushEligibilityFieldName,
+          phase5AutoPushEligibilityValues: runOptionsBase.phase5AutoPushEligibilityValues,
+          phase5EbayEnvironment: runOptionsBase.phase5EbayEnvironment,
+          phase5EbayClientId: runOptionsBase.phase5EbayClientId,
+          phase5EbayDevId: runOptionsBase.phase5EbayDevId,
+          phase5EbayClientSecret: runOptionsBase.phase5EbayClientSecret,
+          phase5EbayRuName: runOptionsBase.phase5EbayRuName,
+          phase5ListingsTable: runOptionsBase.phase5ListingsTable,
+          phase5ApprovalFieldName: runOptionsBase.phase5ApprovalFieldName,
+          phase5GroupFieldName: runOptionsBase.phase5GroupFieldName,
+          phase5GroupValue: runOptionsBase.phase5GroupValue,
+          phase5SchemaCsvPath: runOptionsBase.phase5SchemaCsvPath,
+          phase5AutoPushActive: true
+        };
+        saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache(merged));
+        return { success: true, summary };
+      }
+    );
 
     const status = startPhase5AutoPushSchedule(
       {
@@ -5158,23 +5356,28 @@ ipcMain.handle('phase5:runAutoPushNow', async (event, options = {}) => {
     };
     const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase5:runAutoPushNow');
 
-    const result = await runPhase5AutoPushNow(async () => {
-      const summary = await runPhase5PublishApproved(runOptions, progress => {
-        event.sender.send('phase5:progress', progress);
-      });
-      saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
-        ...stored,
-        ...options,
-        phase5Mode: 'B',
-        phase5AutoPushEnabled: true,
-        phase5EbayEnvironment: runOptions.phase5EbayEnvironment,
-        phase5EbayClientId: runOptions.phase5EbayClientId,
-        phase5EbayDevId: runOptions.phase5EbayDevId,
-        phase5EbayClientSecret: runOptions.phase5EbayClientSecret,
-        phase5EbayRuName: runOptions.phase5EbayRuName
-      }));
-      return { success: true, summary };
-    });
+    const result = await runPhase5AutoPushNow(async () => withEbayAutomationLock(
+      'phase5:runAutoPushNow',
+      'Publish approved items',
+      event.sender,
+      async () => {
+        const summary = await runPhase5PublishApproved(runOptions, progress => {
+          emitPhase5Progress(event.sender, progress);
+        });
+        saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
+          ...stored,
+          ...options,
+          phase5Mode: 'B',
+          phase5AutoPushEnabled: true,
+          phase5EbayEnvironment: runOptions.phase5EbayEnvironment,
+          phase5EbayClientId: runOptions.phase5EbayClientId,
+          phase5EbayDevId: runOptions.phase5EbayDevId,
+          phase5EbayClientSecret: runOptions.phase5EbayClientSecret,
+          phase5EbayRuName: runOptions.phase5EbayRuName
+        }));
+        return { success: true, summary };
+      }
+    ));
 
     return {
       success: !!result?.success,
@@ -5480,7 +5683,33 @@ function buildDailyCronFromTime(value = '') {
   return `${minute} ${hour} * * *`;
 }
 
+function applyEbayCredentialSetForEnvironment(config = {}, environment = 'sandbox') {
+  const targetEnvironment = normalizeEbayEnvironment(environment);
+  const phase5EbayCredentialSets = getEbayCredentialSets({
+    ...config,
+    phase5EbayEnvironment: targetEnvironment
+  });
+  const activeCredentials = phase5EbayCredentialSets[targetEnvironment] || normalizeEbayCredentialSet({});
+  return {
+    ...config,
+    phase5EbayEnvironment: targetEnvironment,
+    phase5EbayCredentialSets,
+    phase5EbayClientId: activeCredentials.phase5EbayClientId,
+    phase5EbayDevId: activeCredentials.phase5EbayDevId,
+    phase5EbayClientSecret: activeCredentials.phase5EbayClientSecret,
+    phase5EbayRuName: activeCredentials.phase5EbayRuName,
+    phase5EbayRefreshToken: activeCredentials.phase5EbayRefreshToken,
+    phase5EbayUserAccessToken: activeCredentials.phase5EbayUserAccessToken,
+    phase5EbayRefreshScope: activeCredentials.phase5EbayRefreshScope,
+    phase5EbayUserAccessTokenIssuedAt: activeCredentials.phase5EbayUserAccessTokenIssuedAt
+  };
+}
+
 function emitEbayListingsScheduleProgress(sender, payload = {}) {
+  const message = normalizeText(payload?.message || payload?.stage || '');
+  if (message) {
+    appendPhase5ActivityLog(message, progressLogType(payload), 'ebay_listings_automation');
+  }
   try {
     if (sender && !sender.isDestroyed()) {
       sender.send('ebaysandbox:progress', payload);
@@ -5492,16 +5721,182 @@ function emitEbayListingsScheduleProgress(sender, payload = {}) {
   } catch (_) {}
 }
 
+function emitPhase5Progress(sender, payload = {}) {
+  const message = normalizeText(payload?.message || payload?.stage || '');
+  if (message) {
+    appendPhase5ActivityLog(message, progressLogType(payload), 'phase5_publish');
+  }
+  try {
+    if (sender && !sender.isDestroyed()) {
+      sender.send('phase5:progress', payload);
+      return;
+    }
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+      mainWindow.webContents.send('phase5:progress', payload);
+    }
+  } catch (_) {}
+}
+
+async function runScheduledSandboxPostImportAutomation({
+  runOptions = {},
+  summary = {},
+  emitProgress = () => {},
+  stored = {}
+} = {}) {
+  const batchIpns = Array.isArray(summary?.ebaySandboxBatchIpns)
+    ? summary.ebaySandboxBatchIpns.map(value => normalizeUpperIpn(value)).filter(Boolean)
+    : [];
+
+  try {
+    emitProgress({
+      stage: 'ebaysandbox_brand_propagation',
+      percent: 94,
+      counts: summary,
+      message: 'Starting Brand propagation from eBay Item Specifics JSON...'
+    });
+    const brandPropagationSummary = await runEbayBrandPropagation({
+      ...runOptions,
+      sourceBaseId: runOptions.airtableBaseId,
+      destinationBaseId: runOptions.itemSpecificsBaseId,
+      sourceTableName: runOptions.ebaySandboxTableName || DEFAULT_EBAY_SANDBOX_TABLE,
+      sourceIpns: batchIpns
+    }, progress => {
+      emitProgress(progress);
+    });
+    summary.brandPropagation = brandPropagationSummary;
+    emitProgress({
+      stage: 'ebaysandbox_brand_propagation',
+      percent: 100,
+      counts: summary,
+      message:
+        `Brand propagation completed: scanned=${brandPropagationSummary?.sourceRowsScanned || 0}, ` +
+        `written=${brandPropagationSummary?.written || 0}`
+    });
+  } catch (error) {
+    const detail = error?.message || String(error);
+    summary.brandPropagation = {
+      success: false,
+      message: detail
+    };
+    emitProgress({
+      stage: 'ebaysandbox_brand_propagation_error',
+      percent: 100,
+      counts: summary,
+      message: `Brand propagation failed: ${detail}`
+    });
+  }
+
+  const autoRunPostImport =
+    String(
+      runOptions.ebaySandboxAutoRunPostImportPhases ??
+        stored.ebaySandboxAutoRunPostImportPhases ??
+        process.env.EBAY_SANDBOX_AUTO_RUN_POST_IMPORT_PHASES ??
+        'true'
+    )
+      .trim()
+      .toLowerCase() !== 'false';
+  const wroteListingRows = Number(summary?.recordsWritten || 0) > 0;
+  const hasFetchedBatchIpns = batchIpns.length > 0;
+
+  if (autoRunPostImport && (wroteListingRows || hasFetchedBatchIpns)) {
+    emitProgress({
+      stage: 'ebaysandbox_post_import',
+      percent: 99,
+      counts: summary,
+      message: 'Starting post-import automation: batch creation -> Phase4 -> Phase6 -> Phase7.2 -> Phase7.4...'
+    });
+
+    try {
+      const postImportSummary = await runPostEbayListingsAutomation({
+        ...runOptions,
+        phase4DListingsTable: resolveListingsTableName(
+          runOptions.phase4DListingsTable,
+          runOptions.ebaySandboxTableName,
+          runOptions.phase6ListingsTable,
+          runOptions.phase74ListingsTable,
+          DEFAULT_EBAY_LISTINGS_TABLE
+        ),
+        phase6ListingsTable: resolveListingsTableName(
+          runOptions.phase6ListingsTable,
+          runOptions.ebaySandboxTableName,
+          runOptions.phase4DListingsTable,
+          runOptions.phase74ListingsTable,
+          DEFAULT_EBAY_LISTINGS_TABLE
+        ),
+        phase74ListingsTable: resolveListingsTableName(
+          runOptions.phase74ListingsTable,
+          runOptions.ebaySandboxTableName,
+          runOptions.phase6ListingsTable,
+          runOptions.phase4DListingsTable,
+          DEFAULT_EBAY_LISTINGS_TABLE
+        ),
+        ebaySandboxBatchIpns: batchIpns
+      }, {
+        onProgress: payload => {
+          emitProgress(payload);
+        }
+      });
+      summary.postImportAutomation = postImportSummary;
+      if (postImportSummary?.blocked) {
+        emitProgress({
+          stage: 'ebaysandbox_post_import_blocked',
+          percent: 100,
+          counts: summary,
+          message: postImportSummary?.message || 'Post-import automation blocked by missing configuration.'
+        });
+      } else {
+        emitProgress({
+          stage: 'ebaysandbox_post_import',
+          percent: 100,
+          counts: summary,
+          message: 'Post-import automation completed: batch creation -> Phase4 -> Phase6 -> Phase7.2 -> Phase7.4.'
+        });
+      }
+    } catch (automationError) {
+      const failedPhase = normalizeText(automationError?.postImportPhaseLabel || summary.failedPhaseLabel || '');
+      const detail = formatDetailedErrorMessage(automationError);
+      const debug = formatErrorDebugContext(automationError);
+      summary.postImportAutomationError = detail;
+      if (failedPhase) {
+        summary.postImportFailedPhase = failedPhase;
+      }
+      const failureMessage = failedPhase
+        ? `Post-import automation failed at ${failedPhase}: ${detail}`
+        : `Post-import automation failed: ${detail}`;
+      emitInventoryAutoChainLog(failureMessage, 'error');
+      if (debug) {
+        emitInventoryAutoChainLog(`Post-import automation debug: ${debug}`, 'error');
+      }
+      emitProgress({
+        stage: 'ebaysandbox_post_import_failed',
+        percent: 100,
+        counts: summary,
+        message: failureMessage
+      });
+    }
+  } else if (autoRunPostImport && !wroteListingRows && !hasFetchedBatchIpns) {
+    const reason =
+      `Post-import automation skipped: no new listing rows were written and no batch IPNs were detected ` +
+      `(recordsWritten=${Number(summary?.recordsWritten || 0)}, recordsPlanned=${Number(summary?.recordsPlanned || 0)}, batchIpns=${batchIpns.length}).`;
+    emitInventoryAutoChainLog(reason);
+    emitProgress({
+      stage: 'ebaysandbox_post_import_skipped_no_writes',
+      percent: 100,
+      counts: summary,
+      message: reason
+    });
+  }
+}
+
 function buildScheduledEbayListingsRunOptions(key = '', options = {}) {
   const schedule = EBAY_LISTINGS_SCHEDULES[key];
   if (!schedule) throw new Error('Unknown eBay listings schedule.');
   const stored = getInventoryConfig('phase2Config') || {};
-  return {
+  const baseOptions = applyEbayCredentialSetForEnvironment({
     ...stored,
     ...options,
     dryRun: false,
     ebaySandboxDryRun: false,
-    phase5EbayEnvironment: schedule.environment,
     ebaySandboxDestination: schedule.environment === 'production' ? 'sandbox' : 'airtable',
     ebaySandboxTableName: resolveEbaySandboxTableName(
       options.ebaySandboxTableName,
@@ -5517,41 +5912,62 @@ function buildScheduledEbayListingsRunOptions(key = '', options = {}) {
         stored.ebaySandboxFetchMode ||
         DEFAULT_EBAY_FETCH_PAGING_MODE
     )
-  };
+  }, schedule.environment);
+  return baseOptions;
 }
 
 function makeEbayListingsScheduleRunner(key = '', options = {}, sender = null) {
   return async context => {
     const schedule = EBAY_LISTINGS_SCHEDULES[key];
-    const runOptions = await attachPhase5PublishedState(
-      buildScheduledEbayListingsRunOptions(key, options),
-      `ebayListingsSchedule:${key}`
+    return withEbayAutomationLock(
+      `ebaylistings:${key}`,
+      schedule?.label || 'eBay listings automation',
+      sender,
+      async () => {
+        const runOptions = await attachPhase5PublishedState(
+          buildScheduledEbayListingsRunOptions(key, options),
+          `ebayListingsSchedule:${key}`
+        );
+        emitEbayListingsScheduleProgress(sender, {
+          stage: `ebaylistings_schedule_${key}`,
+          percent: 1,
+          counts: null,
+          message: `${schedule.label} scheduled run started (${context?.trigger || 'scheduled'}).`
+        });
+        const summary = await runEbaySandboxInventoryImport(runOptions, progress => {
+          emitEbayListingsScheduleProgress(sender, progress);
+        });
+        const stored = getInventoryConfig('phase2Config') || {};
+        if (key === 'sandbox_to_airtable') {
+          await runScheduledSandboxPostImportAutomation({
+            runOptions,
+            summary,
+            stored,
+            emitProgress: progress => {
+              emitEbayListingsScheduleProgress(sender, progress);
+            }
+          });
+        }
+        saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
+          ...stored,
+          ...options,
+          phase5EbayEnvironment: runOptions.phase5EbayEnvironment,
+          ebaySandboxDryRun: false,
+          ebaySandboxTableName: runOptions.ebaySandboxTableName,
+          ebaySandboxFetchLimit: runOptions.ebaySandboxFetchLimit,
+          ebaySandboxFetchPagingMode: runOptions.ebaySandboxFetchPagingMode,
+          [schedule.activeKey]: true
+        }));
+        return { success: true, summary };
+      }
     );
-    emitEbayListingsScheduleProgress(sender, {
-      stage: `ebaylistings_schedule_${key}`,
-      percent: 1,
-      counts: null,
-      message: `${schedule.label} scheduled run started (${context?.trigger || 'scheduled'}).`
-    });
-    const summary = await runEbaySandboxInventoryImport(runOptions, progress => {
-      emitEbayListingsScheduleProgress(sender, progress);
-    });
-    const stored = getInventoryConfig('phase2Config') || {};
-    saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache({
-      ...stored,
-      ...options,
-      phase5EbayEnvironment: runOptions.phase5EbayEnvironment,
-      ebaySandboxDryRun: false,
-      ebaySandboxTableName: runOptions.ebaySandboxTableName,
-      ebaySandboxFetchLimit: runOptions.ebaySandboxFetchLimit,
-      ebaySandboxFetchPagingMode: runOptions.ebaySandboxFetchPagingMode,
-      [schedule.activeKey]: true
-    }));
-    return { success: true, summary };
   };
 }
 
 ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
+  let acquiredEbayAutomationLockKey = '';
+  let acquiredEbayAutomationLockLabel = '';
+  let completedEbayAutomation = false;
   try {
     const stored = getInventoryConfig('phase2Config') || {};
     const dryRun =
@@ -5581,6 +5997,29 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
       )
     };
     const runOptions = await attachPhase5PublishedState(runOptionsBase, 'ebaysandbox:run');
+    if (!dryRun) {
+      const lockLabel = 'Sandbox to Airtable import';
+      const lock = acquireEbayAutomationLock('ebaysandbox:run', lockLabel);
+      if (!lock.acquired) {
+        event.sender.send('ebaysandbox:progress', {
+          stage: 'error',
+          percent: 100,
+          counts: null,
+          message: lock.message
+        });
+        emitPhase5ActivityLog(event.sender, lock.message, 'error', 'ebay_automation_lock');
+        return {
+          success: false,
+          skipped: true,
+          reason: 'ebay_automation_already_running',
+          message: lock.message,
+          lock: lock.status
+        };
+      }
+      acquiredEbayAutomationLockKey = 'ebaysandbox:run';
+      acquiredEbayAutomationLockLabel = lockLabel;
+      emitPhase5ActivityLog(event.sender, `${lockLabel} started.`, '', 'ebay_automation_lock');
+    }
 
     const summary = await runEbaySandboxInventoryImport(runOptions, progress => {
       event.sender.send('ebaysandbox:progress', progress);
@@ -5731,6 +6170,7 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
       });
     }
 
+    completedEbayAutomation = true;
     return {
       success: true,
       summary
@@ -5747,6 +6187,18 @@ ipcMain.handle('ebaysandbox:run', async (event, options = {}) => {
       success: false,
       message
     };
+  } finally {
+    if (acquiredEbayAutomationLockKey) {
+      releaseEbayAutomationLock(acquiredEbayAutomationLockKey);
+      emitPhase5ActivityLog(
+        event.sender,
+        completedEbayAutomation
+          ? `${acquiredEbayAutomationLockLabel || 'eBay automation'} finished.`
+          : `${acquiredEbayAutomationLockLabel || 'eBay automation'} stopped after error.`,
+        completedEbayAutomation ? 'success' : 'error',
+        'ebay_automation_lock'
+      );
+    }
   }
 });
 

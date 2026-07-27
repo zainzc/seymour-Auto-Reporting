@@ -31,6 +31,10 @@ const PHASE74_ITEM_TITLE_FIELD = 'Item Title';
 const PHASE74_ITEM_DESCRIPTION_FIELD = 'Item Description';
 const RAW_ITEM_JSON_FIELD = 'Raw eBay Item JSON';
 const RAW_OFFER_JSON_FIELD = 'Raw eBay Offer JSON';
+const LISTING_STATUS_FIELD = 'Listing Status';
+const MISSING_DETECTED_FIELD = 'Ended/Missing Detected At';
+const ACTIVE_LISTING_STATUS_VALUE = 'Active';
+const ENDED_LISTING_STATUS_VALUE = 'Ended';
 const EBAY_TRADING_COMPATIBILITY_LEVEL = '1271';
 const EBAY_TRADING_DEFAULT_SITE_ID = '0';
 
@@ -72,8 +76,10 @@ const UPSERT_FIELDS = [
   'Price',
   'Currency',
   'eBay Category ID',
+  LISTING_STATUS_FIELD,
   'Source',
   'eBay Environment',
+  MISSING_DETECTED_FIELD,
   'Last Synced At'
 ];
 
@@ -267,6 +273,60 @@ function normalizeFetchPagingMode(value = '') {
     return 'continue_from_last_page';
   }
   return DEFAULT_FETCH_PAGING_MODE;
+}
+
+function isActiveListingStatus(value = '') {
+  const text = normalizeText(value).toLowerCase();
+  return !text || text === 'active';
+}
+
+function isEndedListingStatus(value = '') {
+  const text = normalizeText(value).toLowerCase();
+  return text === 'ended' || text === 'completed' || text === 'deleted' || text === 'removed' || text === 'inactive';
+}
+
+const EBAY_CREDENTIAL_FIELDS = [
+  'phase5EbayClientId',
+  'phase5EbayDevId',
+  'phase5EbayClientSecret',
+  'phase5EbayRuName',
+  'phase5EbayRefreshToken',
+  'phase5EbayUserAccessToken',
+  'phase5EbayRefreshScope',
+  'phase5EbayUserAccessTokenIssuedAt'
+];
+
+function hasAnyEbayCredentialValue(value = {}) {
+  if (!value || typeof value !== 'object') return false;
+  return EBAY_CREDENTIAL_FIELDS.some(field => Boolean(normalizeText(value[field] || '')));
+}
+
+function applyEbayCredentialsForEnvironment(runOptions = {}, environment = 'sandbox') {
+  const targetEnvironment = normalizeEnvironment(environment);
+  const sets =
+    runOptions.phase5EbayCredentialSets && typeof runOptions.phase5EbayCredentialSets === 'object'
+      ? runOptions.phase5EbayCredentialSets
+      : {};
+  const activeSet =
+    sets[targetEnvironment] && typeof sets[targetEnvironment] === 'object'
+      ? sets[targetEnvironment]
+      : {};
+
+  if (!hasAnyEbayCredentialValue(activeSet)) {
+    return {
+      ...runOptions,
+      phase5EbayEnvironment: targetEnvironment
+    };
+  }
+
+  const next = {
+    ...runOptions,
+    phase5EbayEnvironment: targetEnvironment
+  };
+  for (const field of EBAY_CREDENTIAL_FIELDS) {
+    next[field] = normalizeText(activeSet[field] || runOptions[field] || '');
+  }
+  return next;
 }
 
 function getNextFetchPageStateMap(runOptions = {}) {
@@ -712,10 +772,12 @@ function parseTradingApiItems(responseXml = '') {
     const title = normalizeText(extractTagValue(itemXml, 'Title'));
     const description = normalizeText(extractTagValue(itemXml, 'Description'));
     const condition = normalizeText(extractTagValue(itemXml, 'ConditionDisplayName') || extractTagValue(itemXml, 'ConditionID'));
+    const listingStatus = normalizeText(extractTagValue(itemXml, 'ListingStatus') || extractTagValue(itemXml, 'Status'));
 
     out.push({
       item: {
         sku,
+        listingStatus: listingStatus || ACTIVE_LISTING_STATUS_VALUE,
         condition,
         conditionDescription: '',
         product: {
@@ -1425,8 +1487,8 @@ function buildTradingImportCollections(syncResult = {}, fetchLimit = 0) {
 
   const selectedBulk =
     Number(fetchLimit) > 0
-      ? bulkListings.slice(0, Number(fetchLimit))
-      : bulkListings;
+      ? bulkListings.filter(item => isActiveListingStatus(item?.listingStatus)).slice(0, Number(fetchLimit))
+      : bulkListings.filter(item => isActiveListingStatus(item?.listingStatus));
 
   const inventoryItems = [];
   const offersBySku = new Map();
@@ -1447,6 +1509,8 @@ function buildTradingImportCollections(syncResult = {}, fetchLimit = 0) {
             ? bulk.quantity
             : 0;
     const listingId = normalizeText(deep?.ebayItemId || itemId);
+    const listingStatus = normalizeText(deep?.listingStatus || bulk?.listingStatus || ACTIVE_LISTING_STATUS_VALUE);
+    if (!isActiveListingStatus(listingStatus)) continue;
     const priceValue = normalizeText(deep?.currentPrice || bulk?.currentPrice);
     const currencyValue = normalizeText(deep?.currency || '');
     const categoryId = normalizeText(deep?.categoryId || '');
@@ -1460,6 +1524,7 @@ function buildTradingImportCollections(syncResult = {}, fetchLimit = 0) {
 
     inventoryItems.push({
       sku,
+      listingStatus: listingStatus || ACTIVE_LISTING_STATUS_VALUE,
       condition: normalizeText(deep?.conditionDisplayName || deep?.conditionId || ''),
       conditionDescription: '',
       rawDeepListing: deep || null,
@@ -1535,7 +1600,8 @@ async function fetchTradingActiveListings(
       throw error;
     }
 
-    const pageRows = parseTradingApiItems(responseXml);
+    const pageRows = parseTradingApiItems(responseXml)
+      .filter(row => isActiveListingStatus(row?.item?.listingStatus));
     for (const row of pageRows) {
       if (inventoryItems.length >= fetchLimit) break;
       inventoryItems.push(row.item);
@@ -1563,7 +1629,8 @@ async function fetchTradingActiveListings(
   return {
     inventoryItems: inventoryItems.slice(0, fetchLimit),
     offersBySku,
-    pagesFetched: pageNumber - 1
+    pagesFetched: pageNumber - 1,
+    totalPages
   };
 }
 
@@ -1779,8 +1846,9 @@ function buildSeoKeywords(parts = []) {
 
 async function runEbayListingSync(options = {}, progressCallback = () => {}) {
   const stored = getInventoryConfig('phase2Config') || {};
-  const runOptions = { ...stored, ...options };
-  const environment = normalizeEnvironment(runOptions.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox');
+  const mergedOptions = { ...stored, ...options };
+  const environment = normalizeEnvironment(mergedOptions.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox');
+  const runOptions = applyEbayCredentialsForEnvironment(mergedOptions, environment);
   const clientId = normalizeText(runOptions.phase5EbayClientId || process.env.EBAY_CLIENT_ID || '');
   const clientSecret = normalizeText(runOptions.phase5EbayClientSecret || process.env.EBAY_CLIENT_SECRET || '');
   const userAccessToken = normalizeOAuthToken(
@@ -2368,8 +2436,10 @@ function buildUpsertFields(
     Price: price,
     Currency: currency,
     'eBay Category ID': categoryId,
+    [LISTING_STATUS_FIELD]: normalizeText(item?.listingStatus || ACTIVE_LISTING_STATUS_VALUE) || ACTIVE_LISTING_STATUS_VALUE,
     Source: sourceLabel,
     'eBay Environment': environment,
+    [MISSING_DETECTED_FIELD]: null,
     'Last Synced At': new Date().toISOString()
   };
   if (hasLegacyPrimaryField) {
@@ -2452,6 +2522,85 @@ async function flushBatch(airtableService, tableName, rows = [], summary = {}, d
       incompatibleFields.forEach(name => skippedIncompatible.add(name));
       attempts += 1;
     }
+  }
+}
+
+function shouldReconcileMissingListings(summary = {}, runOptions = {}, environment = 'sandbox', sourceApi = 'trading') {
+  const enabled = String(runOptions.ebaySandboxReconcileMissingListings ?? 'true').trim().toLowerCase() !== 'false';
+  if (!enabled) return false;
+  if (normalizeEnvironment(environment) !== 'sandbox') return false;
+  if (sourceApi !== 'trading') return false;
+  if (summary.destinationMode !== 'airtable') return false;
+  const startPage = Number(summary.fetchStartPage || 0) || 0;
+  const lastPage = Number(summary.fetchLastPage || 0) || 0;
+  const totalPages = Math.max(1, Number(summary.fetchTotalPages || 1) || 1);
+  return startPage === 1 && lastPage >= totalPages;
+}
+
+async function markMissingAirtableListingsEnded(
+  airtableService,
+  tableName,
+  existingRows = [],
+  activeKeys = new Set(),
+  environment = 'sandbox',
+  existingFields = new Set(),
+  summary = {},
+  dryRun = true,
+  progressCallback = () => {}
+) {
+  if (!Array.isArray(existingRows) || existingRows.length === 0) {
+    return;
+  }
+  const now = new Date().toISOString();
+  const updates = [];
+
+  for (const row of existingRows) {
+    const recordId = normalizeText(row?.id);
+    const fields = row?.fields || {};
+    const key = resolvePrimaryKeyFromFields(fields);
+    if (!recordId || !key || activeKeys.has(key)) continue;
+
+    const rowEnvironment = normalizeEnvironment(fields['eBay Environment'] || environment);
+    if (rowEnvironment !== environment) continue;
+    if (isEndedListingStatus(fields[LISTING_STATUS_FIELD])) continue;
+
+    const nextFields = alignFieldsToExisting({
+      [LISTING_STATUS_FIELD]: ENDED_LISTING_STATUS_VALUE,
+      [MISSING_DETECTED_FIELD]: fields[MISSING_DETECTED_FIELD] || now
+    }, existingFields);
+    if (Object.keys(nextFields).length === 0) continue;
+    updates.push({
+      id: recordId,
+      fields: nextFields
+    });
+  }
+
+  summary.missingListingsMarkedEnded = Number(summary.missingListingsMarkedEnded || 0);
+  summary.missingListingsMarkEndedPlanned = Number(summary.missingListingsMarkEndedPlanned || 0);
+  if (updates.length === 0) return;
+
+  if (dryRun) {
+    summary.missingListingsMarkEndedPlanned += updates.length;
+    return;
+  }
+
+  for (let i = 0; i < updates.length; i += 10) {
+    const batch = updates.slice(i, i + 10);
+    const data = await airtableService.request('PATCH', `/${encodeURIComponent(tableName)}`, {
+      data: {
+        records: batch,
+        typecast: true
+      }
+    });
+    summary.missingListingsMarkedEnded += Array.isArray(data?.records) ? data.records.length : 0;
+    emitProgress(progressCallback, {
+      stage: 'ebaysandbox_reconcile_missing',
+      percent: 98,
+      counts: summary,
+      message:
+        `Marking missing sandbox listings as ended: ` +
+        `${Math.min(i + batch.length, updates.length)}/${updates.length}.`
+    });
   }
 }
 
@@ -2928,8 +3077,9 @@ async function mirrorInventoryItemsToSandbox(
 
 async function runEbaySandboxInventoryImport(options = {}, progressCallback = () => {}) {
   const stored = getInventoryConfig('phase2Config') || {};
-  const runOptions = { ...stored, ...options };
-  const environment = normalizeEnvironment(runOptions.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox');
+  const mergedOptions = { ...stored, ...options };
+  const environment = normalizeEnvironment(mergedOptions.phase5EbayEnvironment || process.env.EBAY_ENVIRONMENT || 'sandbox');
+  const runOptions = applyEbayCredentialsForEnvironment(mergedOptions, environment);
   const dryRun =
     typeof runOptions.ebaySandboxDryRun === 'boolean'
       ? runOptions.ebaySandboxDryRun
@@ -2960,6 +3110,10 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
   // - production imports should mirror to sandbox only
   // - sandbox imports should go to Airtable only (avoid duplicate re-create attempts in same sandbox account)
   const destinationMode = environment === 'production' ? 'sandbox' : 'airtable';
+  if (environment === 'sandbox' && destinationMode === 'airtable') {
+    runOptions.ebaySandboxFetchPagingMode = DEFAULT_FETCH_PAGING_MODE;
+    runOptions.ebaySandboxFetchMode = DEFAULT_FETCH_PAGING_MODE;
+  }
   const writeToAirtable = destinationMode === 'airtable' || destinationMode === 'both';
   const writeToSandbox = destinationMode === 'sandbox' || destinationMode === 'both';
   const pageSize = toNumber(
@@ -3064,6 +3218,8 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
     skippedInvalidRows: 0,
     skippedAlreadyPublished: 0,
     removedAlreadyPublished: 0,
+    missingListingsMarkedEnded: 0,
+    missingListingsMarkEndedPlanned: 0,
     skippedAlreadyUpToDate: 0,
     skippedStagingUnchanged: 0,
     sandboxMirrored: 0,
@@ -3183,6 +3339,10 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
         inventoryItems = tradingResult.inventoryItems;
         offersBySku = tradingResult.offersBySku;
         summary.tradingPagesFetched = Number(tradingResult.pagesFetched || 0) || 0;
+        summary.fetchStartPage = 1;
+        summary.fetchLastPage = summary.tradingPagesFetched;
+        summary.fetchTotalPages = Math.max(1, Number(tradingResult.totalPages || 1) || 1);
+        summary.fetchNextPage = summary.fetchLastPage >= summary.fetchTotalPages ? 1 : summary.fetchLastPage + 1;
       }
     } catch (error) {
       const status = Number(error?.response?.status || 0);
@@ -3268,6 +3428,10 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
         inventoryItems = tradingResult.inventoryItems;
         offersBySku = tradingResult.offersBySku;
         summary.tradingPagesFetched = Number(tradingResult.pagesFetched || 0) || 0;
+        summary.fetchStartPage = 1;
+        summary.fetchLastPage = summary.tradingPagesFetched;
+        summary.fetchTotalPages = Math.max(1, Number(tradingResult.totalPages || 1) || 1);
+        summary.fetchNextPage = summary.fetchLastPage >= summary.fetchTotalPages ? 1 : summary.fetchLastPage + 1;
       }
     }
   } else {
@@ -3408,16 +3572,22 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
     const airtableService = new AirtableService({ token: airtableToken, baseId: airtableBaseId });
     const existingRecordFieldsByKey = new Map();
     const existingRecordRowsByKey = new Map();
+    let existingRows = [];
     try {
-      const existingRows = await airtableService.fetchAllRecords(
+      const existingSelectFields = [
+        PRIMARY_KEY_FIELD,
+        LEGACY_PRIMARY_KEY_FIELD,
+        payloadHashFieldName,
+        'Item Specifics',
+        'Item Specifics - All C: values relevant to item',
+        'Item ID',
+        'eBay Environment',
+        LISTING_STATUS_FIELD,
+        MISSING_DETECTED_FIELD
+      ].filter(fieldName => fieldName && hasFieldByNormalizedName(ensure.existingFields, fieldName));
+      existingRows = await airtableService.fetchAllRecords(
         tableName,
-        [
-          PRIMARY_KEY_FIELD,
-          LEGACY_PRIMARY_KEY_FIELD,
-          payloadHashFieldName,
-          'Item Specifics',
-          'Item Specifics - All C: values relevant to item'
-        ].filter(Boolean)
+        existingSelectFields
       );
       for (const row of existingRows) {
         const existingFields = row?.fields || {};
@@ -3468,6 +3638,11 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
       return deleted;
     }
 
+    const activeRecordKeys = new Set(
+      (inventoryItems || [])
+        .map(item => normalizeText(item?.sku))
+        .filter(Boolean)
+    );
     const records = [];
     for (let i = 0; i < inventoryItems.length; i += 1) {
       const item = inventoryItems[i] || {};
@@ -3591,6 +3766,25 @@ async function runEbaySandboxInventoryImport(options = {}, progressCallback = ()
 
     if (records.length > 0) {
       await flushBatch(airtableService, tableName, records.splice(0, records.length), summary, dryRun);
+    }
+
+    if (shouldReconcileMissingListings(summary, runOptions, environment, sourceApi)) {
+      await markMissingAirtableListingsEnded(
+        airtableService,
+        tableName,
+        existingRows,
+        activeRecordKeys,
+        environment,
+        ensure.existingFields,
+        summary,
+        dryRun,
+        progressCallback
+      );
+    } else if (environment === 'sandbox' && sourceApi === 'trading') {
+      summary.errors.push(
+        `Skipped missing-listing reconciliation because the active listing fetch was not a complete page-1 fetch ` +
+        `(startPage=${summary.fetchStartPage || 1}, lastPage=${summary.fetchLastPage || 0}, totalPages=${summary.fetchTotalPages || 1}).`
+      );
     }
   }
 
