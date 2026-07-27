@@ -642,32 +642,63 @@ function nextBusinessDayParts(baseParts) {
   return cursor;
 }
 
+function startOfBusinessDay(localParts = {}) {
+  return {
+    year: localParts.year,
+    month: localParts.month,
+    day: localParts.day,
+    hour: 8,
+    minute: 0,
+    second: 0
+  };
+}
+
+function minutesSinceMidnight(localParts = {}) {
+  return Number(localParts.hour || 0) * 60 + Number(localParts.minute || 0);
+}
+
+function addBusinessMinutesEst(startDate, minutesToAdd = 0) {
+  let remainingMinutes = Math.max(0, Number(minutesToAdd || 0));
+  let local = getZonedParts(startDate);
+  const businessStartMinute = 8 * 60;
+  const businessEndMinute = 17 * 60;
+
+  if (!isBusinessWeekday(local.weekday) || minutesSinceMidnight(local) >= businessEndMinute) {
+    const nextBiz = nextBusinessDayParts(local);
+    local = getZonedParts(zonedDateToUtc(startOfBusinessDay(nextBiz)));
+  } else if (minutesSinceMidnight(local) < businessStartMinute) {
+    local = getZonedParts(zonedDateToUtc(startOfBusinessDay(local)));
+  }
+
+  for (let i = 0; i < 20; i += 1) {
+    const currentMinute = minutesSinceMidnight(local);
+    const minutesAvailableToday = Math.max(0, businessEndMinute - currentMinute);
+
+    if (remainingMinutes <= minutesAvailableToday) {
+      return zonedDateToUtc({
+        year: local.year,
+        month: local.month,
+        day: local.day,
+        hour: Math.floor((currentMinute + remainingMinutes) / 60),
+        minute: (currentMinute + remainingMinutes) % 60,
+        second: local.second || 0
+      });
+    }
+
+    remainingMinutes -= minutesAvailableToday;
+    const nextBiz = nextBusinessDayParts(local);
+    local = getZonedParts(zonedDateToUtc(startOfBusinessDay(nextBiz)));
+  }
+
+  return null;
+}
+
 function computeDueDate(createdAt, shipVia = '') {
   const created = createdAt instanceof Date ? createdAt : parseRowDate(createdAt);
   if (!created) return null;
-  const local = getZonedParts(created);
   const ship = normalizeUpper(shipVia);
   const isPriority = PRIORITY_SHIP_VIA.has(ship);
-
-  const startHour = 8;
-  const endHour = isPriority ? 15 : 13;
-  const addHours = isPriority ? 2 : 4;
-
-  const inBusinessDay = isBusinessWeekday(local.weekday);
-  const inWindow = inBusinessDay && local.hour >= startHour && local.hour < endHour;
-  if (inWindow) {
-    return new Date(created.getTime() + addHours * 60 * 60 * 1000);
-  }
-
-  const nextBiz = nextBusinessDayParts(local);
-  const dueLocal = {
-    year: nextBiz.year,
-    month: nextBiz.month,
-    day: nextBiz.day,
-    hour: isPriority ? 10 : 12,
-    minute: 0
-  };
-  return zonedDateToUtc(dueLocal);
+  return addBusinessMinutesEst(created, isPriority ? 120 : 240);
 }
 
 function isCompleteStatus(status = '', completedStatusNames = new Set()) {
