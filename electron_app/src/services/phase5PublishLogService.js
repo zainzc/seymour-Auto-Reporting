@@ -23,6 +23,16 @@ const REQUIRED_HEADERS = [
   'Payload Hash (optional, recommended for idempotency)'
 ];
 
+function normalizeEbayItemId(value) {
+  const text = normalizeText(value)
+    .replace(/^[\s'"`]+/, '')
+    .replace(/[\s'"`]+$/, '');
+  if (/^[\d\s.,'-]+$/.test(text)) {
+    return text.replace(/\D+/g, '');
+  }
+  return text;
+}
+
 class Phase5PublishLogService {
   constructor(config = {}) {
     this.enabled = String(config.enabled ?? process.env.PHASE5_SHEETS_LOG_ENABLED ?? 'false').trim().toLowerCase() === 'true';
@@ -78,6 +88,9 @@ class Phase5PublishLogService {
       throw new Error('Phase 5 publish log row must include exactly 14 columns.');
     }
 
+    const cleanRow = row.slice();
+    cleanRow[4] = normalizeEbayItemId(cleanRow[4]);
+
     const sheets = await this.getSheetsClient();
     await this.ensureHeaders(sheets);
 
@@ -87,7 +100,7 @@ class Phase5PublishLogService {
       valueInputOption: 'RAW',
       insertDataOption: 'INSERT_ROWS',
       requestBody: {
-        values: [row]
+        values: [cleanRow]
       }
     });
 
@@ -115,7 +128,7 @@ class Phase5PublishLogService {
     const map = new Map();
     for (let i = 1; i < rows.length; i += 1) {
       const row = rows[i] || [];
-      const itemId = normalizeText(row[4]);
+      const itemId = normalizeEbayItemId(row[4]);
       const payloadHash = normalizeText(row[13]);
       if (!itemId) continue;
       if (payloadHash) {
@@ -139,7 +152,7 @@ class Phase5PublishLogService {
 
     for (let i = 1; i < rows.length; i += 1) {
       const row = rows[i] || [];
-      const itemId = normalizeText(row[4]);
+      const itemId = normalizeEbayItemId(row[4]);
       const ipn = normalizeText(row[2]).toUpperCase();
       const payloadHash = normalizeText(row[13]);
       if (itemId) identities.add(`ITEM:${itemId}`);
