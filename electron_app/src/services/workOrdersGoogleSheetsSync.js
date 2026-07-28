@@ -18,7 +18,7 @@ const {
   timeZoneDateToUtc
 } = require('../utils/timezone');
 
-const WORK_ORDERS_EST_TIME_ZONE = 'Etc/GMT+5';
+const WORK_ORDERS_EST_TIME_ZONE = 'America/New_York';
 const terminalConsole = global.console;
 const workOrdersVerboseTerminalLogs =
   String(process.env.WORK_ORDERS_VERBOSE_LOGS || process.env.WORK_ORDERS_TERMINAL_LOGS || '')
@@ -2258,26 +2258,29 @@ async function syncRowsToDeliveryAutomation({
     if (existingTask) {
       const existingTaskId = normalizeCell(existingTask.id);
       if (existingTaskId) deliveryTaskIdsSyncedFromRows.add(existingTaskId);
-      // Deliveries Automation is a copied snapshot. Once copied, the delivery
-      // task is intentionally not kept linked to ongoing Work Order updates.
-      const cleanedDescription = removeDeliveryOriginalTaskLinks(existingTask?.description || existingTask?.text_content || '');
+      const desiredDescription = buildDeliveryTaskDescription(row);
       const currentDescription = normalizeMultilineTextForCompare(existingTask?.description || existingTask?.text_content || '');
+      const existingStatus = normalizeClickUpStatusToken(existingTask?.status?.status || existingTask?.status || '');
+      const desiredStatus = normalizeClickUpStatusToken(status);
       const cleanupFields = buildDeliveryLinkCleanupCustomFields(existingTask, deliveryFieldMeta);
       const refreshedDeliveryFields = buildDeliveryAutomationCustomFields(row, deliveryFieldMeta, {
         includeClearFields: true
       });
       const changedDeliveryFields = refreshedDeliveryFields.filter(field => hasCustomFieldChanged(existingTask, field));
-      let descriptionCleaned = false;
+      let descriptionUpdated = false;
+      let statusUpdated = false;
       let fieldsUpdated = false;
 
       try {
-        if (cleanedDescription && normalizeMultilineTextForCompare(cleanedDescription) !== currentDescription) {
-          await deliveryClickup.request('PUT', `/task/${encodeURIComponent(existingTask.id)}`, {
-            data: {
-              description: cleanedDescription
-            }
+        if (normalizeMultilineTextForCompare(desiredDescription) !== currentDescription) {
+          await deliveryClickup.updateTask(existingTask.id, {
+            description: desiredDescription
           });
-          descriptionCleaned = true;
+          descriptionUpdated = true;
+        }
+        if (desiredStatus && existingStatus !== desiredStatus) {
+          await deliveryClickup.updateTaskStatus(existingTask.id, status);
+          statusUpdated = true;
         }
         if (cleanupFields.length > 0) {
           await applyTaskCustomFields(deliveryClickup, existingTask.id, cleanupFields, key, result);
@@ -2290,10 +2293,10 @@ async function syncRowsToDeliveryAutomation({
         }
       } catch (error) {
         const message = getClickUpErrorMessage(error);
-        result.errors.push(`Delivery Automation unlink cleanup failed for ${key}: ${message}`);
+        result.errors.push(`Delivery Automation row refresh failed for ${key}: ${message}`);
       }
 
-      if (descriptionCleaned || fieldsUpdated) {
+      if (descriptionUpdated || statusUpdated || fieldsUpdated) {
         console.log(`[WorkOrders] Delivery Automation task synced: ${key}`);
         result.updated += 1;
       } else {
@@ -2365,10 +2368,31 @@ async function syncRowsToDeliveryAutomation({
           includeClearFields: true
         });
         const changedRowFields = rowCustomFields.filter(field => hasCustomFieldChanged(detailedTask, field));
+        const desiredDescription = buildDeliveryTaskDescription(matchingRow);
+        const currentDescription = normalizeMultilineTextForCompare(
+          detailedTask?.description || detailedTask?.text_content || ''
+        );
+        const status = getDeliveryAutomationStatus(matchingRow);
+        const existingStatus = normalizeClickUpStatusToken(detailedTask?.status?.status || detailedTask?.status || '');
+        const desiredStatus = normalizeClickUpStatusToken(status);
+        const taskKey = buildTaskKey(matchingRow) || extractTaskKey(detailedTask) || normalizeCell(detailedTask?.name) || taskId;
+        let rowUpdated = false;
+        if (normalizeMultilineTextForCompare(desiredDescription) !== currentDescription) {
+          await deliveryClickup.updateTask(taskId, {
+            description: desiredDescription
+          });
+          rowUpdated = true;
+        }
+        if (desiredStatus && existingStatus !== desiredStatus) {
+          await deliveryClickup.updateTaskStatus(taskId, status);
+          rowUpdated = true;
+        }
         if (changedRowFields.length > 0) {
-          const taskKey = buildTaskKey(matchingRow) || extractTaskKey(detailedTask) || normalizeCell(detailedTask?.name) || taskId;
           await applyTaskCustomFields(deliveryClickup, taskId, changedRowFields, taskKey, result);
-          console.log(`[WorkOrders] Delivery Automation task enriched from sheet row: ${taskKey}`);
+          rowUpdated = true;
+        }
+        if (rowUpdated) {
+          console.log(`[WorkOrders] Delivery Automation task refreshed from sheet row: ${taskKey}`);
           result.updated += 1;
           continue;
         }
