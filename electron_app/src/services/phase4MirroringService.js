@@ -58,6 +58,22 @@ function normalizeCategoryToken(value) {
     .replace(/[^a-z0-9]/g, '');
 }
 
+function addCategoryTokens(tokens, value) {
+  if (!(tokens instanceof Set)) return;
+  const raw = normalizeString(value);
+  if (!raw) return;
+  const add = text => {
+    const token = normalizeCategoryToken(text);
+    if (token) tokens.add(token);
+  };
+  add(raw);
+  raw
+    .split(/[|,;/]+/)
+    .map(item => normalizeString(item))
+    .filter(Boolean)
+    .forEach(add);
+}
+
 function readLinkedRecordIds(fields = {}, candidates = []) {
   for (const name of candidates) {
     const key = normalizeString(name);
@@ -95,11 +111,15 @@ function buildCategoryDefinitionLookup(categoryRecords = []) {
     const fields = record?.fields || {};
     const prefix = parseMasterPrefix(fields['IPN Prefix']);
     const tokens = new Set();
-    const ebayCategoryLeaf = extractEbayCategoryLeaf(
-      fields['eBay Category Name'] || fields['eBay Category'] || fields['eBay Category Path']
-    );
-    const ebayCategoryToken = normalizeCategoryToken(ebayCategoryLeaf);
-    if (ebayCategoryToken) tokens.add(ebayCategoryToken);
+    addCategoryTokens(tokens, fields['Category Identifier / Conditions & Options']);
+    addCategoryTokens(tokens, fields['Category Identifier']);
+    addCategoryTokens(tokens, fields['Conditions & Options']);
+    if (tokens.size === 0) {
+      const ebayCategoryLeaf = extractEbayCategoryLeaf(
+        fields['eBay Category Name'] || fields['eBay Category'] || fields['eBay Category Path']
+      );
+      addCategoryTokens(tokens, ebayCategoryLeaf);
+    }
     byId.set(id, {
       prefix,
       tokens
@@ -124,6 +144,62 @@ function resolveIdentifierTokensForPrefix(linkedIds = [], categoryLookup = new M
 function getRouteCategoryKey(tableName) {
   const match = normalizeString(tableName).match(/^\d{3}\s*-\s*(.+)$/);
   return normalizeCategoryToken(match ? match[1] : '');
+}
+
+function findRouteByIdentifierTokens(routes = [], categoryIdentifierTokens = new Set()) {
+  const candidates = Array.isArray(routes) ? routes : [];
+  const tokens = categoryIdentifierTokens instanceof Set
+    ? [...categoryIdentifierTokens].filter(token => token && token.length >= 2)
+    : [];
+  if (candidates.length === 0 || tokens.length === 0) {
+    return {
+      status: 'missing',
+      matches: []
+    };
+  }
+
+  const exactMatches = candidates.filter(route =>
+    tokens.includes(normalizeString(route?.categoryKey))
+  );
+  if (exactMatches.length === 1) {
+    return {
+      status: 'ok',
+      matches: exactMatches,
+      route: exactMatches[0],
+      matchType: 'exact'
+    };
+  }
+  if (exactMatches.length > 1) {
+    return {
+      status: 'ambiguous',
+      matches: exactMatches
+    };
+  }
+
+  const containedMatches = candidates.filter(route => {
+    const routeKey = normalizeString(route?.categoryKey);
+    if (!routeKey) return false;
+    return tokens.some(token => routeKey.includes(token) || token.includes(routeKey));
+  });
+  if (containedMatches.length === 1) {
+    return {
+      status: 'ok',
+      matches: containedMatches,
+      route: containedMatches[0],
+      matchType: 'contains'
+    };
+  }
+  if (containedMatches.length > 1) {
+    return {
+      status: 'ambiguous',
+      matches: containedMatches
+    };
+  }
+
+  return {
+    status: 'missing',
+    matches: []
+  };
 }
 
 function classifyRoutingFailure(failureGroups, type, payload = {}) {
@@ -554,6 +630,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
   const { tablesByPrefix, tablesById, duplicatePrefixes } = await buildRoutingMap(itemSchemaService);
 
   let categoryDefinitionLookup = new Map();
+  let categoryLinkFieldName = '';
   if (duplicatePrefixes.length > 0) {
     emitProgress(progressCallback, {
       stage: 'phase4_route_map',
@@ -562,6 +639,7 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
       message: `Loading Category Definitions for duplicate-prefix routing (${duplicatePrefixes.length} prefixes)...`
     });
     try {
+      categoryLinkFieldName = await masterService.resolveMasterCategoryLinkFieldName();
       const categoryRecords = await masterService.fetchAllRecords(config.categoryTable, []);
       categoryDefinitionLookup = buildCategoryDefinitionLookup(categoryRecords);
     } catch (error) {
@@ -585,6 +663,9 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     'Category Definitions',
     'Categories'
   ];
+  if (categoryLinkFieldName && !selectFields.includes(categoryLinkFieldName)) {
+    selectFields.push(categoryLinkFieldName);
+  }
 
   let masterRecords = [];
   let runMode = 'full_scan';
@@ -708,7 +789,8 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     targetFieldName: MASTER_EBAY_ITEM_SPECIFICS_FIELD,
     sampleLimit: config.sampleLimit,
     dryRun: config.dryRun,
-    masterService
+    masterService,
+    categoryLinkFieldName
   }, progress => {
     emitProgress(progressCallback, {
       stage: progress?.stage || 'phase4_master_urls',
@@ -810,7 +892,15 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     }
 
     const categoryIdentifierTokens = resolveIdentifierTokensForPrefix(
-      readLinkedRecordIds(fields, ['Category Definitions Link', 'Category Definitions', 'Categories']),
+      readLinkedRecordIds(
+        fields,
+        [
+          categoryLinkFieldName,
+          'Category Definitions Link',
+          'Category Definitions',
+          'Categories'
+        ]
+      ),
       categoryDefinitionLookup,
       prefix
     );
@@ -844,11 +934,9 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
       continue;
     }
 
-    const identifierMatches = routes.filter(route =>
-      categoryIdentifierTokens && categoryIdentifierTokens.has(normalizeString(route.categoryKey))
-    );
-    if (identifierMatches.length === 1) {
-      assignDestination(ipn, prefix, identifierMatches[0].tableId, referenceNumberByIpn.get(ipn) || '');
+    const identifierMatch = findRouteByIdentifierTokens(routes, categoryIdentifierTokens);
+    if (identifierMatch.status === 'ok' && identifierMatch.route) {
+      assignDestination(ipn, prefix, identifierMatch.route.tableId, referenceNumberByIpn.get(ipn) || '');
       continue;
     }
 
@@ -856,14 +944,19 @@ async function runPhase4Mirroring(options = {}, progressCallback = () => {}) {
     classifyRoutingFailure(routingFailureGroups, 'ambiguousDuplicatePrefix', {
       prefix,
       categoryName: categoryName || [...categoryIdentifierTokens].join(' | '),
-      candidateTables: routes.map(route => route.tableName)
+      candidateTables: (identifierMatch.matches && identifierMatch.matches.length > 0
+        ? identifierMatch.matches
+        : routes
+      ).map(route => route.tableName)
     });
     appendSample(
       summary.routingFailureSamples,
       {
         ipn,
         prefix,
-        reason: 'ambiguous_duplicate_prefix'
+        reason: identifierMatch.status === 'ambiguous'
+          ? 'ambiguous_duplicate_prefix'
+          : 'no_matching_identifier_table_for_duplicate_prefix'
       },
       summary.sampleLimit
     );

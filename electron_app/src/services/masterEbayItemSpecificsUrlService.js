@@ -2,6 +2,7 @@ const AirtableService = require('./airtableService');
 const AirtableSchemaService = require('./airtableSchemaService');
 
 const DEFAULT_MASTER_TABLE = 'Master Parts Table';
+const DEFAULT_CATEGORY_TABLE = 'Category Definitions';
 const DEFAULT_TARGET_FIELD = 'eBay Item Specifics';
 const DEFAULT_SAMPLE_LIMIT = 25;
 
@@ -42,6 +43,186 @@ function extractIpnPrefix(ipn) {
   return match && match[1] ? match[1] : null;
 }
 
+function parseMasterPrefix(value) {
+  const parsed = parseInt(normalizeText(value), 10);
+  if (!Number.isFinite(parsed)) return '';
+  return String(parsed).padStart(3, '0');
+}
+
+function normalizeCategoryToken(value) {
+  return normalizeText(value)
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[\/,_]/g, ' ')
+    .replace(/[()\[\]{}.:;+]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function addCategoryTokens(tokens, value) {
+  if (!(tokens instanceof Set)) return;
+  const raw = normalizeText(value);
+  if (!raw) return;
+  const add = text => {
+    const token = normalizeCategoryToken(text);
+    if (token) tokens.add(token);
+  };
+  add(raw);
+  raw
+    .split(/[|,;/]+/)
+    .map(item => normalizeText(item))
+    .filter(Boolean)
+    .forEach(add);
+}
+
+function extractEbayCategoryLeaf(value) {
+  const raw = normalizeText(value);
+  if (!raw) return '';
+  const parts = raw
+    .split('Â»')
+    .map(item => normalizeText(item))
+    .filter(Boolean);
+  if (parts.length > 0) return parts[parts.length - 1];
+  return raw;
+}
+
+function readLinkedRecordIds(fields = {}, candidates = []) {
+  for (const name of candidates) {
+    const key = normalizeText(name);
+    if (!key) continue;
+    const raw = fields?.[key];
+    if (!Array.isArray(raw) || raw.length === 0) continue;
+    return raw
+      .map(item => {
+        if (!item) return '';
+        if (typeof item === 'string') return normalizeText(item);
+        if (typeof item === 'object') return normalizeText(item.id || item.recordId || '');
+        return '';
+      })
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function buildCategoryDefinitionLookup(categoryRecords = []) {
+  const byId = new Map();
+  for (const record of categoryRecords) {
+    const id = normalizeText(record?.id);
+    if (!id) continue;
+    const fields = record?.fields || {};
+    const prefix = parseMasterPrefix(fields['IPN Prefix']);
+    const tokens = new Set();
+    addCategoryTokens(tokens, fields['Category Identifier / Conditions & Options']);
+    addCategoryTokens(tokens, fields['Category Identifier']);
+    addCategoryTokens(tokens, fields['Conditions & Options']);
+    if (tokens.size === 0) {
+      const ebayCategoryLeaf = extractEbayCategoryLeaf(
+        fields['eBay Category Name'] || fields['eBay Category'] || fields['eBay Category Path']
+      );
+      addCategoryTokens(tokens, ebayCategoryLeaf);
+    }
+    byId.set(id, {
+      prefix,
+      tokens
+    });
+  }
+  return byId;
+}
+
+function resolveIdentifierTokensForRecord(
+  fields = {},
+  categoryLookup = new Map(),
+  prefix = '',
+  categoryLinkFieldName = ''
+) {
+  const resolved = new Set();
+  const linkFieldCandidates = [
+    'Category Definitions Link',
+    'Category Definitions',
+    'Categories'
+  ];
+  const dynamicLinkField = normalizeText(categoryLinkFieldName);
+  if (dynamicLinkField) {
+    linkFieldCandidates.unshift(dynamicLinkField);
+  }
+  const linkedIds = readLinkedRecordIds(fields, linkFieldCandidates);
+  for (const recordId of linkedIds) {
+    const entry = categoryLookup.get(recordId);
+    if (!entry) continue;
+    if (entry.prefix && prefix && entry.prefix !== prefix) continue;
+    for (const token of entry.tokens || []) {
+      if (token) resolved.add(token);
+    }
+  }
+  addCategoryTokens(resolved, fields['Category Identifier / Conditions & Options']);
+  addCategoryTokens(resolved, fields['Category Identifier']);
+  addCategoryTokens(resolved, fields['Conditions & Options']);
+  return resolved;
+}
+
+function getRouteCategoryKey(tableName) {
+  const match = normalizeText(tableName).match(/^\d{3}\s*-\s*(.+)$/);
+  return normalizeCategoryToken(match ? match[1] : '');
+}
+
+function findRouteByIdentifierTokens(routes = [], categoryIdentifierTokens = new Set()) {
+  const candidates = Array.isArray(routes) ? routes : [];
+  const tokens = categoryIdentifierTokens instanceof Set
+    ? [...categoryIdentifierTokens].filter(token => token && token.length >= 2)
+    : [];
+  if (candidates.length === 0 || tokens.length === 0) {
+    return {
+      status: 'missing',
+      matches: []
+    };
+  }
+
+  const exactMatches = candidates.filter(route =>
+    tokens.includes(normalizeText(route?.categoryKey))
+  );
+  if (exactMatches.length === 1) {
+    return {
+      status: 'ok',
+      matches: exactMatches,
+      route: exactMatches[0],
+      matchType: 'exact'
+    };
+  }
+  if (exactMatches.length > 1) {
+    return {
+      status: 'ambiguous',
+      matches: exactMatches
+    };
+  }
+
+  const containedMatches = candidates.filter(route => {
+    const routeKey = normalizeText(route?.categoryKey);
+    if (!routeKey) return false;
+    return tokens.some(token => routeKey.includes(token) || token.includes(routeKey));
+  });
+  if (containedMatches.length === 1) {
+    return {
+      status: 'ok',
+      matches: containedMatches,
+      route: containedMatches[0],
+      matchType: 'contains'
+    };
+  }
+  if (containedMatches.length > 1) {
+    return {
+      status: 'ambiguous',
+      matches: containedMatches
+    };
+  }
+
+  return {
+    status: 'missing',
+    matches: []
+  };
+}
+
 function matchesPrefixTableName(prefix = '', tableName = '') {
   const normalizedPrefix = normalizeText(prefix);
   const normalizedTableName = normalizeText(tableName);
@@ -73,6 +254,7 @@ function buildSchemaIndex(schemaTables = []) {
       tableId,
       tableName,
       prefix,
+      categoryKey: getRouteCategoryKey(tableName),
       viewId: normalizeText(view?.id),
       viewName: normalizeText(view?.name)
     };
@@ -102,6 +284,12 @@ function buildItemSpecificTableUrl(prefix, schema) {
   if (matches.length !== 1) return null;
 
   const table = matches[0];
+  return buildItemSpecificTableUrlForTable(table, schema);
+}
+
+function buildItemSpecificTableUrlForTable(table = {}, schema = {}) {
+  const itemSpecificsBaseId = normalizeText(schema?.itemSpecificsBaseId);
+  if (!itemSpecificsBaseId) return null;
   if (!table?.tableId || !table?.viewId) return null;
   return {
     url: `https://airtable.com/${itemSpecificsBaseId}/${table.tableId}/${table.viewId}?blocks=hide`,
@@ -112,7 +300,7 @@ function buildItemSpecificTableUrl(prefix, schema) {
   };
 }
 
-function resolveItemSpecificTableMatch(prefix, schema) {
+function resolveItemSpecificTableMatch(prefix, schema, options = {}) {
   const normalizedPrefix = normalizeText(prefix);
   const tablesByPrefix = schema?.tablesByPrefix instanceof Map
     ? schema.tablesByPrefix
@@ -128,10 +316,30 @@ function resolveItemSpecificTableMatch(prefix, schema) {
     };
   }
   if (matches.length > 1) {
+    const identifierMatch = findRouteByIdentifierTokens(matches, options.categoryIdentifierTokens);
+    if (identifierMatch.status === 'ok' && identifierMatch.route) {
+      const detail = buildItemSpecificTableUrlForTable(identifierMatch.route, schema);
+      if (!detail) {
+        return {
+          status: 'missing_view',
+          prefix: normalizedPrefix,
+          matches: identifierMatch.matches
+        };
+      }
+      return {
+        status: 'ok',
+        prefix: normalizedPrefix,
+        matches: identifierMatch.matches,
+        detail,
+        matchType: identifierMatch.matchType
+      };
+    }
     return {
       status: 'ambiguous',
       prefix: normalizedPrefix,
-      matches
+      matches: identifierMatch.matches && identifierMatch.matches.length > 0
+        ? identifierMatch.matches
+        : matches
     };
   }
   const detail = buildItemSpecificTableUrl(normalizedPrefix, schema);
@@ -195,6 +403,14 @@ function buildServiceConfig(options = {}) {
     masterTable: normalizeText(
       merged.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || DEFAULT_MASTER_TABLE
     ),
+    categoryTable: normalizeText(
+      merged.airtableCategoryTable || process.env.AIRTABLE_CATEGORY_TABLE || DEFAULT_CATEGORY_TABLE
+    ),
+    categoryLinkFieldName: normalizeText(
+      merged.airtableCategoryLinkFieldName ||
+        merged.categoryLinkFieldName ||
+        process.env.AIRTABLE_CATEGORY_LINK_FIELD_NAME
+    ),
     itemSpecificsBaseId: normalizeText(
       merged.itemSpecificsBaseId ||
         process.env.AIRTABLE_ITEM_SPECIFICS_BASE_ID ||
@@ -245,6 +461,33 @@ function buildBlankBackfillFormula(targetFieldName = DEFAULT_TARGET_FIELD) {
   return `AND(LEN(TRIM(${ipnField}&""))>0,LEN(TRIM(${targetField}&""))=0)`;
 }
 
+function buildMasterBackfillSelectFields(
+  targetFieldName = DEFAULT_TARGET_FIELD,
+  availableFieldNames = null,
+  categoryLinkFieldName = ''
+) {
+  const candidates = [
+    'IPN',
+    targetFieldName,
+    'Category Identifier / Conditions & Options',
+    'Category Identifier',
+    'Conditions & Options',
+    'Category Definitions Link',
+    'Category Definitions',
+    'Categories'
+  ];
+  const dynamicLinkField = normalizeText(categoryLinkFieldName);
+  if (dynamicLinkField) {
+    candidates.unshift(dynamicLinkField);
+  }
+  const available = availableFieldNames instanceof Set ? availableFieldNames : null;
+  return candidates
+    .map(fieldName => normalizeText(fieldName))
+    .filter(Boolean)
+    .filter((fieldName, index, list) => list.indexOf(fieldName) === index)
+    .filter(fieldName => !available || available.has(fieldName));
+}
+
 function pushUnique(list, value, limit = DEFAULT_SAMPLE_LIMIT) {
   if (!Array.isArray(list)) return;
   if (list.includes(value)) return;
@@ -286,7 +529,15 @@ function populateEbayItemSpecificsUrlForRecord(masterRecord, context = {}) {
     return null;
   }
 
-  const match = resolveItemSpecificTableMatch(prefix, context.schema);
+  const categoryIdentifierTokens = resolveIdentifierTokensForRecord(
+    fields,
+    context.categoryDefinitionLookup,
+    prefix,
+    context.categoryLinkFieldName
+  );
+  const match = resolveItemSpecificTableMatch(prefix, context.schema, {
+    categoryIdentifierTokens
+  });
   if (match.status === 'missing') {
     summary.skippedNoMatchingTable += 1;
     pushUnique(summary.missingPrefixes, prefix, summary.sampleLimit);
@@ -304,7 +555,7 @@ function populateEbayItemSpecificsUrlForRecord(masterRecord, context = {}) {
       summary,
       `[skip][ambiguous_tables] ipn='${ipn}' prefix='${prefix}' candidates='${match.matches
         .map(item => item.tableName)
-        .join(' | ')}'`
+        .join(' | ')}' identifiers='${[...categoryIdentifierTokens].join(' | ')}'`
     );
     return null;
   }
@@ -379,6 +630,24 @@ async function populateEbayItemSpecificsUrlsForRecords(masterRecords = [], optio
       `prefixes=${summary.schemaPrefixesLoaded}, metadataCalls=${summary.metadataCalls}`
   });
 
+  let categoryDefinitionLookup = new Map();
+  let categoryLinkFieldName = normalizeText(config.categoryLinkFieldName);
+  const hasDuplicatePrefixes = schema.tablesByPrefix instanceof Map &&
+    [...schema.tablesByPrefix.values()].some(matches => Array.isArray(matches) && matches.length > 1);
+  if (hasDuplicatePrefixes) {
+    try {
+      categoryLinkFieldName = await masterService.resolveMasterCategoryLinkFieldName(categoryLinkFieldName);
+      const categoryRecords = await masterService.fetchAllRecords(config.categoryTable, []);
+      categoryDefinitionLookup = buildCategoryDefinitionLookup(categoryRecords);
+      logSample(
+        summary,
+        `[routing] loaded_category_definitions='${categoryRecords.length}' category_link_field='${categoryLinkFieldName || 'not_detected'}' duplicate_prefix_matching='enabled'`
+      );
+    } catch (error) {
+      summary.errors.push(`Category Definitions duplicate-prefix routing unavailable: ${error.message}`);
+    }
+  }
+
   const updates = [];
   let lastProgressAt = Date.now();
   for (let index = 0; index < records.length; index += 1) {
@@ -386,7 +655,9 @@ async function populateEbayItemSpecificsUrlsForRecords(masterRecords = [], optio
     const update = populateEbayItemSpecificsUrlForRecord(record, {
       schema,
       summary,
-      targetFieldName: config.targetFieldName
+      targetFieldName: config.targetFieldName,
+      categoryDefinitionLookup,
+      categoryLinkFieldName
     });
     if (update) updates.push(update);
 
@@ -440,12 +711,12 @@ async function populateEbayItemSpecificsUrlsForRecords(masterRecords = [], optio
         counts: summary,
         message:
           `Writing Master Parts eBay Item Specifics URLs... batch ${batchState.batchIndex || batchState.index || 0}/` +
-          `${batchState.totalBatches || batchState.total || 0}, written=${batchState.written || batchState.writtenSoFar || 0}, ` +
-          `failed=${batchState.failed || batchState.errorsSoFar || 0}`
+          `${batchState.totalBatches || batchState.total || 0}, written=${batchState.writtenRecords || batchState.written || batchState.writtenSoFar || 0}, ` +
+          `failed=${batchState.failedRecords || batchState.failed || batchState.errorsSoFar || 0}`
       });
     }
   );
-  summary.recordsUpdated = Number(result.written || 0);
+  summary.recordsUpdated = Number(result.count || result.written || 0);
   if (Array.isArray(result.errors)) {
     result.errors.slice(0, 200).forEach(error => summary.errors.push(error));
   }
@@ -462,8 +733,20 @@ async function populateEbayItemSpecificsUrlsForRecords(masterRecords = [], optio
   return summary;
 }
 
-async function fetchMasterBackfillRows(masterService, tableName, targetFieldName, progressCallback = () => {}) {
-  const selectFields = ['IPN', targetFieldName];
+async function fetchMasterBackfillRows(
+  masterService,
+  tableName,
+  targetFieldName,
+  progressCallback = () => {},
+  options = {}
+) {
+  const selectFields = options.minimalFields
+    ? buildMasterBackfillSelectFields(targetFieldName, new Set(['IPN', targetFieldName]))
+    : buildMasterBackfillSelectFields(
+        targetFieldName,
+        options.availableFieldNames,
+        options.categoryLinkFieldName
+      );
   const filterByFormula = buildBlankBackfillFormula(targetFieldName);
   const records = [];
   let offset = null;
@@ -513,12 +796,41 @@ async function backfillEbayItemSpecificsUrls(options = {}, progressCallback = ()
   });
   const rows = Array.isArray(config.masterRows)
     ? config.masterRows
-    : await fetchMasterBackfillRows(
-        masterService,
-        config.masterTable,
-        config.targetFieldName,
-        progressCallback
-      );
+    : await (async () => {
+        let categoryLinkFieldName = normalizeText(config.categoryLinkFieldName);
+        try {
+          categoryLinkFieldName = await masterService.resolveMasterCategoryLinkFieldName(categoryLinkFieldName);
+        } catch (_) {
+          categoryLinkFieldName = normalizeText(config.categoryLinkFieldName);
+        }
+        try {
+          return await fetchMasterBackfillRows(
+            masterService,
+            config.masterTable,
+            config.targetFieldName,
+            progressCallback,
+            {
+              availableFieldNames: masterFieldNames,
+              categoryLinkFieldName
+            }
+          );
+        } catch (error) {
+          emitProgress(progressCallback, {
+            stage: 'master_item_specifics_url_backfill_load',
+            percent: 20,
+            counts: null,
+            message:
+              `Category-aware backfill read failed (${error.message}); retrying with IPN-only fields.`
+          });
+          return fetchMasterBackfillRows(
+            masterService,
+            config.masterTable,
+            config.targetFieldName,
+            progressCallback,
+            { minimalFields: true }
+          );
+        }
+      })();
 
   return populateEbayItemSpecificsUrlsForRecords(rows, {
     ...config,
