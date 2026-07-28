@@ -701,6 +701,40 @@ function computeDueDate(createdAt, shipVia = '') {
   return addBusinessMinutesEst(created, isPriority ? 120 : 240);
 }
 
+function buildOriginalDueDateByWorkOrderNumber(rows = []) {
+  const originalRowByNumber = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (normalizeUpper(row?.['Record Type']) !== 'WORK ORDER') continue;
+    const workOrderNumber = normalizeCell(row?.['W/O or Quote Number']);
+    if (!workOrderNumber) continue;
+    const created = parseRowDate(row?.Created);
+    if (!created) continue;
+    const current = originalRowByNumber.get(workOrderNumber);
+    if (!current || created.getTime() < current.created.getTime()) {
+      originalRowByNumber.set(workOrderNumber, {
+        created,
+        row
+      });
+    }
+  }
+
+  const dueDateByNumber = new Map();
+  for (const [workOrderNumber, original] of originalRowByNumber.entries()) {
+    const dueDate = computeDueDate(original.created, original.row?.['Ship Via']);
+    if (dueDate) dueDateByNumber.set(workOrderNumber, dueDate);
+  }
+  return dueDateByNumber;
+}
+
+function resolveLockedWorkOrderDueDate(row = {}, dueDateByWorkOrderNumber = new Map()) {
+  const workOrderNumber = normalizeCell(row?.['W/O or Quote Number']);
+  if (normalizeUpper(row?.['Record Type']) === 'WORK ORDER' && workOrderNumber) {
+    const lockedDueDate = dueDateByWorkOrderNumber.get(workOrderNumber);
+    if (lockedDueDate instanceof Date) return lockedDueDate;
+  }
+  return computeDueDate(row?.Created, row?.['Ship Via']);
+}
+
 function isCompleteStatus(status = '', completedStatusNames = new Set()) {
   const normalized = normalizeClickUpStatusToken(status);
   if (!normalized) return false;
@@ -2004,13 +2038,14 @@ async function syncRowsToClickUp({
     seenRowKeys.add(key);
     uniqueFilteredRows.push(row);
   }
+  const dueDateByWorkOrderNumber = buildOriginalDueDateByWorkOrderNumber(uniqueFilteredRows);
 
   await mapWithConcurrency(uniqueFilteredRows, async row => {
     const key = buildTaskKey(row);
     if (!key) return;
     const existingTask = taskByKey.get(key);
     const isCancellation = isCanceledCustomerPo(row);
-    const dueDate = computeDueDate(row.Created, row['Ship Via']);
+    const dueDate = resolveLockedWorkOrderDueDate(row, dueDateByWorkOrderNumber);
     const customFields = buildTaskCustomFields(row, customFieldMeta, dueDate, {
       includeClearFields: Boolean(existingTask)
     }).map(field => {
