@@ -2,7 +2,7 @@ const { getDB } = require('./db');
 
 const { formatDateInTimeZone } = require('../utils/timezone');
 
-const WORK_ORDERS_EST_TIME_ZONE = 'Etc/GMT+5';
+const WORK_ORDERS_EST_TIME_ZONE = 'America/New_York';
 
 const WORK_ORDERS_QUERY = `
 DECLARE @LastSynced DATETIME = GETDATE();

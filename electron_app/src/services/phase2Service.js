@@ -233,6 +233,8 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     skippedExcludedPrefix: 0,
     created: 0,
     updated: 0,
+    qohZeroed: 0,
+    qohZeroedSamples: [],
     categoryResolved: 0,
     selfHealingResolved: 0,
     deterministicPlanned: 0,
@@ -464,6 +466,45 @@ async function runPhase2(options = {}, progressCallback = () => {}) {
     throw new Error(formatDetailedServiceError(error, 'self_healing_scan_master_parts'));
   }
   const knownIpns = new Set(normalizedRows.map(row => String(row.ipn || '').trim().toUpperCase()));
+
+  for (const record of allMasterRecords) {
+    const fields = record?.fields || {};
+    const ipn = String(fields.IPN || '').trim();
+    if (!record?.id || !ipn) continue;
+    const ipnUpper = ipn.toUpperCase();
+    if (knownIpns.has(ipnUpper)) continue;
+    const existingQoh = Number(fields['Quantity (QOH)']);
+    if (!Number.isFinite(existingQoh) || existingQoh <= 0) continue;
+
+    const existingPlannedUpdate = plan.updates.find(item => item?.id === record.id);
+    if (existingPlannedUpdate) {
+      existingPlannedUpdate.fields = {
+        ...(existingPlannedUpdate.fields || {}),
+        'Quantity (QOH)': 0
+      };
+    } else {
+      plan.updates.push({
+        id: record.id,
+        fields: {
+          'Quantity (QOH)': 0
+        }
+      });
+    }
+    summary.qohZeroed += 1;
+    if (summary.qohZeroedSamples.length < 25) {
+      summary.qohZeroedSamples.push(ipn);
+    }
+  }
+  if (summary.qohZeroed > 0) {
+    emitProgress(progressCallback, {
+      stage: 'plan_upserts',
+      percent: 70,
+      counts: summary,
+      message:
+        `Planned QOH zero-out for ${summary.qohZeroed} Master Parts records missing from Current Inventory` +
+        (summary.qohZeroedSamples.length > 0 ? ` (samples=${summary.qohZeroedSamples.join(', ')})` : '')
+    });
+  }
 
   for (let i = 0; i < allMasterRecords.length; i += 1) {
     const record = allMasterRecords[i];
