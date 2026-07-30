@@ -788,6 +788,47 @@ function buildPriorityAlert(shipVia = '') {
   return PRIORITY_SHIP_VIA.has(normalized) ? 'Priority' : '';
 }
 
+function buildAlertValues(row = {}, options = {}) {
+  const values = [];
+  const priorityAlert = buildPriorityAlert(row?.['Ship Via']);
+  if (priorityAlert) values.push(priorityAlert);
+  if (options?.multiple) values.push('Multiple');
+  return values;
+}
+
+function buildMultipleWorkOrderNumberSet(rows = []) {
+  const lineKeysByWorkOrder = new Map();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (normalizeUpper(row?.['Record Type']) !== 'WORK ORDER') continue;
+    const workOrderNumber = normalizeCell(row?.['W/O or Quote Number']);
+    if (!workOrderNumber) continue;
+    const lineKey =
+      normalizeCell(row?.['Line Item ID']) ||
+      normalizeCell(row?.['Detail (IPN)']) ||
+      buildTaskKey(row);
+    if (!lineKey) continue;
+    const status = normalizeUpper(row?.Status);
+    if (!isOpenPowerlinkStatus(status)) continue;
+    if (!lineKeysByWorkOrder.has(workOrderNumber)) {
+      lineKeysByWorkOrder.set(workOrderNumber, new Set());
+    }
+    lineKeysByWorkOrder.get(workOrderNumber).add(normalizeUpper(lineKey));
+  }
+
+  const out = new Set();
+  for (const [workOrderNumber, lineKeys] of lineKeysByWorkOrder.entries()) {
+    if (lineKeys.size > 1) out.add(workOrderNumber);
+  }
+  return out;
+}
+
+function isMultipleWorkOrderRow(row = {}, multipleWorkOrderNumbers = new Set()) {
+  const workOrderNumber = normalizeCell(row?.['W/O or Quote Number']);
+  return normalizeUpper(row?.['Record Type']) === 'WORK ORDER' &&
+    Boolean(workOrderNumber) &&
+    multipleWorkOrderNumbers.has(workOrderNumber);
+}
+
 function normalizeMoneyFieldValue(value = '') {
   const text = normalizeCell(value);
   if (!text) return '';
@@ -1081,6 +1122,9 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
   const rawLocation = normalizeCell(row.Location);
   const rawDeliveryDate = normalizeCell(row['Delivery Date']);
   const rowKey = buildRecordKey(row);
+  const alertValue = buildAlertValues(row, {
+    multiple: Boolean(options?.multipleWorkOrder)
+  });
   if (rawLocation && !resolvedAssignee) {
     console.warn(`[WorkOrders] No assignee mapping found for Location: ${rawLocation}`);
   } else if (resolvedAssignee) {
@@ -1093,7 +1137,7 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
     ),
     [WORK_ORDERS_TASK_FIELD_NAMES.createdBy]: normalizeCell(row['Created By']),
     [WORK_ORDERS_TASK_FIELD_NAMES.shipVia]: normalizeCell(row['Ship Via']),
-    [WORK_ORDERS_TASK_FIELD_NAMES.alert]: buildPriorityAlert(row['Ship Via']),
+    [WORK_ORDERS_TASK_FIELD_NAMES.alert]: alertValue,
     [WORK_ORDERS_TASK_FIELD_NAMES.location]: normalizeCell(row.Location),
     [WORK_ORDERS_TASK_FIELD_NAMES.detail]: normalizeCell(row['Detail (IPN)']),
     [WORK_ORDERS_TASK_FIELD_NAMES.deliveryDate]: parseOptionalDate(rawDeliveryDate),
@@ -1127,8 +1171,9 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
       });
       continue;
     }
-    if (!fieldMeta || value === '' || value === null) {
-      if (!fieldMeta && value !== '' && name !== 'Due Date') missingFieldNames.push(name);
+    if (!fieldMeta || value === '' || value === null || (Array.isArray(value) && value.length === 0)) {
+      const hasMissingValue = Array.isArray(value) ? value.length > 0 : value !== '';
+      if (!fieldMeta && hasMissingValue && name !== 'Due Date') missingFieldNames.push(name);
       continue;
     }
 
@@ -1151,8 +1196,45 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
       fieldValue = normalizeMoneyFieldValue(value);
       if (fieldValue === '') continue;
     }
+    if (fieldType === 'LABELS') {
+      const rawValues = Array.isArray(value) ? value : [value];
+      const labelIds = rawValues
+        .map(item => resolveLabelOptionId(fieldMeta, item))
+        .filter(Boolean);
+      if (labelIds.length === 0) {
+        if (name === WORK_ORDERS_TASK_FIELD_NAMES.assignee || name === WORK_ORDERS_TASK_FIELD_NAMES.alert) {
+          const options = Array.isArray(fieldMeta?.type_config?.options) ? fieldMeta.type_config.options : [];
+          const optionNames = options
+            .map(opt => normalizeCell(opt?.label || opt?.name || ''))
+            .filter(Boolean)
+            .join(', ');
+          console.warn(
+            `[WorkOrders] Label option not found. value='${rawValues.join(', ')}', fieldName='${name}', fieldType='${fieldType}', options='${optionNames}'`
+          );
+        }
+        continue;
+      }
+      customFields.push({
+        id: fieldMeta.id,
+        payload: {
+          value: Array.from(new Set(labelIds))
+        },
+        fieldName: name,
+        fieldType
+      });
+      continue;
+    }
+    if (Array.isArray(fieldValue)) {
+      fieldValue = fieldValue.map(item => normalizeCell(item)).filter(Boolean).join(', ');
+      if (!fieldValue) continue;
+    }
     if (fieldType === 'DROP_DOWN') {
-      const optionId = resolveDropdownOptionId(fieldMeta, value);
+      let optionId = resolveDropdownOptionId(fieldMeta, fieldValue);
+      if (!optionId && name === WORK_ORDERS_TASK_FIELD_NAMES.alert && Array.isArray(value)) {
+        const fallbackAlertValue = value.includes('Multiple') ? 'Multiple' : value[0];
+        optionId = resolveDropdownOptionId(fieldMeta, fallbackAlertValue);
+        if (optionId) fieldValue = fallbackAlertValue;
+      }
       if (!optionId) {
         if (name === WORK_ORDERS_TASK_FIELD_NAMES.assignee) {
           const options = Array.isArray(fieldMeta?.type_config?.options) ? fieldMeta.type_config.options : [];
@@ -1172,36 +1254,6 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
         );
       }
       fieldValue = optionId;
-    }
-    if (fieldType === 'LABELS') {
-      const labelId = resolveLabelOptionId(fieldMeta, value);
-      if (!labelId) {
-        if (name === WORK_ORDERS_TASK_FIELD_NAMES.assignee) {
-          const options = Array.isArray(fieldMeta?.type_config?.options) ? fieldMeta.type_config.options : [];
-          const optionNames = options
-            .map(opt => normalizeCell(opt?.label || opt?.name || ''))
-            .filter(Boolean)
-            .join(', ');
-          console.warn(
-            `[WorkOrders] Assignee label option not found. value='${value}', fieldType='${fieldType}', options='${optionNames}'`
-          );
-        }
-        continue;
-      }
-      if (name === WORK_ORDERS_TASK_FIELD_NAMES.assignee) {
-        console.log(
-          `[WorkOrders] Assignee label resolved. value='${value}', optionId='${labelId}', fieldId='${normalizeCell(fieldMeta?.id)}'`
-        );
-      }
-      customFields.push({
-        id: fieldMeta.id,
-        payload: {
-          value: [labelId]
-        },
-        fieldName: name,
-        fieldType
-      });
-      continue;
     }
     if (
       name === WORK_ORDERS_TASK_FIELD_NAMES.assignee &&
@@ -2039,6 +2091,7 @@ async function syncRowsToClickUp({
     uniqueFilteredRows.push(row);
   }
   const dueDateByWorkOrderNumber = buildOriginalDueDateByWorkOrderNumber(uniqueFilteredRows);
+  const multipleWorkOrderNumbers = buildMultipleWorkOrderNumberSet(uniqueFilteredRows);
 
   await mapWithConcurrency(uniqueFilteredRows, async row => {
     const key = buildTaskKey(row);
@@ -2047,7 +2100,8 @@ async function syncRowsToClickUp({
     const isCancellation = isCanceledCustomerPo(row);
     const dueDate = resolveLockedWorkOrderDueDate(row, dueDateByWorkOrderNumber);
     const customFields = buildTaskCustomFields(row, customFieldMeta, dueDate, {
-      includeClearFields: Boolean(existingTask)
+      includeClearFields: Boolean(existingTask),
+      multipleWorkOrder: isMultipleWorkOrderRow(row, multipleWorkOrderNumbers)
     }).map(field => {
       const fieldMeta = resolveCustomFieldMeta(customFieldMeta, field.fieldName);
       const options = Array.isArray(fieldMeta?.type_config?.options) ? fieldMeta.type_config.options : [];
