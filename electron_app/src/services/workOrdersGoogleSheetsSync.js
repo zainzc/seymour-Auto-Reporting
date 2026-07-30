@@ -42,6 +42,7 @@ const CLICKUP_ISSUE_STATUS = 'ISSUE';
 const CLICKUP_DELIVERY_COMPLETE_STATUS = 'COMPLETE';
 const CLICKUP_COMPLETED_STATUS_TOKENS = ['COMPLETE', 'COMPLETED', 'CLOSED', 'DONE', 'RESOLVED'];
 const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', 'CDC', 'FREIGHT', 'FLATRATEFREIGHT']);
+const PRIORITY_DUE_DATE_SHIP_VIA = new Set([...PRIORITY_SHIP_VIA, '']);
 const DELIVERY_AUTOMATION_LIST_ID = process.env.WORK_ORDERS_DELIVERY_AUTOMATION_LIST_ID || '901114138163';
 const DELIVERY_AUTOMATION_SHIP_VIA = new Set(['DELIVER', 'HUB', 'CDC', 'RCD', 'RTV', 'PUDO']);
 const DELIVERY_AUTOMATION_CUSTOM_FIELD_NAMES = [
@@ -106,6 +107,7 @@ const WORK_ORDERS_HEADERS = [
   'Shipping Customer Phone Number',
   'eBay Order Number',
   'Detail (IPN)',
+  'Line Item Description',
   'R#',
   'Stock #',
   'S/C',
@@ -148,6 +150,17 @@ function isCanceledCustomerPo(row = {}) {
 
 function isCanceledStatus(status = '') {
   return normalizeUpper(status) === CLICKUP_CANCELED_STATUS;
+}
+
+function isExcludedNonProductLine(row = {}) {
+  const text = [
+    row['Line Item Description'],
+    row['Detail (IPN)']
+  ]
+    .map(value => normalizeUpper(value))
+    .filter(Boolean)
+    .join(' ');
+  return /\bDELIVERY\s+FEE\b/.test(text) || /\bWARRANTY\b/.test(text);
 }
 
 function isIssueStatus(status = '') {
@@ -235,6 +248,7 @@ function buildDeliveryTaskName(row = {}) {
 
 function isDeliveryAutomationEligibleRow(row = {}) {
   if (normalizeUpper(row['Record Type']) !== 'WORK ORDER') return false;
+  if (isExcludedNonProductLine(row)) return false;
   if (isCanceledCustomerPo(row)) return false;
   if (!isOpenPowerlinkStatus(row.Status)) return false;
 
@@ -697,7 +711,7 @@ function computeDueDate(createdAt, shipVia = '') {
   const created = createdAt instanceof Date ? createdAt : parseRowDate(createdAt);
   if (!created) return null;
   const ship = normalizeUpper(shipVia);
-  const isPriority = PRIORITY_SHIP_VIA.has(ship);
+  const isPriority = PRIORITY_DUE_DATE_SHIP_VIA.has(ship);
   return addBusinessMinutesEst(created, isPriority ? 120 : 240);
 }
 
@@ -772,6 +786,7 @@ function buildTaskDescription(row = {}) {
     `Ship Via: ${normalizeCell(row['Ship Via'])}`,
     `Location: ${normalizeCell(row.Location)}`,
     `Detail (IPN): ${normalizeCell(row['Detail (IPN)'])}`,
+    `Line Item Description: ${normalizeCell(row['Line Item Description'])}`,
     `Stock #: ${normalizeCell(row['Stock #'])}`,
     `R Number: ${normalizeCell(row['R#'])}`,
     `Notes: ${normalizeCell(row.Notes)}`
@@ -2066,6 +2081,10 @@ async function syncRowsToClickUp({
   for (const row of latestRows) {
     const key = buildTaskKey(row);
     if (!key) continue;
+    if (isExcludedNonProductLine(row)) {
+      console.log(`[WorkOrders] Row skipped before ClickUp sync (Delivery Fee/Warranty): ${key}`);
+      continue;
+    }
     if (!isEligibleWorkOrdersSourceRow(row)) {
       console.log(`[WorkOrders] Row skipped before ClickUp sync (not open/eligible): ${key}`);
       continue;

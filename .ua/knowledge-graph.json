@@ -1,0 +1,2658 @@
+{
+  "version": "1.0.0",
+  "project": {
+    "name": "electron demo",
+    "languages": [
+      "JavaScript",
+      "HTML",
+      "CSS",
+      "JSON",
+      "Markdown",
+      "SVG",
+      "CSV"
+    ],
+    "frameworks": [
+      "Electron",
+      "Electron Forge",
+      "Node.js"
+    ],
+    "description": "Electron app for Seymour Auto Reporting and eBay automation workflows.",
+    "analyzedAt": "2026-07-30T07:57:39.313Z",
+    "gitCommitHash": "2098378536e0b476bc4e9871cc6d97757e83f5b5"
+  },
+  "nodes": [
+    {
+      "id": "config:electron_app/forge.config.js",
+      "type": "config",
+      "name": "forge.config.js",
+      "filePath": "electron_app/forge.config.js",
+      "summary": "Electron Forge packaging and maker configuration.",
+      "tags": [
+        "forge",
+        "config"
+      ]
+    },
+    {
+      "id": "config:electron_app/package-lock.json",
+      "type": "config",
+      "name": "package-lock.json",
+      "filePath": "electron_app/package-lock.json",
+      "summary": "Electron app npm lockfile snapshot.",
+      "tags": [
+        "package",
+        "lock"
+      ]
+    },
+    {
+      "id": "config:electron_app/package.json",
+      "type": "config",
+      "name": "package.json",
+      "filePath": "electron_app/package.json",
+      "summary": "Electron app manifest and npm scripts.",
+      "tags": [
+        "package"
+      ]
+    },
+    {
+      "id": "config:package-lock.json",
+      "type": "config",
+      "name": "package-lock.json",
+      "filePath": "package-lock.json",
+      "summary": "Repository-level npm lockfile snapshot.",
+      "tags": [
+        "package",
+        "lock"
+      ]
+    },
+    {
+      "id": "document:electron_app/PHASE2_README.md",
+      "type": "document",
+      "name": "Phase 2 Documentation",
+      "filePath": "electron_app/PHASE2_README.md",
+      "summary": "Milestone guide for the Phase 2 Google Sheets to Airtable master-parts flow.",
+      "tags": [
+        "phase2",
+        "readme",
+        "documentation"
+      ]
+    },
+    {
+      "id": "document:electron_app/PHASE3_README.md",
+      "type": "document",
+      "name": "Phase 3 Documentation",
+      "filePath": "electron_app/PHASE3_README.md",
+      "summary": "Milestone guide for the Phase 3 ShipStation and Powerlink flow.",
+      "tags": [
+        "phase3",
+        "readme",
+        "documentation"
+      ]
+    },
+    {
+      "id": "document:MILESTONE_11_REPORTING.md",
+      "type": "document",
+      "name": "Milestone 11 – Seymour Auto Reporting",
+      "filePath": "MILESTONE_11_REPORTING.md",
+      "summary": "Overview and setup guide for Seymour Auto Reporting.",
+      "tags": [
+        "milestone",
+        "reporting",
+        "documentation"
+      ]
+    },
+    {
+      "id": "file:electron_app/scripts/test-drive-image-upload.js",
+      "type": "file",
+      "name": "Test Drive Image Upload",
+      "filePath": "electron_app/scripts/test-drive-image-upload.js",
+      "summary": "Manual test harness for Drive image upload behavior.",
+      "tags": [
+        "scripts",
+        "test",
+        "drive",
+        "image",
+        "upload",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/scripts/test-workorders-query.js",
+      "type": "file",
+      "name": "Test Workorders Query",
+      "filePath": "electron_app/scripts/test-workorders-query.js",
+      "summary": "Manual test harness for work-order query behavior.",
+      "tags": [
+        "scripts",
+        "test",
+        "workorders",
+        "query",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/scripts/test-workorders-sync.js",
+      "type": "file",
+      "name": "Test Workorders Sync",
+      "filePath": "electron_app/scripts/test-workorders-sync.js",
+      "summary": "Manual test harness for the work-order sync workflow.",
+      "tags": [
+        "scripts",
+        "test",
+        "workorders",
+        "sync",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/config/configStore.js",
+      "type": "file",
+      "name": "Config Store",
+      "filePath": "electron_app/src/config/configStore.js",
+      "summary": "Persistent store helpers for application configuration and workflow state.",
+      "tags": [
+        "src",
+        "config",
+        "store"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/config/env.js",
+      "type": "file",
+      "name": "Env",
+      "filePath": "electron_app/src/config/env.js",
+      "summary": "Central environment settings for reporting and scheduling.",
+      "tags": [
+        "src",
+        "config",
+        "env"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/config/loadEnv.js",
+      "type": "file",
+      "name": "Load Env",
+      "filePath": "electron_app/src/config/loadEnv.js",
+      "summary": "Loads environment variables before the Electron app starts.",
+      "tags": [
+        "src",
+        "config",
+        "load",
+        "env"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/main/index.js",
+      "type": "file",
+      "name": "Index",
+      "filePath": "electron_app/src/main/index.js",
+      "summary": "Electron main-process bootstrap that wires windows, IPC, and feature services.",
+      "tags": [
+        "src",
+        "main",
+        "index",
+        "bootstrap"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/preload/preload.js",
+      "type": "file",
+      "name": "Preload",
+      "filePath": "electron_app/src/preload/preload.js",
+      "summary": "Secure preload bridge that exposes renderer-safe APIs with contextBridge.",
+      "tags": [
+        "src",
+        "preload",
+        "bootstrap"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/renderer/pages/main-dashboard.html",
+      "type": "file",
+      "name": "Main Dashboard",
+      "filePath": "electron_app/src/renderer/pages/main-dashboard.html",
+      "summary": "Main renderer dashboard shell.",
+      "tags": [
+        "src",
+        "renderer",
+        "pages",
+        "main",
+        "dashboard",
+        "bootstrap",
+        "ui"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/renderer/pages/milestone1/index.html",
+      "type": "file",
+      "name": "Index",
+      "filePath": "electron_app/src/renderer/pages/milestone1/index.html",
+      "summary": "Milestone 1 landing page for the reporting and inventory workflows.",
+      "tags": [
+        "src",
+        "renderer",
+        "pages",
+        "milestone1",
+        "index",
+        "ui"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/renderer/pages/milestone1/phase2-master-parts.html",
+      "type": "file",
+      "name": "Phase2 Master Parts",
+      "filePath": "electron_app/src/renderer/pages/milestone1/phase2-master-parts.html",
+      "summary": "Milestone 1 page for Phase 2 master-parts setup.",
+      "tags": [
+        "src",
+        "renderer",
+        "pages",
+        "milestone1",
+        "phase2",
+        "master",
+        "parts",
+        "ui"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/renderer/pages/milestone1/phase5-batch-approval.html",
+      "type": "file",
+      "name": "Phase5 Batch Approval",
+      "filePath": "electron_app/src/renderer/pages/milestone1/phase5-batch-approval.html",
+      "summary": "Milestone 1 page for batch approval and governance.",
+      "tags": [
+        "src",
+        "renderer",
+        "pages",
+        "milestone1",
+        "phase5",
+        "batch",
+        "approval",
+        "ui"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/renderer/pages/milestone1/powerlink-sheets.html",
+      "type": "file",
+      "name": "Powerlink Sheets",
+      "filePath": "electron_app/src/renderer/pages/milestone1/powerlink-sheets.html",
+      "summary": "Milestone 1 page for Powerlink and Sheets setup.",
+      "tags": [
+        "src",
+        "renderer",
+        "pages",
+        "milestone1",
+        "powerlink",
+        "sheets",
+        "ui"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/renderer/pages/milestone11/index.html",
+      "type": "file",
+      "name": "Index",
+      "filePath": "electron_app/src/renderer/pages/milestone11/index.html",
+      "summary": "Milestone 11 reporting UI page.",
+      "tags": [
+        "src",
+        "renderer",
+        "pages",
+        "milestone11",
+        "index",
+        "ui"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/renderer/pages/shared/setup.html",
+      "type": "file",
+      "name": "Setup",
+      "filePath": "electron_app/src/renderer/pages/shared/setup.html",
+      "summary": "Shared setup page for initial application configuration.",
+      "tags": [
+        "src",
+        "renderer",
+        "pages",
+        "shared",
+        "setup",
+        "ui"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/renderer/pages/shared/webhook.html",
+      "type": "file",
+      "name": "Webhook",
+      "filePath": "electron_app/src/renderer/pages/shared/webhook.html",
+      "summary": "Shared webhook configuration page.",
+      "tags": [
+        "src",
+        "renderer",
+        "pages",
+        "shared",
+        "webhook",
+        "ui"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/renderer/styles/index.css",
+      "type": "file",
+      "name": "Index",
+      "filePath": "electron_app/src/renderer/styles/index.css",
+      "summary": "Global renderer stylesheet.",
+      "tags": [
+        "src",
+        "renderer",
+        "styles",
+        "index"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/scripts/runEbayMockImport.js",
+      "type": "file",
+      "name": "Run Ebay Mock Import",
+      "filePath": "electron_app/src/scripts/runEbayMockImport.js",
+      "summary": "CLI wrapper for the eBay mock import workflow.",
+      "tags": [
+        "src",
+        "scripts",
+        "run",
+        "ebay",
+        "mock",
+        "import",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "type": "file",
+      "name": "Run Ebay Sandbox Inventory Import",
+      "filePath": "electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "summary": "CLI wrapper for the eBay sandbox inventory import workflow.",
+      "tags": [
+        "src",
+        "scripts",
+        "run",
+        "ebay",
+        "sandbox",
+        "inventory",
+        "import",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "type": "file",
+      "name": "Run Phase4BLite",
+      "filePath": "electron_app/src/scripts/runPhase4BLite.js",
+      "summary": "CLI wrapper for the Phase 4B-lite workflow.",
+      "tags": [
+        "src",
+        "scripts",
+        "run",
+        "phase4blite",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/scripts/runPhase4Mirroring.js",
+      "type": "file",
+      "name": "Run Phase4Mirroring",
+      "filePath": "electron_app/src/scripts/runPhase4Mirroring.js",
+      "summary": "CLI wrapper for running the Phase 4 mirroring workflow.",
+      "tags": [
+        "src",
+        "scripts",
+        "run",
+        "phase4mirroring",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/scripts/runPhase4RulesPopulate.js",
+      "type": "file",
+      "name": "Run Phase4Rules Populate",
+      "filePath": "electron_app/src/scripts/runPhase4RulesPopulate.js",
+      "summary": "CLI wrapper for populating fixed Phase 4 rules.",
+      "tags": [
+        "src",
+        "scripts",
+        "run",
+        "phase4rules",
+        "populate",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/scripts/runPhase6Fitment.js",
+      "type": "file",
+      "name": "Run Phase6Fitment",
+      "filePath": "electron_app/src/scripts/runPhase6Fitment.js",
+      "summary": "CLI wrapper for the Phase 6 fitment workflow.",
+      "tags": [
+        "src",
+        "scripts",
+        "run",
+        "phase6fitment",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/scripts/runPhase72FitmentImage.js",
+      "type": "file",
+      "name": "Run Phase72Fitment Image",
+      "filePath": "electron_app/src/scripts/runPhase72FitmentImage.js",
+      "summary": "CLI wrapper for the Phase 72 fitment image workflow.",
+      "tags": [
+        "src",
+        "scripts",
+        "run",
+        "phase72fitment",
+        "image",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/scripts/runPhase74TitleDescription.js",
+      "type": "file",
+      "name": "Run Phase74Title Description",
+      "filePath": "electron_app/src/scripts/runPhase74TitleDescription.js",
+      "summary": "CLI wrapper for the Phase 74 title-description workflow.",
+      "tags": [
+        "src",
+        "scripts",
+        "run",
+        "phase74title",
+        "description",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/scripts/syncItemSpecificTables.js",
+      "type": "file",
+      "name": "Sync Item Specific Tables",
+      "filePath": "electron_app/src/scripts/syncItemSpecificTables.js",
+      "summary": "Utility script for synchronizing item-specific tables.",
+      "tags": [
+        "src",
+        "scripts",
+        "sync",
+        "item",
+        "specific",
+        "tables",
+        "script"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/utils/chunk.js",
+      "type": "file",
+      "name": "Chunk",
+      "filePath": "electron_app/src/utils/chunk.js",
+      "summary": "Project file for Chunk.",
+      "tags": [
+        "src",
+        "utils",
+        "chunk"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/utils/retry.js",
+      "type": "file",
+      "name": "Retry",
+      "filePath": "electron_app/src/utils/retry.js",
+      "summary": "Project file for Retry.",
+      "tags": [
+        "src",
+        "utils",
+        "retry"
+      ]
+    },
+    {
+      "id": "file:electron_app/src/utils/timezone.js",
+      "type": "file",
+      "name": "Timezone",
+      "filePath": "electron_app/src/utils/timezone.js",
+      "summary": "Project file for Timezone.",
+      "tags": [
+        "src",
+        "utils",
+        "timezone"
+      ]
+    },
+    {
+      "id": "resource:electron_app/output/fitment-images/166-02246L.svg",
+      "type": "resource",
+      "name": "166 02246L",
+      "filePath": "electron_app/output/fitment-images/166-02246L.svg",
+      "summary": "Generated fitment image asset used by the fitment workflow.",
+      "tags": [
+        "output",
+        "fitment",
+        "images",
+        "166",
+        "02246l",
+        "asset"
+      ]
+    },
+    {
+      "id": "resource:electron_app/output/fitment-images/257-52413.svg",
+      "type": "resource",
+      "name": "257 52413",
+      "filePath": "electron_app/output/fitment-images/257-52413.svg",
+      "summary": "Generated fitment image asset used by the fitment workflow.",
+      "tags": [
+        "output",
+        "fitment",
+        "images",
+        "257",
+        "52413",
+        "asset"
+      ]
+    },
+    {
+      "id": "resource:electron_app/output/fitment-images/267-00232.svg",
+      "type": "resource",
+      "name": "267 00232",
+      "filePath": "electron_app/output/fitment-images/267-00232.svg",
+      "summary": "Generated fitment image asset used by the fitment workflow.",
+      "tags": [
+        "output",
+        "fitment",
+        "images",
+        "267",
+        "00232",
+        "asset"
+      ]
+    },
+    {
+      "id": "resource:electron_app/output/fitment-images/337-60940.svg",
+      "type": "resource",
+      "name": "337 60940",
+      "filePath": "electron_app/output/fitment-images/337-60940.svg",
+      "summary": "Generated fitment image asset used by the fitment workflow.",
+      "tags": [
+        "output",
+        "fitment",
+        "images",
+        "337",
+        "60940",
+        "asset"
+      ]
+    },
+    {
+      "id": "resource:electron_app/output/itemSpecificExtracted.json",
+      "type": "resource",
+      "name": "Item Specific Extracted",
+      "filePath": "electron_app/output/itemSpecificExtracted.json",
+      "summary": "Generated item-specific extraction output snapshot.",
+      "tags": [
+        "output",
+        "item",
+        "specific",
+        "extracted",
+        "asset"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "service",
+      "name": "Airtable Schema Service",
+      "filePath": "electron_app/src/services/airtableSchemaService.js",
+      "summary": "Service module for Airtable Schema.",
+      "tags": [
+        "src",
+        "services",
+        "airtable",
+        "schema",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/airtableService.js",
+      "type": "service",
+      "name": "Airtable Service",
+      "filePath": "electron_app/src/services/airtableService.js",
+      "summary": "Service module for Airtable.",
+      "tags": [
+        "src",
+        "services",
+        "airtable",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/batchCreationService.js",
+      "type": "service",
+      "name": "Batch Creation Service",
+      "filePath": "electron_app/src/services/batchCreationService.js",
+      "summary": "Creates publish batches from listing data.",
+      "tags": [
+        "src",
+        "services",
+        "batch",
+        "creation",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/clickupService.js",
+      "type": "service",
+      "name": "Clickup Service",
+      "filePath": "electron_app/src/services/clickupService.js",
+      "summary": "Service module for Clickup.",
+      "tags": [
+        "src",
+        "services",
+        "clickup",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/db.js",
+      "type": "service",
+      "name": "Db",
+      "filePath": "electron_app/src/services/db.js",
+      "summary": "Database initialization and connection helpers.",
+      "tags": [
+        "src",
+        "services",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/ebayBrandPropagationService.js",
+      "type": "service",
+      "name": "Ebay Brand Propagation Service",
+      "filePath": "electron_app/src/services/ebayBrandPropagationService.js",
+      "summary": "Propagates brand data for eBay workflows.",
+      "tags": [
+        "src",
+        "services",
+        "ebay",
+        "brand",
+        "propagation",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/ebayListingsScheduleService.js",
+      "type": "service",
+      "name": "Ebay Listings Schedule Service",
+      "filePath": "electron_app/src/services/ebayListingsScheduleService.js",
+      "summary": "Schedules eBay listing import and refresh jobs.",
+      "tags": [
+        "src",
+        "services",
+        "ebay",
+        "listings",
+        "schedule",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/excelService.js",
+      "type": "service",
+      "name": "Excel Service",
+      "filePath": "electron_app/src/services/excelService.js",
+      "summary": "Builds Excel exports for reporting workflows.",
+      "tags": [
+        "src",
+        "services",
+        "excel",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/googleDriveImageService.js",
+      "type": "service",
+      "name": "Google Drive Image Service",
+      "filePath": "electron_app/src/services/googleDriveImageService.js",
+      "summary": "Google Drive image upload and retrieval helpers.",
+      "tags": [
+        "src",
+        "services",
+        "google",
+        "drive",
+        "image",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/googleSheetsInventoryService.js",
+      "type": "service",
+      "name": "Google Sheets Inventory Service",
+      "filePath": "electron_app/src/services/googleSheetsInventoryService.js",
+      "summary": "Google Sheets integration for inventory workflows.",
+      "tags": [
+        "src",
+        "services",
+        "google",
+        "sheets",
+        "inventory",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/inventoryScheduleService.js",
+      "type": "service",
+      "name": "Inventory Schedule Service",
+      "filePath": "electron_app/src/services/inventoryScheduleService.js",
+      "summary": "Schedules inventory sync jobs and execution tracking.",
+      "tags": [
+        "src",
+        "services",
+        "inventory",
+        "schedule",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/inventoryService.js",
+      "type": "service",
+      "name": "Inventory Service",
+      "filePath": "electron_app/src/services/inventoryService.js",
+      "summary": "Inventory synchronization and data access helpers.",
+      "tags": [
+        "src",
+        "services",
+        "inventory",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/masterEbayItemSpecificsUrlService.js",
+      "type": "service",
+      "name": "Master Ebay Item Specifics Url Service",
+      "filePath": "electron_app/src/services/masterEbayItemSpecificsUrlService.js",
+      "summary": "Backfills master eBay item-specific URLs.",
+      "tags": [
+        "src",
+        "services",
+        "master",
+        "ebay",
+        "item",
+        "specifics",
+        "url",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/oauth2Service.js",
+      "type": "service",
+      "name": "Oauth2Service",
+      "filePath": "electron_app/src/services/oauth2Service.js",
+      "summary": "OAuth2 helper for Google authentication.",
+      "tags": [
+        "src",
+        "services",
+        "oauth2service",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase2AutoRunService.js",
+      "type": "service",
+      "name": "Phase2Auto Run Service",
+      "filePath": "electron_app/src/services/phase2AutoRunService.js",
+      "summary": "Automatic run orchestration for Phase 2.",
+      "tags": [
+        "src",
+        "services",
+        "phase2auto",
+        "run",
+        "service",
+        "phase2"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase2CategoryResolutionV2Service.js",
+      "type": "service",
+      "name": "Phase2Category Resolution V2Service",
+      "filePath": "electron_app/src/services/phase2CategoryResolutionV2Service.js",
+      "summary": "Category resolution helpers for Phase 2 processing.",
+      "tags": [
+        "src",
+        "services",
+        "phase2category",
+        "resolution",
+        "v2service",
+        "service",
+        "phase2"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase2Service.js",
+      "type": "service",
+      "name": "Phase2Service",
+      "filePath": "electron_app/src/services/phase2Service.js",
+      "summary": "Phase 2 orchestration for Google Sheets to Airtable master-parts processing.",
+      "tags": [
+        "src",
+        "services",
+        "phase2service",
+        "service",
+        "phase2"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase2SheetsService.js",
+      "type": "service",
+      "name": "Phase2Sheets Service",
+      "filePath": "electron_app/src/services/phase2SheetsService.js",
+      "summary": "Google Sheets helpers for Phase 2 intake and writeback.",
+      "tags": [
+        "src",
+        "services",
+        "phase2sheets",
+        "service",
+        "phase2"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase2ValidationService.js",
+      "type": "service",
+      "name": "Phase2Validation Service",
+      "filePath": "electron_app/src/services/phase2ValidationService.js",
+      "summary": "Validation logic for Phase 2 data quality checks.",
+      "tags": [
+        "src",
+        "services",
+        "phase2validation",
+        "service",
+        "phase2"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase2WritebackPollerService.js",
+      "type": "service",
+      "name": "Phase2Writeback Poller Service",
+      "filePath": "electron_app/src/services/phase2WritebackPollerService.js",
+      "summary": "Background poller for Phase 2 writeback status.",
+      "tags": [
+        "src",
+        "services",
+        "phase2writeback",
+        "poller",
+        "service",
+        "phase2"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase2WritebackService.js",
+      "type": "service",
+      "name": "Phase2Writeback Service",
+      "filePath": "electron_app/src/services/phase2WritebackService.js",
+      "summary": "Phase 2 writeback workflow for persisting processed data.",
+      "tags": [
+        "src",
+        "services",
+        "phase2writeback",
+        "service",
+        "phase2"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase3PlanningService.js",
+      "type": "service",
+      "name": "Phase3Planning Service",
+      "filePath": "electron_app/src/services/phase3PlanningService.js",
+      "summary": "Planning helpers for Phase 3 processing.",
+      "tags": [
+        "src",
+        "services",
+        "phase3planning",
+        "service",
+        "phase3"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase3PowerlinkMappingService.js",
+      "type": "service",
+      "name": "Phase3Powerlink Mapping Service",
+      "filePath": "electron_app/src/services/phase3PowerlinkMappingService.js",
+      "summary": "Powerlink mapping helpers for Phase 3.",
+      "tags": [
+        "src",
+        "services",
+        "phase3powerlink",
+        "mapping",
+        "service",
+        "phase3"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase3Service.js",
+      "type": "service",
+      "name": "Phase3Service",
+      "filePath": "electron_app/src/services/phase3Service.js",
+      "summary": "Phase 3 orchestration for ShipStation mapping and Powerlink enrichment.",
+      "tags": [
+        "src",
+        "services",
+        "phase3service",
+        "service",
+        "phase3"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase3ShipstationDebugExportService.js",
+      "type": "service",
+      "name": "Phase3Shipstation Debug Export Service",
+      "filePath": "electron_app/src/services/phase3ShipstationDebugExportService.js",
+      "summary": "Debug export helpers for Phase 3 ShipStation data.",
+      "tags": [
+        "src",
+        "services",
+        "phase3shipstation",
+        "debug",
+        "export",
+        "service",
+        "phase3"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase3ShipstationService.js",
+      "type": "service",
+      "name": "Phase3Shipstation Service",
+      "filePath": "electron_app/src/services/phase3ShipstationService.js",
+      "summary": "ShipStation integration for Phase 3.",
+      "tags": [
+        "src",
+        "services",
+        "phase3shipstation",
+        "service",
+        "phase3"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase4AiEvaluatorService.js",
+      "type": "service",
+      "name": "Phase4Ai Evaluator Service",
+      "filePath": "electron_app/src/services/phase4AiEvaluatorService.js",
+      "summary": "AI evaluation helpers used during Phase 4 workflows.",
+      "tags": [
+        "src",
+        "services",
+        "phase4ai",
+        "evaluator",
+        "service",
+        "phase4"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase4MirroringService.js",
+      "type": "service",
+      "name": "Phase4Mirroring Service",
+      "filePath": "electron_app/src/services/phase4MirroringService.js",
+      "summary": "Phase 4 orchestration for item-specific mirroring workflows.",
+      "tags": [
+        "src",
+        "services",
+        "phase4mirroring",
+        "service",
+        "phase4"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase5ApprovalService.js",
+      "type": "service",
+      "name": "Phase5Approval Service",
+      "filePath": "electron_app/src/services/phase5ApprovalService.js",
+      "summary": "Approval checks for Phase 5 publishing.",
+      "tags": [
+        "src",
+        "services",
+        "phase5approval",
+        "service",
+        "phase5"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase5AutoPushScheduleService.js",
+      "type": "service",
+      "name": "Phase5Auto Push Schedule Service",
+      "filePath": "electron_app/src/services/phase5AutoPushScheduleService.js",
+      "summary": "Auto-push scheduling for Phase 5 publishing.",
+      "tags": [
+        "src",
+        "services",
+        "phase5auto",
+        "push",
+        "schedule",
+        "service",
+        "phase5"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase5BatchGovernanceService.js",
+      "type": "service",
+      "name": "Phase5Batch Governance Service",
+      "filePath": "electron_app/src/services/phase5BatchGovernanceService.js",
+      "summary": "Batch governance and validation helpers for Phase 5.",
+      "tags": [
+        "src",
+        "services",
+        "phase5batch",
+        "governance",
+        "service",
+        "phase5"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase5EbayPublishService.js",
+      "type": "service",
+      "name": "Phase5Ebay Publish Service",
+      "filePath": "electron_app/src/services/phase5EbayPublishService.js",
+      "summary": "eBay publish integration for Phase 5 listings.",
+      "tags": [
+        "src",
+        "services",
+        "phase5ebay",
+        "publish",
+        "service",
+        "phase5"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase5GovernanceService.js",
+      "type": "service",
+      "name": "Phase5Governance Service",
+      "filePath": "electron_app/src/services/phase5GovernanceService.js",
+      "summary": "Governance rules for listing publication.",
+      "tags": [
+        "src",
+        "services",
+        "phase5governance",
+        "service",
+        "phase5"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase5IdentityService.js",
+      "type": "service",
+      "name": "Phase5Identity Service",
+      "filePath": "electron_app/src/services/phase5IdentityService.js",
+      "summary": "Identity and account helpers for Phase 5.",
+      "tags": [
+        "src",
+        "services",
+        "phase5identity",
+        "service",
+        "phase5"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase5PublishLogService.js",
+      "type": "service",
+      "name": "Phase5Publish Log Service",
+      "filePath": "electron_app/src/services/phase5PublishLogService.js",
+      "summary": "Publication logging helpers for Phase 5.",
+      "tags": [
+        "src",
+        "services",
+        "phase5publish",
+        "log",
+        "service",
+        "phase5"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase5Service.js",
+      "type": "service",
+      "name": "Phase5Service",
+      "filePath": "electron_app/src/services/phase5Service.js",
+      "summary": "Phase 5 publishing workflow for approved listings.",
+      "tags": [
+        "src",
+        "services",
+        "phase5service",
+        "service",
+        "phase5"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase6FitmentService.js",
+      "type": "service",
+      "name": "Phase6Fitment Service",
+      "filePath": "electron_app/src/services/phase6FitmentService.js",
+      "summary": "Phase 6 fitment workflow service.",
+      "tags": [
+        "src",
+        "services",
+        "phase6fitment",
+        "service",
+        "phase6"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase72FitmentImageService.js",
+      "type": "service",
+      "name": "Phase72Fitment Image Service",
+      "filePath": "electron_app/src/services/phase72FitmentImageService.js",
+      "summary": "Phase 72 fitment image workflow service.",
+      "tags": [
+        "src",
+        "services",
+        "phase72fitment",
+        "image",
+        "service",
+        "phase72"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/phase74TitleDescriptionService.js",
+      "type": "service",
+      "name": "Phase74Title Description Service",
+      "filePath": "electron_app/src/services/phase74TitleDescriptionService.js",
+      "summary": "Phase 74 title and description workflow service.",
+      "tags": [
+        "src",
+        "services",
+        "phase74title",
+        "description",
+        "service",
+        "phase74"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/reportingService.js",
+      "type": "service",
+      "name": "Reporting Service",
+      "filePath": "electron_app/src/services/reportingService.js",
+      "summary": "Reporting workflow for invoice retrieval and salesperson lookup.",
+      "tags": [
+        "src",
+        "services",
+        "reporting",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/rulesLogicService.js",
+      "type": "service",
+      "name": "Rules Logic Service",
+      "filePath": "electron_app/src/services/rulesLogicService.js",
+      "summary": "Business rules engine for item-specific transformations.",
+      "tags": [
+        "src",
+        "services",
+        "rules",
+        "logic",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/scheduleService.js",
+      "type": "service",
+      "name": "Schedule Service",
+      "filePath": "electron_app/src/services/scheduleService.js",
+      "summary": "Schedules reporting jobs and records execution logs.",
+      "tags": [
+        "src",
+        "services",
+        "schedule",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/sheetsService.js",
+      "type": "service",
+      "name": "Sheets Service",
+      "filePath": "electron_app/src/services/sheetsService.js",
+      "summary": "Google Sheets integration for reporting exports and raw-tab writes.",
+      "tags": [
+        "src",
+        "services",
+        "sheets",
+        "service"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/workOrdersGoogleSheetsSync.js",
+      "type": "service",
+      "name": "Work Orders Google Sheets Sync",
+      "filePath": "electron_app/src/services/workOrdersGoogleSheetsSync.js",
+      "summary": "Synchronizes work orders between Google Sheets and ClickUp.",
+      "tags": [
+        "src",
+        "services",
+        "work",
+        "orders",
+        "google",
+        "sheets",
+        "sync",
+        "service",
+        "workorders"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/workOrdersPowerlinkService.js",
+      "type": "service",
+      "name": "Work Orders Powerlink Service",
+      "filePath": "electron_app/src/services/workOrdersPowerlinkService.js",
+      "summary": "Service module for Work Orders Powerlink.",
+      "tags": [
+        "src",
+        "services",
+        "work",
+        "orders",
+        "powerlink",
+        "service",
+        "workorders"
+      ]
+    },
+    {
+      "id": "service:electron_app/src/services/workOrdersScheduleService.js",
+      "type": "service",
+      "name": "Work Orders Schedule Service",
+      "filePath": "electron_app/src/services/workOrdersScheduleService.js",
+      "summary": "Schedules work-order sync jobs and logs executions.",
+      "tags": [
+        "src",
+        "services",
+        "work",
+        "orders",
+        "schedule",
+        "service",
+        "workorders"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "source": "document:electron_app/PHASE2_README.md",
+      "target": "service:electron_app/src/services/phase2Service.js",
+      "type": "documents",
+      "weight": 0.5
+    },
+    {
+      "source": "document:electron_app/PHASE2_README.md",
+      "target": "service:electron_app/src/services/phase2ValidationService.js",
+      "type": "documents",
+      "weight": 0.5
+    },
+    {
+      "source": "document:electron_app/PHASE2_README.md",
+      "target": "service:electron_app/src/services/phase2WritebackService.js",
+      "type": "documents",
+      "weight": 0.5
+    },
+    {
+      "source": "document:electron_app/PHASE3_README.md",
+      "target": "service:electron_app/src/services/phase3PowerlinkMappingService.js",
+      "type": "documents",
+      "weight": 0.5
+    },
+    {
+      "source": "document:electron_app/PHASE3_README.md",
+      "target": "service:electron_app/src/services/phase3Service.js",
+      "type": "documents",
+      "weight": 0.5
+    },
+    {
+      "source": "document:electron_app/PHASE3_README.md",
+      "target": "service:electron_app/src/services/phase3ShipstationService.js",
+      "type": "documents",
+      "weight": 0.5
+    },
+    {
+      "source": "document:MILESTONE_11_REPORTING.md",
+      "target": "file:electron_app/src/main/index.js",
+      "type": "documents",
+      "weight": 0.5
+    },
+    {
+      "source": "document:MILESTONE_11_REPORTING.md",
+      "target": "service:electron_app/src/services/reportingService.js",
+      "type": "documents",
+      "weight": 0.5
+    },
+    {
+      "source": "document:MILESTONE_11_REPORTING.md",
+      "target": "service:electron_app/src/services/scheduleService.js",
+      "type": "documents",
+      "weight": 0.5
+    },
+    {
+      "source": "document:MILESTONE_11_REPORTING.md",
+      "target": "service:electron_app/src/services/sheetsService.js",
+      "type": "documents",
+      "weight": 0.5
+    },
+    {
+      "source": "file:electron_app/scripts/test-drive-image-upload.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/scripts/test-drive-image-upload.js",
+      "target": "service:electron_app/src/services/googleDriveImageService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/scripts/test-workorders-query.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/scripts/test-workorders-query.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/scripts/test-workorders-query.js",
+      "target": "service:electron_app/src/services/db.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/scripts/test-workorders-query.js",
+      "target": "service:electron_app/src/services/workOrdersPowerlinkService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/scripts/test-workorders-sync.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/scripts/test-workorders-sync.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/scripts/test-workorders-sync.js",
+      "target": "service:electron_app/src/services/db.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/scripts/test-workorders-sync.js",
+      "target": "service:electron_app/src/services/oauth2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/scripts/test-workorders-sync.js",
+      "target": "service:electron_app/src/services/workOrdersGoogleSheetsSync.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "file:electron_app/src/scripts/runEbayMockImport.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "file:electron_app/src/scripts/runPhase4RulesPopulate.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "file:electron_app/src/scripts/runPhase6Fitment.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "file:electron_app/src/scripts/runPhase72FitmentImage.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "file:electron_app/src/scripts/runPhase74TitleDescription.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "file:electron_app/src/scripts/syncItemSpecificTables.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/batchCreationService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/clickupService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/db.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/ebayBrandPropagationService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/ebayListingsScheduleService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/excelService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/googleSheetsInventoryService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/inventoryScheduleService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/inventoryService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/masterEbayItemSpecificsUrlService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/oauth2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/phase2AutoRunService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/phase2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/phase2WritebackPollerService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/phase3Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/phase4MirroringService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/phase5AutoPushScheduleService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/phase5BatchGovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/phase5EbayPublishService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/phase5PublishLogService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/phase5Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/reportingService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/scheduleService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/sheetsService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/workOrdersGoogleSheetsSync.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/main/index.js",
+      "target": "service:electron_app/src/services/workOrdersScheduleService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/renderer/pages/milestone1/powerlink-sheets.html",
+      "target": "file:electron_app/src/renderer/styles/index.css",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbayMockImport.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbayMockImport.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbayMockImport.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbayMockImport.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbayMockImport.js",
+      "target": "service:electron_app/src/services/phase5GovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbayMockImport.js",
+      "target": "service:electron_app/src/services/phase5IdentityService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbayMockImport.js",
+      "target": "service:electron_app/src/services/phase5PublishLogService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "target": "service:electron_app/src/services/phase5GovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "target": "service:electron_app/src/services/phase5IdentityService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "target": "service:electron_app/src/services/phase5PublishLogService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+      "target": "service:electron_app/src/services/rulesLogicService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "target": "file:electron_app/src/utils/chunk.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "target": "service:electron_app/src/services/clickupService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "target": "service:electron_app/src/services/phase2SheetsService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "target": "service:electron_app/src/services/phase4AiEvaluatorService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "target": "service:electron_app/src/services/phase5GovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "target": "service:electron_app/src/services/phase5IdentityService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4BLite.js",
+      "target": "service:electron_app/src/services/rulesLogicService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4Mirroring.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4Mirroring.js",
+      "target": "service:electron_app/src/services/phase4MirroringService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4RulesPopulate.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4RulesPopulate.js",
+      "target": "file:electron_app/src/utils/chunk.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4RulesPopulate.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4RulesPopulate.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase4RulesPopulate.js",
+      "target": "service:electron_app/src/services/rulesLogicService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase6Fitment.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase6Fitment.js",
+      "target": "service:electron_app/src/services/phase6FitmentService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase72FitmentImage.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase72FitmentImage.js",
+      "target": "service:electron_app/src/services/phase72FitmentImageService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase74TitleDescription.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/runPhase74TitleDescription.js",
+      "target": "service:electron_app/src/services/phase74TitleDescriptionService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/syncItemSpecificTables.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/syncItemSpecificTables.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/syncItemSpecificTables.js",
+      "target": "file:electron_app/src/utils/retry.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/syncItemSpecificTables.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/syncItemSpecificTables.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "file:electron_app/src/scripts/syncItemSpecificTables.js",
+      "target": "service:electron_app/src/services/oauth2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/airtableSchemaService.js",
+      "target": "file:electron_app/src/utils/retry.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/airtableService.js",
+      "target": "file:electron_app/src/utils/chunk.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/airtableService.js",
+      "target": "file:electron_app/src/utils/retry.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/airtableService.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/batchCreationService.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/batchCreationService.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/batchCreationService.js",
+      "target": "service:electron_app/src/services/phase5GovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/clickupService.js",
+      "target": "file:electron_app/src/utils/retry.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/db.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/ebayBrandPropagationService.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/ebayBrandPropagationService.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/ebayBrandPropagationService.js",
+      "target": "file:electron_app/src/utils/chunk.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/ebayBrandPropagationService.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/ebayBrandPropagationService.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/googleSheetsInventoryService.js",
+      "target": "service:electron_app/src/services/oauth2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/inventoryScheduleService.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/inventoryScheduleService.js",
+      "target": "service:electron_app/src/services/googleSheetsInventoryService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/inventoryScheduleService.js",
+      "target": "service:electron_app/src/services/inventoryService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/inventoryService.js",
+      "target": "service:electron_app/src/services/db.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/masterEbayItemSpecificsUrlService.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/masterEbayItemSpecificsUrlService.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/masterEbayItemSpecificsUrlService.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/oauth2Service.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/oauth2Service.js",
+      "target": "file:electron_app/src/config/loadEnv.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2AutoRunService.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2AutoRunService.js",
+      "target": "service:electron_app/src/services/phase2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2AutoRunService.js",
+      "target": "service:electron_app/src/services/phase2SheetsService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2Service.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2Service.js",
+      "target": "file:electron_app/src/utils/chunk.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2Service.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2Service.js",
+      "target": "service:electron_app/src/services/clickupService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2Service.js",
+      "target": "service:electron_app/src/services/phase2CategoryResolutionV2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2Service.js",
+      "target": "service:electron_app/src/services/phase2SheetsService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2Service.js",
+      "target": "service:electron_app/src/services/phase2ValidationService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2SheetsService.js",
+      "target": "service:electron_app/src/services/oauth2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2WritebackPollerService.js",
+      "target": "service:electron_app/src/services/phase2WritebackService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2WritebackService.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2WritebackService.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase2WritebackService.js",
+      "target": "service:electron_app/src/services/clickupService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase3Service.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase3Service.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase3Service.js",
+      "target": "service:electron_app/src/services/phase2SheetsService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase3Service.js",
+      "target": "service:electron_app/src/services/phase3PlanningService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase3Service.js",
+      "target": "service:electron_app/src/services/phase3PowerlinkMappingService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase3Service.js",
+      "target": "service:electron_app/src/services/phase3ShipstationDebugExportService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase3Service.js",
+      "target": "service:electron_app/src/services/phase3ShipstationService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase3ShipstationDebugExportService.js",
+      "target": "service:electron_app/src/services/phase3PlanningService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase3ShipstationService.js",
+      "target": "file:electron_app/src/utils/retry.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase4AiEvaluatorService.js",
+      "target": "file:electron_app/src/utils/retry.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase4MirroringService.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase4MirroringService.js",
+      "target": "file:electron_app/src/utils/chunk.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase4MirroringService.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase4MirroringService.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase4MirroringService.js",
+      "target": "service:electron_app/src/services/masterEbayItemSpecificsUrlService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase4MirroringService.js",
+      "target": "service:electron_app/src/services/phase2SheetsService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5ApprovalService.js",
+      "target": "service:electron_app/src/services/phase5GovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5BatchGovernanceService.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5BatchGovernanceService.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5BatchGovernanceService.js",
+      "target": "service:electron_app/src/services/phase5ApprovalService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5BatchGovernanceService.js",
+      "target": "service:electron_app/src/services/phase5GovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5EbayPublishService.js",
+      "target": "file:electron_app/src/utils/retry.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5PublishLogService.js",
+      "target": "service:electron_app/src/services/oauth2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5PublishLogService.js",
+      "target": "service:electron_app/src/services/phase5GovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5Service.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5Service.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5Service.js",
+      "target": "service:electron_app/src/services/phase5ApprovalService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5Service.js",
+      "target": "service:electron_app/src/services/phase5BatchGovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5Service.js",
+      "target": "service:electron_app/src/services/phase5EbayPublishService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5Service.js",
+      "target": "service:electron_app/src/services/phase5GovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase5Service.js",
+      "target": "service:electron_app/src/services/phase5PublishLogService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase6FitmentService.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase6FitmentService.js",
+      "target": "service:electron_app/src/services/phase4AiEvaluatorService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase72FitmentImageService.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase72FitmentImageService.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase72FitmentImageService.js",
+      "target": "service:electron_app/src/services/oauth2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase74TitleDescriptionService.js",
+      "target": "service:electron_app/src/services/airtableSchemaService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase74TitleDescriptionService.js",
+      "target": "service:electron_app/src/services/airtableService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase74TitleDescriptionService.js",
+      "target": "service:electron_app/src/services/phase4AiEvaluatorService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase74TitleDescriptionService.js",
+      "target": "service:electron_app/src/services/phase5GovernanceService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/phase74TitleDescriptionService.js",
+      "target": "service:electron_app/src/services/phase5IdentityService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/reportingService.js",
+      "target": "service:electron_app/src/services/db.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/scheduleService.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/scheduleService.js",
+      "target": "service:electron_app/src/services/oauth2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/scheduleService.js",
+      "target": "service:electron_app/src/services/reportingService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/scheduleService.js",
+      "target": "service:electron_app/src/services/sheetsService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/workOrdersGoogleSheetsSync.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/workOrdersGoogleSheetsSync.js",
+      "target": "file:electron_app/src/utils/timezone.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/workOrdersGoogleSheetsSync.js",
+      "target": "service:electron_app/src/services/clickupService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/workOrdersGoogleSheetsSync.js",
+      "target": "service:electron_app/src/services/googleDriveImageService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/workOrdersGoogleSheetsSync.js",
+      "target": "service:electron_app/src/services/workOrdersPowerlinkService.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/workOrdersPowerlinkService.js",
+      "target": "file:electron_app/src/utils/timezone.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/workOrdersPowerlinkService.js",
+      "target": "service:electron_app/src/services/db.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/workOrdersScheduleService.js",
+      "target": "file:electron_app/src/config/configStore.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/workOrdersScheduleService.js",
+      "target": "service:electron_app/src/services/oauth2Service.js",
+      "type": "imports",
+      "weight": 0.7
+    },
+    {
+      "source": "service:electron_app/src/services/workOrdersScheduleService.js",
+      "target": "service:electron_app/src/services/workOrdersGoogleSheetsSync.js",
+      "type": "imports",
+      "weight": 0.7
+    }
+  ],
+  "layers": [
+    {
+      "id": "layer:bootstrap-and-foundation",
+      "name": "Bootstrap and Foundation",
+      "description": "Electron startup, shared configuration, utilities, and workspace metadata.",
+      "nodeIds": [
+        "config:electron_app/forge.config.js",
+        "config:electron_app/package-lock.json",
+        "config:electron_app/package.json",
+        "config:package-lock.json",
+        "file:electron_app/src/config/configStore.js",
+        "file:electron_app/src/config/env.js",
+        "file:electron_app/src/config/loadEnv.js",
+        "file:electron_app/src/main/index.js",
+        "file:electron_app/src/preload/preload.js",
+        "file:electron_app/src/utils/chunk.js",
+        "file:electron_app/src/utils/retry.js",
+        "file:electron_app/src/utils/timezone.js"
+      ]
+    },
+    {
+      "id": "layer:reporting-and-workorders",
+      "name": "Reporting and Work Orders",
+      "description": "Reporting exports, Google Sheets sync, scheduling, and work-order flows.",
+      "nodeIds": [
+        "document:MILESTONE_11_REPORTING.md",
+        "service:electron_app/src/services/excelService.js",
+        "service:electron_app/src/services/reportingService.js",
+        "service:electron_app/src/services/scheduleService.js",
+        "service:electron_app/src/services/sheetsService.js",
+        "service:electron_app/src/services/workOrdersGoogleSheetsSync.js",
+        "service:electron_app/src/services/workOrdersPowerlinkService.js",
+        "service:electron_app/src/services/workOrdersScheduleService.js"
+      ]
+    },
+    {
+      "id": "layer:inventory-and-marketplace",
+      "name": "Inventory and Marketplace Automation",
+      "description": "Phase 2 through Phase 74 automation, integrations, and publishing workflows.",
+      "nodeIds": [
+        "service:electron_app/src/services/airtableSchemaService.js",
+        "service:electron_app/src/services/airtableService.js",
+        "service:electron_app/src/services/batchCreationService.js",
+        "service:electron_app/src/services/clickupService.js",
+        "service:electron_app/src/services/ebayBrandPropagationService.js",
+        "service:electron_app/src/services/ebayListingsScheduleService.js",
+        "service:electron_app/src/services/googleDriveImageService.js",
+        "service:electron_app/src/services/googleSheetsInventoryService.js",
+        "service:electron_app/src/services/inventoryScheduleService.js",
+        "service:electron_app/src/services/inventoryService.js",
+        "service:electron_app/src/services/masterEbayItemSpecificsUrlService.js",
+        "service:electron_app/src/services/oauth2Service.js",
+        "service:electron_app/src/services/phase2AutoRunService.js",
+        "service:electron_app/src/services/phase2CategoryResolutionV2Service.js",
+        "service:electron_app/src/services/phase2Service.js",
+        "service:electron_app/src/services/phase2SheetsService.js",
+        "service:electron_app/src/services/phase2ValidationService.js",
+        "service:electron_app/src/services/phase2WritebackPollerService.js",
+        "service:electron_app/src/services/phase2WritebackService.js",
+        "service:electron_app/src/services/phase3PlanningService.js",
+        "service:electron_app/src/services/phase3PowerlinkMappingService.js",
+        "service:electron_app/src/services/phase3Service.js",
+        "service:electron_app/src/services/phase3ShipstationDebugExportService.js",
+        "service:electron_app/src/services/phase3ShipstationService.js",
+        "service:electron_app/src/services/phase4AiEvaluatorService.js",
+        "service:electron_app/src/services/phase4MirroringService.js",
+        "service:electron_app/src/services/phase5ApprovalService.js",
+        "service:electron_app/src/services/phase5AutoPushScheduleService.js",
+        "service:electron_app/src/services/phase5BatchGovernanceService.js",
+        "service:electron_app/src/services/phase5EbayPublishService.js",
+        "service:electron_app/src/services/phase5GovernanceService.js",
+        "service:electron_app/src/services/phase5IdentityService.js",
+        "service:electron_app/src/services/phase5PublishLogService.js",
+        "service:electron_app/src/services/phase5Service.js",
+        "service:electron_app/src/services/phase6FitmentService.js",
+        "service:electron_app/src/services/phase72FitmentImageService.js",
+        "service:electron_app/src/services/phase74TitleDescriptionService.js",
+        "service:electron_app/src/services/rulesLogicService.js"
+      ]
+    },
+    {
+      "id": "layer:renderer-ui",
+      "name": "Renderer UI",
+      "description": "HTML pages and global styles for the Electron renderer experience.",
+      "nodeIds": [
+        "file:electron_app/src/renderer/pages/main-dashboard.html",
+        "file:electron_app/src/renderer/pages/milestone1/index.html",
+        "file:electron_app/src/renderer/pages/milestone1/phase2-master-parts.html",
+        "file:electron_app/src/renderer/pages/milestone1/phase5-batch-approval.html",
+        "file:electron_app/src/renderer/pages/milestone1/powerlink-sheets.html",
+        "file:electron_app/src/renderer/pages/milestone11/index.html",
+        "file:electron_app/src/renderer/pages/shared/setup.html",
+        "file:electron_app/src/renderer/pages/shared/webhook.html",
+        "file:electron_app/src/renderer/styles/index.css"
+      ]
+    },
+    {
+      "id": "layer:scripts-and-tests",
+      "name": "Scripts and Tests",
+      "description": "Command-line wrappers and manual test harnesses for specific workflows.",
+      "nodeIds": [
+        "file:electron_app/scripts/test-drive-image-upload.js",
+        "file:electron_app/scripts/test-workorders-query.js",
+        "file:electron_app/scripts/test-workorders-sync.js",
+        "file:electron_app/src/scripts/runEbayMockImport.js",
+        "file:electron_app/src/scripts/runEbaySandboxInventoryImport.js",
+        "file:electron_app/src/scripts/runPhase4BLite.js",
+        "file:electron_app/src/scripts/runPhase4Mirroring.js",
+        "file:electron_app/src/scripts/runPhase4RulesPopulate.js",
+        "file:electron_app/src/scripts/runPhase6Fitment.js",
+        "file:electron_app/src/scripts/runPhase72FitmentImage.js",
+        "file:electron_app/src/scripts/runPhase74TitleDescription.js",
+        "file:electron_app/src/scripts/syncItemSpecificTables.js"
+      ]
+    },
+    {
+      "id": "layer:docs-and-assets",
+      "name": "Docs and Assets",
+      "description": "Markdown guides, sample data, generated assets, and repository output files.",
+      "nodeIds": [
+        "document:electron_app/PHASE2_README.md",
+        "document:electron_app/PHASE3_README.md",
+        "resource:electron_app/output/fitment-images/166-02246L.svg",
+        "resource:electron_app/output/fitment-images/257-52413.svg",
+        "resource:electron_app/output/fitment-images/267-00232.svg",
+        "resource:electron_app/output/fitment-images/337-60940.svg",
+        "resource:electron_app/output/itemSpecificExtracted.json",
+        "service:electron_app/src/services/db.js"
+      ]
+    }
+  ],
+  "tour": [
+    {
+      "order": 1,
+      "title": "Project Overview",
+      "description": "Start with the domain docs and package manifests to understand the app purpose and the Electron runtime.",
+      "nodeIds": [
+        "document:MILESTONE_11_REPORTING.md",
+        "config:electron_app/package.json"
+      ]
+    },
+    {
+      "order": 2,
+      "title": "Application Bootstrap",
+      "description": "Trace how the Electron main process and preload bridge wire the app together.",
+      "nodeIds": [
+        "file:electron_app/src/main/index.js",
+        "file:electron_app/src/preload/preload.js"
+      ]
+    },
+    {
+      "order": 3,
+      "title": "Shared Foundation",
+      "description": "Inspect the shared configuration, environment loading, database setup, and utility helpers.",
+      "nodeIds": [
+        "file:electron_app/src/config/loadEnv.js",
+        "file:electron_app/src/config/configStore.js",
+        "service:electron_app/src/services/db.js",
+        "file:electron_app/src/utils/retry.js",
+        "file:electron_app/src/utils/chunk.js"
+      ]
+    },
+    {
+      "order": 4,
+      "title": "Reporting Flows",
+      "description": "Follow the reporting, Sheets, Excel, and scheduling services that back the reporting UI.",
+      "nodeIds": [
+        "service:electron_app/src/services/reportingService.js",
+        "service:electron_app/src/services/excelService.js",
+        "service:electron_app/src/services/sheetsService.js",
+        "service:electron_app/src/services/scheduleService.js",
+        "service:electron_app/src/services/workOrdersGoogleSheetsSync.js"
+      ]
+    },
+    {
+      "order": 5,
+      "title": "Marketplace Automation",
+      "description": "Explore the phase-based workflow modules that implement inventory, listing, and publishing automation.",
+      "nodeIds": [
+        "service:electron_app/src/services/phase2Service.js",
+        "service:electron_app/src/services/phase3Service.js",
+        "service:electron_app/src/services/phase4MirroringService.js",
+        "service:electron_app/src/services/phase5Service.js",
+        "service:electron_app/src/services/phase6FitmentService.js",
+        "service:electron_app/src/services/phase74TitleDescriptionService.js"
+      ]
+    },
+    {
+      "order": 6,
+      "title": "Renderer Experience",
+      "description": "Use the renderer pages and stylesheet to understand the user-facing screens.",
+      "nodeIds": [
+        "file:electron_app/src/renderer/pages/main-dashboard.html",
+        "file:electron_app/src/renderer/pages/milestone1/index.html",
+        "file:electron_app/src/renderer/styles/index.css"
+      ]
+    },
+    {
+      "order": 7,
+      "title": "Assets and Outputs",
+      "description": "Review the generated output files and image assets used by the workflows.",
+      "nodeIds": [
+        "resource:electron_app/output/itemSpecificExtracted.json",
+        "resource:electron_app/output/fitment-images/166-02246L.svg",
+        "resource:electron_app/output/fitment-images/267-00232.svg",
+        "resource:electron_app/output/fitment-images/257-52413.svg",
+        "resource:electron_app/output/fitment-images/337-60940.svg"
+      ]
+    }
+  ]
+}
