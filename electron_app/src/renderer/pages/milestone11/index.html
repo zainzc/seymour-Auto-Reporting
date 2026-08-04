@@ -820,6 +820,23 @@
     `).join('');
   }
 
+  function formatWorkOrdersEasternTime(value) {
+    if (!value) return 'Never';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return value;
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true,
+      timeZoneName: 'short'
+    }).format(date);
+  }
+
   function toggleExecutionLogs() {
     executionLogsCollapsed = !executionLogsCollapsed;
     const btn = document.getElementById('toggle-exec-logs-btn');
@@ -990,7 +1007,7 @@
           ${schedule.clickupListId ? `<strong>ClickUp List ID:</strong> ${schedule.clickupListId}<br>` : ''}
           ${schedule.endDate ? `<strong>Ends:</strong> ${schedule.endDate}<br>` : ''}
           ${schedule.spreadsheetId ? `<strong>Sheet ID:</strong> ${schedule.spreadsheetId.substring(0, 20)}...<br>` : ''}
-          <strong>Last Run:</strong> ${schedule.lastRun || 'Never'}
+          <strong>Last Run:</strong> ${formatWorkOrdersEasternTime(schedule.lastRun)}
         `;
         document.getElementById('current-schedule').style.display = 'block';
         
