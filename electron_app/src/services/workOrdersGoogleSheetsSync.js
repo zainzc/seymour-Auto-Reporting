@@ -161,7 +161,19 @@ function isExcludedNonProductLine(row = {}) {
     .map(value => normalizeUpper(value))
     .filter(Boolean)
     .join(' ');
-  return /\bDELIVERY\s+FEE\b/.test(text) || /\bWARRANTY\b/.test(text);
+  return /\bCORE\s+CHARGE\b/.test(text) ||
+    /\bDELIVERY\s+FEE\b/.test(text) ||
+    /\bEXTENDED\s+WARRANTY\b/.test(text) ||
+    /\bWARRANTY\b/.test(text);
+}
+
+function getGenuineProductIpn(row = {}) {
+  const ipn = normalizeCell(row['Detail (IPN)']).split('|')[0].trim();
+  return ipn && ipn !== '-' ? ipn : '';
+}
+
+function isGenuineProductLine(row = {}) {
+  return Boolean(getGenuineProductIpn(row)) && !isExcludedNonProductLine(row);
 }
 
 function isIssueStatus(status = '') {
@@ -841,15 +853,18 @@ function buildMultipleWorkOrderNumberSet(rows = []) {
   const lineKeysByWorkOrder = new Map();
   for (const row of Array.isArray(rows) ? rows : []) {
     if (normalizeUpper(row?.['Record Type']) !== 'WORK ORDER') continue;
+    if (!isGenuineProductLine(row)) continue;
     const workOrderNumber = normalizeCell(row?.['W/O or Quote Number']);
     if (!workOrderNumber) continue;
     const lineKey =
       normalizeCell(row?.['Line Item ID']) ||
-      normalizeCell(row?.['Detail (IPN)']) ||
+      getGenuineProductIpn(row) ||
       buildTaskKey(row);
     if (!lineKey) continue;
     const status = normalizeUpper(row?.Status);
     if (!isOpenPowerlinkStatus(status)) continue;
+    const lineItemStatus = normalizeCell(row?.['Line Item Status']);
+    if (lineItemStatus && !isOpenPowerlinkStatus(lineItemStatus)) continue;
     if (!lineKeysByWorkOrder.has(workOrderNumber)) {
       lineKeysByWorkOrder.set(workOrderNumber, new Set());
     }
@@ -866,6 +881,7 @@ function buildMultipleWorkOrderNumberSet(rows = []) {
 function isMultipleWorkOrderRow(row = {}, multipleWorkOrderNumbers = new Set()) {
   const workOrderNumber = normalizeCell(row?.['W/O or Quote Number']);
   return normalizeUpper(row?.['Record Type']) === 'WORK ORDER' &&
+    isGenuineProductLine(row) &&
     Boolean(workOrderNumber) &&
     multipleWorkOrderNumbers.has(workOrderNumber);
 }
@@ -1203,6 +1219,21 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
       name === WORK_ORDERS_TASK_FIELD_NAMES.deliveryDate &&
       rawDeliveryDate === '' &&
       value === null
+    ) {
+      customFields.push({
+        id: fieldMeta.id,
+        clear: true,
+        fieldName: name,
+        fieldType: normalizeUpper(fieldMeta?.type)
+      });
+      continue;
+    }
+    if (
+      fieldMeta &&
+      includeClearFields &&
+      name === WORK_ORDERS_TASK_FIELD_NAMES.alert &&
+      Array.isArray(value) &&
+      value.length === 0
     ) {
       customFields.push({
         id: fieldMeta.id,
@@ -2113,8 +2144,8 @@ async function syncRowsToClickUp({
   for (const row of latestRows) {
     const key = buildTaskKey(row);
     if (!key) continue;
-    if (isExcludedNonProductLine(row)) {
-      console.log(`[WorkOrders] Row skipped before ClickUp sync (Delivery Fee/Warranty): ${key}`);
+    if (!isGenuineProductLine(row)) {
+      console.log(`[WorkOrders] Row skipped before ClickUp sync (non-product or missing IPN): ${key}`);
       continue;
     }
     if (!isEligibleWorkOrdersSourceRow(row)) {
