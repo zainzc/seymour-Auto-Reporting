@@ -53,7 +53,8 @@ const DELIVERY_AUTOMATION_CUSTOM_FIELD_NAMES = [
   'Shipping City',
   'Shipping State',
   'Ship Via',
-  'Delivery Date'
+  'Delivery Date',
+  'Line Item Description'
 ];
 const OPEN_POWERLINK_STATUS_TOKENS = new Set(['O', 'OPEN']);
 const ISSUE_GROUP_A_CUSTOMER_NUMBERS = new Set(['41192531', '2042132421', '2', '35610191', '127141941']);
@@ -302,10 +303,12 @@ function getClickUpErrorMessage(error) {
 }
 
 function buildDeliveryTaskDescription(row = {}) {
+  const ipn = normalizeCell(row['Detail (IPN)']).split('|')[0].trim();
   const lines = [
     `Record Key: ${buildTaskKey(row)}`,
     `W/O or Quote Number: ${normalizeCell(row['W/O or Quote Number'])}`,
     `Line Item ID: ${normalizeCell(row['Line Item ID'])}`,
+    `IPN: ${ipn}`,
     `Billing Name: ${normalizeCell(row['Billing Customer Name'])}`,
     `Shipping Name: ${normalizeCell(row['Shipping Customer Name'])}`,
     `Shipping Address: ${normalizeCell(row['Shipping Customer Address'])}`,
@@ -1370,14 +1373,16 @@ function buildDeliveryAutomationCustomFields(row = {}, fieldMetaLookup = null, o
       'Shipping City': normalizeCell(row['Shipping City']),
       'Shipping State': normalizeCell(row['Shipping State']),
       'Ship Via': normalizeCell(row['Ship Via']),
-      'Delivery Date': parseOptionalDate(row['Delivery Date'])
+      'Delivery Date': parseOptionalDate(row['Delivery Date']),
+      'Line Item Description': normalizeCell(row['Line Item Description'])
     },
     fieldMetaLookup,
     {
       ...options,
       rowKey: buildTaskKey(row),
       rawValuesByFieldName: {
-        'Delivery Date': normalizeCell(row['Delivery Date'])
+        'Delivery Date': normalizeCell(row['Delivery Date']),
+        'Line Item Description': normalizeCell(row['Line Item Description'])
       }
     }
   );
@@ -1418,14 +1423,16 @@ function buildDeliveryAutomationCustomFieldsFromTaskDescription(task = {}, field
       'Shipping City': getDescriptionValue(values, ['Shipping City']),
       'Shipping State': getDescriptionValue(values, ['Shipping State']),
       'Ship Via': getDescriptionValue(values, ['Ship Via']),
-      'Delivery Date': parseOptionalDate(deliveryDate)
+      'Delivery Date': parseOptionalDate(deliveryDate),
+      'Line Item Description': getDescriptionValue(values, ['Line Item Description'])
     },
     fieldMetaLookup,
     {
       includeClearFields: false,
       rowKey: extractTaskKey(task) || normalizeCell(task?.name || task?.id),
       rawValuesByFieldName: {
-        'Delivery Date': deliveryDate
+        'Delivery Date': deliveryDate,
+        'Line Item Description': getDescriptionValue(values, ['Line Item Description'])
       }
     }
   );
