@@ -513,6 +513,29 @@ function parseOptionalDate(value) {
   return parseRowDate(text);
 }
 
+function toClickUpDateOnlyMs(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  const parts = getZonedParts(date);
+  const year = Number(parts.year || 0);
+  const month = Number(parts.month || parts.monthNumber || 0);
+  const day = Number(parts.day || 0);
+  if (!year || !month || !day) return null;
+  return Date.UTC(year, month - 1, day);
+}
+
+function buildClickUpDateFieldPayload(date, options = {}) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return null;
+  if (options?.dateOnly) {
+    const value = toClickUpDateOnlyMs(date);
+    if (value === null) return null;
+    return { value, time: false };
+  }
+  return {
+    value: Number(date.getTime()),
+    time: true
+  };
+}
+
 function hasExplicitTimeZone(text = '') {
   return /(?:\b(?:GMT|UTC)\b|Z$|[+-]\d{2}:?\d{2}(?:\s|$|\)))/i.test(String(text).trim());
 }
@@ -1199,12 +1222,13 @@ function buildTaskCustomFields(row = {}, fieldMetaLookup = null, dueDate = null,
     const fieldType = normalizeUpper(fieldMeta?.type);
     if (fieldType === 'DATE') {
       if (!(value instanceof Date) || Number.isNaN(value.getTime())) continue;
+      const datePayload = buildClickUpDateFieldPayload(value, {
+        dateOnly: name === WORK_ORDERS_TASK_FIELD_NAMES.deliveryDate
+      });
+      if (!datePayload) continue;
       customFields.push({
         id: fieldMeta.id,
-        payload: {
-          value: Number(value.getTime()),
-          time: true
-        },
+        payload: datePayload,
         fieldName: name,
         fieldType
       });
@@ -1334,12 +1358,13 @@ function buildDeliveryAutomationCustomFieldsFromValues(valuesByFieldName = {}, f
 
     if (fieldType === 'DATE') {
       if (!(value instanceof Date) || Number.isNaN(value.getTime())) continue;
+      const datePayload = buildClickUpDateFieldPayload(value, {
+        dateOnly: name === 'Delivery Date'
+      });
+      if (!datePayload) continue;
       customFields.push({
         id: fieldMeta.id,
-        payload: {
-          value: Number(value.getTime()),
-          time: true
-        },
+        payload: datePayload,
         fieldName: name,
         fieldType
       });
