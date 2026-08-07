@@ -112,6 +112,65 @@ class AirtableService {
     return records;
   }
 
+  async updateRecord(tableName, recordId, fieldsToSet = {}, options = {}) {
+    const table = String(tableName || '').trim();
+    const id = String(recordId || '').trim();
+    if (!table || !id) {
+      throw new Error('updateRecord requires tableName and recordId.');
+    }
+
+    const sanitizedFields = {};
+    Object.entries(fieldsToSet || {}).forEach(([key, value]) => {
+      if (!key) return;
+      if (value === undefined) return;
+      sanitizedFields[key] = value;
+    });
+
+    if (Object.keys(sanitizedFields).length === 0) {
+      return null;
+    }
+
+    const data = await this.request('PATCH', `/${encodeURIComponent(table)}/${encodeURIComponent(id)}`, {
+      data: {
+        fields: sanitizedFields,
+        typecast: Boolean(options.typecast)
+      }
+    });
+
+    return data || null;
+  }
+
+  async updateRecords(tableName, recordsToUpdate = [], options = {}) {
+    const table = String(tableName || '').trim();
+    const records = (Array.isArray(recordsToUpdate) ? recordsToUpdate : [])
+      .map(record => ({
+        id: String(record?.id || '').trim(),
+        fields: Object.fromEntries(
+          Object.entries(record?.fields || {}).filter(([key, value]) => key && value !== undefined)
+        )
+      }))
+      .filter(record => record.id && Object.keys(record.fields).length > 0);
+
+    if (!table) {
+      throw new Error('updateRecords requires tableName.');
+    }
+    if (records.length === 0) {
+      return [];
+    }
+
+    const updated = [];
+    for (const batch of chunkArray(records, 10)) {
+      const data = await this.request('PATCH', `/${encodeURIComponent(table)}`, {
+        data: {
+          records: batch,
+          typecast: Boolean(options.typecast)
+        }
+      });
+      updated.push(...(Array.isArray(data?.records) ? data.records : []));
+    }
+    return updated;
+  }
+
   async deleteRecord(tableName, recordId) {
     const table = String(tableName || '').trim();
     const id = String(recordId || '').trim();

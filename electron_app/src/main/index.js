@@ -73,6 +73,12 @@ const {
 } = require('../services/ebayListingsScheduleService');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
+const { getQuickBooksAutomationOverview } = require('../services/quickBooksOverviewService');
+const {
+  getQuickBooksNotificationOwner,
+  updateQuickBooksNotificationOwner
+} = require('../services/quickBooksNotificationOwnerService');
+const quickBooksAutomationScheduler = require('../services/quickBooksAutomationSchedulerService');
 const phase2WritebackPoller = require('../services/phase2WritebackPollerService');
 const phase2AutoRunService = require('../services/phase2AutoRunService');
 
@@ -194,6 +200,78 @@ function normalizeEbayEnvironment(value) {
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function resolveQuickBooksEnvironment(value = '') {
+  return normalizeText(value || process.env.QUICKBOOKS_ENVIRONMENT || 'SANDBOX').toUpperCase();
+}
+
+function resolveQuickBooksAirtableToken() {
+  const storedPhase2 = getInventoryConfig('phase2Config') || {};
+  const masterPartsConfig = buildPhase2Config(storedPhase2);
+  return normalizeText(
+    process.env.QUICKBOOKS_AIRTABLE_TOKEN ||
+    masterPartsConfig.airtableToken ||
+    storedPhase2.airtableToken ||
+    process.env.AIRTABLE_TOKEN ||
+    ''
+  );
+}
+
+function resolveQuickBooksClickUpToken() {
+  const storedPhase2 = getInventoryConfig('phase2Config') || {};
+  return normalizeText(storedPhase2.clickupToken || process.env.CLICKUP_TOKEN || '');
+}
+
+function resolveQuickBooksClickUpTeamId() {
+  return normalizeText(process.env.QUICKBOOKS_CLICKUP_TEAM_ID || process.env.CLICKUP_TEAM_ID || '');
+}
+
+let quickBooksClickUpMembersCache = {
+  teamId: '',
+  fetchedAt: 0,
+  users: []
+};
+
+async function getQuickBooksClickUpMembers(forceRefresh = false) {
+  const token = resolveQuickBooksClickUpToken();
+  const teamId = resolveQuickBooksClickUpTeamId();
+  if (!token) {
+    throw new Error('ClickUp token is required to load users.');
+  }
+
+  const cacheAgeMs = Date.now() - Number(quickBooksClickUpMembersCache.fetchedAt || 0);
+  if (
+    !forceRefresh &&
+    quickBooksClickUpMembersCache.teamId === teamId &&
+    Array.isArray(quickBooksClickUpMembersCache.users) &&
+    quickBooksClickUpMembersCache.users.length > 0 &&
+    cacheAgeMs < 5 * 60 * 1000
+  ) {
+    return quickBooksClickUpMembersCache.users;
+  }
+
+  const clickupService = new ClickUpService({ token });
+  const users = await clickupService.fetchWorkspaceMembers(teamId);
+  quickBooksClickUpMembersCache = {
+    teamId,
+    fetchedAt: Date.now(),
+    users
+  };
+  return users;
+}
+
+function filterClickUpUsers(users = [], searchTerm = '') {
+  const query = normalizeText(searchTerm).toLowerCase();
+  const filtered = !query
+    ? users
+    : users.filter(user => [
+        user.name,
+        user.username,
+        user.email,
+        user.id
+      ].some(value => normalizeText(value).toLowerCase().includes(query)));
+  return filtered.slice(0, 50);
 }
 
 function normalizeUpperIpn(value) {
@@ -4939,6 +5017,154 @@ ipcMain.handle('phase5:openExternal', async (_, url = '') => {
   return { success: true };
 });
 
+ipcMain.handle('quickbooks-automation:get-overview', async () => {
+  try {
+    return await getQuickBooksAutomationOverview({
+      airtableToken: resolveQuickBooksAirtableToken(),
+      auditBaseId: process.env.QUICKBOOKS_AUDIT_BASE_ID || '',
+      stagingBaseId: process.env.QUICKBOOKS_STAGING_BASE_ID || ''
+    });
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.message || 'QuickBooks Automation overview failed to load.',
+      overview: null,
+      warnings: []
+    };
+  }
+});
+
+ipcMain.handle('quickbooks-automation:get-notification-owner', async (_, payload = {}) => {
+  try {
+    const owner = await getQuickBooksNotificationOwner({
+      airtableToken: resolveQuickBooksAirtableToken(),
+      stagingBaseId: process.env.QUICKBOOKS_STAGING_BASE_ID || '',
+      environment: resolveQuickBooksEnvironment(payload.environment)
+    });
+    return { success: true, owner };
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.message || 'Unable to load notification owner configuration.',
+      owner: null
+    };
+  }
+});
+
+ipcMain.handle('quickbooks-automation:search-clickup-users', async (_, payload = {}) => {
+  try {
+    const users = await getQuickBooksClickUpMembers(Boolean(payload.forceRefresh));
+    return {
+      success: true,
+      users: filterClickUpUsers(users, payload.searchTerm)
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.message || 'Unable to load ClickUp users.',
+      users: []
+    };
+  }
+});
+
+ipcMain.handle('quickbooks-automation:save-notification-owner', async (_, payload = {}) => {
+  try {
+    const ownerClickUpId = normalizeText(payload.ownerClickUpId);
+    const ownerName = normalizeText(payload.ownerName);
+    if (!ownerName || !ownerClickUpId) {
+      return { success: false, message: 'Select a ClickUp user before saving.', owner: null };
+    }
+
+    const users = await getQuickBooksClickUpMembers(false);
+    const matchedUser = users.find(user => String(user.id) === ownerClickUpId);
+    if (!matchedUser || normalizeText(matchedUser.name) !== ownerName) {
+      return {
+        success: false,
+        message: 'Selected owner no longer matches a ClickUp workspace member.',
+        owner: null
+      };
+    }
+
+    const owner = await updateQuickBooksNotificationOwner({
+      airtableToken: resolveQuickBooksAirtableToken(),
+      stagingBaseId: process.env.QUICKBOOKS_STAGING_BASE_ID || '',
+      environment: resolveQuickBooksEnvironment(payload.environment),
+      ownerName: matchedUser.name,
+      ownerClickUpId: matchedUser.id
+    });
+    return {
+      success: true,
+      message: 'Notification owner updated successfully.',
+      owner
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.message || 'Unable to save notification owner configuration.',
+      owner: null
+    };
+  }
+});
+
+ipcMain.handle('quickbooks-automation:get-schedule-status', async () => {
+  try {
+    return {
+      success: true,
+      status: quickBooksAutomationScheduler.getStatus()
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.message || 'Failed to load QuickBooks automation settings.',
+      status: null
+    };
+  }
+});
+
+ipcMain.handle('quickbooks-automation:save-schedule-settings', async (_, payload = {}) => {
+  try {
+    const status = quickBooksAutomationScheduler.updateSettings(payload);
+    return {
+      success: true,
+      message: 'QuickBooks automation settings saved.',
+      status
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.message || 'Failed to save QuickBooks automation settings.',
+      status: quickBooksAutomationScheduler.getStatus()
+    };
+  }
+});
+
+ipcMain.handle('quickbooks-automation:run-now', async () => {
+  try {
+    const result = await quickBooksAutomationScheduler.runNow();
+    return {
+      success: Boolean(result?.success),
+      message: result?.message || 'QuickBooks automation Run Now completed.',
+      result,
+      status: quickBooksAutomationScheduler.getStatus()
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.message || 'QuickBooks automation Run Now failed.',
+      status: quickBooksAutomationScheduler.getStatus()
+    };
+  }
+});
+
+ipcMain.handle('quickbooks-automation:open-external', async (_, url = '') => {
+  const target = String(url || '').trim();
+  if (!/^https?:\/\//i.test(target)) {
+    return { success: false, message: 'Only http/https external links are allowed.' };
+  }
+  await shell.openExternal(target);
+  return { success: true };
+});
+
 ipcMain.handle('phase5:setBatchStatus', async (_, options = {}) => {
   try {
     const stored = getInventoryConfig('phase2Config') || {};
@@ -6347,6 +6573,7 @@ function createWindow() {
       // Resume any active reporting schedules
       resumeSchedule();
       resumeWorkOrdersSchedule();
+      quickBooksAutomationScheduler.resumeSchedule();
       
       // Initialize inventory webhook schedule if it was previously active
       initInventorySchedule();

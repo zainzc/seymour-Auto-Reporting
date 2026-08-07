@@ -496,6 +496,70 @@ class ClickUpService {
     }
     return Array.from(unique.values()).sort((a, b) => a.path.localeCompare(b.path));
   }
+
+  static normalizeMember(member = {}, team = {}) {
+    const user = member?.user || member || {};
+    const id = String(user.id || member.id || '').trim();
+    const username = String(user.username || member.username || '').trim();
+    const email = String(user.email || member.email || '').trim();
+    const name = String(
+      user.name ||
+      member.name ||
+      user.display_name ||
+      member.display_name ||
+      username ||
+      email ||
+      id
+    ).trim();
+
+    if (!id || !name) return null;
+
+    return {
+      id,
+      name,
+      username: username || name,
+      email,
+      teamId: String(team?.id || '').trim(),
+      teamName: String(team?.name || '').trim()
+    };
+  }
+
+  async fetchWorkspaceMembers(teamId = '') {
+    const teamsRes = await this.request('GET', '/team');
+    const teams = Array.isArray(teamsRes?.teams) ? teamsRes.teams : [];
+    const selectedTeamId = String(teamId || '').trim();
+    const targetTeams = selectedTeamId
+      ? teams.filter(team => String(team?.id || '') === selectedTeamId)
+      : teams;
+    const members = [];
+
+    for (const team of targetTeams) {
+      const teamMembers = Array.isArray(team?.members) ? team.members : [];
+      if (teamMembers.length > 0) {
+        members.push(...teamMembers.map(member => ClickUpService.normalizeMember(member, team)).filter(Boolean));
+        continue;
+      }
+
+      try {
+        const membersRes = await this.request('GET', `/team/${encodeURIComponent(String(team.id))}/member`);
+        const fallbackMembers = Array.isArray(membersRes?.members) ? membersRes.members : [];
+        members.push(...fallbackMembers.map(member => ClickUpService.normalizeMember(member, team)).filter(Boolean));
+      } catch (error) {
+        const message =
+          error?.response?.data?.err ||
+          error?.response?.data?.error ||
+          error?.message ||
+          'Failed to fetch ClickUp workspace members.';
+        console.warn(`ClickUp member lookup failed for team ${team?.id || 'unknown'}: ${message}`);
+      }
+    }
+
+    const unique = new Map();
+    for (const member of members) {
+      unique.set(member.id, member);
+    }
+    return Array.from(unique.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }
 }
 
 module.exports = ClickUpService;

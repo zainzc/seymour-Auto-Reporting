@@ -133,7 +133,7 @@
 
     .data-type-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 10px;
       margin-top: 8px;
     }
@@ -303,6 +303,713 @@
       line-height: 1.5;
     }
 
+    .qb-overview {
+      display: none;
+      gap: 14px;
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .qb-page-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+      padding: 18px;
+      margin-bottom: 0;
+      background:
+        linear-gradient(135deg, rgba(11, 92, 171, 0.10), rgba(15, 138, 106, 0.08)),
+        #f8fbff;
+      border-bottom: 1px solid #d8e4f2;
+    }
+
+    .qb-page-title h2 {
+      margin: 0 0 5px;
+      color: #183d66;
+      font-size: 22px;
+      line-height: 1.15;
+    }
+
+    .qb-page-title p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .qb-header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .qb-badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      border: 1px solid #c8d8ea;
+      background: #f4f8fd;
+      color: #244a73;
+      font-size: 11px;
+      font-weight: 800;
+      padding: 4px 9px;
+      line-height: 1.2;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+    }
+
+    .qb-badge.green {
+      background: #ddf4ec;
+      border-color: #b8e4d3;
+      color: #0c6b52;
+    }
+
+    .qb-badge.yellow {
+      background: #fff4d8;
+      border-color: #ead28d;
+      color: #805800;
+    }
+
+    .qb-badge.red {
+      background: #f8dfdd;
+      border-color: #edbdb8;
+      color: #8f261f;
+    }
+
+    .qb-badge.gray {
+      background: #edf1f6;
+      border-color: #d1dae5;
+      color: #5c6d82;
+    }
+
+    .qb-badge.blue {
+      background: #e2f0ff;
+      border-color: #bbd8f5;
+      color: #185f9e;
+    }
+
+    .qb-refresh-meta {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    #qb-overview-content {
+      background: #f5f8fc;
+      min-height: 180px;
+    }
+
+    .qb-section-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      padding: 16px;
+      background: #f5f8fc;
+    }
+
+    .qb-card {
+      border: 1px solid #d7e3f1;
+      background: #ffffff;
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 8px 16px rgba(12, 35, 58, 0.045);
+      min-width: 0;
+    }
+
+    .qb-card.primary {
+      background:
+        linear-gradient(135deg, #ffffff 0%, #f4f9ff 52%, #f2fbf8 100%);
+      border-color: #b7d0ea;
+      box-shadow: 0 12px 24px rgba(11, 92, 171, 0.08);
+    }
+
+    .qb-card.full {
+      grid-column: 1 / -1;
+    }
+
+    .qb-card h4 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 0 0 12px;
+      padding-bottom: 9px;
+      border-bottom: 1px solid #e5eef8;
+      color: #173d66;
+      font-size: 15px;
+      line-height: 1.25;
+    }
+
+    .qb-kv-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .qb-kv {
+      border: 1px solid #e6eef8;
+      background: #fbfdff;
+      border-radius: 8px;
+      padding: 9px 10px;
+      min-width: 0;
+    }
+
+    .qb-kv-label {
+      color: #6a7f98;
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 5px;
+    }
+
+    .qb-kv-value {
+      color: #142e4d;
+      font-size: 13px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+      line-height: 1.35;
+    }
+
+    .qb-link-inline {
+      color: #185f9e;
+      text-decoration: underline;
+      word-break: break-all;
+    }
+
+    .qb-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .qb-metric {
+      background:
+        linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+      border: 1px solid #d8e5f4;
+      border-left: 4px solid #0b5cab;
+      border-radius: 9px;
+      padding: 12px;
+      min-width: 0;
+    }
+
+    .qb-metric-value {
+      color: #0d335b;
+      font-size: 24px;
+      font-weight: 900;
+      line-height: 1.1;
+    }
+
+    .qb-metric-label {
+      color: #5d728b;
+      font-size: 11px;
+      font-weight: 800;
+      margin-top: 5px;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    .qb-table-wrap {
+      overflow-x: auto;
+      border: 1px solid #d6e2f0;
+      border-radius: 9px;
+      background: #ffffff;
+    }
+
+    .qb-error-table-scroll {
+      max-height: 360px;
+      overflow: auto;
+    }
+
+    .qb-attempts-scroll {
+      max-height: 320px;
+      overflow: auto;
+    }
+
+    .qb-table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 760px;
+      font-size: 12px;
+    }
+
+    .qb-table th,
+    .qb-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #edf3f9;
+      text-align: left;
+      color: #223f61;
+    }
+
+    .qb-table th {
+      background: #eef5fd;
+      color: #315a87;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      white-space: nowrap;
+    }
+
+    .qb-table td:not(:first-child) {
+      font-weight: 800;
+      color: #173d66;
+    }
+
+    .qb-table tbody tr:nth-child(even) td {
+      background: #fbfdff;
+    }
+
+    .qb-table tbody tr:hover td {
+      background: #f4f9ff;
+    }
+
+    .qb-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .qb-empty,
+    .qb-warning,
+    .qb-error-state {
+      border-radius: 9px;
+      padding: 12px 13px;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .qb-empty {
+      border: 1px dashed #cbd9e9;
+      background: #f8fbff;
+      color: #5e748d;
+    }
+
+    .qb-warning {
+      border: 1px solid #ead28d;
+      background: #fff8e8;
+      color: #735000;
+      margin: 16px 16px 12px;
+    }
+
+    .qb-refresh-notice {
+      border: 1px solid #bbd8f5;
+      background: #eff7ff;
+      color: #225f9a;
+      border-radius: 9px;
+      padding: 10px 12px;
+      font-size: 13px;
+      font-weight: 700;
+      margin: 16px 16px 12px;
+    }
+
+    .qb-error-state {
+      border: 1px solid #edbdb8;
+      background: #fff0ee;
+      color: #8f261f;
+    }
+
+    #qb-overview-content > .qb-error-state {
+      margin: 16px;
+    }
+
+    .qb-link-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .qb-link-btn {
+      width: auto;
+      padding: 8px 12px;
+      font-size: 13px;
+      border-radius: 8px;
+    }
+
+    .qb-settings-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      align-items: end;
+    }
+
+    .qb-settings-card {
+      background:
+        linear-gradient(135deg, rgba(11, 92, 171, 0.08), rgba(15, 138, 106, 0.08)),
+        #ffffff;
+      border-color: #bed4ea;
+    }
+
+    .qb-settings-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #d9e6f4;
+    }
+
+    .qb-settings-title h4 {
+      margin: 0 0 4px;
+      font-size: 18px;
+      color: #173f69;
+    }
+
+    .qb-settings-title p {
+      margin: 0;
+      color: #5d728b;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .qb-setting-tile {
+      background: rgba(255, 255, 255, 0.78);
+      border: 1px solid #d8e4f2;
+      border-radius: 12px;
+      padding: 13px;
+      min-height: 92px;
+    }
+
+    .qb-setting-tile strong {
+      color: #173d66;
+    }
+
+    .qb-toggle-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 42px;
+      flex-wrap: wrap;
+    }
+
+    .qb-toggle {
+      position: relative;
+      display: inline-flex;
+      width: 54px;
+      height: 30px;
+      flex: 0 0 auto;
+    }
+
+    .qb-toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .qb-toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: #c9d5e4;
+      border-radius: 999px;
+      transition: background 0.15s ease;
+    }
+
+    .qb-toggle-slider::before {
+      content: "";
+      position: absolute;
+      width: 24px;
+      height: 24px;
+      left: 3px;
+      top: 3px;
+      background: #ffffff;
+      border-radius: 50%;
+      box-shadow: 0 3px 8px rgba(24, 50, 83, 0.22);
+      transition: transform 0.15s ease;
+    }
+
+    .qb-toggle input:checked + .qb-toggle-slider {
+      background: var(--accent);
+    }
+
+    .qb-toggle input:checked + .qb-toggle-slider::before {
+      transform: translateX(24px);
+    }
+
+    .qb-settings-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid #d9e6f4;
+    }
+
+    .qb-settings-hint {
+      margin-top: 8px;
+      color: #5d728b;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .qb-attempt-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+      max-height: 260px;
+      overflow-y: auto;
+    }
+
+    .qb-attempt {
+      border: 1px solid #dce7f3;
+      border-left: 4px solid #8da4c0;
+      background: #ffffff;
+      border-radius: 9px;
+      padding: 9px 10px;
+    }
+
+    .qb-attempt.success {
+      border-left-color: #0f8a6a;
+    }
+
+    .qb-attempt.error {
+      border-left-color: #b53d35;
+    }
+
+    .qb-attempt-title {
+      font-size: 13px;
+      font-weight: 800;
+      color: #1c3d63;
+      margin-bottom: 3px;
+    }
+
+    .qb-attempt-meta {
+      font-size: 12px;
+      color: #637a94;
+      line-height: 1.45;
+    }
+
+    .qb-control-panel {
+      padding: 0;
+      overflow: hidden;
+    }
+
+    .qb-control-hero {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px;
+      border-bottom: 1px solid #d9e6f4;
+      background:
+        radial-gradient(circle at 92% 12%, rgba(11, 92, 171, 0.14), transparent 36%),
+        linear-gradient(135deg, #f6fbff 0%, #effaf6 100%);
+    }
+
+    .qb-control-hero.active {
+      background:
+        radial-gradient(circle at 92% 12%, rgba(15, 138, 106, 0.18), transparent 36%),
+        linear-gradient(135deg, #f3fff9 0%, #edf9ff 100%);
+    }
+
+    .qb-control-hero.paused {
+      background:
+        radial-gradient(circle at 92% 12%, rgba(141, 164, 192, 0.20), transparent 36%),
+        linear-gradient(135deg, #f8fbff 0%, #f1f6fb 100%);
+    }
+
+    .qb-control-copy {
+      min-width: 0;
+    }
+
+    .qb-control-eyebrow {
+      color: #5d728b;
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 5px;
+    }
+
+    .qb-control-copy h4 {
+      margin: 0 0 4px;
+      color: #123961;
+      font-size: 22px;
+      line-height: 1.15;
+    }
+
+    .qb-control-copy p {
+      margin: 0;
+      color: #526b86;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .qb-control-switch-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 0 0 auto;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid #cfdeee;
+      border-radius: 999px;
+      padding: 8px 10px;
+      box-shadow: 0 8px 18px rgba(18, 57, 97, 0.08);
+    }
+
+    .qb-control-body {
+      padding: 16px 18px 18px;
+    }
+
+    .qb-control-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr 1.2fr;
+      gap: 10px;
+    }
+
+    .qb-control-item {
+      border: 1px solid #d8e4f2;
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 12px;
+      min-width: 0;
+    }
+
+    .qb-control-label {
+      color: #627790;
+      font-size: 11px;
+      font-weight: 900;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .qb-control-value {
+      color: #14375d;
+      font-size: 15px;
+      font-weight: 900;
+      overflow-wrap: anywhere;
+    }
+
+    .qb-control-note {
+      margin-top: 6px;
+      color: #627790;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .qb-control-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid #d9e6f4;
+    }
+
+    .qb-owner-card {
+      margin-top: 0;
+    }
+
+    .qb-owner-card h4 {
+      margin: 0 0 10px;
+      color: #173d66;
+      font-size: 15px;
+    }
+
+    .qb-owner-current,
+    .qb-owner-selected {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+
+    .qb-owner-search {
+      margin-bottom: 10px;
+    }
+
+    .qb-user-results {
+      display: grid;
+      gap: 8px;
+      max-height: 260px;
+      overflow-y: auto;
+      margin-bottom: 12px;
+    }
+
+    .qb-user-result {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border: 1px solid #dce7f3;
+      background: #ffffff;
+      border-radius: 10px;
+      padding: 10px 12px;
+    }
+
+    .qb-user-name {
+      color: #173d66;
+      font-weight: 900;
+      font-size: 13px;
+      margin-bottom: 3px;
+    }
+
+    .qb-user-meta {
+      color: #637a94;
+      font-size: 12px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+
+    .qb-readonly-input {
+      background: #f3f7fb !important;
+      color: #14375d !important;
+      font-weight: 800;
+    }
+
+    .qb-attempts-panel {
+      display: none;
+      margin-top: 12px;
+      border-top: 1px solid #d9e6f4;
+      padding-top: 12px;
+    }
+
+    .qb-loading-state {
+      padding: 16px;
+      border: 1px solid #cfe0f3;
+      border-radius: 12px;
+      background:
+        linear-gradient(135deg, rgba(11, 92, 171, 0.08), rgba(15, 138, 106, 0.06)),
+        #fbfdff;
+      color: #1f4d7d;
+    }
+
+    .qb-loading-state h4 {
+      margin: 0 0 6px;
+      color: #07396d;
+      font-size: 16px;
+    }
+
+    .qb-loading-state p {
+      margin: 0;
+      color: #4d6f92;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .qb-loading-label {
+      margin: 0 0 10px;
+      color: #174e83;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .qb-skeleton {
+      min-height: 18px;
+      border-radius: 8px;
+      background: linear-gradient(90deg, #edf3fa 25%, #f8fbff 37%, #edf3fa 63%);
+      background-size: 400% 100%;
+      animation: shimmer 1.2s ease-in-out infinite;
+    }
+
+    @keyframes shimmer {
+      0% { background-position: 100% 0; }
+      100% { background-position: 0 0; }
+    }
+
     .inline-action-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -470,6 +1177,29 @@
       .data-type-grid {
         grid-template-columns: 1fr 1fr;
       }
+
+      .qb-section-grid,
+      .qb-kv-grid,
+      .qb-settings-grid,
+      .qb-control-grid,
+      .qb-owner-current,
+      .qb-owner-selected {
+        grid-template-columns: 1fr;
+      }
+
+      .qb-control-hero {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .qb-control-switch-wrap {
+        width: 100%;
+        justify-content: space-between;
+      }
+
+      .qb-metrics {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
     }
 
     @media (max-width: 700px) {
@@ -490,6 +1220,10 @@
 
       h1 {
         font-size: 24px;
+      }
+
+      .qb-metrics {
+        grid-template-columns: 1fr;
       }
     }
   </style>
@@ -521,8 +1255,130 @@
       <div class="data-type-btn" id="btn-workorders" onclick="selectDataType('workorders')">
         Work Orders
       </div>
+      <div class="data-type-btn" id="btn-quickbooks" onclick="selectDataType('quickbooks')">
+        QuickBooks Automation
+      </div>
       <div class="data-type-btn disabled" id="btn-inventory">
         Inventory
+      </div>
+    </div>
+  </div>
+
+  <div class="card qb-overview" id="quickbooks-overview-card">
+    <div class="qb-page-header">
+      <div class="qb-page-title">
+        <h2>QuickBooks Automation</h2>
+        <p>Monitor the Google Sheets to QuickBooks import process.</p>
+      </div>
+      <div class="qb-header-actions">
+        <span class="qb-badge gray" id="qb-environment-badge">Unknown</span>
+        <span class="qb-refresh-meta" id="qb-last-refreshed">Last refreshed: Never</span>
+        <button class="action-btn secondary qb-link-btn" id="qb-refresh-btn" type="button" onclick="refreshQuickBooksOverview()">
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <div class="qb-card full qb-settings-card qb-control-panel" id="qb-settings-card" style="margin-bottom: 12px;">
+      <div class="qb-control-hero paused" id="qb-control-hero">
+        <div class="qb-control-copy">
+          <div class="qb-control-eyebrow">Automation control panel</div>
+          <h4 id="qb-schedule-status-text">Daily Schedule Paused</h4>
+          <p id="qb-schedule-toggle-hint">Automatic scheduled runs are paused. Run Now remains available for an intentional manual start.</p>
+        </div>
+        <div class="qb-control-switch-wrap">
+          <span class="qb-badge gray" id="qb-schedule-status-badge">Paused</span>
+          <label class="qb-toggle" aria-label="QuickBooks daily schedule active toggle">
+            <input type="checkbox" id="qb-schedule-enabled" onchange="previewQuickBooksScheduleToggle()" />
+            <span class="qb-toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="qb-control-body">
+        <div class="qb-control-grid">
+          <div class="qb-control-item">
+            <div class="qb-control-label">Daily Run Time</div>
+            <input type="time" id="qb-run-time" step="60" value="01:00" />
+            <div class="qb-control-note">Interpreted in Eastern time. You can select a time a few minutes ahead for testing.</div>
+          </div>
+          <div class="qb-control-item">
+            <div class="qb-control-label">Timezone</div>
+            <div class="qb-control-value" id="qb-schedule-timezone">America/New_York</div>
+            <div class="qb-control-note">EST and EDT are handled automatically.</div>
+          </div>
+          <div class="qb-control-item">
+            <div class="qb-control-label">Next Scheduled Run</div>
+            <div class="qb-control-value" id="qb-next-run">Paused</div>
+            <div class="qb-control-note">Changing the time and saving recalculates the next run.</div>
+          </div>
+        </div>
+
+        <div class="qb-control-actions">
+          <button class="action-btn success qb-link-btn" id="qb-save-settings-btn" type="button" onclick="saveQuickBooksScheduleSettings()">Save Settings</button>
+          <button class="action-btn secondary qb-link-btn" id="qb-run-now-btn" type="button" onclick="runQuickBooksNow()">Run Now</button>
+          <button class="action-btn secondary log-toolbar-btn" id="qb-toggle-attempts-btn" type="button" onclick="toggleQuickBooksAttempts()">View Recent Attempts</button>
+        </div>
+        <div class="status-box hidden" id="qb-settings-status"></div>
+
+        <div class="qb-attempts-panel" id="qb-attempts-panel">
+          <div class="logs-toolbar">
+            <strong>Webhook Attempt History</strong>
+          </div>
+          <div class="logs-container qb-attempts-scroll">
+            <div id="qb-latest-attempt" class="qb-empty">No QuickBooks webhook attempts yet.</div>
+            <div id="qb-attempt-list" class="qb-attempt-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="qb-card full qb-settings-card qb-owner-card" id="qb-owner-card" style="margin-bottom: 12px;">
+      <h4>Notification / Needs Review Owner</h4>
+      <div class="qb-owner-current">
+        <div class="qb-control-item">
+          <div class="qb-control-label">Current Owner</div>
+          <div class="qb-control-value" id="qb-current-owner-name">Loading...</div>
+        </div>
+        <div class="qb-control-item">
+          <div class="qb-control-label">ClickUp ID</div>
+          <div class="qb-control-value" id="qb-current-owner-id">Loading...</div>
+        </div>
+      </div>
+
+      <div class="qb-owner-search">
+        <label for="qb-owner-search-input">Search ClickUp User</label>
+        <input type="text" id="qb-owner-search-input" placeholder="Search by name or email..." oninput="debounceQuickBooksOwnerSearch()" />
+        <div class="qb-control-note">Searches Seymour Auto ClickUp workspace members. Select a result before saving.</div>
+      </div>
+
+      <div id="qb-owner-results" class="qb-user-results">
+        <div class="qb-empty">Type a name or email to search ClickUp users.</div>
+      </div>
+
+      <div class="qb-owner-selected">
+        <div>
+          <label for="qb-owner-name">Owner Name</label>
+          <input class="qb-readonly-input" type="text" id="qb-owner-name" readonly placeholder="Select a ClickUp user" />
+        </div>
+        <div>
+          <label for="qb-owner-clickup-id">ClickUp User ID</label>
+          <input class="qb-readonly-input" type="text" id="qb-owner-clickup-id" readonly placeholder="Select a ClickUp user" />
+        </div>
+      </div>
+
+      <div class="qb-control-actions" style="border-top: none; padding-top: 0;">
+        <button class="action-btn success qb-link-btn" id="qb-save-owner-btn" type="button" onclick="saveQuickBooksNotificationOwner()">Save Owner</button>
+      </div>
+      <div class="status-box hidden" id="qb-owner-status"></div>
+    </div>
+
+    <div id="qb-overview-content">
+      <div class="qb-section-grid">
+        <div class="qb-card full">
+          <div class="qb-skeleton" style="width: 36%; margin-bottom: 12px;"></div>
+          <div class="qb-skeleton" style="width: 100%; height: 80px;"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -653,6 +1509,16 @@
   let workOrdersVerificationPollTimer = null;
   let workOrdersExecutionLogs = [];
   let executionLogsCollapsed = false;
+  let quickBooksOverviewPayload = null;
+  let quickBooksOverviewLoading = false;
+  let quickBooksScheduleStatus = null;
+  let quickBooksScheduleLoading = false;
+  let quickBooksAttemptsCollapsed = true;
+  let quickBooksOwnerStatus = null;
+  let quickBooksSelectedOwner = null;
+  let quickBooksOwnerSearchResults = [];
+  let quickBooksOwnerSearchTimer = null;
+  let quickBooksOwnerSearchRequestId = 0;
   const WORK_ORDERS_SCHEDULE_OPTIONS = [
     { value: 'every_1_minute', label: 'Every 1 Minute' },
     { value: 'every_3_minutes', label: 'Every 3 Minutes' },
@@ -678,10 +1544,16 @@
   });
 
   function selectDataType(type) {
-    if (type !== 'invoices' && type !== 'workorders') return;
+    if (type !== 'invoices' && type !== 'workorders' && type !== 'quickbooks') return;
     currentDataType = type;
     clearAllStatuses();
     applyDataTypeUI();
+    if (currentDataType === 'quickbooks') {
+      loadQuickBooksScheduleStatus();
+      loadQuickBooksNotificationOwner();
+      loadQuickBooksOverview();
+      return;
+    }
     loadCurrentSchedule();
     loadSavedSheetId();
     loadSavedDriveFolderId();
@@ -691,12 +1563,14 @@
   }
 
   function getScheduleApi() {
+    if (currentDataType === 'quickbooks') return null;
     return currentDataType === 'workorders' ? window.workOrdersAPI : window.reportingAPI;
   }
 
   function applyDataTypeUI() {
     document.getElementById('btn-invoices').classList.toggle('active', currentDataType === 'invoices');
     document.getElementById('btn-workorders').classList.toggle('active', currentDataType === 'workorders');
+    document.getElementById('btn-quickbooks').classList.toggle('active', currentDataType === 'quickbooks');
 
     const destinationSelect = document.getElementById('destination-label');
     const destinationInfo = document.getElementById('destination-info');
@@ -704,6 +1578,19 @@
     const clickupListGroup = document.getElementById('clickup-list-group');
     const clickupSyncButton = document.getElementById('clickup-sync-now-btn');
     const executionHistoryCard = document.getElementById('execution-history-card');
+    const modeCard = document.getElementById('mode-card');
+    const quickBooksCard = document.getElementById('quickbooks-overview-card');
+
+    if (currentDataType === 'quickbooks') {
+      modeCard.style.display = 'none';
+      quickBooksCard.style.display = 'block';
+      executionHistoryCard.style.display = 'none';
+      stopVerificationPolling();
+      return;
+    }
+
+    modeCard.style.display = 'block';
+    quickBooksCard.style.display = 'none';
 
     if (currentDataType === 'workorders') {
       driveFolderGroup.style.display = 'block';
@@ -1091,6 +1978,689 @@
     }
   }
 
+  function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[char]));
+  }
+
+  function displayValue(value) {
+    if (value === null || value === undefined || value === '') return 'Unavailable';
+    return String(value);
+  }
+
+  function displayNumber(value) {
+    if (value === null || value === undefined || value === '') return 'Unavailable';
+    const number = Number(value);
+    return Number.isFinite(number) ? String(number) : 'Unavailable';
+  }
+
+  function formatDuration(seconds) {
+    const value = Number(seconds);
+    if (!Number.isFinite(value)) return 'Unavailable';
+    if (value < 60) return `${value}s`;
+    const minutes = Math.floor(value / 60);
+    const remainingSeconds = value % 60;
+    if (minutes < 60) return `${minutes}m ${remainingSeconds}s`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return `${hours}h ${remainingMinutes}m`;
+  }
+
+  function formatQuickBooksTimestamp(value, timezone) {
+    if (!value) return 'Unavailable';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return escapeHtml(value);
+    return new Intl.DateTimeFormat('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    }).format(date);
+  }
+
+  function quickBooksBadgeClass(status) {
+    const key = String(status || '').toLowerCase();
+    if (['active', 'completed', 'passed', 'imported'].includes(key)) return 'green';
+    if (['running', 'warning', 'needs review', 'retry queued'].includes(key)) return 'yellow';
+    if (['failed', 'error', 'errors'].includes(key)) return 'red';
+    if (['sandbox', 'production'].includes(key)) return 'blue';
+    return 'gray';
+  }
+
+  function renderQuickBooksLoading() {
+    document.getElementById('qb-overview-content').innerHTML = `
+      <div class="qb-loading-state">
+        <h4>Loading QuickBooks automation data...</h4>
+        <p>Fetching the latest non-retry run, staging totals, preflight status, processing logs, and operational links from Airtable.</p>
+      </div>
+      <div class="qb-section-grid">
+        <div class="qb-card full">
+          <div class="qb-loading-label">Current Automation Status</div>
+          <div class="qb-skeleton" style="width: 32%; margin-bottom: 12px;"></div>
+          <div class="qb-skeleton" style="width: 100%; height: 90px;"></div>
+        </div>
+        <div class="qb-card">
+          <div class="qb-loading-label">Latest Staging Summary</div>
+          <div class="qb-skeleton" style="width: 80%; height: 110px;"></div>
+        </div>
+        <div class="qb-card">
+          <div class="qb-loading-label">Latest Preflight</div>
+          <div class="qb-skeleton" style="width: 80%; height: 110px;"></div>
+        </div>
+        <div class="qb-card full">
+          <div class="qb-loading-label">Results By Transaction Type</div>
+          <div class="qb-skeleton" style="width: 100%; height: 150px;"></div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function loadQuickBooksOverview() {
+    if (quickBooksOverviewLoading) return;
+    const refreshBtn = document.getElementById('qb-refresh-btn');
+    const hadPreviousData = Boolean(quickBooksOverviewPayload?.overview);
+    quickBooksOverviewLoading = true;
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = 'Refreshing...';
+    if (hadPreviousData) {
+      renderQuickBooksOverview(quickBooksOverviewPayload, {
+        refreshing: true
+      });
+    } else {
+      renderQuickBooksLoading();
+    }
+
+    try {
+      const result = await window.quickBooksAutomationAPI.getOverview();
+      quickBooksOverviewPayload = result;
+      renderQuickBooksOverview(result);
+    } catch (err) {
+      const failedPayload = {
+        success: false,
+        message: err.message || 'QuickBooks Automation overview failed to load.',
+        overview: null
+      };
+      if (hadPreviousData) {
+        renderQuickBooksOverview(quickBooksOverviewPayload, {
+          refreshError: failedPayload.message
+        });
+      } else {
+        quickBooksOverviewPayload = failedPayload;
+        renderQuickBooksOverview(quickBooksOverviewPayload);
+      }
+    } finally {
+      quickBooksOverviewLoading = false;
+      refreshBtn.disabled = false;
+      refreshBtn.textContent = 'Refresh';
+    }
+  }
+
+  function refreshQuickBooksOverview() {
+    loadQuickBooksNotificationOwner();
+    loadQuickBooksOverview();
+  }
+
+  async function loadQuickBooksScheduleStatus() {
+    if (quickBooksScheduleLoading) return;
+    quickBooksScheduleLoading = true;
+    try {
+      const result = await window.quickBooksAutomationAPI.getScheduleStatus();
+      if (!result?.success) {
+        throw new Error(result?.message || 'Failed to load QuickBooks automation settings.');
+      }
+      quickBooksScheduleStatus = result.status || null;
+      renderQuickBooksScheduleStatus();
+    } catch (err) {
+      showStatus(document.getElementById('qb-settings-status'), 'error', err.message || 'Failed to load QuickBooks settings.');
+    } finally {
+      quickBooksScheduleLoading = false;
+    }
+  }
+
+  function renderQuickBooksScheduleStatus() {
+    const status = quickBooksScheduleStatus || {};
+    const enabled = Boolean(status.enabled);
+    const timezone = status.timezone || 'America/New_York';
+    const statusText = enabled ? 'Daily Schedule Active' : 'Daily Schedule Paused';
+    const badge = document.getElementById('qb-schedule-status-badge');
+    const hero = document.getElementById('qb-control-hero');
+    const enabledInput = document.getElementById('qb-schedule-enabled');
+    const runTimeInput = document.getElementById('qb-run-time');
+    const latestAttempt = status.lastWebhookAttempt || (Array.isArray(status.logs) ? status.logs[0] : null);
+    const attemptsPanel = document.getElementById('qb-attempts-panel');
+    const attemptsBtn = document.getElementById('qb-toggle-attempts-btn');
+
+    hero.className = `qb-control-hero ${enabled ? 'active' : 'paused'}`;
+    enabledInput.checked = enabled;
+    runTimeInput.value = status.runTime || '01:00';
+    document.getElementById('qb-schedule-status-text').textContent = statusText;
+    document.getElementById('qb-schedule-toggle-hint').textContent = enabled
+      ? 'The Electron app will start the parent QuickBooks workflow once per day at the saved Eastern time.'
+      : 'Automatic scheduled runs are paused. Run Now remains available for an intentional manual start.';
+    document.getElementById('qb-schedule-timezone').textContent = timezone;
+    document.getElementById('qb-next-run').textContent = enabled
+      ? formatQuickBooksTimestamp(status.nextRunAt, timezone)
+      : 'Paused';
+    badge.className = `qb-badge ${enabled ? 'green' : 'gray'}`;
+    badge.textContent = enabled ? 'Active' : 'Paused';
+
+    const latestAttemptEl = document.getElementById('qb-latest-attempt');
+    latestAttemptEl.className = latestAttempt
+      ? `log-entry ${latestAttempt.success ? 'success' : 'error'}`
+      : 'qb-empty';
+    latestAttemptEl.innerHTML = latestAttempt
+      ? renderQuickBooksAttempt(latestAttempt, timezone, true)
+      : 'No QuickBooks webhook attempts yet.';
+
+    const logs = Array.isArray(status.logs) ? status.logs : [];
+    document.getElementById('qb-attempt-list').innerHTML = logs.slice(1, 25).map(log => renderQuickBooksAttempt(log, timezone, false)).join('');
+    attemptsPanel.style.display = quickBooksAttemptsCollapsed ? 'none' : 'block';
+    attemptsBtn.textContent = quickBooksAttemptsCollapsed ? 'View Recent Attempts' : 'Hide Recent Attempts';
+  }
+
+  function previewQuickBooksScheduleToggle() {
+    const enabled = document.getElementById('qb-schedule-enabled').checked;
+    const statusText = enabled ? 'Daily Schedule Active after save' : 'Daily Schedule Paused after save';
+    const badge = document.getElementById('qb-schedule-status-badge');
+    const hero = document.getElementById('qb-control-hero');
+    hero.className = `qb-control-hero ${enabled ? 'active' : 'paused'}`;
+    document.getElementById('qb-schedule-status-text').textContent = statusText;
+    document.getElementById('qb-schedule-toggle-hint').textContent = enabled
+      ? 'Click Save Settings to activate the daily QuickBooks schedule.'
+      : 'Click Save Settings to pause automatic scheduled runs.';
+    badge.className = `qb-badge ${enabled ? 'yellow' : 'gray'}`;
+    badge.textContent = 'Unsaved';
+  }
+
+  function toggleQuickBooksAttempts() {
+    quickBooksAttemptsCollapsed = !quickBooksAttemptsCollapsed;
+    renderQuickBooksScheduleStatus();
+  }
+
+  function getQuickBooksOwnerEnvironment() {
+    return quickBooksOwnerStatus?.environment ||
+      quickBooksOverviewPayload?.overview?.environment?.selected ||
+      quickBooksOverviewPayload?.overview?.environment?.quickBooks ||
+      'SANDBOX';
+  }
+
+  async function loadQuickBooksNotificationOwner() {
+    const statusEl = document.getElementById('qb-owner-status');
+    document.getElementById('qb-current-owner-name').textContent = 'Loading...';
+    document.getElementById('qb-current-owner-id').textContent = 'Loading...';
+    try {
+      const result = await window.quickBooksAutomationAPI.getNotificationOwner({
+        environment: getQuickBooksOwnerEnvironment()
+      });
+      if (!result?.success) {
+        throw new Error(result?.message || 'Unable to load notification owner configuration.');
+      }
+      quickBooksOwnerStatus = result.owner || null;
+      renderQuickBooksNotificationOwner();
+    } catch (err) {
+      document.getElementById('qb-current-owner-name').textContent = 'Not configured';
+      document.getElementById('qb-current-owner-id').textContent = 'Unavailable';
+      showStatus(statusEl, 'error', err.message || 'Unable to load notification owner configuration.');
+    }
+  }
+
+  function renderQuickBooksNotificationOwner() {
+    const ownerName = quickBooksOwnerStatus?.ownerName || '';
+    const ownerClickUpId = quickBooksOwnerStatus?.ownerClickUpId || '';
+    document.getElementById('qb-current-owner-name').textContent = ownerName || 'Not configured';
+    document.getElementById('qb-current-owner-id').textContent = ownerClickUpId || 'Unavailable';
+    document.getElementById('qb-owner-name').value = quickBooksSelectedOwner?.ownerName || '';
+    document.getElementById('qb-owner-clickup-id').value = quickBooksSelectedOwner?.ownerClickUpId || '';
+  }
+
+  function debounceQuickBooksOwnerSearch() {
+    clearTimeout(quickBooksOwnerSearchTimer);
+    quickBooksOwnerSearchTimer = setTimeout(searchQuickBooksOwnerUsers, 400);
+  }
+
+  async function searchQuickBooksOwnerUsers() {
+    const input = document.getElementById('qb-owner-search-input');
+    const resultsEl = document.getElementById('qb-owner-results');
+    const searchTerm = input.value.trim();
+    const requestId = ++quickBooksOwnerSearchRequestId;
+
+    if (searchTerm.length < 2) {
+      quickBooksOwnerSearchResults = [];
+      resultsEl.innerHTML = '<div class="qb-empty">Type at least 2 characters to search ClickUp users.</div>';
+      return;
+    }
+
+    resultsEl.innerHTML = '<div class="qb-empty">Searching ClickUp users...</div>';
+    try {
+      const result = await window.quickBooksAutomationAPI.searchClickUpUsers({ searchTerm });
+      if (requestId !== quickBooksOwnerSearchRequestId) return;
+      if (!result?.success) {
+        throw new Error(result?.message || 'Unable to load ClickUp users.');
+      }
+      quickBooksOwnerSearchResults = Array.isArray(result.users) ? result.users : [];
+      renderQuickBooksOwnerSearchResults();
+    } catch (err) {
+      if (requestId !== quickBooksOwnerSearchRequestId) return;
+      quickBooksOwnerSearchResults = [];
+      resultsEl.innerHTML = '<div class="qb-error-state">Unable to load ClickUp users.</div>';
+    }
+  }
+
+  function renderQuickBooksOwnerSearchResults() {
+    const resultsEl = document.getElementById('qb-owner-results');
+    if (!quickBooksOwnerSearchResults.length) {
+      resultsEl.innerHTML = '<div class="qb-empty">No ClickUp users found.</div>';
+      return;
+    }
+    resultsEl.innerHTML = quickBooksOwnerSearchResults.map((user, index) => `
+      <div class="qb-user-result">
+        <div>
+          <div class="qb-user-name">${escapeHtml(user.name || user.username || 'Unnamed User')}</div>
+          <div class="qb-user-meta">
+            ${escapeHtml(user.email || 'No email available')}<br>
+            ClickUp ID: ${escapeHtml(user.id || 'Unavailable')}
+          </div>
+        </div>
+        <button class="action-btn secondary qb-link-btn" type="button" onclick="selectQuickBooksOwnerUser(${index})">Select</button>
+      </div>
+    `).join('');
+  }
+
+  function selectQuickBooksOwnerUser(index) {
+    const user = quickBooksOwnerSearchResults[index];
+    if (!user?.id || !(user.name || user.username)) return;
+    quickBooksSelectedOwner = {
+      ownerName: user.name || user.username,
+      ownerClickUpId: String(user.id)
+    };
+    renderQuickBooksNotificationOwner();
+  }
+
+  async function saveQuickBooksNotificationOwner() {
+    const statusEl = document.getElementById('qb-owner-status');
+    const saveBtn = document.getElementById('qb-save-owner-btn');
+    if (!quickBooksSelectedOwner?.ownerName || !quickBooksSelectedOwner?.ownerClickUpId) {
+      showStatus(statusEl, 'error', 'Select a ClickUp user before saving.');
+      return;
+    }
+
+    saveBtn.disabled = true;
+    showStatus(statusEl, 'info', 'Saving notification owner...');
+    try {
+      const result = await window.quickBooksAutomationAPI.saveNotificationOwner({
+        environment: getQuickBooksOwnerEnvironment(),
+        ownerName: quickBooksSelectedOwner.ownerName,
+        ownerClickUpId: quickBooksSelectedOwner.ownerClickUpId
+      });
+      if (!result?.success) {
+        throw new Error(result?.message || 'Unable to save notification owner configuration.');
+      }
+      quickBooksOwnerStatus = result.owner || quickBooksOwnerStatus;
+      renderQuickBooksNotificationOwner();
+      showStatus(statusEl, 'success', result.message || 'Notification owner updated successfully.');
+    } catch (err) {
+      showStatus(statusEl, 'error', err.message || 'Unable to save notification owner configuration.');
+    } finally {
+      saveBtn.disabled = false;
+    }
+  }
+
+  function renderQuickBooksAttempt(attempt, timezone, compact) {
+    const success = Boolean(attempt?.success);
+    const skipped = Boolean(attempt?.skipped);
+    const triggerType = String(attempt?.triggerType || 'unknown').replace(/_/g, ' ');
+    const statusLabel = skipped ? 'Skipped' : success ? 'Success' : 'Failed';
+    const httpStatus = attempt?.httpStatus ? `HTTP ${attempt.httpStatus}` : 'HTTP unavailable';
+    const retry = Number(attempt?.retryAttempt || 0) > 0 ? `Retry ${attempt.retryAttempt}` : '';
+    const detail = attempt?.responseSummary || attempt?.errorSummary || attempt?.message || 'No additional details.';
+    const body = `
+      <div class="qb-attempt-title">${escapeHtml(statusLabel)} - ${escapeHtml(triggerType)} ${retry ? `(${escapeHtml(retry)})` : ''}</div>
+      <div class="qb-attempt-meta">
+        ${formatQuickBooksTimestamp(attempt?.timestamp, timezone)} | ${escapeHtml(httpStatus)}<br>
+        ${escapeHtml(detail)}
+      </div>
+    `;
+    if (compact) return body;
+    return `<div class="log-entry ${success ? 'success' : 'error'}">${body}</div>`;
+  }
+
+  async function saveQuickBooksScheduleSettings() {
+    const statusEl = document.getElementById('qb-settings-status');
+    const saveBtn = document.getElementById('qb-save-settings-btn');
+    const payload = {
+      enabled: document.getElementById('qb-schedule-enabled').checked,
+      runTime: document.getElementById('qb-run-time').value || '01:00'
+    };
+    saveBtn.disabled = true;
+    showStatus(statusEl, 'info', 'Saving QuickBooks automation settings...');
+    try {
+      const result = await window.quickBooksAutomationAPI.saveScheduleSettings(payload);
+      if (!result?.success) {
+        throw new Error(result?.message || 'Failed to save settings.');
+      }
+      quickBooksScheduleStatus = result.status || null;
+      renderQuickBooksScheduleStatus();
+      const savedStatus = quickBooksScheduleStatus?.enabled ? 'Automation is Active.' : 'Automation is Paused because the toggle is off.';
+      showStatus(statusEl, 'success', `${result.message || 'QuickBooks automation settings saved.'} ${savedStatus}`);
+    } catch (err) {
+      showStatus(statusEl, 'error', err.message || 'Failed to save QuickBooks automation settings.');
+    } finally {
+      saveBtn.disabled = false;
+    }
+  }
+
+  async function runQuickBooksNow() {
+    const confirmed = confirm('Run the production QuickBooks automation now? This will call the live n8n parent workflow.');
+    if (!confirmed) return;
+    const statusEl = document.getElementById('qb-settings-status');
+    const runBtn = document.getElementById('qb-run-now-btn');
+    runBtn.disabled = true;
+    showStatus(statusEl, 'info', 'Calling QuickBooks production webhook...');
+    try {
+      const result = await window.quickBooksAutomationAPI.runNow();
+      quickBooksScheduleStatus = result?.status || quickBooksScheduleStatus;
+      renderQuickBooksScheduleStatus();
+      if (!result?.success) {
+        throw new Error(result?.message || 'QuickBooks Run Now failed.');
+      }
+      showStatus(statusEl, 'success', result.message || 'QuickBooks Run Now completed.');
+      refreshQuickBooksOverview();
+    } catch (err) {
+      showStatus(statusEl, 'error', err.message || 'QuickBooks Run Now failed.');
+    } finally {
+      runBtn.disabled = false;
+    }
+  }
+
+  function renderKv(label, value) {
+    return `
+      <div class="qb-kv">
+        <div class="qb-kv-label">${escapeHtml(label)}</div>
+        <div class="qb-kv-value">${escapeHtml(displayValue(value))}</div>
+      </div>
+    `;
+  }
+
+  function renderLinkKv(label, url) {
+    const value = String(url || '').trim();
+    return `
+      <div class="qb-kv">
+        <div class="qb-kv-label">${escapeHtml(label)}</div>
+        <div class="qb-kv-value">
+          ${value && value !== 'Unavailable'
+            ? `<a class="qb-link-inline" href="${escapeHtml(value)}" onclick="openQuickBooksLink('${encodeURIComponent(value)}'); return false;">${escapeHtml(value)}</a>`
+            : 'Unavailable'}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderTimestampKv(label, value, timezone) {
+    return `
+      <div class="qb-kv">
+        <div class="qb-kv-label">${escapeHtml(label)}</div>
+        <div class="qb-kv-value">${formatQuickBooksTimestamp(value, timezone)}</div>
+      </div>
+    `;
+  }
+
+  function renderRunCard(title, run, emptyText, timezone) {
+    if (!run) {
+      return `
+        <div class="qb-card">
+          <h4>${escapeHtml(title)}</h4>
+          <div class="qb-empty">${escapeHtml(emptyText)}</div>
+        </div>
+      `;
+    }
+    return `
+      <div class="qb-card">
+        <h4>${escapeHtml(title)}</h4>
+        <div class="qb-kv-grid">
+          ${renderTimestampKv(title.includes('Failed') ? 'Failed at' : 'Import timestamp', run.finishedAt || run.startedAt, timezone)}
+          ${renderKv('Run ID', run.runId)}
+          ${renderKv('Batch ID', run.batchId)}
+          ${title.includes('Successful') ? renderKv('Imported transaction count', displayNumber(run.importedTransactionCount)) : ''}
+          ${renderKv('Duration', formatDuration(run.durationSeconds))}
+          ${title.includes('Failed') ? renderKv('Failure stage', run.failureStage) : ''}
+          ${title.includes('Failed') ? renderKv('Short reason', run.failureReason) : ''}
+        </div>
+      </div>
+    `;
+  }
+
+  function renderMetric(label, value) {
+    return `
+      <div class="qb-metric">
+        <div class="qb-metric-value">${escapeHtml(displayNumber(value))}</div>
+        <div class="qb-metric-label">${escapeHtml(label)}</div>
+      </div>
+    `;
+  }
+
+  function renderTransactionTable(result) {
+    const breakdown = Array.isArray(result)
+      ? { status: 'success', rows: result }
+      : (result || {});
+    const data = Array.isArray(breakdown.rows) ? breakdown.rows : [];
+    if (breakdown.status === 'no_run_id') {
+      return '<div class="qb-empty">No completed QuickBooks Run ID was found for transaction processing results.</div>';
+    }
+    if (breakdown.status === 'no_records') {
+      return `<div class="qb-empty">${escapeHtml(breakdown.message || `No processing records were found for Run ID: ${breakdown.runId || 'Unavailable'}`)}</div>`;
+    }
+    if (breakdown.status === 'error') {
+      return `<div class="qb-error-state">Record Processing Logs could not load: ${escapeHtml(breakdown.message || 'Airtable request failed.')}</div>`;
+    }
+    return `
+      <div class="qb-table-wrap">
+        <table class="qb-table">
+          <thead>
+            <tr>
+              <th>Transaction Type</th>
+              <th>Total</th>
+              <th>Imported</th>
+              <th>Duplicates</th>
+              <th>Errors</th>
+              <th>Needs Review</th>
+              <th>Retry Queued</th>
+              <th>Skipped</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.map(row => `
+              <tr>
+                <td>${escapeHtml(row.label || row.type || 'Unknown')}</td>
+                <td>${escapeHtml(displayNumber(row.total))}</td>
+                <td>${escapeHtml(displayNumber(row.imported))}</td>
+                <td>${escapeHtml(displayNumber(row.duplicates))}</td>
+                <td>${escapeHtml(displayNumber(row.errors))}</td>
+                <td>${escapeHtml(displayNumber(row.needsReview))}</td>
+                <td>${escapeHtml(displayNumber(row.retryQueued))}</td>
+                <td>${escapeHtml(displayNumber(row.skipped))}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderRecentErrors(errors, timezone) {
+    if (!Array.isArray(errors) || errors.length === 0) {
+      return '<div class="qb-empty">No recent errors found for the latest full import run.</div>';
+    }
+    return `
+      <div class="qb-table-wrap qb-error-table-scroll">
+        <table class="qb-table">
+          <thead>
+            <tr>
+              <th>Transaction Type</th>
+              <th>Source #</th>
+              <th>Message</th>
+              <th>Timestamp</th>
+              <th>ClickUp</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${errors.map(error => `
+              <tr>
+                <td>${escapeHtml(error.transactionType || 'Unknown')}</td>
+                <td>${escapeHtml(error.sourceTransactionNumber || 'Unavailable')}</td>
+                <td>${escapeHtml(error.message || 'Unavailable')}</td>
+                <td>${formatQuickBooksTimestamp(error.timestamp, timezone)}</td>
+                <td>${error.clickUpUrl ? `<button class="action-btn secondary qb-link-btn" type="button" onclick="openQuickBooksLink('${encodeURIComponent(error.clickUpUrl)}')">Open</button>` : 'Unavailable'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  }
+
+  function renderQuickBooksLinks(links) {
+    if (!Array.isArray(links) || links.length === 0) {
+      return '<div class="qb-empty">No configured QuickBooks Automation links are available.</div>';
+    }
+    return `
+      <div class="qb-link-row">
+        ${links.map(link => `
+          <button class="action-btn secondary qb-link-btn" type="button" onclick="openQuickBooksLink('${encodeURIComponent(link.url)}')">
+            ${escapeHtml(link.label)}
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  async function openQuickBooksLink(url) {
+    try {
+      await window.quickBooksAutomationAPI.openExternal(decodeURIComponent(url));
+    } catch (err) {
+      console.error('Failed to open QuickBooks Automation link:', err);
+    }
+  }
+
+  function renderQuickBooksOverview(result, state = {}) {
+    const content = document.getElementById('qb-overview-content');
+    const badge = document.getElementById('qb-environment-badge');
+    const refreshed = document.getElementById('qb-last-refreshed');
+    const overview = result?.overview;
+
+    if (!overview) {
+      badge.className = 'qb-badge gray';
+      badge.textContent = 'Unknown';
+      content.innerHTML = `
+        <div class="qb-error-state">
+          ${escapeHtml(result?.message || 'QuickBooks Automation overview could not load.')}
+          <div style="margin-top: 10px;">
+            <button class="action-btn secondary qb-link-btn" type="button" onclick="refreshQuickBooksOverview()">Retry</button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    const timezone = overview.timezone || 'Timezone unavailable';
+    const environment = overview.environment?.quickBooks || overview.environment?.selected || 'Unknown';
+    badge.className = `qb-badge ${quickBooksBadgeClass(environment)}`;
+    badge.textContent = environment;
+    refreshed.textContent = `Last refreshed: ${formatQuickBooksTimestamp(overview.generatedAt, timezone)}`;
+
+    const current = overview.currentStatus || {};
+    const latestRun = current.latestFullRun || {};
+    const activeRunId = current.activeRunId && current.activeRunId !== 'Unavailable'
+      ? current.activeRunId
+      : '';
+    const statusRunId = activeRunId || latestRun.runId || 'Unavailable';
+    const statusStartedAt = activeRunId ? current.lockAcquiredAt : latestRun.startedAt;
+    const statusFinishedAt = activeRunId
+      ? renderKv('Finished at', 'Processing')
+      : renderTimestampKv('Finished at', latestRun.finishedAt, timezone);
+    const statusDuration = activeRunId ? 'Processing' : formatDuration(latestRun.durationSeconds);
+    const batchRow = activeRunId || !latestRun.batchId || latestRun.batchId === 'Unavailable'
+      ? ''
+      : renderKv('Batch ID', latestRun.batchId);
+    const preflight = overview.latestPreflight || {};
+    const summary = overview.latestImportSummary || {};
+    const refreshNotice = state.refreshing
+      ? '<div class="qb-refresh-notice">Updating data from Airtable... showing the last loaded overview until refresh completes.</div>'
+      : '';
+    const refreshError = state.refreshError
+      ? `<div class="qb-warning"><strong>Refresh failed:</strong> ${escapeHtml(state.refreshError)} Showing last loaded data.</div>`
+      : '';
+    const warnings = Array.isArray(overview.warnings) && overview.warnings.length > 0
+      ? `<div class="qb-warning"><strong>Partial data warning:</strong> ${escapeHtml(overview.warnings.slice(0, 3).join(' | '))}</div>`
+      : '';
+
+    content.innerHTML = `
+      ${refreshNotice}
+      ${refreshError}
+      ${warnings}
+      <div class="qb-section-grid">
+        <div class="qb-card primary full">
+          <h4>Current Automation Status <span class="qb-badge ${quickBooksBadgeClass(current.status)}">${escapeHtml(current.status || 'Unknown')}</span></h4>
+          <div class="qb-kv-grid">
+            ${renderKv('Selected environment', current.selectedEnvironment || overview.environment?.selected || 'Unknown')}
+            ${renderKv('Active Run ID', current.activeRunId || 'Unavailable')}
+            ${renderKv('Latest run status', activeRunId ? 'Processing' : latestRun.status || 'Unknown')}
+            ${renderKv('Latest Run ID', statusRunId)}
+            ${batchRow}
+            ${renderTimestampKv('Started at', statusStartedAt, timezone)}
+            ${statusFinishedAt}
+            ${renderKv('Total duration', statusDuration)}
+          </div>
+        </div>
+
+        ${renderRunCard('Last Successful Import', overview.lastSuccessfulImport, 'No successful imports found.', timezone)}
+        ${renderRunCard('Last Failed Import', overview.lastFailedImport, 'No failed imports found.', timezone)}
+
+        <div class="qb-card full">
+          <h4>Latest Preflight <span class="qb-badge ${quickBooksBadgeClass(preflight.status)}">${escapeHtml(preflight.status || 'Unknown')}</span></h4>
+          <div class="qb-kv-grid">
+            ${renderTimestampKv('Timestamp', preflight.timestamp, timezone)}
+            ${renderKv('Source data changed', preflight.sourceDataChanged || 'Unknown')}
+            ${renderKv('Failure Reason', preflight.reason || 'Unavailable')}
+            ${renderLinkKv('ClickUp Task', preflight.clickUpTaskLink)}
+          </div>
+        </div>
+
+        <div class="qb-card full">
+          <h4>Latest Import Summary</h4>
+          <div class="qb-metrics">
+            ${renderMetric('Staged', summary.staged)}
+            ${renderMetric('Imported', summary.imported)}
+            ${renderMetric('Duplicates', summary.duplicates)}
+            ${renderMetric('Errors', summary.errors)}
+          </div>
+        </div>
+
+        <div class="qb-card full">
+          <h4>Results By Transaction Type</h4>
+          ${renderTransactionTable(overview.processingBreakdown || overview.resultsByTransactionType)}
+        </div>
+
+        <div class="qb-card full">
+          <h4>Recent Errors</h4>
+          ${renderRecentErrors(overview.recentErrors, timezone)}
+        </div>
+
+        <div class="qb-card full">
+          <h4>Important Links</h4>
+          ${renderQuickBooksLinks(overview.links)}
+        </div>
+      </div>
+    `;
+  }
+
   function getDayName(day) {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     return days[day];
@@ -1115,6 +2685,8 @@
 
   function clearAllStatuses() {
     hideStatus(document.getElementById('scheduled-status'));
+    hideStatus(document.getElementById('qb-settings-status'));
+    hideStatus(document.getElementById('qb-owner-status'));
   }
 
   function showStatus(element, type, message) {

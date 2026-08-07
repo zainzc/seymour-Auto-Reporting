@@ -36,6 +36,17 @@ contextBridge.exposeInMainWorld('workOrdersAPI', {
   testSchedule: () => ipcRenderer.invoke('workorders-test-schedule')
 });
 
+contextBridge.exposeInMainWorld('quickBooksAutomationAPI', {
+  getOverview: () => ipcRenderer.invoke('quickbooks-automation:get-overview'),
+  getScheduleStatus: () => ipcRenderer.invoke('quickbooks-automation:get-schedule-status'),
+  saveScheduleSettings: (payload) => ipcRenderer.invoke('quickbooks-automation:save-schedule-settings', payload),
+  getNotificationOwner: (payload) => ipcRenderer.invoke('quickbooks-automation:get-notification-owner', payload),
+  searchClickUpUsers: (payload) => ipcRenderer.invoke('quickbooks-automation:search-clickup-users', payload),
+  saveNotificationOwner: (payload) => ipcRenderer.invoke('quickbooks-automation:save-notification-owner', payload),
+  runNow: () => ipcRenderer.invoke('quickbooks-automation:run-now'),
+  openExternal: (url) => ipcRenderer.invoke('quickbooks-automation:open-external', url)
+});
+
 // OAuth2 API
 contextBridge.exposeInMainWorld('oauth2API', {
   getAuthUrl: () => ipcRenderer.invoke('oauth2-get-auth-url'),
