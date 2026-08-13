@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('workOrdersAPI', {
 
 contextBridge.exposeInMainWorld('quickBooksAutomationAPI', {
   getOverview: () => ipcRenderer.invoke('quickbooks-automation:get-overview'),
+  getProcessingBreakdown: (payload) => ipcRenderer.invoke('quickbooks-automation:get-processing-breakdown', payload),
   getScheduleStatus: () => ipcRenderer.invoke('quickbooks-automation:get-schedule-status'),
   saveScheduleSettings: (payload) => ipcRenderer.invoke('quickbooks-automation:save-schedule-settings', payload),
   getNotificationOwner: (payload) => ipcRenderer.invoke('quickbooks-automation:get-notification-owner', payload),

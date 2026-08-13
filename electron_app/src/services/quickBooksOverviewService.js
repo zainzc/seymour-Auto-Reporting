@@ -301,6 +301,11 @@ function escapeAirtableFormulaString(value = '') {
   return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
 
+function buildRunIdFormula(runId = '') {
+  const id = normalizeText(runId);
+  return id ? AirtableService.buildEqualsFormula('Run ID', id) : '';
+}
+
 function runTimestampMs(record = {}) {
   return Date.parse(getRecordTime(record, FIELD_ALIASES.startTime) || '') || 0;
 }
@@ -617,6 +622,36 @@ async function fetchTable(service, tableName) {
   return service.fetchAllRecords(tableName, []);
 }
 
+async function fetchRecentRecordsSafe(service, tableName, warnings, options = {}) {
+  try {
+    const params = {};
+    const maxRecords = Number(options.maxRecords || 0);
+    if (maxRecords > 0) params.maxRecords = maxRecords;
+    if (options.sortField) {
+      params.sort = [{ field: options.sortField, direction: 'desc' }];
+    }
+    const data = await service.request('GET', `/${encodeURIComponent(tableName)}`, { params });
+    return Array.isArray(data?.records) ? data.records : [];
+  } catch (error) {
+    warnings.push(`${tableName}: ${AirtableService.getAirtableErrorMessage(error)}`);
+    return null;
+  }
+}
+
+async function fetchRecordsByFormulaSafe(service, tableName, formula, warnings, options = {}) {
+  try {
+    return await service.fetchRecordsByFormula(
+      tableName,
+      formula,
+      Array.isArray(options.fields) ? options.fields : [],
+      Number(options.maxRecords || 0)
+    );
+  } catch (error) {
+    warnings.push(`${tableName}: ${AirtableService.getAirtableErrorMessage(error)}`);
+    return null;
+  }
+}
+
 async function fetchTableSafe(service, tableName, warnings) {
   try {
     return await fetchTable(service, tableName);
@@ -710,26 +745,11 @@ async function getQuickBooksAutomationOverview(options = {}) {
   const auditService = options.auditService || new AirtableService({ token, baseId: auditBaseId });
   const stagingService = options.stagingService || new AirtableService({ token, baseId: stagingBaseId });
 
-  const [auditSchema, stagingSchema] = await Promise.all([
-    options.auditSchemaService && typeof options.auditSchemaService.listTables === 'function'
-      ? options.auditSchemaService.listTables()
-      : listSchemaSafe(token, auditBaseId, warnings, 'Audit Base'),
-    options.stagingSchemaService && typeof options.stagingSchemaService.listTables === 'function'
-      ? options.stagingSchemaService.listTables()
-      : listSchemaSafe(token, stagingBaseId, warnings, 'Staging Base')
-  ]);
-
-  const [
-    runLogs,
-    errorLogs,
-    preflightLogs,
-    runLocks,
-    runtimeConfig,
-    automationConfig
-  ] = await Promise.all([
-    fetchTableSafe(auditService, AUDIT_TABLES.runLogs, warnings),
-    fetchTableSafe(auditService, AUDIT_TABLES.errorLogs, warnings),
-    fetchTableSafe(auditService, AUDIT_TABLES.preflightCheckLogs, warnings),
+  const [runLogs, runLocks, runtimeConfig, automationConfig] = await Promise.all([
+    fetchRecentRecordsSafe(auditService, AUDIT_TABLES.runLogs, warnings, {
+      sortField: 'Start Time',
+      maxRecords: 40
+    }),
     fetchTableSafe(stagingService, STAGING_TABLES.runLocks, warnings),
     fetchTableSafe(stagingService, STAGING_TABLES.automationRuntimeConfiguration, warnings),
     fetchTableSafe(stagingService, STAGING_TABLES.automationConfiguration, warnings)
@@ -774,27 +794,50 @@ async function getQuickBooksAutomationOverview(options = {}) {
           : 'Unknown';
 
   const identity = runIdentity(latestFullRun || {});
-  const preflightForLatest = Array.isArray(preflightLogs)
-    ? preflightLogs
-        .filter(record => recordMatchesIdentity(record, identity))
+  const runIdFormula = buildRunIdFormula(identity.runId);
+  const [preflightLogsForLatest, errorRecordsForLatest] = runIdFormula
+    ? await Promise.all([
+        fetchRecordsByFormulaSafe(auditService, AUDIT_TABLES.preflightCheckLogs, runIdFormula, warnings, {
+          maxRecords: 20
+        }),
+        fetchRecordsByFormulaSafe(auditService, AUDIT_TABLES.errorLogs, runIdFormula, warnings, {
+          maxRecords: 500
+        })
+      ])
+    : [[], []];
+  const preflightForLatest = Array.isArray(preflightLogsForLatest)
+    ? preflightLogsForLatest
         .sort((a, b) => compareByTimeDesc(a, b, FIELD_ALIASES.preflightTimestamp))[0] || null
     : null;
-  const errorRecordsForLatest = Array.isArray(errorLogs)
-    ? errorLogs.filter(record => recordMatchesIdentity(record, identity))
-    : [];
+  const shouldLoadProcessingBreakdown = options.includeProcessingBreakdown !== false;
   const processingRunIdentity = selectProcessingRunIdentity(runLogs, runLocks, options.selectedRunId);
   let processingBreakdown;
-  try {
-    processingBreakdown = await getProcessingBreakdownForRun(auditService, processingRunIdentity.runId, {
-      source: processingRunIdentity.source
-    });
-  } catch (error) {
-    warnings.push(`${AUDIT_TABLES.recordProcessingLogs}: ${AirtableService.getAirtableErrorMessage(error)}`);
+  if (shouldLoadProcessingBreakdown) {
+    try {
+      processingBreakdown = await getProcessingBreakdownForRun(auditService, processingRunIdentity.runId, {
+        source: processingRunIdentity.source
+      });
+    } catch (error) {
+      warnings.push(`${AUDIT_TABLES.recordProcessingLogs}: ${AirtableService.getAirtableErrorMessage(error)}`);
+      processingBreakdown = {
+        runId: processingRunIdentity.runId || '',
+        source: processingRunIdentity.source || 'Unavailable',
+        status: 'error',
+        message: AirtableService.getAirtableErrorMessage(error),
+        rows: TRANSACTION_TYPES.map(type => ({ transactionType: type.label, type: type.key, label: type.label, ...emptyMetrics() })),
+        recordCount: 0,
+        dedupedRecordCount: 0,
+        unrecognizedStatuses: {}
+      };
+    }
+  } else {
     processingBreakdown = {
       runId: processingRunIdentity.runId || '',
       source: processingRunIdentity.source || 'Unavailable',
-      status: 'error',
-      message: AirtableService.getAirtableErrorMessage(error),
+      status: processingRunIdentity.runId ? 'deferred' : 'no_run_id',
+      message: processingRunIdentity.runId
+        ? 'Record Processing Logs are loading separately.'
+        : 'No completed QuickBooks Run ID was found for transaction processing results.',
       rows: TRANSACTION_TYPES.map(type => ({ transactionType: type.label, type: type.key, label: type.label, ...emptyMetrics() })),
       recordCount: 0,
       dedupedRecordCount: 0,
@@ -813,8 +856,8 @@ async function getQuickBooksAutomationOverview(options = {}) {
     generatedAt: new Date().toISOString(),
     timezone,
     bases: {
-      audit: { id: auditBaseId, tables: schemaSummary(auditSchema, Object.values(AUDIT_TABLES)) },
-      staging: { id: stagingBaseId, tables: schemaSummary(stagingSchema, Object.values(STAGING_TABLES)) }
+      audit: { id: auditBaseId, tables: [] },
+      staging: { id: stagingBaseId, tables: [] }
     },
     warnings,
     environment: {
@@ -839,8 +882,8 @@ async function getQuickBooksAutomationOverview(options = {}) {
     links: pickConfiguredLinks({
       runtimeConfig,
       automationConfig,
-      auditSchema,
-      stagingSchema,
+      auditSchema: [],
+      stagingSchema: [],
       auditBaseId,
       stagingBaseId
     }),

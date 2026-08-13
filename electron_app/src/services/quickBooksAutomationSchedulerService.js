@@ -9,6 +9,7 @@ const DEFAULT_RUN_TIME = '01:00';
 const MAX_LOGS = 25;
 const MAX_SCHEDULED_RETRIES = 3;
 const RETRY_DELAY_MS = 30 * 60 * 1000;
+const WEBHOOK_AUTH_HEADER = 'X-QBO-Automation-Key';
 
 let activeJob = null;
 let activeRetryTimer = null;
@@ -200,6 +201,15 @@ function summarizeResponse(response) {
   return String(data).slice(0, 220);
 }
 
+function getWebhookAuthKey() {
+  return String(
+    process.env[WEBHOOK_AUTH_HEADER] ||
+    process.env.QBO_AUTOMATION_KEY ||
+    process.env.QUICKBOOKS_AUTOMATION_KEY ||
+    ''
+  ).trim();
+}
+
 function saveAttemptToSettings(attempt) {
   const current = getSettings();
   const updates = {
@@ -232,7 +242,14 @@ async function triggerWebhook(triggerType = 'scheduled', meta = {}) {
   const settings = getSettings();
   const timestamp = new Date().toISOString();
   try {
+    const authKey = getWebhookAuthKey();
+    if (!authKey) {
+      throw new Error(`${WEBHOOK_AUTH_HEADER} is missing from environment configuration.`);
+    }
     const response = await axios.get(MAIN_WORKFLOW_WEBHOOK_URL, {
+      headers: {
+        [WEBHOOK_AUTH_HEADER]: authKey
+      },
       timeout: 30000,
       validateStatus: () => true
     });

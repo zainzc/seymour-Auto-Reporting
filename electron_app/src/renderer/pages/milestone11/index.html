@@ -1511,6 +1511,8 @@
   let executionLogsCollapsed = false;
   let quickBooksOverviewPayload = null;
   let quickBooksOverviewLoading = false;
+  let quickBooksProcessingLoading = false;
+  let quickBooksProcessingRequestId = 0;
   let quickBooksScheduleStatus = null;
   let quickBooksScheduleLoading = false;
   let quickBooksAttemptsCollapsed = true;
@@ -1519,6 +1521,7 @@
   let quickBooksOwnerSearchResults = [];
   let quickBooksOwnerSearchTimer = null;
   let quickBooksOwnerSearchRequestId = 0;
+  let quickBooksOverviewLoadTimer = null;
   const WORK_ORDERS_SCHEDULE_OPTIONS = [
     { value: 'every_1_minute', label: 'Every 1 Minute' },
     { value: 'every_3_minutes', label: 'Every 3 Minutes' },
@@ -1551,7 +1554,7 @@
     if (currentDataType === 'quickbooks') {
       loadQuickBooksScheduleStatus();
       loadQuickBooksNotificationOwner();
-      loadQuickBooksOverview();
+      scheduleQuickBooksOverviewLoad(250);
       return;
     }
     loadCurrentSchedule();
@@ -2082,6 +2085,7 @@
       const result = await window.quickBooksAutomationAPI.getOverview();
       quickBooksOverviewPayload = result;
       renderQuickBooksOverview(result);
+      loadQuickBooksProcessingBreakdown(result?.overview?.meta?.processingRunId);
     } catch (err) {
       const failedPayload = {
         success: false,
@@ -2106,6 +2110,48 @@
   function refreshQuickBooksOverview() {
     loadQuickBooksNotificationOwner();
     loadQuickBooksOverview();
+  }
+
+  function scheduleQuickBooksOverviewLoad(delayMs = 0) {
+    clearTimeout(quickBooksOverviewLoadTimer);
+    quickBooksOverviewLoadTimer = setTimeout(() => {
+      if (currentDataType === 'quickbooks') {
+        loadQuickBooksOverview();
+      }
+    }, delayMs);
+  }
+
+  async function loadQuickBooksProcessingBreakdown(runId) {
+    const target = document.getElementById('qb-processing-results');
+    const selectedRunId = String(runId || '').trim();
+    if (!target || !selectedRunId) return;
+    const requestId = ++quickBooksProcessingRequestId;
+    quickBooksProcessingLoading = true;
+    target.innerHTML = renderTransactionTable({
+      status: 'deferred',
+      rows: []
+    });
+    try {
+      const result = await window.quickBooksAutomationAPI.getProcessingBreakdown({ runId: selectedRunId });
+      if (requestId !== quickBooksProcessingRequestId) return;
+      if (!result?.success) {
+        throw new Error(result?.message || 'Unable to load transaction results.');
+      }
+      const breakdown = result.processingBreakdown || null;
+      if (quickBooksOverviewPayload?.overview && breakdown) {
+        quickBooksOverviewPayload.overview.processingBreakdown = breakdown;
+        quickBooksOverviewPayload.overview.resultsByTransactionType = breakdown.rows || [];
+        quickBooksOverviewPayload.overview.meta.processingRecordsMatched = breakdown.dedupedRecordCount || 0;
+      }
+      target.innerHTML = renderTransactionTable(breakdown);
+    } catch (err) {
+      if (requestId !== quickBooksProcessingRequestId) return;
+      target.innerHTML = `<div class="qb-error-state">${escapeHtml(err.message || 'Unable to load transaction results.')}</div>`;
+    } finally {
+      if (requestId === quickBooksProcessingRequestId) {
+        quickBooksProcessingLoading = false;
+      }
+    }
   }
 
   async function loadQuickBooksScheduleStatus() {
@@ -2451,6 +2497,14 @@
       ? { status: 'success', rows: result }
       : (result || {});
     const data = Array.isArray(breakdown.rows) ? breakdown.rows : [];
+    if (breakdown.status === 'deferred') {
+      return `
+        <div class="qb-loading-state">
+          <div class="qb-loading-label">Loading transaction results...</div>
+          <div class="qb-skeleton" style="width: 100%; height: 120px;"></div>
+        </div>
+      `;
+    }
     if (breakdown.status === 'no_run_id') {
       return '<div class="qb-empty">No completed QuickBooks Run ID was found for transaction processing results.</div>';
     }
@@ -2645,7 +2699,9 @@
 
         <div class="qb-card full">
           <h4>Results By Transaction Type</h4>
-          ${renderTransactionTable(overview.processingBreakdown || overview.resultsByTransactionType)}
+          <div id="qb-processing-results">
+            ${renderTransactionTable(overview.processingBreakdown || overview.resultsByTransactionType)}
+          </div>
         </div>
 
         <div class="qb-card full">

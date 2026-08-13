@@ -73,7 +73,11 @@ const {
 } = require('../services/ebayListingsScheduleService');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
-const { getQuickBooksAutomationOverview } = require('../services/quickBooksOverviewService');
+const {
+  AUDIT_BASE_ID: QUICKBOOKS_AUDIT_BASE_ID,
+  getProcessingBreakdownForRun,
+  getQuickBooksAutomationOverview
+} = require('../services/quickBooksOverviewService');
 const {
   getQuickBooksNotificationOwner,
   updateQuickBooksNotificationOwner
@@ -5022,7 +5026,8 @@ ipcMain.handle('quickbooks-automation:get-overview', async () => {
     return await getQuickBooksAutomationOverview({
       airtableToken: resolveQuickBooksAirtableToken(),
       auditBaseId: process.env.QUICKBOOKS_AUDIT_BASE_ID || '',
-      stagingBaseId: process.env.QUICKBOOKS_STAGING_BASE_ID || ''
+      stagingBaseId: process.env.QUICKBOOKS_STAGING_BASE_ID || '',
+      includeProcessingBreakdown: false
     });
   } catch (error) {
     return {
@@ -5030,6 +5035,36 @@ ipcMain.handle('quickbooks-automation:get-overview', async () => {
       message: error?.message || 'QuickBooks Automation overview failed to load.',
       overview: null,
       warnings: []
+    };
+  }
+});
+
+ipcMain.handle('quickbooks-automation:get-processing-breakdown', async (_, payload = {}) => {
+  try {
+    const runId = normalizeText(payload.runId);
+    if (!runId) {
+      return {
+        success: false,
+        message: 'Run ID is required to load transaction results.',
+        processingBreakdown: null
+      };
+    }
+    const auditService = new AirtableService({
+      token: resolveQuickBooksAirtableToken(),
+      baseId: process.env.QUICKBOOKS_AUDIT_BASE_ID || QUICKBOOKS_AUDIT_BASE_ID
+    });
+    const processingBreakdown = await getProcessingBreakdownForRun(auditService, runId, {
+      source: 'Progressive Overview Load'
+    });
+    return {
+      success: true,
+      processingBreakdown
+    };
+  } catch (error) {
+    return {
+      success: false,
+      message: error?.message || 'Unable to load transaction results.',
+      processingBreakdown: null
     };
   }
 });
