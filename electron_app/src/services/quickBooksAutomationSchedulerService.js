@@ -472,6 +472,44 @@ async function runNow() {
   });
 }
 
+function runNowInBackground() {
+  const requested = {
+    timestamp: new Date().toISOString(),
+    triggerType: 'manual',
+    success: true,
+    pending: true,
+    configuredRunTime: getSettings().runTime,
+    timezone: DEFAULT_TIMEZONE,
+    occurrenceDate: '',
+    retryAttempt: 0,
+    message: 'QuickBooks manual webhook request started.'
+  };
+  appendLog(requested);
+
+  setTimeout(() => {
+    triggerWebhook('manual', {
+      occurrenceDate: '',
+      retryAttempt: 0
+    }).catch(error => {
+      const failed = {
+        timestamp: new Date().toISOString(),
+        triggerType: 'manual',
+        success: false,
+        configuredRunTime: getSettings().runTime,
+        timezone: DEFAULT_TIMEZONE,
+        occurrenceDate: '',
+        retryAttempt: 0,
+        message: 'QuickBooks manual webhook request failed.',
+        errorSummary: String(error?.message || error || 'Unknown error').slice(0, 220)
+      };
+      appendLog(failed);
+      saveAttemptToSettings(failed);
+    });
+  }, 0);
+
+  return requested;
+}
+
 function getStatus() {
   const settings = getSettings();
   return {
@@ -492,6 +530,7 @@ module.exports = {
   getStatus,
   updateSettings,
   runNow,
+  runNowInBackground,
   startSchedule,
   stopSchedule,
   resumeSchedule,

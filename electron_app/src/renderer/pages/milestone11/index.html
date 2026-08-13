@@ -747,8 +747,6 @@
       display: grid;
       gap: 8px;
       margin-top: 10px;
-      max-height: 260px;
-      overflow-y: auto;
     }
 
     .qb-attempt {
@@ -965,6 +963,25 @@
       margin-top: 12px;
       border-top: 1px solid #d9e6f4;
       padding-top: 12px;
+    }
+
+    .qb-confirm-panel {
+      display: none;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid #ead28d;
+      border-radius: 10px;
+      background: #fff8e8;
+      color: #735000;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .qb-confirm-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
     }
 
     .qb-loading-state {
@@ -1320,6 +1337,14 @@
           <button class="action-btn secondary log-toolbar-btn" id="qb-toggle-attempts-btn" type="button" onclick="toggleQuickBooksAttempts()">View Recent Attempts</button>
         </div>
         <div class="status-box hidden" id="qb-settings-status"></div>
+        <div class="qb-confirm-panel" id="qb-run-now-confirm">
+          <strong>Run the production QuickBooks automation now?</strong><br>
+          This will call the live n8n parent workflow.
+          <div class="qb-confirm-actions">
+            <button class="action-btn success qb-link-btn" type="button" onclick="confirmQuickBooksRunNow()">Yes, Run Now</button>
+            <button class="action-btn secondary qb-link-btn" type="button" onclick="cancelQuickBooksRunNow()">Cancel</button>
+          </div>
+        </div>
 
         <div class="qb-attempts-panel" id="qb-attempts-panel">
           <div class="logs-toolbar">
@@ -1521,7 +1546,10 @@
   let quickBooksOwnerSearchResults = [];
   let quickBooksOwnerSearchTimer = null;
   let quickBooksOwnerSearchRequestId = 0;
+  let quickBooksOwnerUsersPreloading = false;
   let quickBooksOverviewLoadTimer = null;
+  let quickBooksAutoRefreshTimer = null;
+  const QUICKBOOKS_AUTO_REFRESH_MS = 5 * 60 * 1000;
   const WORK_ORDERS_SCHEDULE_OPTIONS = [
     { value: 'every_1_minute', label: 'Every 1 Minute' },
     { value: 'every_3_minutes', label: 'Every 3 Minutes' },
@@ -1544,6 +1572,7 @@
 
   window.addEventListener('beforeunload', () => {
     stopVerificationPolling();
+    stopQuickBooksAutoRefresh();
   });
 
   function selectDataType(type) {
@@ -1554,9 +1583,12 @@
     if (currentDataType === 'quickbooks') {
       loadQuickBooksScheduleStatus();
       loadQuickBooksNotificationOwner();
+      preloadQuickBooksOwnerUsers();
       scheduleQuickBooksOverviewLoad(250);
+      startQuickBooksAutoRefresh();
       return;
     }
+    stopQuickBooksAutoRefresh();
     loadCurrentSchedule();
     loadSavedSheetId();
     loadSavedDriveFolderId();
@@ -2112,6 +2144,21 @@
     loadQuickBooksOverview();
   }
 
+  function startQuickBooksAutoRefresh() {
+    stopQuickBooksAutoRefresh();
+    quickBooksAutoRefreshTimer = setInterval(() => {
+      if (currentDataType !== 'quickbooks') return;
+      loadQuickBooksScheduleStatus();
+      loadQuickBooksOverview();
+    }, QUICKBOOKS_AUTO_REFRESH_MS);
+  }
+
+  function stopQuickBooksAutoRefresh() {
+    if (!quickBooksAutoRefreshTimer) return;
+    clearInterval(quickBooksAutoRefreshTimer);
+    quickBooksAutoRefreshTimer = null;
+  }
+
   function scheduleQuickBooksOverviewLoad(delayMs = 0) {
     clearTimeout(quickBooksOverviewLoadTimer);
     quickBooksOverviewLoadTimer = setTimeout(() => {
@@ -2265,6 +2312,29 @@
     document.getElementById('qb-current-owner-id').textContent = ownerClickUpId || 'Unavailable';
     document.getElementById('qb-owner-name').value = quickBooksSelectedOwner?.ownerName || '';
     document.getElementById('qb-owner-clickup-id').value = quickBooksSelectedOwner?.ownerClickUpId || '';
+    ensureQuickBooksOwnerSearchEnabled();
+  }
+
+  function ensureQuickBooksOwnerSearchEnabled() {
+    const input = document.getElementById('qb-owner-search-input');
+    if (!input) return;
+    input.disabled = false;
+    input.removeAttribute('disabled');
+    input.style.pointerEvents = 'auto';
+    input.style.userSelect = 'text';
+  }
+
+  async function preloadQuickBooksOwnerUsers() {
+    if (quickBooksOwnerUsersPreloading) return;
+    quickBooksOwnerUsersPreloading = true;
+    try {
+      await window.quickBooksAutomationAPI.searchClickUpUsers({ searchTerm: '' });
+    } catch (_) {
+      // Search itself will show the user-facing failure if the client searches later.
+    } finally {
+      quickBooksOwnerUsersPreloading = false;
+      ensureQuickBooksOwnerSearchEnabled();
+    }
   }
 
   function debounceQuickBooksOwnerSearch() {
@@ -2273,6 +2343,7 @@
   }
 
   async function searchQuickBooksOwnerUsers() {
+    ensureQuickBooksOwnerSearchEnabled();
     const input = document.getElementById('qb-owner-search-input');
     const resultsEl = document.getElementById('qb-owner-results');
     const searchTerm = input.value.trim();
@@ -2404,25 +2475,39 @@
   }
 
   async function runQuickBooksNow() {
-    const confirmed = confirm('Run the production QuickBooks automation now? This will call the live n8n parent workflow.');
-    if (!confirmed) return;
+    const panel = document.getElementById('qb-run-now-confirm');
+    if (panel) panel.style.display = 'block';
+    ensureQuickBooksOwnerSearchEnabled();
+  }
+
+  function cancelQuickBooksRunNow() {
+    const panel = document.getElementById('qb-run-now-confirm');
+    if (panel) panel.style.display = 'none';
+    ensureQuickBooksOwnerSearchEnabled();
+  }
+
+  async function confirmQuickBooksRunNow() {
+    const panel = document.getElementById('qb-run-now-confirm');
+    if (panel) panel.style.display = 'none';
     const statusEl = document.getElementById('qb-settings-status');
     const runBtn = document.getElementById('qb-run-now-btn');
     runBtn.disabled = true;
+    ensureQuickBooksOwnerSearchEnabled();
     showStatus(statusEl, 'info', 'Calling QuickBooks production webhook...');
     try {
       const result = await window.quickBooksAutomationAPI.runNow();
       quickBooksScheduleStatus = result?.status || quickBooksScheduleStatus;
       renderQuickBooksScheduleStatus();
+      ensureQuickBooksOwnerSearchEnabled();
       if (!result?.success) {
         throw new Error(result?.message || 'QuickBooks Run Now failed.');
       }
-      showStatus(statusEl, 'success', result.message || 'QuickBooks Run Now completed.');
-      refreshQuickBooksOverview();
+      showStatus(statusEl, 'success', result.message || 'QuickBooks Run Now started.');
     } catch (err) {
       showStatus(statusEl, 'error', err.message || 'QuickBooks Run Now failed.');
     } finally {
       runBtn.disabled = false;
+      ensureQuickBooksOwnerSearchEnabled();
     }
   }
 
