@@ -938,6 +938,11 @@
       padding: 10px 12px;
     }
 
+    .qb-user-result.selected {
+      background: #f1f8ff;
+      border-color: #bcd6f2;
+    }
+
     .qb-user-name {
       color: #173d66;
       font-weight: 900;
@@ -1374,7 +1379,7 @@
       <div class="qb-owner-search">
         <label for="qb-owner-search-input">Search ClickUp User</label>
         <input type="text" id="qb-owner-search-input" placeholder="Search by name or email..." oninput="debounceQuickBooksOwnerSearch()" />
-        <div class="qb-control-note">Searches Seymour Auto ClickUp workspace members. Select a result before saving.</div>
+        <div class="qb-control-note">Searches Seymour Auto ClickUp workspace members. Select one or more assignees before saving.</div>
       </div>
 
       <div id="qb-owner-results" class="qb-user-results">
@@ -1383,12 +1388,12 @@
 
       <div class="qb-owner-selected">
         <div>
-          <label for="qb-owner-name">Owner Name</label>
-          <input class="qb-readonly-input" type="text" id="qb-owner-name" readonly placeholder="Select a ClickUp user" />
+          <label for="qb-owner-name">Owner Name(s)</label>
+          <input class="qb-readonly-input" type="text" id="qb-owner-name" readonly placeholder="Select ClickUp user(s)" />
         </div>
         <div>
-          <label for="qb-owner-clickup-id">ClickUp User ID</label>
-          <input class="qb-readonly-input" type="text" id="qb-owner-clickup-id" readonly placeholder="Select a ClickUp user" />
+          <label for="qb-owner-clickup-id">ClickUp User ID(s)</label>
+          <input class="qb-readonly-input" type="text" id="qb-owner-clickup-id" readonly placeholder="Select ClickUp user(s)" />
         </div>
       </div>
 
@@ -1542,7 +1547,7 @@
   let quickBooksScheduleLoading = false;
   let quickBooksAttemptsCollapsed = true;
   let quickBooksOwnerStatus = null;
-  let quickBooksSelectedOwner = null;
+  let quickBooksSelectedOwners = [];
   let quickBooksOwnerSearchResults = [];
   let quickBooksOwnerSearchTimer = null;
   let quickBooksOwnerSearchRequestId = 0;
@@ -2310,8 +2315,8 @@
     const ownerClickUpId = quickBooksOwnerStatus?.ownerClickUpId || '';
     document.getElementById('qb-current-owner-name').textContent = ownerName || 'Not configured';
     document.getElementById('qb-current-owner-id').textContent = ownerClickUpId || 'Unavailable';
-    document.getElementById('qb-owner-name').value = quickBooksSelectedOwner?.ownerName || '';
-    document.getElementById('qb-owner-clickup-id').value = quickBooksSelectedOwner?.ownerClickUpId || '';
+    document.getElementById('qb-owner-name').value = quickBooksSelectedOwners.map(owner => owner.ownerName).join(', ');
+    document.getElementById('qb-owner-clickup-id').value = quickBooksSelectedOwners.map(owner => owner.ownerClickUpId).join(', ');
     ensureQuickBooksOwnerSearchEnabled();
   }
 
@@ -2377,8 +2382,11 @@
       resultsEl.innerHTML = '<div class="qb-empty">No ClickUp users found.</div>';
       return;
     }
-    resultsEl.innerHTML = quickBooksOwnerSearchResults.map((user, index) => `
-      <div class="qb-user-result">
+    resultsEl.innerHTML = quickBooksOwnerSearchResults.map((user, index) => {
+      const selectedIndex = quickBooksSelectedOwners.findIndex(owner => owner.ownerClickUpId === String(user.id));
+      const isSelected = selectedIndex >= 0;
+      return `
+      <div class="qb-user-result ${isSelected ? 'selected' : ''}">
         <div>
           <div class="qb-user-name">${escapeHtml(user.name || user.username || 'Unnamed User')}</div>
           <div class="qb-user-meta">
@@ -2386,26 +2394,41 @@
             ClickUp ID: ${escapeHtml(user.id || 'Unavailable')}
           </div>
         </div>
-        <button class="action-btn secondary qb-link-btn" type="button" onclick="selectQuickBooksOwnerUser(${index})">Select</button>
+        <div class="qb-link-row" style="justify-content: flex-end;">
+          <button class="action-btn secondary qb-link-btn" type="button" ${isSelected ? 'disabled' : ''} onclick="selectQuickBooksOwnerUser(${index})">
+            ${isSelected ? 'Selected' : 'Select'}
+          </button>
+          ${isSelected ? `<button class="action-btn secondary qb-link-btn" type="button" onclick="removeQuickBooksSelectedOwner(${selectedIndex})">Remove</button>` : ''}
+        </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
   }
 
   function selectQuickBooksOwnerUser(index) {
     const user = quickBooksOwnerSearchResults[index];
     if (!user?.id || !(user.name || user.username)) return;
-    quickBooksSelectedOwner = {
+    const ownerClickUpId = String(user.id);
+    if (quickBooksSelectedOwners.some(owner => owner.ownerClickUpId === ownerClickUpId)) return;
+    quickBooksSelectedOwners = [...quickBooksSelectedOwners, {
       ownerName: user.name || user.username,
-      ownerClickUpId: String(user.id)
-    };
+      ownerClickUpId
+    }];
     renderQuickBooksNotificationOwner();
+    renderQuickBooksOwnerSearchResults();
+  }
+
+  function removeQuickBooksSelectedOwner(index) {
+    quickBooksSelectedOwners = quickBooksSelectedOwners.filter((_, ownerIndex) => ownerIndex !== index);
+    renderQuickBooksNotificationOwner();
+    renderQuickBooksOwnerSearchResults();
   }
 
   async function saveQuickBooksNotificationOwner() {
     const statusEl = document.getElementById('qb-owner-status');
     const saveBtn = document.getElementById('qb-save-owner-btn');
-    if (!quickBooksSelectedOwner?.ownerName || !quickBooksSelectedOwner?.ownerClickUpId) {
-      showStatus(statusEl, 'error', 'Select a ClickUp user before saving.');
+    if (!quickBooksSelectedOwners.length) {
+      showStatus(statusEl, 'error', 'Select at least one ClickUp user before saving.');
       return;
     }
 
@@ -2414,8 +2437,9 @@
     try {
       const result = await window.quickBooksAutomationAPI.saveNotificationOwner({
         environment: getQuickBooksOwnerEnvironment(),
-        ownerName: quickBooksSelectedOwner.ownerName,
-        ownerClickUpId: quickBooksSelectedOwner.ownerClickUpId
+        owners: quickBooksSelectedOwners,
+        ownerName: quickBooksSelectedOwners.map(owner => owner.ownerName).join(', '),
+        ownerClickUpId: quickBooksSelectedOwners.map(owner => owner.ownerClickUpId).join(', ')
       });
       if (!result?.success) {
         throw new Error(result?.message || 'Unable to save notification owner configuration.');

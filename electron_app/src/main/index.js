@@ -5104,28 +5104,51 @@ ipcMain.handle('quickbooks-automation:search-clickup-users', async (_, payload =
 
 ipcMain.handle('quickbooks-automation:save-notification-owner', async (_, payload = {}) => {
   try {
-    const ownerClickUpId = normalizeText(payload.ownerClickUpId);
-    const ownerName = normalizeText(payload.ownerName);
-    if (!ownerName || !ownerClickUpId) {
-      return { success: false, message: 'Select a ClickUp user before saving.', owner: null };
+    const owners = Array.isArray(payload.owners)
+      ? payload.owners
+          .map(owner => ({
+            ownerName: normalizeText(owner?.ownerName),
+            ownerClickUpId: normalizeText(owner?.ownerClickUpId)
+          }))
+          .filter(owner => owner.ownerName && owner.ownerClickUpId)
+      : [];
+    const fallbackOwnerClickUpId = normalizeText(payload.ownerClickUpId);
+    const fallbackOwnerName = normalizeText(payload.ownerName);
+    const selectedOwners = owners.length > 0
+      ? owners
+      : fallbackOwnerName && fallbackOwnerClickUpId
+        ? [{ ownerName: fallbackOwnerName, ownerClickUpId: fallbackOwnerClickUpId }]
+        : [];
+
+    if (selectedOwners.length === 0) {
+      return { success: false, message: 'Select at least one ClickUp user before saving.', owner: null };
     }
 
     const users = await getQuickBooksClickUpMembers(false);
-    const matchedUser = users.find(user => String(user.id) === ownerClickUpId);
-    if (!matchedUser || normalizeText(matchedUser.name) !== ownerName) {
-      return {
-        success: false,
-        message: 'Selected owner no longer matches a ClickUp workspace member.',
-        owner: null
-      };
+    const matchedOwners = [];
+    for (const selectedOwner of selectedOwners) {
+      const matchedUser = users.find(user => String(user.id) === selectedOwner.ownerClickUpId);
+      if (!matchedUser || normalizeText(matchedUser.name) !== selectedOwner.ownerName) {
+        return {
+          success: false,
+          message: 'One or more selected owners no longer match ClickUp workspace members.',
+          owner: null
+        };
+      }
+      if (!matchedOwners.some(owner => owner.ownerClickUpId === String(matchedUser.id))) {
+        matchedOwners.push({
+          ownerName: matchedUser.name,
+          ownerClickUpId: String(matchedUser.id)
+        });
+      }
     }
 
     const owner = await updateQuickBooksNotificationOwner({
       airtableToken: resolveQuickBooksAirtableToken(),
       stagingBaseId: process.env.QUICKBOOKS_STAGING_BASE_ID || '',
       environment: resolveQuickBooksEnvironment(payload.environment),
-      ownerName: matchedUser.name,
-      ownerClickUpId: matchedUser.id
+      ownerName: matchedOwners.map(item => item.ownerName).join(', '),
+      ownerClickUpId: matchedOwners.map(item => item.ownerClickUpId).join(', ')
     });
     return {
       success: true,

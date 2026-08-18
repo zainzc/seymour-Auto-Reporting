@@ -107,7 +107,7 @@ async function updateQuickBooksNotificationOwner(options = {}) {
   const ownerClickUpId = normalizeText(options.ownerClickUpId);
 
   if (!ownerName || !ownerClickUpId) {
-    throw new Error('Owner Name and ClickUp User ID are required.');
+    throw new Error('Owner Name(s) and ClickUp User ID(s) are required.');
   }
   if (!token && !serviceFromOptions) {
     throw new Error('Airtable token is required to save notification owner configuration.');
