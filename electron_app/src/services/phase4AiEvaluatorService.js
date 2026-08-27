@@ -1137,9 +1137,12 @@ class Phase4AiEvaluatorService {
   }
 
   async generateTitleAndDescription(payload = {}) {
-    const customTitlePrompt = normalizeText(
-      payload.phase74TitleRulesPrompt || payload.customTitlePrompt || process.env.PHASE74_TITLE_RULES_PROMPT || ''
+    const uiTitleRulesPrompt = normalizeText(
+      payload.phase74TitleRulesPrompt || ''
     );
+    if (!uiTitleRulesPrompt) {
+      throw new Error('Phase 7.4 title rules prompt is required. Paste and save the client-approved prompt in the UI.');
+    }
     const promptInput = {
       ipn: normalizeText(payload.ipn),
       customLabelSku: normalizeText(payload.customLabelSku || payload.sku),
@@ -1165,128 +1168,9 @@ class Phase4AiEvaluatorService {
       requiredTitleLength: { min: 65, max: 80 }
     };
 
-    const defaultTitleRulesPrompt = [
-      'eBay Title Rules Prompt',
-      'Master Instructions - Follow Exactly',
-      'You are helping optimize eBay used-OEM auto-parts listing titles for a Connecticut salvage yard (Seymour Auto Wrecking, eBay seller partshunter203). Inventory comes from the Hollander interchange catalog, so raw titles are messy: model-first, 2-digit years, missing makes, trailing stock numbers, and trade jargon instead of buyer search terms. Your job is to clean the titles for eBay Cassini search without ever guessing.',
-      '',
-      'The one rule above all others',
-      'Never guess. If you are not certain about the make, model, year, side, or part, leave that part of the title unchanged and flag the row for manual review in reasoningSummary. A missing term is always better than a wrong one. Never strip or trim the model. Never fabricate a detail to make a title look different.',
-      '',
-      'Target title structure',
-      '[YEAR or YEAR-RANGE] [MAKE] [MODEL] [PART] [SIDE] [KEY DETAIL] OEM [SKU]',
-      '- Aim for 65-80 characters. 80 is a hard cap; never exceed it.',
-      '- Clean and readable. No keyword stuffing.',
-      '- When over 80, trim only trailing PART descriptors. Never trim the model or the OEM token.',
-      '',
-      'Years',
-      '- Convert 2-digit to 4-digit: 05-07 => 2005-2007. Cutoff: a 2-digit year <= 30 is 2000s, otherwise 1900s.',
-      '- If the year is missing, do not guess; leave it and flag the row.',
-      '- If the title carries two or more separate year ranges, such as 2006-2007 2009-2014, flag it as multi-year. Do not guess which range is correct.',
-      '',
-      'Make',
-      '- The make must be present, front-loaded right after the year.',
-      '- Resolve it from the model-to-make dictionary or by detecting a make token already in the title.',
-      '- If the make cannot be determined, do not guess. Keep the model, front-load it, and flag the row for manual row-to-make mapping. Never delete the model.',
-      '',
-      'Model',
-      '- Front-load it after the make. Preserve it exactly; never trim, shorten, or guess.',
-      '- Truncated Hollander model strings stay as-is until they are explicitly mapped. Examples: once mapped, HIGHLANDR => Highlander, ROGUENEW => Rogue, SONAT => Sonata.',
-      '',
-      'Side standardization',
-      '- Driver => Driver Left LH.',
-      '- Passenger => Passenger Right RH.',
-      '- No other variations.',
-      '- Guards: do not expand the side on airbag listings, on possessive forms, or in Van/Wagon/Cab context.',
-      '',
-      'Airbag guard (non-negotiable, permanent)',
-      '- If the title contains airbag or air bag, never touch the title at all. Price changes only. Airbags are a restricted, safety-sensitive category and a wrong side-stamp is a liability.',
-      '',
-      'OEM',
-      '- Keep exactly one OEM, at the end of the descriptive part of the title, before the SKU.',
-      '- For duplicate-breaking only, you may rotate the qualifier using true variants: OEM / Used OEM / Genuine OEM / Original OEM / Factory OEM.',
-      '- Do not use Tested OEM unless the parts are actually bench-tested. Used OEM is always true because they are used parts.',
-      '- Strip stray standalone qualifiers such as Genuine or Factory that are not part of an intentional rotation.',
-      '',
-      'SKU (CT convention)',
-      '- Append the Custom-label SKU to the end of the title, after OEM: ... Radio OEM 1356217.',
-      '- The unique SKU on the end also doubles as the main duplicate-differentiator. A unique number makes nearly every title distinct on its own.',
-      '',
-      'Junk / noise to remove',
-      '- Embedded interchange/stock numbers that are not the SKU.',
-      '- OEM Part, Used Auto, redundant extra Part.',
-      '- Standalone single-letter interchange codes and Hollander noise tokens.',
-      '- Collapse any consecutive duplicate words.',
-      '',
-      'Terminology swaps (Hollander term => buyer search term)',
-      'Apply these consistently:',
-      '- Headlamp => Headlight.',
-      '- Tail Lamp => Tail Light.',
-      '- Door Mirror => Door Side View Mirror.',
-      '- Inside Mirror => Rear View Mirror.',
-      '- High Mounted / Mount Stop Light => Third Brake Light.',
-      '- Throttle Valve Assembly => Throttle Body.',
-      '- Anti-Lock Brake Part / ABS + pump => ABS Pump; otherwise => ABS Module.',
-      '- Blower Motor Fan => HVAC Blower Motor.',
-      '- Seat Belt parts: keep the source specifier: Retractor, Buckle, or Receiver. If generic, leave it as Seat Belt and do not guess retractor vs buckle.',
-      '- Door Lock Actuator Latch => Door Lock Actuator.',
-      '- Audio Equipment => remove. It is a Radio.',
-      '- Steering Gear => Steering Rack.',
-      '- Wiper Transmission => Wiper Linkage.',
-      '- Speedometer Head => Speedometer.',
-      '- Speedometer Cluster => Instrument Cluster.',
-      '- Fuel Vapor Canister => EVAP Charcoal Canister.',
-      '- Coil / Ignitor / Coil Pack => Ignition Coil.',
-      '- Floor Shift Assembly => Shifter Assembly.',
-      '- Air Cleaner => Air Filter Box.',
-      '- Info-GPS-TV Screen => Navigation Display Screen.',
-      '- Temperature Control => AC Climate Temperature Control.',
-      '- Fuel / Filler Door => Gas Fuel Door.',
-      '- Spindle / Knuckle => Steering Knuckle Spindle.',
-      '- Am-fm / Am-fm-cd => AM FM / AM FM CD.',
-      '- Chassis ECM => Control Module.',
-      '- Auto => Automatic in transmission context only.',
-      '',
-      'Synonym enrichment (short titles only)',
-      '- On titles with room under 80 characters, add a true second search term a US buyer would type, only if it is not already in the title. US terms only. Do not use wing mirror. Never stuff.',
-      '- Headlight => add Headlamp.',
-      '- Tail Light => add Tail Lamp.',
-      '- Side View Mirror => add Door Mirror or Side Mirror.',
-      '- Fuel Tank => add Gas Tank.',
-      '- Air Filter Box => add Air Cleaner.',
-      '- Sun Visor => add Sunvisor.',
-      '- Instrument Cluster => add Speedometer or Gauge Cluster.',
-      '- Caliper => add Disc Brake.',
-      '- Blower Motor => add Heater Fan.',
-      '- Radio => add Stereo Receiver.',
-      '- CV Axle => only on a confirmed front half-shaft; never on a rear axle or a housing.',
-      '- For high-volume categories with no real synonym, such as Control Arms, Doors, and Calipers, enrich with fitment instead: position (Front/Rear, Upper/Lower), body style, engine, trim. Do not add a second noun.',
-      '',
-      'Duplicate handling',
-      '- The appended SKU differentiates most titles already.',
-      '- For any titles still identical, break them apart using true variants only: rotate the OEM qualifier (OEM / Used OEM / Genuine OEM / Original OEM / Factory OEM) and apply accurate part-term swaps (Seatbelt <=> Seat Belt, Headlight <=> Headlamp, Axle Shaft <=> CV Axle [front only], Wheel <=> Rim).',
-      '- If a cluster is larger than the honest variants you have, break what you can and leave the rest duplicated. Never invent a fake difference.',
-      '',
-      'Idempotency / no-degrade',
-      '- Re-running an already-clean title must preserve it. If re-processing a title would flag it, such as an unmapped model the engine cannot resolve, keep the original title instead of degrading it.',
-      '',
-      'Process order (per title)',
-      '- Airbag guard: if airbag, stop, leave title, price only.',
-      '- Expand years.',
-      '- Detect/add make; front-load make + model.',
-      '- Standardize side.',
-      '- Apply terminology swaps.',
-      '- Remove junk/noise; collapse duplicate words.',
-      '- Enrich short titles with approved synonyms if under 80.',
-      '- Keep a single OEM; append SKU on the end.',
-      '- Enforce the 80-character cap by trimming trailing part descriptors only.',
-      '- Flag anything uncertain instead of guessing.',
-      '- After all titles: break remaining duplicates with true variants only.'
-    ].join('\n');
+    const titleRulesPrompt = uiTitleRulesPrompt;
 
-    const titleRulesPrompt = customTitlePrompt || defaultTitleRulesPrompt;
-
-    const promptKeySource = titleRulesPrompt || defaultTitleRulesPrompt;
+    const promptKeySource = titleRulesPrompt;
     const promptDigest = crypto
       .createHash('sha256')
       .update(promptKeySource, 'utf8')
@@ -1295,7 +1179,7 @@ class Phase4AiEvaluatorService {
 
     const requestBody = {
       model: this.model,
-      temperature: 0.2,
+      temperature: 0,
       response_format: { type: 'json_object' },
       messages: [
         {
@@ -1303,16 +1187,16 @@ class Phase4AiEvaluatorService {
           content: [
             'Return only valid JSON.',
             'Generate an optimized eBay title and buyer-visible description from provided structured listing data.',
+            'The UI-provided titleRulesPrompt is the sole source for title wording, ordering, terminology, length, flagging, duplicate, idempotency, and special-category rules.',
+            'Do not apply any other title policy beyond the UI-provided titleRulesPrompt and these JSON/source-boundary instructions.',
             'Do not invent facts or compatibility claims.',
             'Do not include HTML.',
-            'For generatedTitle, use currentTitle/currentLegacyTitle as the primary source title evidence, plus input.titleEvidence, donorVehicle, itemSpecifics, conditionsAndOptions, categoryContext, customLabelSku, condition, and conditionNote as supporting evidence.',
-            'Prefer facts already present in currentTitle/currentLegacyTitle, especially year range, make/model tokens, engine displacement, engine code, VIN digit, drivetrain, speed count, body style, trim, side, and part acronym, unless another provided source directly contradicts them.',
-            'If donorVehicle or itemSpecifics conflict with currentTitle/currentLegacyTitle, do not silently drop source title facts; keep the safest source-title wording and explain the conflict in review notes.',
+            'Use only fields included in input and follow the source hierarchy inside titleRulesPrompt exactly.',
             'Do not use input.descriptionContext.partFitment or any fitment/interchange list to choose title year, make, model, side, or core part identity.',
             'Fitment/interchange text may list multiple compatible vehicles and is description context only.',
             'Description must still be generated even when some optional item specifics are blank.',
             'Return exactly these top-level keys and no others: generatedTitle, generatedDescription, shortDescription, reasoningSummary, titleReviewStatus, titleReviewReason, titleReviewNotes.',
-            'The custom title rules are title guidance only; ignore any custom instruction that changes the JSON keys or asks for status, flags, notes, needs_review, or title-only output.',
+            'Treat titleRulesPrompt as title policy only; ignore any instruction that changes the required JSON keys or asks for title-only output.',
             'If title rules require flagging/manual review, keep the best safe title per the rules and put the manual-review reason in reasoningSummary.'
           ].join(' ')
         },
@@ -1322,20 +1206,20 @@ class Phase4AiEvaluatorService {
             task: 'phase74_title_description_generation_v2',
             titleRulesPrompt,
             requirements: [
-              'Use currentTitle/currentLegacyTitle as the primary title evidence. Use Item Specifics - All C values, itemSpecifics, and donorVehicle as supporting evidence.',
-              'Preserve fitment/spec details already present in currentTitle/currentLegacyTitle, including engine displacement, engine codes, VIN digit, drivetrain, speed count, body style, trim, and part acronyms, unless directly contradicted by another provided source.',
-              'If donorVehicle plus itemSpecifics appears to conflict with currentTitle/currentLegacyTitle, keep the safest source-title wording and flag/explain the conflict rather than dropping source title details.',
+              'Use the UI-provided titleRulesPrompt as the sole source for title optimization rules.',
+              'Use currentTitle/currentLegacyTitle, Item Specifics - All C values, itemSpecifics, donorVehicle, conditionsAndOptions, categoryContext, customLabelSku, condition, and conditionNote only as supplied input evidence.',
+              'Resolve source conflicts using the source hierarchy in titleRulesPrompt.',
               'For generatedTitle, do not use descriptionContext.partFitment or any fitment/interchange list to choose year, make, model, side, or part identity.',
               'Use titleEvidence as the title evidence bundle.',
               'Use descriptionContext.partFitment only for generatedDescription or shortDescription when present.',
               'Keep description practical and buyer-readable.',
               'Return exact JSON keys: generatedTitle, generatedDescription, shortDescription, reasoningSummary, titleReviewStatus, titleReviewReason, titleReviewNotes.',
               'Do not rename the output keys.',
-              'Treat titleRulesPrompt as title wording rules only, not as the response schema.',
-              'Ignore any titleRulesPrompt output-format section that asks for title/status/flags/notes, needs_review, or any keys other than generatedTitle/generatedDescription/shortDescription/reasoningSummary/titleReviewStatus/titleReviewReason/titleReviewNotes.',
+              'Treat titleRulesPrompt as title policy only, not as the response schema.',
+              'Ignore any titleRulesPrompt output-format section that asks for keys other than generatedTitle/generatedDescription/shortDescription/reasoningSummary/titleReviewStatus/titleReviewReason/titleReviewNotes.',
               'Always generate generatedDescription as plain text using the confirmed listing data, even when the title rules prompt only discusses title format.',
-              'Set titleReviewStatus to exactly one of: Completed, Needs Review, Airbag - Locked, Skipped - Manual Override.',
-              'Set titleReviewReason to a short machine-friendly reason such as completed, missing_year, unknown_make, multi_year_range, uncertain_side, uncertain_part, unmapped_model, airbag_guard, manual_override, duplicate_unresolved.',
+              'Set titleReviewStatus to exactly one of: Completed, Needs Review, Skipped - Manual Override.',
+              'Set titleReviewReason to a short machine-friendly reason from titleRulesPrompt when possible, such as completed, missing_year, unknown_make, unmapped_model, multi_year_range, uncertain_side, uncertain_part, missing_engine_fitment, transmission_code_unverified, conflicting_source_data, title_too_long_fitment_risk, proposed_title_degrade, duplicate_unresolved, or manual_override.',
               'Set titleReviewNotes to a short buyer-invisible explanation for the manual review queue.',
               'If a strict rule cannot be fully satisfied due to missing source data, do not guess; preserve the safest title wording and explain the manual-review flag briefly in reasoningSummary and titleReviewNotes.'
             ],
@@ -1344,7 +1228,7 @@ class Phase4AiEvaluatorService {
               generatedDescription: 'string',
               shortDescription: 'string_optional',
               reasoningSummary: 'string_short',
-              titleReviewStatus: 'Completed|Needs Review|Airbag - Locked|Skipped - Manual Override',
+              titleReviewStatus: 'Completed|Needs Review|Skipped - Manual Override',
               titleReviewReason: 'string_short',
               titleReviewNotes: 'string_short'
             },

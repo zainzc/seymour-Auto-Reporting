@@ -332,22 +332,347 @@ function extractTrailingSku(value) {
   if (afterOem) return afterOem[1];
   const beforeOem = text.match(/\s+([0-9]{5,})\s+OEM$/i);
   if (beforeOem) return beforeOem[1];
+  const hashedSku = text.match(/\s+(#[A-Z0-9][A-Z0-9.-]{3,})$/i);
+  if (hashedSku) return hashedSku[1];
+  const trailingSku = text.match(/\s+([A-Z0-9][A-Z0-9.-]{3,})$/i);
+  if (trailingSku) return trailingSku[1];
   return '';
 }
 
-function ensureSingleOemAtEnd(value) {
-  const source = collapseConsecutiveDuplicateWords(value);
-  const sku = extractTrailingSku(source);
-  let title = source.replace(/\bOEM\b/gi, '').replace(/\s+/g, ' ').trim();
-  if (sku) {
-    title = title
-      .replace(new RegExp(`\\s+${sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'), '')
-      .replace(/\s+/g, ' ')
-      .trim();
+function getInterchangePrefix(value = '') {
+  const text = normalizeText(value);
+  const match = text.match(/^(\d{3})\b/);
+  return match ? match[1] : '';
+}
+
+function shouldUseHashSku(ipn = '', categoryContext = {}, title = '') {
+  const prefix = getInterchangePrefix(ipn);
+  const context = [
+    title,
+    categoryContext?.category,
+    categoryContext?.name,
+    categoryContext?.part,
+    categoryContext?.partName,
+    categoryContext?.categoryName
+  ]
+    .map(normalizeText)
+    .join(' ');
+  return (
+    prefix === '257' &&
+    /\b(speedometer|instrument\s+cluster|gauge|gauges|cluster)\b/i.test(context)
+  );
+}
+
+function normalizeSkuToken(skuValue = '', ipn = '', categoryContext = {}, title = '') {
+  const sku = normalizeText(skuValue).replace(/^#+/, '');
+  if (!sku) return '';
+  return shouldUseHashSku(ipn, categoryContext, title) ? `#${sku}` : sku;
+}
+
+function removeSkuOccurrences(value = '', skuValue = '') {
+  let title = normalizeText(value).replace(/\s+/g, ' ').trim();
+  const sku = normalizeText(skuValue).replace(/^#+/, '');
+  if (!title || !sku) return title;
+  const escapedSku = sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  title = title
+    .replace(new RegExp(`\\s+#?${escapedSku}\\b`, 'gi'), ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return title;
+}
+
+function normalizeTitleCore(value = '') {
+  return collapseConsecutiveDuplicateWords(value)
+    .replace(/\bA\/C\b/gi, 'AC')
+    .replace(/\bOEM\s+Part\b/gi, ' ')
+    .replace(/\bUsed\s+Auto\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[,\-:/|]+$/, '')
+    .trim();
+}
+
+function containsEngineAssemblyTerm(value = '') {
+  return /\b(?:long|short)\s+block\b/i.test(normalizeText(value));
+}
+
+function sourceEvidenceContainsEngineAssemblyTerm(values = []) {
+  return (Array.isArray(values) ? values : [])
+    .map(normalizeText)
+    .some(value => containsEngineAssemblyTerm(value));
+}
+
+function ensureTitleHasSku(value, skuValue = '', ipn = '', categoryContext = {}) {
+  const skuToken = normalizeSkuToken(skuValue, ipn, categoryContext, value);
+  const core = normalizeTitleCore(removeSkuOccurrences(value, skuValue));
+  if (!core) return '';
+  if (!skuToken) return core;
+  return collapseConsecutiveDuplicateWords(`${core} ${skuToken}`);
+}
+
+function expandTwoDigitYear(value = '') {
+  const year = Number(value);
+  if (!Number.isInteger(year) || year < 0 || year > 99) return 0;
+  return year <= 30 ? 2000 + year : 1900 + year;
+}
+
+function normalizeYearValue(value = '') {
+  const text = normalizeText(value);
+  if (/^(?:19|20)\d{2}$/.test(text)) return Number(text);
+  if (/^\d{2}$/.test(text)) return expandTwoDigitYear(text);
+  return 0;
+}
+
+function extractYearRanges(value = '') {
+  const text = normalizeText(value);
+  const ranges = [];
+  const seen = new Set();
+
+  const addRange = (startRaw, endRaw) => {
+    const start = normalizeYearValue(startRaw);
+    const end = normalizeYearValue(endRaw);
+    if (!start || !end) return;
+    const orderedStart = Math.min(start, end);
+    const orderedEnd = Math.max(start, end);
+    const label = orderedStart === orderedEnd ? String(orderedStart) : `${orderedStart}-${orderedEnd}`;
+    if (seen.has(label)) return;
+    seen.add(label);
+    ranges.push({ start: orderedStart, end: orderedEnd, label });
+  };
+
+  let match;
+  const fullYearRangePattern = /\b((?:19|20)\d{2})\s*[-–]\s*((?:19|20)?\d{2})\b/g;
+  while ((match = fullYearRangePattern.exec(text)) !== null) {
+    addRange(match[1], match[2]);
   }
-  if (!title) return '';
-  title = title.replace(/[,\-:/|]+$/, '').trim();
-  return collapseConsecutiveDuplicateWords(`${title} OEM${sku ? ` ${sku}` : ''}`);
+
+  const shortYearRangePattern = /(^|[^A-Z0-9])(\d{2})\s*[-–]\s*(\d{2})(?=$|[^A-Z0-9])/gi;
+  while ((match = shortYearRangePattern.exec(text)) !== null) {
+    addRange(match[2], match[3]);
+  }
+
+  return ranges;
+}
+
+function pickSourceYearRange(currentLegacyTitle = '', sourceDescription = '', currentOutputTitle = '') {
+  const sources = [currentLegacyTitle, sourceDescription, currentOutputTitle];
+  for (const source of sources) {
+    const ranges = extractYearRanges(source);
+    if (ranges.length > 0) return ranges[0];
+  }
+  return null;
+}
+
+function titleIncludesYearRange(value = '', range = null) {
+  if (!range?.label) return true;
+  const titleRanges = extractYearRanges(value);
+  return titleRanges.some(item => item.label === range.label);
+}
+
+function replaceTitleYearWithRange(value = '', range = null, skuValue = '', ipn = '', categoryContext = {}) {
+  if (!range?.label) return value;
+  let core = removeSkuOccurrences(value, skuValue);
+  core = core
+    .replace(/\b(?:19|20)\d{2}\s*[-–]\s*(?:(?:19|20)?\d{2})\b/g, ' ')
+    .replace(/(^|[^A-Z0-9])\d{2}\s*[-–]\s*\d{2}(?=$|[^A-Z0-9])/gi, '$1 ')
+    .replace(/\b(?:19|20)\d{2}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return ensureTitleHasSku(`${range.label} ${core}`, skuValue, ipn, categoryContext);
+}
+
+function flattenEvidenceValues(value, out = []) {
+  if (Array.isArray(value)) {
+    value.forEach(item => flattenEvidenceValues(item, out));
+    return out;
+  }
+  if (value && typeof value === 'object') {
+    Object.entries(value).forEach(([key, entryValue]) => {
+      out.push(key);
+      flattenEvidenceValues(entryValue, out);
+    });
+    return out;
+  }
+  const text = normalizeText(value);
+  if (text) out.push(text);
+  return out;
+}
+
+function buildEvidenceText(values = []) {
+  return flattenEvidenceValues(values).join(' ');
+}
+
+function isAirbagTitleEvidence(value = '') {
+  return /\bair\s*bag\b|\bairbag\b/i.test(normalizeText(value));
+}
+
+function resolveVerifiedSide(evidenceValues = []) {
+  const text = buildEvidenceText(evidenceValues);
+  if (!text) return null;
+  const airbagContext = isAirbagTitleEvidence(text);
+  const driverLeft =
+    /\bdriver\s*\/\s*left\b/i.test(text) ||
+    /\bdriver\s+left\b/i.test(text) ||
+    /\bleft\s+hand\b/i.test(text) ||
+    /\bdriver\s+lh\b/i.test(text) ||
+    /\bdriver\b(?!'s)\b/i.test(text) ||
+    /\bleft\b/i.test(text) ||
+    /\blh\b/i.test(text);
+  const passengerRight =
+    /\bpassenger\s*\/\s*right\b/i.test(text) ||
+    /\bpassenger\s+right\b/i.test(text) ||
+    /\bright\s+hand\b/i.test(text) ||
+    /\bpassenger\s+rh\b/i.test(text) ||
+    /\bpassenger\b/i.test(text) ||
+    /\bright\b/i.test(text) ||
+    /\brh\b/i.test(text);
+
+  if (driverLeft && passengerRight) return { conflict: true };
+  if (driverLeft) {
+    if (airbagContext && !/\bplacement\s+on\s+vehicle\b|\bdriver\s*\/\s*left\b|\bdriver\s+left\b|\bdriver\s+lh\b/i.test(text)) {
+      return null;
+    }
+    return { label: 'Driver Left LH', family: 'driver' };
+  }
+  if (passengerRight) {
+    if (airbagContext && !/\bplacement\s+on\s+vehicle\b|\bpassenger\s*\/\s*right\b|\bpassenger\s+right\b|\bpassenger\s+rh\b/i.test(text)) {
+      return null;
+    }
+    return { label: 'Passenger Right RH', family: 'passenger' };
+  }
+  return null;
+}
+
+function titleHasSideLabel(value = '', side = null) {
+  if (!side?.label) return true;
+  return normalizeTitleForKey(value).includes(side.label.toLowerCase());
+}
+
+function applySideStandardization(value = '', side = null, skuValue = '', ipn = '', categoryContext = {}) {
+  if (!side?.label || titleHasSideLabel(value, side)) return value;
+  let core = removeSkuOccurrences(value, skuValue);
+  const pattern =
+    side.family === 'driver'
+      ? /\b(?:driver\s*\/\s*left|driver\s+left\s+lh|driver\s+left|driver\s+lh|left\s+hand|left\s+lh|driver(?!'s)|lh|left)\b/gi
+      : /\b(?:passenger\s*\/\s*right|passenger\s+right\s+rh|passenger\s+right|passenger\s+rh|right\s+hand|right\s+rh|passenger|rh|right)\b/gi;
+  if (pattern.test(core)) {
+    core = core.replace(pattern, side.label);
+  } else {
+    core = insertBeforeSku(core, side.label, '');
+  }
+  core = core
+    .replace(new RegExp(`\\b${side.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b(?:\\s+${side.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b)+`, 'gi'), side.label)
+    .replace(/\s+/g, ' ')
+    .trim();
+  return ensureTitleHasSku(core, skuValue, ipn, categoryContext);
+}
+
+function titleIndicatesSunVisor(value = '', ipn = '', categoryContext = {}, itemSpecifics = {}) {
+  return (
+    getInterchangePrefix(ipn) === '268' ||
+    /\bsun\s*visor\b/i.test(
+      buildEvidenceText([value, categoryContext, itemSpecifics])
+    )
+  );
+}
+
+function sourceHasIllumination(value = '') {
+  return /\billuminated\b|\billumination\b|\bwith\s+illum(?:ination|inated)?\b/i.test(normalizeText(value));
+}
+
+function removeLowPriorityTitleTerms(value = '') {
+  return normalizeText(value)
+    .replace(/\banti[-\s]?glare\s+blocker\b/gi, ' ')
+    .replace(/\banti[-\s]?glare\b/gi, ' ')
+    .replace(/\bblocker\b/gi, ' ')
+    .replace(/\bgermany\s+built\b/gi, ' ')
+    .replace(/\bgermany\b/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function insertBeforeSku(value = '', term = '', skuValue = '') {
+  const normalizedTerm = normalizeText(term);
+  let title = normalizeText(value);
+  if (!title || !normalizedTerm || normalizeTitleForKey(title).includes(normalizedTerm.toLowerCase())) return title;
+  const sku = normalizeText(skuValue).replace(/^#+/, '');
+  if (!sku) return collapseConsecutiveDuplicateWords(`${title} ${normalizedTerm}`);
+  const escapedSku = sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const suffixMatch = title.match(new RegExp(`\\s+(#?${escapedSku})$`, 'i'));
+  if (!suffixMatch) return collapseConsecutiveDuplicateWords(`${title} ${normalizedTerm}`);
+  title = title.replace(new RegExp(`\\s+#?${escapedSku}$`, 'i'), '').trim();
+  return collapseConsecutiveDuplicateWords(`${title} ${normalizedTerm} ${suffixMatch[1]}`);
+}
+
+function appendValidationNote(existing = '', addition = '') {
+  const current = normalizeText(existing);
+  const next = normalizeText(addition);
+  if (!next) return current;
+  if (!current) return next;
+  if (current.toLowerCase().includes(next.toLowerCase())) return current;
+  return `${current} ${next}`;
+}
+
+function applyClientTitleValidationGuards(title = '', context = {}) {
+  const {
+    currentLegacyTitle = '',
+    currentOutputTitle = '',
+    sourceDescription = '',
+    conditionsAndOptions = '',
+    cSpecifics = {},
+    itemSpecifics = {},
+    categoryContext = {},
+    customLabelSku = '',
+    ipn = '',
+    titleMinLength = 65,
+    titleMaxLength = 80
+  } = context;
+  let nextTitle = ensureTitleHasSku(title, customLabelSku, ipn, categoryContext);
+  const repairs = [];
+  const sourceEvidenceText = buildEvidenceText([
+    currentLegacyTitle,
+    currentOutputTitle,
+    sourceDescription,
+    conditionsAndOptions,
+    cSpecifics,
+    itemSpecifics,
+    categoryContext
+  ]);
+
+  const protectedRange = pickSourceYearRange(currentLegacyTitle, sourceDescription, currentOutputTitle);
+  if (protectedRange && !titleIncludesYearRange(nextTitle, protectedRange)) {
+    nextTitle = replaceTitleYearWithRange(nextTitle, protectedRange, customLabelSku, ipn, categoryContext);
+    repairs.push('preserved verified source year range');
+  }
+
+  const side = resolveVerifiedSide([currentLegacyTitle, conditionsAndOptions, cSpecifics, itemSpecifics]);
+  if (side?.conflict) {
+    repairs.push('detected conflicting side evidence');
+  } else if (side?.label && !titleHasSideLabel(nextTitle, side)) {
+    nextTitle = applySideStandardization(nextTitle, side, customLabelSku, ipn, categoryContext);
+    repairs.push('standardized verified side');
+  }
+
+  if (
+    titleIndicatesSunVisor(sourceEvidenceText, ipn, categoryContext, itemSpecifics) &&
+    sourceHasIllumination(sourceEvidenceText) &&
+    !/\billuminated\b/i.test(nextTitle)
+  ) {
+    nextTitle = removeLowPriorityTitleTerms(nextTitle);
+    nextTitle = insertBeforeSku(nextTitle, 'Illuminated', customLabelSku);
+    nextTitle = ensureTitleHasSku(nextTitle, customLabelSku, ipn, categoryContext);
+    repairs.push('preserved verified sun visor illumination');
+  }
+
+  if (nextTitle.length > titleMaxLength) {
+    const compacted = removeLowPriorityTitleTerms(nextTitle);
+    if (compacted.length < nextTitle.length) nextTitle = compacted;
+  }
+  nextTitle = enforceTitleLength(nextTitle, titleMinLength, titleMaxLength, customLabelSku, ipn, categoryContext);
+
+  return {
+    title: nextTitle,
+    repairs
+  };
 }
 
 function trimAtWordBoundary(value, maxLength) {
@@ -379,8 +704,15 @@ function extractProtectedSourceTitlePhrases(values = []) {
   return phrases;
 }
 
-function preserveProtectedSourceTitlePhrases(candidate, sourceTitles = [], skuValue = '', max = 80) {
-  let title = ensureSingleOemAtEnd(candidate);
+function preserveProtectedSourceTitlePhrases(
+  candidate,
+  sourceTitles = [],
+  skuValue = '',
+  max = 80,
+  ipn = '',
+  categoryContext = {}
+) {
+  let title = ensureTitleHasSku(candidate, skuValue, ipn, categoryContext);
   if (!title) return '';
   const phrases = extractProtectedSourceTitlePhrases(sourceTitles);
   if (phrases.length === 0) return title;
@@ -388,23 +720,23 @@ function preserveProtectedSourceTitlePhrases(candidate, sourceTitles = [], skuVa
   const normalizedTitle = () => normalizeTitleForKey(title);
   for (const phrase of phrases) {
     if (normalizedTitle().includes(phrase.toLowerCase())) continue;
-    const sku = extractTrailingSku(title) || normalizeText(skuValue);
+    const sku = normalizeText(skuValue);
     const escapedSku = sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const suffixPattern = new RegExp(`\\s+OEM${sku ? `\\s+${escapedSku}` : ''}$`, 'i');
-    let core = title.replace(suffixPattern, '').trim();
+    const suffixPattern = sku ? new RegExp(`\\s+#?${escapedSku}$`, 'i') : null;
+    let core = suffixPattern ? title.replace(suffixPattern, '').trim() : title;
     core = core.replace(/\bID$/i, '').replace(/[,\-:/| ]+$/, '').trim();
-    const next = ensureSingleOemAtEnd(`${core} ${phrase} OEM${sku ? ` ${sku}` : ''}`);
+    const next = ensureTitleHasSku(`${core} ${phrase}`, sku, ipn, categoryContext);
     if (next && next.length <= max) {
       title = next;
       continue;
     }
 
     const safeSource = sourceTitles
-      .map(sourceTitle => ensureSingleOemAtEnd(sourceTitle))
+      .map(sourceTitle => ensureTitleHasSku(sourceTitle, sku, ipn, categoryContext))
       .find(sourceTitle => {
         if (!sourceTitle || sourceTitle.length > max) return false;
         if (!normalizeTitleForKey(sourceTitle).includes(phrase.toLowerCase())) return false;
-        if (sku && !new RegExp(`\\b${escapedSku}$`, 'i').test(sourceTitle)) return false;
+        if (sku && !new RegExp(`#?${escapedSku}$`, 'i').test(sourceTitle)) return false;
         return true;
       });
     if (safeSource) title = safeSource;
@@ -412,57 +744,19 @@ function preserveProtectedSourceTitlePhrases(candidate, sourceTitles = [], skuVa
   return title;
 }
 
-function enforceTitleLength(value, min = 65, max = 80) {
-  let title = ensureSingleOemAtEnd(value);
+function enforceTitleLength(value, min = 65, max = 80, skuValue = '', ipn = '', categoryContext = {}) {
+  let title = ensureTitleHasSku(value, skuValue, ipn, categoryContext);
   if (!title) return '';
   if (title.length > max) {
-    const sku = extractTrailingSku(title);
-    const suffix = ` OEM${sku ? ` ${sku}` : ''}`;
+    const sku = normalizeSkuToken(skuValue, ipn, categoryContext, title) || extractTrailingSku(title);
+    const suffix = sku ? ` ${sku}` : '';
     const keep = Math.max(1, max - suffix.length);
-    const core = title
-      .replace(new RegExp(`\\s+OEM${sku ? `\\s+${sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` : ''}$`, 'i'), '')
-      .trim();
+    const escapedSku = sku.replace(/^#/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const core = sku ? title.replace(new RegExp(`\\s+#?${escapedSku}$`, 'i'), '').trim() : title;
     const trimmedCore = trimAtWordBoundary(core, keep);
-    title = `${trimmedCore}${suffix}`;
+    title = `${trimmedCore}${suffix}`.trim();
   }
   return collapseConsecutiveDuplicateWords(title);
-}
-
-function replaceOemQualifier(value, qualifier = 'OEM') {
-  const title = ensureSingleOemAtEnd(value);
-  if (!title) return '';
-  const sku = extractTrailingSku(title);
-  const suffixPattern = new RegExp(`\\s+OEM${sku ? `\\s+${sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}` : ''}$`, 'i');
-  const core = title.replace(suffixPattern, '').trim();
-  return collapseConsecutiveDuplicateWords(`${core} ${qualifier}${sku ? ` ${sku}` : ''}`);
-}
-
-function ensureTitleHasSku(value, skuValue = '') {
-  const sku = normalizeText(skuValue);
-  const title = ensureSingleOemAtEnd(value);
-  if (!title || !sku) return title;
-  const escapedSku = sku.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (new RegExp(`\\b${escapedSku}$`, 'i').test(title)) return title;
-  return ensureSingleOemAtEnd(`${title} ${sku}`);
-}
-
-function makeTitleUnique(candidate, usedTitleKeys = new Set(), min = 65, max = 80) {
-  const base = enforceTitleLength(candidate, min, max);
-  if (!base) return '';
-  const baseKey = normalizeTitleForKey(base);
-  if (!baseKey || !usedTitleKeys.has(baseKey)) return base;
-
-  const qualifiers = ['Used OEM', 'Genuine OEM', 'Original OEM', 'Factory OEM'];
-  for (const qualifier of qualifiers) {
-    const variant = enforceTitleLength(replaceOemQualifier(base, qualifier), min, max);
-    const key = normalizeTitleForKey(variant);
-    if (variant && key && !usedTitleKeys.has(key)) return variant;
-  }
-  return base;
-}
-
-function titleContainsAirbag(value) {
-  return /\bair\s*bag\b|\bairbag\b/i.test(normalizeText(value));
 }
 
 function normalizeTitleReviewStatus(value, fallback = TITLE_REVIEW_STATUS_COMPLETED) {
@@ -470,7 +764,7 @@ function normalizeTitleReviewStatus(value, fallback = TITLE_REVIEW_STATUS_COMPLE
   if (!key) return fallback;
   if (key === 'completed' || key === 'complete' || key === 'ok') return TITLE_REVIEW_STATUS_COMPLETED;
   if (key === 'needs review' || key === 'need review' || key === 'manual review') return TITLE_REVIEW_STATUS_NEEDS_REVIEW;
-  if (key === 'airbag - locked' || key === 'airbag locked' || key === 'airbag') return TITLE_REVIEW_STATUS_AIRBAG_LOCKED;
+  if (key === 'airbag - locked' || key === 'airbag locked' || key === 'airbag') return TITLE_REVIEW_STATUS_NEEDS_REVIEW;
   if (key === 'skipped - manual override' || key === 'manual override' || key === 'skipped manual override') {
     return TITLE_REVIEW_STATUS_MANUAL_OVERRIDE;
   }
@@ -488,7 +782,6 @@ function inferTitleReviewStatus(generated = {}) {
     .map(item => normalizeText(item).toLowerCase())
     .filter(Boolean)
     .join(' ');
-  if (/\bair\s*bag\b|\bairbag\b/.test(text)) return TITLE_REVIEW_STATUS_AIRBAG_LOCKED;
   if (/\b(flag|manual review|uncertain|missing|unknown|multi-year|multiple year|unmapped|cannot determine|not certain)\b/.test(text)) {
     return TITLE_REVIEW_STATUS_NEEDS_REVIEW;
   }
@@ -543,9 +836,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   const masterTable = normalizeText(options.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || DEFAULT_MASTER_TABLE);
   const openaiApiKey = normalizeText(options.openaiApiKey || process.env.OPENAI_API_KEY || '');
   const openaiModel = normalizeText(options.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini');
-  const phase74TitleRulesPrompt = normalizeText(
-    options.phase74TitleRulesPrompt || process.env.PHASE74_TITLE_RULES_PROMPT || ''
-  );
+  const phase74TitleRulesPrompt = normalizeText(options.phase74TitleRulesPrompt || '');
   const openaiBaseUrl = normalizeText(options.openaiBaseUrl || process.env.OPENAI_BASE_URL || '');
   const promptCacheEnabled =
     normalizeText(options.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true').toLowerCase() !==
@@ -565,6 +856,9 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!airtableBaseId) throw new Error('Missing AIRTABLE_BASE_ID.');
   if (!openaiApiKey) throw new Error('Missing OpenAI API key for Phase 7.4.');
+  if (!phase74TitleRulesPrompt) {
+    throw new Error('Missing Phase 7.4 title rules prompt. Paste and save the client-approved prompt in the UI before running.');
+  }
 
   const airtableService = new AirtableService({
     token: airtableToken,
@@ -677,7 +971,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       stage: 'phase74_prepare',
       percent: 8,
       counts: summary,
-      message: `Using custom Phase 7.4 title prompt from UI (chars=${phase74TitleRulesPrompt.length}).`
+      message: `Using UI-provided Phase 7.4 title rules prompt (chars=${phase74TitleRulesPrompt.length}).`
     });
   }
 
@@ -831,7 +1125,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     const itemSpecifics = buildItemSpecifics(fields, cSpecifics);
     const currentLegacyTitle = normalizeText(getFieldValueByName(fields, LISTING_LEGACY_TITLE_FIELD));
     const currentOutputTitle = normalizeText(getFieldValueByName(fields, LISTING_OUTPUT_TITLE_FIELD));
-    const donorVehicle = extractDonorVehicleEvidence(getFieldValueByName(fields, LISTING_SOURCE_DESCRIPTION_FIELD));
+    const sourceDescription = normalizeText(getFieldValueByName(fields, LISTING_SOURCE_DESCRIPTION_FIELD));
+    const donorVehicle = extractDonorVehicleEvidence(sourceDescription);
     const customLabelSku =
       normalizeText(getFieldValueByName(fields, 'SKU')) ||
       normalizeText(getFieldValueByName(fields, 'Custom Label')) ||
@@ -840,24 +1135,6 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     const descriptionManualOverride = isManualOverrideForField(fields, LISTING_OUTPUT_DESCRIPTION_FIELD);
     const shortDescriptionManualOverride =
       hasShortDescriptionField && isManualOverrideForField(fields, LISTING_SHORT_DESCRIPTION_FIELD);
-
-    if (titleContainsAirbag(currentOutputTitle || currentLegacyTitle)) {
-      const writeFields = {};
-      addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_STATUS_FIELD, TITLE_REVIEW_STATUS_AIRBAG_LOCKED);
-      addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_REASON_FIELD, 'airbag_guard');
-      addFieldIfChanged(
-        writeFields,
-        fields,
-        LISTING_TITLE_REVIEW_NOTES_FIELD,
-        'Airbag title detected. Client rule says title automation must not alter airbag listings.'
-      );
-      if (Object.keys(writeFields).length > 0) {
-        updates.push({ id: row.id, fields: writeFields });
-        summary.titleReviewWritten += 1;
-      }
-      summary.titleReviewAirbagLocked += 1;
-      continue;
-    }
 
     emitProgress(progressCallback, {
       stage: 'phase74_generate',
@@ -897,12 +1174,29 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     }
 
     const aiTitle = preserveProtectedSourceTitlePhrases(
-      ensureTitleHasSku(generated?.generatedTitle, customLabelSku),
+      ensureTitleHasSku(generated?.generatedTitle, customLabelSku, ipn, categoryContext),
       [currentOutputTitle, currentLegacyTitle],
       customLabelSku,
-      titleMaxLength
+      titleMaxLength,
+      ipn,
+      categoryContext
     );
-    const nextTitle = makeTitleUnique(aiTitle, usedTitleKeys, titleMinLength, titleMaxLength);
+    let nextTitle = enforceTitleLength(aiTitle, titleMinLength, titleMaxLength, customLabelSku, ipn, categoryContext);
+    const titleGuardResult = applyClientTitleValidationGuards(nextTitle, {
+      currentLegacyTitle,
+      currentOutputTitle,
+      sourceDescription,
+      conditionsAndOptions,
+      cSpecifics,
+      itemSpecifics,
+      categoryContext,
+      customLabelSku,
+      ipn,
+      titleMinLength,
+      titleMaxLength
+    });
+    nextTitle = titleGuardResult.title;
+    const titleValidationRepairs = titleGuardResult.repairs;
     const nextDescription = normalizeText(generated?.generatedDescription);
     const nextShortDescription = normalizeText(generated?.shortDescription);
     let nextReviewStatus = inferTitleReviewStatus(generated);
@@ -952,6 +1246,11 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     const existingTitleNew = normalizeText(fields[LISTING_OUTPUT_TITLE_FIELD]);
     const existingDescriptionOut = normalizeText(fields[LISTING_OUTPUT_DESCRIPTION_FIELD]);
     const existingShort = hasShortDescriptionField ? normalizeText(fields[LISTING_SHORT_DESCRIPTION_FIELD]) : '';
+    const currentTitleKeysForRow = new Set(
+      [existingTitleNew, currentLegacyTitle]
+        .map(title => normalizeTitleForKey(title))
+        .filter(Boolean)
+    );
 
     const writeFields = {};
 
@@ -967,11 +1266,52 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       nextReviewNotes = nextReviewNotes || 'Title rules flagged this row for manual review.';
     }
 
+    if (!titleManualOverride && titleValidationRepairs.length > 0) {
+      nextReviewStatus = TITLE_REVIEW_STATUS_NEEDS_REVIEW;
+      nextReviewReason = titleValidationRepairs.some(item => item.includes('conflicting side'))
+        ? 'uncertain_side'
+        : 'proposed_title_degrade';
+      nextReviewNotes = appendValidationNote(
+        nextReviewNotes,
+        `Post-AI validation repaired title: ${titleValidationRepairs.join('; ')}.`
+      );
+    }
+
+    if (
+      !titleManualOverride &&
+      containsEngineAssemblyTerm(nextTitle) &&
+      !sourceEvidenceContainsEngineAssemblyTerm([currentOutputTitle, currentLegacyTitle, conditionsAndOptions])
+    ) {
+      const fallbackTitle = enforceTitleLength(
+        currentOutputTitle || currentLegacyTitle,
+        titleMinLength,
+        titleMaxLength,
+        customLabelSku,
+        ipn,
+        categoryContext
+      );
+      if (fallbackTitle) nextTitle = fallbackTitle;
+      nextReviewStatus = TITLE_REVIEW_STATUS_NEEDS_REVIEW;
+      nextReviewReason = 'prohibited_engine_assembly_term';
+      nextReviewNotes = 'Generated title introduced Long Block or Short Block without source-title support, so Phase 7.4 preserved the safest existing title.';
+    }
+
+    const nextTitleKey = normalizeTitleForKey(nextTitle);
+    if (
+      !titleManualOverride &&
+      nextTitleKey &&
+      usedTitleKeys.has(nextTitleKey) &&
+      !currentTitleKeysForRow.has(nextTitleKey)
+    ) {
+      nextReviewStatus = TITLE_REVIEW_STATUS_NEEDS_REVIEW;
+      nextReviewReason = nextReviewReason || 'duplicate_unresolved';
+      nextReviewNotes = nextReviewNotes || 'Generated title matches another listing; client rules allow duplicates only when no truthful differentiator exists.';
+    }
+
     if (!titleManualOverride && nextTitle && nextTitle !== existingTitleNew) {
       writeFields[LISTING_OUTPUT_TITLE_FIELD] = nextTitle;
       summary.titleGenerated += 1;
-      const titleKey = normalizeTitleForKey(nextTitle);
-      if (titleKey) usedTitleKeys.add(titleKey);
+      if (nextTitleKey) usedTitleKeys.add(nextTitleKey);
       usedTitles.push(nextTitle);
     } else if (titleManualOverride) {
       summary.skippedManualOverride += 1;

@@ -96,70 +96,13 @@ const DEFAULT_EBAY_SANDBOX_TABLE = 'eBay Listings (API)';
 const DEFAULT_EBAY_LISTINGS_TABLE = 'eBay Listings (API)';
 const DEFAULT_EBAY_FETCH_PAGING_MODE = 'first_page';
 const PHASE5_ACTIVITY_LOGS_KEY = 'phase5ActivityLogs';
-const DEFAULT_PHASE74_TITLE_RULES_PROMPT = [
-  'eBay Title Rules Prompt',
-  'Master Instructions - Follow Exactly',
-  '1) Required title structure:',
-  '[YEAR RANGE] [MAKE] [MODEL] [PART] [SIDE] [KEY DETAIL] OEM',
-  '2) Title constraints:',
-  '- Title length must be 65 to 80 characters.',
-  '- Title must end with OEM.',
-  '- OEM must appear once only, and only at the end.',
-  '- Keep title clean, natural, and human-readable.',
-  '- No keyword stuffing.',
-  '3) Never change or remove:',
-  '- Year must remain present after processing.',
-  '- Make must not be changed.',
-  '- Model must not be changed.',
-  '4) Year handling:',
-  '- Convert 2-digit ranges to 4-digit ranges (05-07 => 2005-2007, 13-19 => 2013-2019).',
-  '- If year is missing, do not guess. Leave unchanged or flag for review in reasoningSummary.',
-  '5) Title cleaning:',
-  '- Remove SKU/stock numbers (especially suffix-like IDs).',
-  '- Remove OEM Part text and Used Auto text.',
-  '- Remove extra uses of Part.',
-  '- Keep exactly one OEM at end.',
-  '6) Side standardization (mandatory):',
-  '- Driver side => Driver Left LH',
-  '- Passenger side => Passenger Right RH',
-  '7) SEO part name replacements (mandatory when applicable):',
-  '- Accelerator Parts => Gas Pedal or Accelerator Pedal',
-  '- Anti-Lock Brake Part => ABS Module or ABS Pump or Hydraulic Unit',
-  '- Inside Mirror => Rear View Mirror',
-  '- Throttle Valve Assembly => Throttle Body',
-  '- Fuel Vapor Canister => EVAP Charcoal Canister',
-  '- Audio Equipment Radio => Radio',
-  '- Chassis ECM (590) => choose best single fit: ECM or ECU or PCM',
-  '- Never stack duplicate synonyms.',
-  '8) Extra optimization:',
-  '- Optionally add Tested or OEM Tested when relevant.',
-  '- Keep wording readable and non-spammy.',
-  '9) No duplicate titles (hard rule):',
-  '- Title must be unique against provided existingTitles.',
-  '- If duplicate, apply controlled variation only.',
-  '- Never alter year/make/model for uniqueness.',
-  '10) Length control:',
-  '- If too long, trim extra descriptors.',
-  '- If too short, add relevant detail like Tested, Assembly, or Unit.',
-  '11) Final checks before output:',
-  '- Year present or flagged.',
-  '- Make unchanged.',
-  '- Model unchanged.',
-  '- No SKU/junk text.',
-  '- Side format standardized if side exists.',
-  '- SEO replacements applied where relevant.',
-  '- Ends with OEM once only.',
-  '- 65-80 chars.',
-  '- Clean/readable.',
-  '- Unique against existingTitles.'
-].join('\n');
 
 function resolvePhase74TitleRulesPrompt(...candidates) {
   for (const candidate of candidates) {
     const value = String(candidate || '').trim();
     if (value) return value;
   }
-  return DEFAULT_PHASE74_TITLE_RULES_PROMPT;
+  return '';
 }
 
 function parseBoolean(value, defaultValue = false) {
@@ -1495,8 +1438,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
     openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
     phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
-      stored.phase74TitleRulesPrompt,
-      process.env.PHASE74_TITLE_RULES_PROMPT
+      stored.phase74TitleRulesPrompt
     ),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
     phase74PromptCacheEnabled:
@@ -1676,8 +1618,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
           openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
           openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
           phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
-            stored.phase74TitleRulesPrompt,
-            process.env.PHASE74_TITLE_RULES_PROMPT
+            stored.phase74TitleRulesPrompt
           ),
           openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
           phase74PromptCacheEnabled:
@@ -3270,8 +3211,7 @@ ipcMain.handle('phase2-get-config', async () => {
     openaiApiKey: stored.openaiApiKey || '',
     openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano',
     phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
-      stored.phase74TitleRulesPrompt,
-      process.env.PHASE74_TITLE_RULES_PROMPT
+      stored.phase74TitleRulesPrompt
     ),
     openaiBaseUrl: stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '',
     phase4BClickupOpenStatus:
@@ -4702,8 +4642,7 @@ ipcMain.handle('phase74:get-config', async () => {
       stored.phase74PromptCacheKey || process.env.PHASE74_PROMPT_CACHE_KEY || process.env.OPENAI_PROMPT_CACHE_KEY || 'phase74_title_description_v1'
     ).trim(),
     titleRulesPrompt: resolvePhase74TitleRulesPrompt(
-      stored.phase74TitleRulesPrompt,
-      process.env.PHASE74_TITLE_RULES_PROMPT
+      stored.phase74TitleRulesPrompt
     ),
     testIpns: String(stored.phase74TestIpns || process.env.PHASE74_TEST_IPNS || '').trim(),
     maxListings: Number(stored.phase74MaxListings || process.env.PHASE74_MAX_LISTINGS || 0) || 0,
@@ -4732,8 +4671,7 @@ ipcMain.handle('phase74:run', async (event, options = {}) => {
       openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
       phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
         options.phase74TitleRulesPrompt,
-        stored.phase74TitleRulesPrompt,
-        process.env.PHASE74_TITLE_RULES_PROMPT
+        stored.phase74TitleRulesPrompt
       ),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase74PromptCacheEnabled:

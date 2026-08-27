@@ -1035,10 +1035,11 @@
                   <label for="phase4-unified-title-rules-prompt">Title Generation Prompt (Phase 7.4)</label>
                   <textarea
                     id="phase4-unified-title-rules-prompt"
-                    placeholder="Paste custom title rules prompt here. Leave blank to use default built-in rules."
+                    placeholder="Paste the client-approved Phase 7.4 title rules prompt here."
                     rows="7"
                   ></textarea>
-                  <div class="hint">This prompt is editable from UI and used by Phase 7.4 title generation.</div>
+                  <div class="hint">Required. Phase 7.4 uses this UI prompt as the title-rule source and blocks runs when it is blank.</div>
+                  <div id="err-phase4-unified-title-rules-prompt" class="field-error"></div>
                   <div class="btn-group" style="margin-top:8px;">
                     <button
                       id="phase4-update-title-prompt-btn"
@@ -2714,6 +2715,7 @@
         document.getElementById('openai-api-key').value.trim() ||
         document.getElementById('phase4-unified-openai-api-key')?.value?.trim()
       );
+      const hasPhase74TitlePrompt = Boolean(document.getElementById('phase4-unified-title-rules-prompt')?.value?.trim());
       const hasAirtableCore =
         Boolean(document.getElementById('airtable-token').value.trim()) &&
         Boolean(document.getElementById('airtable-base-id').value.trim());
@@ -2806,7 +2808,7 @@
         runPhase72Btn.disabled = busy || !hasAirtableCore || !hasPhase72DriveFolder;
       }
       if (runPhase74Btn) {
-        runPhase74Btn.disabled = busy || !hasAirtableCore || !hasOpenAiKey;
+        runPhase74Btn.disabled = busy || !hasAirtableCore || !hasOpenAiKey || !hasPhase74TitlePrompt;
       }
       if (runEbayMockImportBtn) {
         const hasCsvPath = Boolean(document.getElementById('ebay-mock-csv-path').value.trim());
@@ -5006,6 +5008,7 @@
         document.getElementById('openai-api-key').value.trim() ||
         document.getElementById('phase4-unified-openai-api-key')?.value?.trim() ||
         '';
+      const phase74TitleRulesPrompt = document.getElementById('phase4-unified-title-rules-prompt')?.value?.trim() || '';
       if (!listingsTable) {
         setFieldError('phase74-listings-table', 'Listings table name is required.');
         showStatus('run-status', 'error', 'Enter listings table name before running Phase 7.4.');
@@ -5014,6 +5017,11 @@
       if (!openaiApiKey) {
         setFieldError('openai-api-key', 'OpenAI API Key is required.');
         showStatus('run-status', 'error', 'Enter OpenAI API Key before running Phase 7.4.');
+        return;
+      }
+      if (!phase74TitleRulesPrompt) {
+        setFieldError('phase4-unified-title-rules-prompt', 'Client title rules prompt is required.');
+        showStatus('run-status', 'error', 'Paste and save the client-approved Phase 7.4 title prompt before running.');
         return;
       }
 
