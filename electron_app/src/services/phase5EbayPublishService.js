@@ -150,6 +150,89 @@ const CONDITION_TEXT_TO_ENUM = new Map([
   ['NOT_WORKING', 'FOR_PARTS_OR_NOT_WORKING']
 ]);
 
+const COIN_GRADED_CONDITION_ID = 2750;
+const COIN_UNGRADED_CONDITION_ID = 4000;
+const COIN_DESCRIPTOR_NAME_GRADER = '1';
+const COIN_DESCRIPTOR_NAME_UNGRADED_CONDITION = '2';
+const COIN_DESCRIPTOR_NAME_LETTER_GRADE = '3';
+const COIN_DESCRIPTOR_NAME_NUMERIC_GRADE = '4';
+const COIN_DESCRIPTOR_NAME_CERTIFICATION_NUMBER = '5';
+const LEGACY_COIN_ASPECT_ALIASES = {
+  grader: ['Certification', 'Professional Grader', 'Grader', 'Grading Company'],
+  certificationNumber: ['Certification Number', 'Cert Number', 'Certificate Number', 'Cert #'],
+  grade: ['Grade', 'Letter Grade', 'Number Grade', 'Numerical Grade'],
+  circulated: ['Circulated/Uncirculated', 'Coin Condition', 'Ungraded Condition']
+};
+const COIN_GRADER_DESCRIPTOR_VALUE_IDS = [
+  { id: '14', aliases: ['PCGS', 'PROFESSIONAL COIN GRADING SERVICE'] },
+  { id: '15', aliases: ['NGC', 'NUMISMATIC GUARANTY COMPANY'] },
+  { id: '16', aliases: ['CACG', 'CAC', 'CAC/CACG', 'CAC GRADING', 'CERTIFIED ACCEPTANCE CORPORATION'] },
+  { id: '34', aliases: ['ANACS', 'AMERICAN NUMISMATIC ASSOCIATION CERTIFICATION SERVICE'] },
+  { id: '35', aliases: ['ICG', 'INDEPENDENT COIN GRADERS'] },
+  { id: '36', aliases: ['ICCS', 'INTERNATIONAL COIN CERTIFICATION SERVICE'] },
+  { id: '37', aliases: ['CCCS', 'CANADIAN COIN CERTIFICATION SERVICE'] },
+  { id: '38', aliases: ['LCGS', 'LONDON COIN GRADING SERVICE'] },
+  { id: '39', aliases: ['CGS-UK', 'CGS UK', 'COIN GRADING SERVICE - UK'] },
+  { id: '40', aliases: ['SEGS', 'SOVEREIGN ENTITIES GRADING SERVICE'] },
+  { id: '41', aliases: ['NNC', 'NUMISMATIC CERTIFICATION COMPANY'] },
+  { id: '42', aliases: ['NTC', 'NUMISTRUST CORPORATION'] },
+  { id: '43', aliases: ['PCI', 'PHOTO CERTIFIED INSTITUTE'] },
+  { id: '44', aliases: ['ACG', 'ACCUGRADE'] },
+  { id: '45', aliases: ['ASA', 'AMERICAN STANDARDS ASSOCIATION'] },
+  { id: '76', aliases: ['OTHER'] }
+];
+const COIN_LETTER_GRADE_DESCRIPTOR_VALUE_IDS = [
+  { id: '18', aliases: ['MS/PR', 'MS', 'MINT STATE', 'PR', 'PF', 'PROOF'] },
+  { id: '19', aliases: ['AU', 'ABOUT UNCIRCULATED', 'ALMOST UNCIRCULATED'] },
+  { id: '20', aliases: ['EX/XF', 'XF', 'EF', 'EXTRA FINE', 'EXTREMELY FINE'] },
+  { id: '46', aliases: ['VF', 'VERY FINE'] },
+  { id: '47', aliases: ['F', 'FINE'] },
+  { id: '48', aliases: ['VG', 'VERY GOOD'] },
+  { id: '49', aliases: ['G', 'GOOD'] },
+  { id: '50', aliases: ['AG', 'ABOUT GOOD'] },
+  { id: '51', aliases: ['FR', 'FAIR'] },
+  { id: '52', aliases: ['P', 'POOR'] }
+];
+const COIN_NUMERIC_GRADE_DESCRIPTOR_VALUE_IDS = new Map([
+  ['70', '32'],
+  ['69', '25'],
+  ['68', '26'],
+  ['67', '53'],
+  ['66', '54'],
+  ['65', '55'],
+  ['64', '56'],
+  ['63', '57'],
+  ['62', '58'],
+  ['61', '59'],
+  ['60', '60'],
+  ['58', '27'],
+  ['55', '28'],
+  ['53', '29'],
+  ['50', '61'],
+  ['45', '30'],
+  ['40', '31'],
+  ['35', '62'],
+  ['30', '63'],
+  ['25', '64'],
+  ['20', '65'],
+  ['15', '66'],
+  ['12', '67'],
+  ['10', '68'],
+  ['8', '69'],
+  ['6', '70'],
+  ['4', '71'],
+  ['3', '72'],
+  ['2', '73'],
+  ['1', '74'],
+  ['NONE', '77']
+]);
+const UNGRADED_COIN_CONDITION_DESCRIPTOR_VALUE_IDS = [
+  { id: '7', aliases: ['UNCIRCULATED'] },
+  { id: '8', aliases: ['EXTREMELY FINE TO ABOUT UNCIRCULATED', 'ABOUT UNCIRCULATED', 'ALMOST UNCIRCULATED', 'EX/XF', 'XF', 'EF', 'EXTRA FINE', 'EXTREMELY FINE', 'AU'] },
+  { id: '9', aliases: ['FINE TO VERY FINE', 'VERY FINE', 'VF', 'FINE', 'F'] },
+  { id: '10', aliases: ['BELOW FINE', 'VERY GOOD', 'VG', 'GOOD', 'G', 'ABOUT GOOD', 'AG', 'FAIR', 'FR', 'POOR', 'P', 'UNGRADED', 'UNCERTIFIED'] }
+];
+
 function deriveInventoryConditionEnum(listingFields = {}) {
   const conditionId = parseIntegerValue(
     firstNonEmptyField(listingFields, ['Condition ID', 'ConditionID']),
@@ -166,6 +249,10 @@ function deriveInventoryConditionEnum(listingFields = {}) {
   if (SUPPORTED_CONDITION_ENUMS.has(token)) return token;
   if (CONDITION_TEXT_TO_ENUM.has(token)) return CONDITION_TEXT_TO_ENUM.get(token);
   return '';
+}
+
+function deriveInventoryConditionId(listingFields = {}) {
+  return parseIntegerValue(firstNonEmptyField(listingFields, ['Condition ID', 'ConditionID']), 0);
 }
 
 function normalizeDimensionUnit(value) {
@@ -198,6 +285,14 @@ function parseJsonObject(value) {
     }
   } catch (_) {}
   return null;
+}
+
+function firstNonEmptyNamedField(fields = {}, candidates = []) {
+  for (const name of Array.isArray(candidates) ? candidates : []) {
+    const value = normalizeText(getFieldValueByName(fields, name));
+    if (value) return value;
+  }
+  return '';
 }
 
 function toStringList(value) {
@@ -260,6 +355,60 @@ function mergeAspect(aspects = {}, name = '', rawValue = null) {
   if (existing.length > 0) {
     aspects[aspectName] = existing;
   }
+}
+
+function getAspectValues(aspects = {}, aliases = []) {
+  if (!aspects || typeof aspects !== 'object') return [];
+  const targets = new Set((Array.isArray(aliases) ? aliases : []).map(value => normalizeFieldKey(value)).filter(Boolean));
+  if (targets.size === 0) return [];
+  for (const [name, rawValues] of Object.entries(aspects)) {
+    if (!targets.has(normalizeFieldKey(name))) continue;
+    return Array.isArray(rawValues)
+      ? rawValues.map(value => normalizeText(value)).filter(Boolean)
+      : [normalizeText(rawValues)].filter(Boolean);
+  }
+  return [];
+}
+
+function firstAspectValue(aspects = {}, aliases = []) {
+  const values = getAspectValues(aspects, aliases);
+  return values[0] || '';
+}
+
+function firstClassifiedAspectValue(aspects = {}, classification = '') {
+  if (!aspects || typeof aspects !== 'object') return '';
+  const target = normalizeText(classification);
+  if (!target) return '';
+  for (const [name, rawValues] of Object.entries(aspects)) {
+    if (classifyLegacyCoinAspectName(name) !== target) continue;
+    const values = Array.isArray(rawValues)
+      ? rawValues.map(value => normalizeText(value)).filter(Boolean)
+      : [normalizeText(rawValues)].filter(Boolean);
+    if (values.length > 0) return values[0];
+  }
+  return '';
+}
+
+function omitAspectAliases(aspects = {}, aliases = []) {
+  if (!aspects || typeof aspects !== 'object') return {};
+  const targets = new Set((Array.isArray(aliases) ? aliases : []).map(value => normalizeFieldKey(value)).filter(Boolean));
+  if (targets.size === 0) return { ...aspects };
+  const filtered = {};
+  for (const [name, value] of Object.entries(aspects)) {
+    if (targets.has(normalizeFieldKey(name))) continue;
+    filtered[name] = value;
+  }
+  return filtered;
+}
+
+function omitClassifiedCoinAspects(aspects = {}) {
+  if (!aspects || typeof aspects !== 'object') return {};
+  const filtered = {};
+  for (const [name, value] of Object.entries(aspects)) {
+    if (classifyLegacyCoinAspectName(name)) continue;
+    filtered[name] = value;
+  }
+  return filtered;
 }
 
 function parseLegacySpecificsText(text = '') {
@@ -370,6 +519,199 @@ function buildAspectsFromListing(fields = {}) {
   }
 
   return aspects;
+}
+
+function normalizeLookupToken(value = '') {
+  return normalizeText(value)
+    .toUpperCase()
+    .replace(/&/g, ' AND ')
+    .replace(/#/g, ' NUMBER ')
+    .replace(/[()]/g, ' ')
+    .replace(/[^A-Z0-9/.-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function classifyLegacyCoinAspectName(name = '') {
+  const token = normalizeLookupToken(name);
+  if (!token) return '';
+  if (
+    token.includes('CERTIFICATION NUMBER') ||
+    token.includes('CERT NUMBER') ||
+    token.includes('CERTIFICATE NUMBER')
+  ) {
+    return 'certificationNumber';
+  }
+  if (
+    token.includes('CIRCULATED/UNCIRCULATED') ||
+    token.includes('CIRCULATED UNCIRCULATED') ||
+    token.includes('COIN CONDITION') ||
+    token.includes('UNGRADED CONDITION')
+  ) {
+    return 'circulated';
+  }
+  if (
+    token === 'GRADE' ||
+    token.endsWith(' GRADE') ||
+    token.includes('LETTER GRADE') ||
+    token.includes('NUMBER GRADE') ||
+    token.includes('NUMERICAL GRADE')
+  ) {
+    return 'grade';
+  }
+  if (
+    token === 'CERTIFICATION' ||
+    token.includes('PROFESSIONAL GRADER') ||
+    token === 'GRADER' ||
+    token.includes('GRADING COMPANY')
+  ) {
+    return 'grader';
+  }
+  return '';
+}
+
+function resolveCoinGraderDescriptorValueId(value = '') {
+  const token = normalizeLookupToken(value);
+  if (!token) return '';
+  for (const entry of COIN_GRADER_DESCRIPTOR_VALUE_IDS) {
+    if (entry.aliases.some(alias => token.includes(normalizeLookupToken(alias)))) {
+      return entry.id;
+    }
+  }
+  return '';
+}
+
+function resolveCoinLetterGradeDescriptorValueId(value = '') {
+  const token = normalizeLookupToken(value);
+  if (!token) return '';
+  for (const entry of COIN_LETTER_GRADE_DESCRIPTOR_VALUE_IDS) {
+    if (entry.aliases.some(alias => {
+      const normalizedAlias = normalizeLookupToken(alias);
+      if (!normalizedAlias) return false;
+      if (normalizedAlias.length === 1) {
+        return new RegExp(`(^|\\s)${normalizedAlias}(\\s|$)`).test(token);
+      }
+      return token.includes(normalizedAlias);
+    })) {
+      return entry.id;
+    }
+  }
+  return '';
+}
+
+function resolveCoinNumericGradeDescriptorValueId(value = '') {
+  const token = normalizeLookupToken(value);
+  if (!token) return '';
+  const squashed = token.replace(/\s+/g, '');
+  for (const grade of Array.from(COIN_NUMERIC_GRADE_DESCRIPTOR_VALUE_IDS.keys()).sort((a, b) => b.length - a.length)) {
+    if (grade === 'NONE') {
+      if (token.includes('NONE')) return COIN_NUMERIC_GRADE_DESCRIPTOR_VALUE_IDS.get(grade);
+      continue;
+    }
+    if (new RegExp(`(^|[^0-9])${grade}([^0-9]|$)`).test(token) || squashed.endsWith(grade)) {
+      return COIN_NUMERIC_GRADE_DESCRIPTOR_VALUE_IDS.get(grade);
+    }
+  }
+  return '';
+}
+
+function resolveUngradedCoinConditionDescriptorValueId(value = '') {
+  const token = normalizeLookupToken(value);
+  if (!token) return '';
+  for (const entry of UNGRADED_COIN_CONDITION_DESCRIPTOR_VALUE_IDS) {
+    if (entry.aliases.some(alias => {
+      const normalizedAlias = normalizeLookupToken(alias);
+      if (!normalizedAlias) return false;
+      if (normalizedAlias.length === 1) {
+        return new RegExp(`(^|\\s)${normalizedAlias}(\\s|$)`).test(token);
+      }
+      return token.includes(normalizedAlias);
+    })) {
+      return entry.id;
+    }
+  }
+  return '';
+}
+
+function looksLikeCoinListing(listingFields = {}, aspects = {}) {
+  const categoryText = normalizeLookupToken(
+    firstNonEmptyNamedField(listingFields, ['Category Name', 'eBay Category Name', 'eBay Category', 'Category', 'eBay Category Path'])
+  );
+  if (categoryText.includes('COIN')) return true;
+
+  for (const name of Object.keys(aspects || {})) {
+    if (classifyLegacyCoinAspectName(name)) return true;
+  }
+
+  return false;
+}
+
+function buildCoinConditionDescriptorPayload(listingFields = {}, aspects = {}) {
+  if (!looksLikeCoinListing(listingFields, aspects)) {
+    return null;
+  }
+
+  const graderText =
+    firstClassifiedAspectValue(aspects, 'grader') ||
+    firstAspectValue(aspects, LEGACY_COIN_ASPECT_ALIASES.grader) ||
+    firstNonEmptyNamedField(listingFields, LEGACY_COIN_ASPECT_ALIASES.grader);
+  const certificationNumber =
+    firstClassifiedAspectValue(aspects, 'certificationNumber') ||
+    firstAspectValue(aspects, LEGACY_COIN_ASPECT_ALIASES.certificationNumber) ||
+    firstNonEmptyNamedField(listingFields, LEGACY_COIN_ASPECT_ALIASES.certificationNumber);
+  const gradeText =
+    firstClassifiedAspectValue(aspects, 'grade') ||
+    firstAspectValue(aspects, LEGACY_COIN_ASPECT_ALIASES.grade) ||
+    firstNonEmptyNamedField(listingFields, LEGACY_COIN_ASPECT_ALIASES.grade);
+  const circulatedText =
+    firstClassifiedAspectValue(aspects, 'circulated') ||
+    firstAspectValue(aspects, LEGACY_COIN_ASPECT_ALIASES.circulated) ||
+    firstNonEmptyNamedField(listingFields, LEGACY_COIN_ASPECT_ALIASES.circulated);
+
+  const graderId = resolveCoinGraderDescriptorValueId(graderText);
+  const letterGradeId = resolveCoinLetterGradeDescriptorValueId(gradeText);
+  const numericGradeId = resolveCoinNumericGradeDescriptorValueId(gradeText);
+  const ungradedConditionId =
+    resolveUngradedCoinConditionDescriptorValueId(circulatedText || gradeText || graderText) ||
+    (circulatedText || gradeText || graderText ? '10' : '');
+  const hasGradedSignal = Boolean(graderText || certificationNumber || gradeText);
+
+  if (hasGradedSignal && graderId && letterGradeId && numericGradeId) {
+    const descriptors = [
+      { name: COIN_DESCRIPTOR_NAME_GRADER, values: [graderId] },
+      { name: COIN_DESCRIPTOR_NAME_LETTER_GRADE, values: [letterGradeId] },
+      { name: COIN_DESCRIPTOR_NAME_NUMERIC_GRADE, values: [numericGradeId] }
+    ];
+    const certText = normalizeText(certificationNumber).slice(0, 30);
+    if (certText) {
+      descriptors.push({
+        name: COIN_DESCRIPTOR_NAME_CERTIFICATION_NUMBER,
+        additionalInfo: certText
+      });
+    }
+    return {
+      conditionId: COIN_GRADED_CONDITION_ID,
+      descriptors
+    };
+  }
+
+  if (ungradedConditionId) {
+    return {
+      conditionId: COIN_UNGRADED_CONDITION_ID,
+      descriptors: [
+        {
+          name: COIN_DESCRIPTOR_NAME_UNGRADED_CONDITION,
+          values: [ungradedConditionId]
+        }
+      ]
+    };
+  }
+
+  return null;
+}
+
+function hasClassifiedCoinAspects(aspects = {}) {
+  return Object.keys(aspects || {}).some(name => Boolean(classifyLegacyCoinAspectName(name)));
 }
 
 function buildPackageWeightAndSize(fields = {}) {
@@ -506,6 +848,54 @@ function buildTradingItemSpecificsXml(aspects = {}) {
   return body ? `<ItemSpecifics>${body}</ItemSpecifics>` : '';
 }
 
+function buildTradingConditionDescriptorsXml(descriptors = []) {
+  const list = Array.isArray(descriptors) ? descriptors : [];
+  let body = '';
+  for (const descriptor of list) {
+    const name = normalizeText(descriptor?.name);
+    const values = Array.isArray(descriptor?.values)
+      ? descriptor.values.map(value => normalizeText(value)).filter(Boolean)
+      : [];
+    const additionalInfo = normalizeText(descriptor?.additionalInfo);
+    if (!name) continue;
+    if (values.length === 0 && !additionalInfo) continue;
+    body += '<ConditionDescriptor>';
+    if (additionalInfo) {
+      body += `<AdditionalInfo>${escapeXml(additionalInfo)}</AdditionalInfo>`;
+    }
+    body += `<Name>${escapeXml(name)}</Name>`;
+    for (const value of values) {
+      body += `<Value>${escapeXml(value)}</Value>`;
+    }
+    body += '</ConditionDescriptor>';
+  }
+  return body ? `<ConditionDescriptors>${body}</ConditionDescriptors>` : '';
+}
+
+function buildTradingGetItemXml(itemId = '') {
+  const normalizedItemId = normalizeText(itemId);
+  if (!normalizedItemId) {
+    throw new Error('Missing Item ID. Trading API GetItem requires Item ID.');
+  }
+  return (
+    `<?xml version="1.0" encoding="utf-8"?>` +
+    `<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
+    `<ErrorLanguage>en_US</ErrorLanguage>` +
+    `<WarningLevel>High</WarningLevel>` +
+    `<ItemID>${escapeXml(normalizedItemId)}</ItemID>` +
+    `<IncludeItemSpecifics>true</IncludeItemSpecifics>` +
+    `</GetItemRequest>`
+  );
+}
+
+function buildDeletedFieldsXml(fields = []) {
+  return (Array.isArray(fields) ? fields : [])
+    .map(value => normalizeText(value))
+    .filter(Boolean)
+    .map(value => `<DeletedField>${escapeXml(value)}</DeletedField>`)
+    .join('');
+}
+
 function buildTradingPictureDetailsXml(imageUrls = []) {
   const urls = (Array.isArray(imageUrls) ? imageUrls : [])
     .map(value => normalizeText(value))
@@ -571,6 +961,45 @@ function extractXmlTagValue(xml = '', tagName = '') {
   return normalizeText(match?.[1] || '');
 }
 
+function extractXmlTagValues(xml = '', tagName = '') {
+  const source = String(xml || '');
+  const tag = normalizeText(tagName);
+  if (!source || !tag) return [];
+  const values = [];
+  const regex = new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${tag}>`, 'gi');
+  let match = regex.exec(source);
+  while (match) {
+    const value = normalizeText(match[1]);
+    if (value) values.push(value);
+    match = regex.exec(source);
+  }
+  return values;
+}
+
+function decodeXmlText(value = '') {
+  return normalizeText(value)
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, '>')
+    .replace(/&lt;/g, '<')
+    .replace(/&amp;/g, '&');
+}
+
+function extractTradingItemSpecificsAspects(xml = '') {
+  const source = String(xml || '');
+  const itemSpecifics = source.match(/<ItemSpecifics(?:\s[^>]*)?>[\s\S]*?<\/ItemSpecifics>/i)?.[0] || '';
+  if (!itemSpecifics) return {};
+  const aspects = {};
+  const blocks = itemSpecifics.match(/<NameValueList(?:\s[^>]*)?>[\s\S]*?<\/NameValueList>/gi) || [];
+  for (const block of blocks) {
+    const name = decodeXmlText(extractXmlTagValue(block, 'Name'));
+    const values = extractXmlTagValues(block, 'Value').map(value => decodeXmlText(value)).filter(Boolean);
+    if (!name || values.length === 0) continue;
+    mergeAspect(aspects, name, values);
+  }
+  return aspects;
+}
+
 function extractXmlErrorMessages(xml = '') {
   const source = String(xml || '');
   if (!source) return [];
@@ -601,6 +1030,61 @@ function hasCategoryInvalidError(messages = []) {
 function hasConditionNotApplicableError(messages = []) {
   const list = Array.isArray(messages) ? messages : [];
   return list.some(message => normalizeText(message).includes('21917121'));
+}
+
+function hasDeprecatedCoinAspectError(messages = []) {
+  const list = Array.isArray(messages) ? messages : [];
+  return list.some(message => normalizeText(message).includes('21920370'));
+}
+
+function buildConditionGradingDebug(prepared = {}) {
+  const conditionId = normalizeText(prepared?.payload?.conditionId || '');
+  const descriptors = Array.isArray(prepared?.payload?.conditionDescriptors)
+    ? prepared.payload.conditionDescriptors
+    : [];
+  const aspects = prepared?.payload?.product?.aspects || {};
+  const aspectNames = Object.keys(aspects || {});
+  const legacyAspectNames = aspectNames.filter(name => classifyLegacyCoinAspectName(name));
+  const deleteItemSpecifics = prepared?.payload?.deleteItemSpecifics === true ? 'true' : 'false';
+  return (
+    `condition_debug=conditionId='${conditionId || 'n/a'}' ` +
+    `descriptors='${descriptors.length}' ` +
+    `deleteItemSpecifics='${deleteItemSpecifics}' ` +
+    `legacyAspectsRemaining='${legacyAspectNames.join(', ') || 'none'}' ` +
+    `aspectNames='${aspectNames.slice(0, 20).join(', ') || 'none'}'`
+  );
+}
+
+function appendConditionDebugForCoinError(message = '', prepared = {}) {
+  const text = normalizeText(message);
+  if (!text.includes('21920370')) return text;
+  return `${buildConditionGradingDebug(prepared)} ${text}`;
+}
+
+function clonePreparedWithConditionGrading(prepared = {}, conditionPayload = null, sourceTag = '') {
+  if (!conditionPayload?.conditionId || !Array.isArray(conditionPayload?.descriptors) || conditionPayload.descriptors.length === 0) {
+    return null;
+  }
+  const product = {
+    ...(prepared?.payload?.product || {})
+  };
+  const existingAspects = product.aspects && typeof product.aspects === 'object' ? product.aspects : {};
+  product.aspects = omitClassifiedCoinAspects(existingAspects);
+  const nextPayload = {
+    ...(prepared?.payload || {}),
+    product,
+    conditionId: conditionPayload.conditionId,
+    conditionDescriptors: conditionPayload.descriptors,
+    conditionGradingSource: sourceTag || 'mapped'
+  };
+  delete nextPayload.conditionDescription;
+  if (Object.keys(product.aspects || {}).length === 0) {
+    nextPayload.deleteItemSpecifics = true;
+  }
+  return {
+    ...prepared,
+    payload: nextPayload
+  };
 }
 
 function buildTradingSiteFallbackOrder(initialSiteId = '') {
@@ -700,11 +1184,18 @@ class Phase5EbayPublishService {
     const title = normalizeText(getFieldValueByName(listingFields, LISTING_PUBLISH_TITLE_FIELD));
     const description = normalizeText(getFieldValueByName(listingFields, LISTING_PUBLISH_DESCRIPTION_FIELD));
     const condition = deriveInventoryConditionEnum(listingFields);
+    const conditionId = deriveInventoryConditionId(listingFields);
     const conditionDescription = firstNonEmptyField(listingFields, ['Condition Description', 'conditionDescription']);
     const quantity = parseIntegerValue(firstNonEmptyField(listingFields, ['Quantity', 'AvailableQuantity']), 0);
     const locale = firstNonEmptyField(listingFields, ['Locale', 'locale']) || 'en_US';
     const packageWeightAndSize = buildPackageWeightAndSize(listingFields);
-    const aspects = mergePackageItemSpecifics(buildAspectsFromListing(listingFields), packageWeightAndSize);
+    const rawAspects = mergePackageItemSpecifics(buildAspectsFromListing(listingFields), packageWeightAndSize);
+    const coinConditionDescriptorPayload = buildCoinConditionDescriptorPayload(listingFields, rawAspects);
+    const shouldStripLegacyCoinAspects = coinConditionDescriptorPayload || hasClassifiedCoinAspects(rawAspects);
+    const aspects = shouldStripLegacyCoinAspects
+      ? omitClassifiedCoinAspects(rawAspects)
+      : rawAspects;
+    const deleteItemSpecifics = shouldStripLegacyCoinAspects && Object.keys(aspects).length === 0;
     const imageUrls = parseImageUrlsFromListing(listingFields);
 
     const payload = {
@@ -713,7 +1204,15 @@ class Phase5EbayPublishService {
     if (condition) {
       payload.condition = condition;
     }
-    if (conditionDescription) {
+    if (coinConditionDescriptorPayload?.conditionId) {
+      payload.conditionId = coinConditionDescriptorPayload.conditionId;
+    } else if (Number.isFinite(conditionId) && conditionId > 0) {
+      payload.conditionId = conditionId;
+    }
+    if (coinConditionDescriptorPayload?.descriptors?.length > 0) {
+      payload.conditionDescriptors = coinConditionDescriptorPayload.descriptors;
+    }
+    if (conditionDescription && !payload.conditionDescriptors) {
       payload.conditionDescription = conditionDescription;
     }
     if (Number.isFinite(quantity)) {
@@ -725,6 +1224,9 @@ class Phase5EbayPublishService {
     }
     if (packageWeightAndSize) {
       payload.packageWeightAndSize = packageWeightAndSize;
+    }
+    if (deleteItemSpecifics) {
+      payload.deleteItemSpecifics = true;
     }
 
     const product = {};
@@ -761,13 +1263,16 @@ class Phase5EbayPublishService {
     const sku = normalizeText(prepared?.sku);
     const title = normalizeText(prepared?.payload?.product?.title);
     const description = normalizeText(prepared?.payload?.product?.description);
+    const conditionId = parseIntegerValue(prepared?.payload?.conditionId, 0);
+    const conditionDescriptorsXml = buildTradingConditionDescriptorsXml(prepared?.payload?.conditionDescriptors || []);
     const itemSpecificsXml = buildTradingItemSpecificsXml(prepared?.payload?.product?.aspects || {});
+    const deletedFieldsXml = buildDeletedFieldsXml(prepared?.payload?.deleteItemSpecifics === true ? ['Item.ItemSpecifics'] : []);
     const pictureDetailsXml = buildTradingPictureDetailsXml(prepared?.payload?.product?.imageUrls || []);
     const shippingPackageDetailsXml = buildTradingShippingPackageDetailsXml(prepared?.payload?.packageWeightAndSize || null);
     if (!itemId) {
       throw new Error('Missing Item ID. Trading API revise requires Item ID for existing listing update.');
     }
-    if (!title && !description && !itemSpecificsXml && !pictureDetailsXml && !shippingPackageDetailsXml) {
+    if (!title && !description && !conditionDescriptorsXml && !itemSpecificsXml && !pictureDetailsXml && !shippingPackageDetailsXml) {
       throw new Error(
         `Missing publish content for SKU '${sku || 'unknown'}'. Populate title, description, item specifics, images, and/or package details before publish.`
       );
@@ -776,6 +1281,8 @@ class Phase5EbayPublishService {
     const itemLines = [`<ItemID>${escapeXml(itemId)}</ItemID>`];
     if (title) itemLines.push(`<Title>${escapeXml(title.slice(0, 80))}</Title>`);
     if (description) itemLines.push(`<Description>${escapeXml(description)}</Description>`);
+    if (conditionDescriptorsXml) itemLines.push(conditionDescriptorsXml);
+    if (conditionId) itemLines.push(`<ConditionID>${conditionId}</ConditionID>`);
     if (itemSpecificsXml) itemLines.push(itemSpecificsXml);
     if (pictureDetailsXml) itemLines.push(pictureDetailsXml);
     if (shippingPackageDetailsXml) itemLines.push(shippingPackageDetailsXml);
@@ -785,6 +1292,7 @@ class Phase5EbayPublishService {
       `<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
       `<ErrorLanguage>en_US</ErrorLanguage>` +
       `<WarningLevel>High</WarningLevel>` +
+      deletedFieldsXml +
       `<Item>${itemLines.join('')}</Item>` +
       `</ReviseFixedPriceItemRequest>`
     );
@@ -795,13 +1303,16 @@ class Phase5EbayPublishService {
     const sku = normalizeText(prepared?.sku);
     const title = normalizeText(prepared?.payload?.product?.title);
     const description = normalizeText(prepared?.payload?.product?.description);
+    const conditionId = parseIntegerValue(prepared?.payload?.conditionId, 0);
+    const conditionDescriptorsXml = buildTradingConditionDescriptorsXml(prepared?.payload?.conditionDescriptors || []);
     const itemSpecificsXml = buildTradingItemSpecificsXml(prepared?.payload?.product?.aspects || {});
+    const deletedFieldsXml = buildDeletedFieldsXml(prepared?.payload?.deleteItemSpecifics === true ? ['Item.ItemSpecifics'] : []);
     const pictureDetailsXml = buildTradingPictureDetailsXml(prepared?.payload?.product?.imageUrls || []);
     const shippingPackageDetailsXml = buildTradingShippingPackageDetailsXml(prepared?.payload?.packageWeightAndSize || null);
     if (!itemId) {
       throw new Error('Missing Item ID. Trading API revise requires Item ID for existing listing update.');
     }
-    if (!title && !description && !itemSpecificsXml && !pictureDetailsXml && !shippingPackageDetailsXml) {
+    if (!title && !description && !conditionDescriptorsXml && !itemSpecificsXml && !pictureDetailsXml && !shippingPackageDetailsXml) {
       throw new Error(
         `Missing publish content for SKU '${sku || 'unknown'}'. Populate title, description, item specifics, images, and/or package details before publish.`
       );
@@ -810,6 +1321,8 @@ class Phase5EbayPublishService {
     const itemLines = [`<ItemID>${escapeXml(itemId)}</ItemID>`];
     if (title) itemLines.push(`<Title>${escapeXml(title.slice(0, 80))}</Title>`);
     if (description) itemLines.push(`<Description>${escapeXml(description)}</Description>`);
+    if (conditionDescriptorsXml) itemLines.push(conditionDescriptorsXml);
+    if (conditionId) itemLines.push(`<ConditionID>${conditionId}</ConditionID>`);
     if (itemSpecificsXml) itemLines.push(itemSpecificsXml);
     if (pictureDetailsXml) itemLines.push(pictureDetailsXml);
     if (shippingPackageDetailsXml) itemLines.push(shippingPackageDetailsXml);
@@ -819,6 +1332,7 @@ class Phase5EbayPublishService {
       `<ReviseItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">` +
       `<ErrorLanguage>en_US</ErrorLanguage>` +
       `<WarningLevel>High</WarningLevel>` +
+      deletedFieldsXml +
       `<Item>${itemLines.join('')}</Item>` +
       `</ReviseItemRequest>`
     );
@@ -1070,6 +1584,81 @@ class Phase5EbayPublishService {
           baseDelayMs: this.baseDelayMs
         }
       );
+    const executeTradingRequest = async (requestSiteId, callName, requestXml) => {
+      let response;
+      try {
+        response = await postTradingRevise(finalToken, requestSiteId, callName, requestXml);
+      } catch (error) {
+        const status = Number(error?.response?.status || 0);
+        if (status !== 401 || !canRefresh) throw error;
+        const refreshed = await this.requestUserAccessTokenFromRefreshToken();
+        finalToken = refreshed.accessToken;
+        response = await postTradingRevise(finalToken, requestSiteId, callName, requestXml);
+      }
+
+      let responseXml = String(response?.data || '');
+      let ack = extractXmlTagValue(responseXml, 'Ack');
+      let messages = extractXmlErrorMessages(responseXml);
+      if (!['Success', 'Warning'].includes(ack) && hasInvalidIafTokenError(messages) && canRefresh) {
+        const refreshed = await this.requestUserAccessTokenFromRefreshToken();
+        finalToken = refreshed.accessToken;
+        response = await postTradingRevise(finalToken, requestSiteId, callName, requestXml);
+        responseXml = String(response?.data || '');
+        ack = extractXmlTagValue(responseXml, 'Ack');
+        messages = extractXmlErrorMessages(responseXml);
+      }
+
+      return { response, responseXml, ack, messages };
+    };
+    const buildCurrentListingConditionGradingRetry = async () => {
+      const result = await executeTradingRequest(
+        finalSiteId,
+        'GetItem',
+        buildTradingGetItemXml(prepared.itemId || '')
+      );
+      if (!['Success', 'Warning'].includes(result.ack)) {
+        const detail = result.messages.join(' | ') || `Ack=${result.ack || 'Unknown'}`;
+        throw new Error(`eBay GetItem failed while resolving condition grading for SKU '${prepared.sku}': ${detail}`);
+      }
+      const currentAspects = extractTradingItemSpecificsAspects(result.responseXml);
+      const conditionPayload = buildCoinConditionDescriptorPayload({}, currentAspects);
+      return clonePreparedWithConditionGrading(
+        prepared,
+        conditionPayload,
+        `condition_grading_retry_from_getitem aspects='${Object.keys(currentAspects).join(', ') || 'none'}'`
+      );
+    };
+    const retryDeprecatedCoinConditionGrading = async (sourceMessages = []) => {
+      const retryPrepared = await buildCurrentListingConditionGradingRetry();
+      if (!retryPrepared) {
+        const detail = sourceMessages.join(' | ') || 'eBay returned deprecated coin grading error but GetItem did not include mappable grading specifics.';
+        throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${appendConditionDebugForCoinError(detail, prepared)}`);
+      }
+      const retryXml = this.buildReviseFixedPriceItemXml(retryPrepared);
+      const retryResponse = await postTradingRevise(finalToken, finalSiteId, 'ReviseFixedPriceItem', retryXml);
+      const retryResponseXml = String(retryResponse?.data || '');
+      const retryAck = extractXmlTagValue(retryResponseXml, 'Ack');
+      const retryMessages = extractXmlErrorMessages(retryResponseXml);
+      if (!['Success', 'Warning'].includes(retryAck)) {
+        const detail = retryMessages.join(' | ') || `Ack=${retryAck || 'Unknown'}`;
+        throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${appendConditionDebugForCoinError(detail, retryPrepared)}`);
+      }
+      return {
+        success: true,
+        dryRun: false,
+        operation: 'revise_fixed_price_item',
+        itemId: retryPrepared.itemId || '',
+        sku: retryPrepared.sku,
+        response: {
+          ack: retryAck,
+          messages: [
+            ...retryMessages,
+            retryPrepared.payload.conditionGradingSource
+          ].filter(Boolean),
+          raw: retryResponseXml
+        }
+      };
+    };
 
     let response;
     try {
@@ -1103,7 +1692,7 @@ class Phase5EbayPublishService {
       const retriedMessages = extractXmlErrorMessages(retriedXml);
       if (!['Success', 'Warning'].includes(retriedAck)) {
         const detail = retriedMessages.join(' | ') || `Ack=${retriedAck || 'Unknown'}`;
-        throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${detail}`);
+        throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${appendConditionDebugForCoinError(detail, prepared)}`);
       }
       return {
         success: true,
@@ -1117,6 +1706,9 @@ class Phase5EbayPublishService {
           raw: retriedXml
         }
       };
+    }
+    if (!isSuccessAck && hasDeprecatedCoinAspectError(xmlMessages)) {
+      return await retryDeprecatedCoinConditionGrading(xmlMessages);
     }
     if (!isSuccessAck && (hasCategoryInvalidError(xmlMessages) || hasConditionNotApplicableError(xmlMessages))) {
       const fallbackAttempts = [];
@@ -1224,11 +1816,11 @@ class Phase5EbayPublishService {
           lastDetail = formatEbayError(attemptError) || lastDetail;
         }
       }
-      throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${lastDetail}`);
+      throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${appendConditionDebugForCoinError(lastDetail, prepared)}`);
     }
     if (!isSuccessAck) {
       const detail = xmlMessages.join(' | ') || `Ack=${ack || 'Unknown'}`;
-      throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${detail}`);
+      throw new Error(`eBay trading revise failed for SKU '${prepared.sku}': ${appendConditionDebugForCoinError(detail, prepared)}`);
     }
 
     return {

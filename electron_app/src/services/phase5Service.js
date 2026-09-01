@@ -20,6 +20,58 @@ function emitProgress(progressCallback, payload = {}) {
   }
 }
 
+function compactText(value = '', maxLength = 220) {
+  const text = normalizeText(value).replace(/\s+/g, ' ').trim();
+  if (!text || text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 3)).trim()}...`;
+}
+
+function formatErrorDetail(error) {
+  const detail =
+    error?.response?.data?.error?.message ||
+    error?.response?.data?.error ||
+    error?.message ||
+    String(error);
+  return compactText(detail, 500);
+}
+
+function formatPublishFailureDetail(result = {}) {
+  const responseMessages = Array.isArray(result?.response?.messages)
+    ? result.response.messages.map(value => normalizeText(value)).filter(Boolean)
+    : [];
+  const detail =
+    responseMessages.join(' | ') ||
+    normalizeText(result?.response?.error?.message || '') ||
+    normalizeText(result?.response?.error || '') ||
+    normalizeText(result?.error?.message || '') ||
+    normalizeText(result?.error || '') ||
+    normalizeText(result?.message || '') ||
+    normalizeText(result?.reason || '');
+  return compactText(detail || 'unknown_failure', 500);
+}
+
+function addPhase5Error(summary, message = '', maxErrors = 200) {
+  const text = compactText(message, 800);
+  if (!text) return '';
+  summary.lastError = text;
+  if (!Array.isArray(summary.recentErrors)) summary.recentErrors = [];
+  summary.recentErrors.push(text);
+  summary.recentErrors = summary.recentErrors.slice(-10);
+  if (Array.isArray(summary.errors) && summary.errors.length < maxErrors) {
+    summary.errors.push(text);
+  }
+  return text;
+}
+
+function buildPublishProgressMessage(summary, index, total, latestError = '') {
+  const base =
+    `Phase 5: Publishing ${index}/${total} ` +
+    `(success=${summary.publishedSuccess}, failed=${summary.publishedFailed}, ` +
+    `logged=${summary.loggedToSheets}, removed=${summary.removedFromQueue})`;
+  const reason = compactText(latestError || summary.lastError || '', 260);
+  return reason ? `${base} latest_error=${reason}` : base;
+}
+
 function parseIdentitySet(values = []) {
   return new Set((Array.isArray(values) ? values : []).map(value => normalizeText(value)).filter(Boolean));
 }
@@ -433,6 +485,8 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     batchApprovedValue: '',
     approvedBatchCount: 0,
     totalBatchCount: 0,
+    lastError: '',
+    recentErrors: [],
     errors: [],
     sampleSkips: [],
     samplePublished: [],
@@ -498,6 +552,16 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     throw new Error(
       'Phase 5 publish log is required. Enable phase5SheetsLogEnabled and set phase5SheetsLogSpreadsheetId before publishing.'
     );
+  }
+
+  if (!dryRun) {
+    emitProgress(progressCallback, {
+      stage: 'phase5_auth',
+      percent: 2,
+      counts: summary,
+      message: `Phase 5: Validating eBay ${summary.ebayEnvironment} credentials before publish...`
+    });
+    await publishService.testCredentials();
   }
 
   const schema = await approvalService.resolveTableSchema(schemaService, { requireApprovalField, requireEligibilityField });
@@ -647,21 +711,17 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
             touchedBatchIdsForCleanup.add(batchId);
           }
         } catch (error) {
-          const detail =
-            error?.response?.data?.error?.message ||
-            error?.response?.data?.error ||
-            error?.message ||
-            String(error);
-          summary.errors.push(`delete_reintroduced_failed record='${recordId}' identity='${identity}': ${detail}`);
+          addPhase5Error(
+            summary,
+            `delete_reintroduced_failed record='${recordId}' identity='${identity}': ${formatErrorDetail(error)}`
+          );
         }
       }
       emitProgress(progressCallback, {
         stage: 'phase5_publish',
         percent: Math.min(95, 25 + Math.floor(((i + 1) / Math.max(1, governanceEligible.length)) * 70)),
         counts: summary,
-        message:
-          `Phase 5: Publishing ${i + 1}/${governanceEligible.length} ` +
-          `(success=${summary.publishedSuccess}, failed=${summary.publishedFailed}, logged=${summary.loggedToSheets}, removed=${summary.removedFromQueue})`
+        message: buildPublishProgressMessage(summary, i + 1, governanceEligible.length)
       });
       continue;
     }
@@ -676,9 +736,7 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
         stage: 'phase5_publish',
         percent: Math.min(95, 25 + Math.floor(((i + 1) / Math.max(1, governanceEligible.length)) * 70)),
         counts: summary,
-        message:
-          `Phase 5: Publishing ${i + 1}/${governanceEligible.length} ` +
-          `(success=${summary.publishedSuccess}, failed=${summary.publishedFailed}, logged=${summary.loggedToSheets}, removed=${summary.removedFromQueue})`
+        message: buildPublishProgressMessage(summary, i + 1, governanceEligible.length)
       });
       continue;
     }
@@ -725,7 +783,10 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
           }
         } else {
           summary.publishedFailed += 1;
-          summary.errors.push(`publish_failed record='${recordId}' unknown_failure`);
+          addPhase5Error(
+            summary,
+            `publish_failed record='${recordId}' sku='${sku}': ${formatPublishFailureDetail(publishResult)}`
+          );
         }
       }
 
@@ -759,12 +820,7 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
 
         } catch (appendError) {
           summary.loggingPending += 1;
-          const appendDetail =
-            appendError?.response?.data?.error?.message ||
-            appendError?.response?.data?.error ||
-            appendError?.message ||
-            String(appendError);
-          summary.errors.push(`publish_log_failed record='${recordId}': ${appendDetail}`);
+          addPhase5Error(summary, `publish_log_failed record='${recordId}': ${formatErrorDetail(appendError)}`);
 
           if (schema.publishStatusField) {
             await patchListingRecordFields(airtableService, schema.tableId, recordId, {
@@ -784,21 +840,14 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
       }
     } catch (error) {
       summary.publishedFailed += 1;
-      const detail =
-        error?.response?.data?.error?.message ||
-        error?.response?.data?.error ||
-        error?.message ||
-        String(error);
-      summary.errors.push(`publish_failed record='${recordId}': ${detail}`);
+      addPhase5Error(summary, `publish_failed record='${recordId}': ${formatErrorDetail(error)}`);
     }
 
     emitProgress(progressCallback, {
       stage: 'phase5_publish',
       percent: Math.min(95, 25 + Math.floor(((i + 1) / Math.max(1, governanceEligible.length)) * 70)),
       counts: summary,
-      message:
-        `Phase 5: Publishing ${i + 1}/${governanceEligible.length} ` +
-        `(success=${summary.publishedSuccess}, failed=${summary.publishedFailed}, logged=${summary.loggedToSheets}, removed=${summary.removedFromQueue})`
+      message: buildPublishProgressMessage(summary, i + 1, governanceEligible.length)
     });
   }
 
@@ -825,7 +874,9 @@ async function runPhase5PublishApproved(options = {}, progressCallback = () => {
     summary.batchesDeleted = cleanup.deleted;
     summary.batchesRetainedWithRemainingItems = cleanup.retained;
     if (cleanup.errors.length > 0) {
-      summary.errors.push(...cleanup.errors);
+      for (const cleanupError of cleanup.errors) {
+        addPhase5Error(summary, cleanupError);
+      }
     }
   }
 

@@ -44,10 +44,12 @@ function resolveDefaultCachePath() {
 
 const CACHE_PATH = resolveDefaultCachePath();
 const DEFAULT_DRIVE_SCOPE = process.env.GOOGLE_DRIVE_SCOPE || 'https://www.googleapis.com/auth/drive.file';
+const CACHE_FILE_NAME = 'image-upload-cache.json';
 
 let cache = null;
 let driveClientPromise = null;
 let loggedConfigErrorForRun = false;
+let cachePathWarningLogged = false;
 let runtimeConfig = {
   driveFolderId: '',
   authClient: null,
@@ -64,6 +66,65 @@ let runStats = {
 
 function normalizeText(value) {
   return String(value || '').trim();
+}
+
+function logCachePathWarning(message) {
+  if (cachePathWarningLogged) return;
+  cachePathWarningLogged = true;
+  console.error(`[WorkOrders][Drive] ${message}`);
+}
+
+function resolveCacheFilePath() {
+  const configuredPath = normalizeText(CACHE_PATH);
+  if (!configuredPath) {
+    return {
+      usable: false,
+      path: '',
+      reason: 'Image upload cache path is empty.'
+    };
+  }
+
+  try {
+    if (fs.existsSync(configuredPath)) {
+      const stat = fs.statSync(configuredPath);
+      if (stat.isDirectory()) {
+        const nestedPath = path.join(configuredPath, CACHE_FILE_NAME);
+        return {
+          usable: true,
+          path: nestedPath,
+          reason: `Image upload cache path resolved to a directory; using ${nestedPath} instead.`
+        };
+      }
+    } else if (!path.extname(configuredPath)) {
+      const nestedPath = path.join(configuredPath, CACHE_FILE_NAME);
+      return {
+        usable: true,
+        path: nestedPath,
+        reason: ''
+      };
+    }
+  } catch (error) {
+    return {
+      usable: false,
+      path: '',
+      reason: `Unable to inspect image upload cache path "${configuredPath}": ${error.message}`
+    };
+  }
+
+  return {
+    usable: true,
+    path: configuredPath,
+    reason: ''
+  };
+}
+
+function isReadableFilePath(filePath) {
+  if (!filePath) return false;
+  try {
+    return fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+  } catch (_) {
+    return false;
+  }
 }
 
 function resolveFallbackMode() {
@@ -87,6 +148,21 @@ function getDriveConfigStatus() {
   const cfg = resolveConfig();
   if (!cfg.driveFolderId) {
     return { ok: false, message: 'Missing GOOGLE_DRIVE_IMAGE_FOLDER_ID' };
+  }
+  if (cfg.serviceAccountKeyPath) {
+    try {
+      if (fs.existsSync(cfg.serviceAccountKeyPath) && fs.statSync(cfg.serviceAccountKeyPath).isDirectory()) {
+        return {
+          ok: false,
+          message: `GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_PATH points to a directory, not a file: ${cfg.serviceAccountKeyPath}`
+        };
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        message: `Unable to inspect GOOGLE_DRIVE_SERVICE_ACCOUNT_KEY_PATH: ${error.message}`
+      };
+    }
   }
   if (!cfg.authClient && !cfg.serviceAccountKeyPath) {
     return { ok: false, message: 'Missing Google Drive auth client for Work Orders image upload' };
@@ -113,26 +189,45 @@ function setDriveImageRuntimeConfig(nextConfig = {}) {
 }
 
 function ensureCacheDir() {
-  const dir = path.dirname(CACHE_PATH);
+  const cacheState = resolveCacheFilePath();
+  if (!cacheState.usable) {
+    logCachePathWarning(cacheState.reason);
+    return null;
+  }
+  if (cacheState.reason) {
+    logCachePathWarning(cacheState.reason);
+  }
+  const dir = path.dirname(cacheState.path);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  return cacheState.path;
 }
 
 function loadCache() {
   if (cache) return cache;
-  ensureCacheDir();
-  if (!fs.existsSync(CACHE_PATH)) {
+  const cacheFilePath = ensureCacheDir();
+  if (!cacheFilePath) {
     cache = {};
-    fs.writeFileSync(CACHE_PATH, JSON.stringify(cache, null, 2), 'utf8');
     return cache;
   }
-  const raw = fs.readFileSync(CACHE_PATH, 'utf8');
+  if (!fs.existsSync(cacheFilePath)) {
+    cache = {};
+    fs.writeFileSync(cacheFilePath, JSON.stringify(cache, null, 2), 'utf8');
+    return cache;
+  }
+  if (!isReadableFilePath(cacheFilePath)) {
+    logCachePathWarning(`Image upload cache path is not a readable file: ${cacheFilePath}`);
+    cache = {};
+    return cache;
+  }
+  const raw = fs.readFileSync(cacheFilePath, 'utf8');
   cache = raw ? JSON.parse(raw) : {};
   return cache;
 }
 
 function saveCache() {
-  ensureCacheDir();
-  fs.writeFileSync(CACHE_PATH, JSON.stringify(cache || {}, null, 2), 'utf8');
+  const cacheFilePath = ensureCacheDir();
+  if (!cacheFilePath) return;
+  fs.writeFileSync(cacheFilePath, JSON.stringify(cache || {}, null, 2), 'utf8');
 }
 
 function normalizeLocalPath(localPath) {

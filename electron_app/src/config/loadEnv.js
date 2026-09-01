@@ -4,6 +4,14 @@ const dotenv = require('dotenv');
 
 let loaded = false;
 
+function isReadableFile(filePath) {
+  try {
+    return fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+  } catch (_) {
+    return false;
+  }
+}
+
 function getElectronApp() {
   try {
     return require('electron')?.app || null;
@@ -53,6 +61,12 @@ function loadEnv() {
     if (seen.has(envPath)) continue;
     seen.add(envPath);
     if (!fs.existsSync(envPath)) continue;
+    if (!isReadableFile(envPath)) {
+      if (process.env.DEBUG_DOTENV === 'true') {
+        console.warn(`Skipping environment configuration because it is not a file: ${envPath}`);
+      }
+      continue;
+    }
     dotenv.config({
       path: envPath,
       override: false,
