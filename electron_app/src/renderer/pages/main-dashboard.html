@@ -228,7 +228,7 @@
   <div class="container">
     <header class="hero">
       <h1 class="hero-title">Seymour Auto Dashboard</h1>
-      <p class="hero-subtitle">Select a workspace to manage listing enrichment, title optimization, or reporting workflows.</p>
+      <p class="hero-subtitle">Select a workspace to manage inventory sync operations or reporting workflows.</p>
     </header>
 
     <section class="workspace-grid">
@@ -252,15 +252,6 @@
         <div class="workspace-cta">Open workspace</div>
       </button>
 
-      <button class="workspace-card" onclick="goToTitleOptimization()">
-        <div class="card-top">
-          <span class="card-badge">Configuration</span>
-          <span class="card-dot"></span>
-        </div>
-        <h2 class="workspace-title">Title Optimization</h2>
-        <p class="workspace-description">Map approved listing sources and configure the rules that power accurate, optimized eBay titles.</p>
-        <div class="workspace-cta">Open workspace</div>
-      </button>
     </section>
 
     <footer class="footer">
@@ -279,10 +270,6 @@
 
     function goToReporting() {
       window.location.href = 'milestone11/index.html';
-    }
-
-    function goToTitleOptimization() {
-      window.location.href = 'title-optimization/source-fields.html';
     }
 
     function openSettings() {
