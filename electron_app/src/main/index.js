@@ -13,7 +13,9 @@ const {
   saveReportingConfig,
   getReportingConfig,
   saveInventoryConfig,
-  getInventoryConfig
+  getInventoryConfig,
+  saveTitleOptimizationSourceFields,
+  getTitleOptimizationSourceFields
 } = require('../config/configStore');
 
 const { initDb, initDbWindowsAuth } = require('../services/db');
@@ -73,6 +75,9 @@ const {
 } = require('../services/ebayListingsScheduleService');
 const ClickUpService = require('../services/clickupService');
 const AirtableService = require('../services/airtableService');
+const AirtableSchemaService = require('../services/airtableSchemaService');
+const { createTitleOptimizationSourceFieldsRepository } = require('../services/titleOptimizationSourceFieldsRepository');
+const { registerTitleOptimizationSourceFieldsIpc } = require('./titleOptimizationSourceFieldsIpc');
 const {
   AUDIT_BASE_ID: QUICKBOOKS_AUDIT_BASE_ID,
   getProcessingBreakdownForRun,
@@ -1757,6 +1762,27 @@ function loadDashboard() {
 /* ---------------------------
    IPC HANDLERS
 ---------------------------- */
+const titleOptimizationSourceFieldsRepository = createTitleOptimizationSourceFieldsRepository({
+  getStored: getTitleOptimizationSourceFields,
+  setStored: saveTitleOptimizationSourceFields,
+  getCredentials: () => {
+    const stored = getInventoryConfig('phase2Config') || {};
+    return {
+      token: String(stored.airtableToken || process.env.AIRTABLE_TOKEN || '').trim(),
+      baseId: String(stored.airtableBaseId || process.env.AIRTABLE_BASE_ID || '').trim()
+    };
+  },
+  listTables: async ({ token, baseId, maxAttempts }) => {
+    const schemaService = new AirtableSchemaService({ token, baseId });
+    return schemaService.listTables({ maxAttempts });
+  },
+  getActor: async () => {
+    const user = await oauth2Service.getUserInfo('inventory');
+    return String(user?.email || user?.name || 'system').trim() || 'system';
+  }
+});
+registerTitleOptimizationSourceFieldsIpc(ipcMain, titleOptimizationSourceFieldsRepository);
+
 ipcMain.handle('save-db-config', async (_, config) => {
   try {
     saveDbConfig(config);

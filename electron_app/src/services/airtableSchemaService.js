@@ -32,6 +32,7 @@ class AirtableSchemaService {
   }
 
   async request(method, path, options = {}) {
+    const maxAttempts = Math.max(1, Number(options.maxAttempts) || 6);
     return retryWithBackoff(
       async () => {
         await this.throttle();
@@ -44,7 +45,7 @@ class AirtableSchemaService {
         return response.data;
       },
       {
-        maxAttempts: 6,
+        maxAttempts,
         baseDelayMs: 500,
         onRetry: ({ attempt, delayMs, error }) => {
           const status = error?.response?.status;
@@ -56,8 +57,8 @@ class AirtableSchemaService {
     );
   }
 
-  async listTables() {
-    const data = await this.request('GET', '/tables');
+  async listTables(options = {}) {
+    const data = await this.request('GET', '/tables', options);
     return Array.isArray(data?.tables) ? data.tables : [];
   }
 

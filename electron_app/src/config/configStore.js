@@ -64,6 +64,17 @@ function clearInventoryConfig() {
   store.delete('inventoryWebhook');
 }
 
+/* ---------------------------
+   TITLE OPTIMIZATION CONFIG
+---------------------------- */
+function saveTitleOptimizationSourceFields(config) {
+  store.set('titleOptimization.sourceFields', config);
+}
+
+function getTitleOptimizationSourceFields() {
+  return store.get('titleOptimization.sourceFields');
+}
+
 module.exports = {
   saveDbConfig,
   getDbConfig,
@@ -76,5 +87,7 @@ module.exports = {
   clearReportingConfig,
   saveInventoryConfig,
   getInventoryConfig,
-  clearInventoryConfig
+  clearInventoryConfig,
+  saveTitleOptimizationSourceFields,
+  getTitleOptimizationSourceFields
 };
