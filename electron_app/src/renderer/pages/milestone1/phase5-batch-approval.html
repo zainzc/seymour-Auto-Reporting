@@ -28,7 +28,7 @@
       font-family: "Trebuchet MS", "Gill Sans", "Segoe UI", sans-serif;
     }
     .page {
-      width: min(1480px, calc(100vw - 32px));
+      width: min(1080px, calc(100vw - 32px));
       max-width: none;
       margin: 0 auto;
       padding: 22px 16px 28px;
@@ -42,10 +42,9 @@
       align-items: center;
     }
     .workspace-nav {
-      flex: 1;
-      display: grid;
-      grid-template-columns: repeat(4, minmax(160px, 1fr));
+      display: flex;
       gap: 8px;
+      flex-wrap: wrap;
     }
     .btn {
       border: 1px solid var(--border);
@@ -349,14 +348,10 @@
     }
 
     @media (max-width: 980px) {
-      .workspace-nav { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
       .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .publish-controls { grid-template-columns: 1fr; }
       .automation-settings { grid-template-columns: 1fr; }
       .automation-row { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 680px) {
-      .workspace-nav { width: 100%; grid-template-columns: 1fr; }
     }
   </style>
 </head>

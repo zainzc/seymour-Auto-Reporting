@@ -64,7 +64,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   outline-offset: 2px;
 }
 
-.workspace-shell { max-width: 1480px; margin: 0 auto; padding: 14px 22px 34px; }
+.workspace-shell { max-width: 1080px; margin: 0 auto; padding: 14px 22px 34px; }
 .workspace-navigation { display: flex; gap: var(--space-4); align-items: center; margin-bottom: 10px; }
 .workspace-navigation button { min-height: 40px; border: 1px solid transparent; border-radius: var(--button-radius); background: transparent; color: var(--slate-800); font-size: 13px; font-weight: 700; padding: 0 14px; }
 .workspace-navigation .back-link { padding-left: 0; }

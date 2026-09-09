@@ -42,7 +42,7 @@ test('all Milestone 1 workspace navigation bars include Title Optimization', () 
   assert.match(titlePage, /data-navigate="\.\.\/milestone1\/index\.html"/);
 });
 
-test('all Milestone 1 workspaces share the Title Optimization desktop width and equal tab grid', () => {
+test('all Milestone 1 workspaces use the original 1080px desktop width', () => {
   const pages = [
     '../src/renderer/pages/milestone1/powerlink-sheets.html',
     '../src/renderer/pages/milestone1/phase2-master-parts.html',
@@ -50,7 +50,8 @@ test('all Milestone 1 workspaces share the Title Optimization desktop width and 
   ];
   for (const page of pages) {
     const html = fs.readFileSync(path.join(__dirname, page), 'utf8');
-    assert.match(html, /width:\s*min\(1480px,\s*calc\(100vw - 32px\)\)/);
-    assert.match(html, /grid-template-columns:\s*repeat\(4,\s*minmax\(160px,\s*1fr\)\)/);
+    assert.match(html, /width:\s*min\(1080px,\s*calc\(100vw - 32px\)\)/);
   }
+  const titleCss = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-fields.css'), 'utf8');
+  assert.match(titleCss, /\.workspace-shell\s*\{\s*max-width:\s*1080px/);
 });
