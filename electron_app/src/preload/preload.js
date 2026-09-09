@@ -10,6 +10,13 @@ contextBridge.exposeInMainWorld('api', {
   resetConfig: () => ipcRenderer.invoke('reset-config')
 });
 
+contextBridge.exposeInMainWorld('titleOptimizationSourceFieldsAPI', {
+  load: () => ipcRenderer.invoke('title-optimization-source-fields:load'),
+  refreshFields: () => ipcRenderer.invoke('title-optimization-source-fields:refresh'),
+  save: (mappings) => ipcRenderer.invoke('title-optimization-source-fields:save', mappings),
+  deleteCustomMapping: (id) => ipcRenderer.invoke('title-optimization-source-fields:delete', id)
+});
+
 // Reporting API
 contextBridge.exposeInMainWorld('reportingAPI', {
   getSalespeople: () => ipcRenderer.invoke('reporting-get-salespeople'),

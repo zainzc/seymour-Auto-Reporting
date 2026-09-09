@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Title Optimization Workspace - Seymour Auto</title>
+  <link rel="stylesheet" href="source-fields.css">
+</head>
+<body>
+  <main class="workspace-shell">
+    <nav class="workspace-navigation" aria-label="Application workspaces">
+      <button class="back-link" type="button" data-navigate="../main-dashboard.html">← Dashboard</button>
+      <div class="workspace-links">
+        <button type="button" data-navigate="../milestone1/powerlink-sheets.html">Inventory Sync Workspace</button>
+        <button type="button" data-navigate="../milestone1/phase2-master-parts.html">Master Parts Sync Workspace</button>
+        <button class="active" type="button" aria-current="page">Title Optimization Workspace</button>
+        <button type="button" data-navigate="../milestone1/phase5-batch-approval.html">Phase 5 Batch Approval</button>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow">Title Optimization</span>
+        <h1>Title Optimization Workspace</h1>
+        <p>Configure AI title generation rules, terminology, structure and validation to ensure accurate and optimized eBay titles.</p>
+      </div>
+      <section class="workspace-status" aria-label="Workspace status">
+        <div><span class="status-heading"><span class="status-dot"></span>Workspace Status</span><strong>Active</strong></div>
+        <div><span>Configuration Version</span><strong>v1.0</strong></div>
+        <div><span>Last Updated</span><strong id="last-updated">Not saved yet</strong></div>
+      </section>
+    </header>
+
+    <nav class="tab-navigation" aria-label="Title Optimization sections">
+      <button type="button" disabled>Overview</button>
+      <button class="active" type="button" aria-current="page">Source Fields</button>
+      <button type="button" disabled>Source Priority</button>
+      <button type="button" disabled>Terminology Rules</button>
+      <button type="button" disabled>Synonyms</button>
+      <button type="button" disabled>Prefix Rules</button>
+      <button type="button" disabled>Restricted Terms</button>
+      <button type="button" disabled>Category Rules</button>
+      <button type="button" disabled>Title Structure</button>
+      <button type="button" disabled>Flag Reasons</button>
+      <button type="button" disabled>System Rules</button>
+    </nav>
+
+    <section class="source-card" aria-labelledby="source-fields-heading">
+      <div class="card-header">
+        <div>
+          <h2 id="source-fields-heading">Source Fields</h2>
+          <p>Map Airtable fields to the logical fields used for title generation. These mappings determine where the optimizer pulls approved listing data from.</p>
+        </div>
+        <div class="card-actions">
+          <button id="refresh-button" class="button secondary" type="button">Refresh Fields</button>
+          <button id="add-button" class="button secondary" type="button">+ Add Source Field</button>
+          <button id="save-button" class="button primary" type="button" disabled>Save Changes</button>
+        </div>
+      </div>
+
+      <div class="summary-row">
+        <span id="mapped-count" class="mapping-summary">0 of 0 mapped</span>
+        <span id="dirty-state" class="dirty-badge" hidden>Unsaved changes</span>
+      </div>
+
+      <div id="loading-state" class="notice info" role="status">Loading Source Fields…</div>
+      <div id="error-message" class="notice error" role="alert" hidden></div>
+      <div id="success-message" class="notice success" role="status" hidden></div>
+      <div id="quarantine-message" class="notice warning" role="alert" hidden></div>
+
+      <div class="table-container" tabindex="0" aria-label="Source Fields mappings table">
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Logical Field</th>
+              <th scope="col">Description</th>
+              <th scope="col">Airtable Field</th>
+              <th scope="col">Field Type</th>
+              <th scope="col">Required</th>
+              <th scope="col">Status</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="mapping-rows"></tbody>
+        </table>
+      </div>
+
+      <div class="guidance" role="note">
+        Required mappings must point to available Airtable fields before changes can be saved. Individual listing values may still be blank when their workflow allows it.
+      </div>
+    </section>
+  </main>
+
+  <dialog id="source-field-dialog" aria-labelledby="dialog-title">
+    <form id="source-field-form" method="dialog">
+      <div class="dialog-header">
+        <div>
+          <h2 id="dialog-title">Add Source Field</h2>
+          <p>Create a logical input without changing application code.</p>
+        </div>
+        <button id="dialog-cancel" class="close-button" type="button" aria-label="Close dialog">×</button>
+      </div>
+      <div class="dialog-content">
+        <div id="form-error" class="notice error" role="alert" hidden></div>
+        <label>Display Name <span aria-hidden="true">*</span><input id="display-name" required autocomplete="off"></label>
+        <label>Logical Key <span aria-hidden="true">*</span><input id="logical-key" required pattern="[a-z][A-Za-z0-9]*" autocomplete="off" aria-describedby="logical-key-help"><small id="logical-key-help">Use a unique camelCase identifier without spaces.</small></label>
+        <label>Airtable Field <span aria-hidden="true">*</span><select id="airtable-field" required></select></label>
+        <label>Description<textarea id="description" rows="3"></textarea></label>
+        <div class="form-options">
+          <label class="check-label"><input id="required" type="checkbox"> Required mapping</label>
+          <label class="check-label"><input id="enabled" type="checkbox" checked> Enabled</label>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button id="dialog-cancel-footer" class="button secondary" type="button" onclick="document.querySelector('#source-field-dialog').close()">Cancel</button>
+        <button class="button primary" type="submit">Save Source Field</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="source-fields.js"></script>
+</body>
+</html>
