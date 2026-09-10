@@ -141,6 +141,17 @@ test('navigation guard confirms only when changes are unsaved', () => {
   assert.equal(confirmations, 1);
 });
 
+test('approved workspace navigation suppresses exactly one beforeunload prompt', () => {
+  const { createSourceFieldsController } = require(MODULE_PATH);
+  const controller = createSourceFieldsController({ api: {}, confirmDiscard: () => true });
+  controller.replaceData(payload());
+  controller.setRequired('custom', true);
+
+  assert.equal(controller.canNavigateAway(), true);
+  assert.equal(controller.shouldBlockUnload(), false);
+  assert.equal(controller.shouldBlockUnload(), true);
+});
+
 test('users can toggle Required off for protected core mappings', () => {
   const { createSourceFieldsController } = require(MODULE_PATH);
   const controller = createSourceFieldsController({ api: {} });

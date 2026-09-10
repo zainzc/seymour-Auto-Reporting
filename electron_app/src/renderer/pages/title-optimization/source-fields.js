@@ -20,6 +20,7 @@
     const confirmDelete = options.confirmDelete || (() => true);
     const confirmDiscard = options.confirmDiscard || (() => true);
     const onChange = options.onChange || (() => {});
+    let allowNextUnload = false;
     const state = {
       mappings: [], fields: [], table: null, updatedAt: null, quarantined: [],
       dirty: false, loading: false, saving: false, refreshing: false,
@@ -181,11 +182,24 @@
       return true;
     }
 
-    function canNavigateAway() { return !state.dirty || confirmDiscard(); }
+    function canNavigateAway() {
+      if (!state.dirty) return true;
+      if (!confirmDiscard()) return false;
+      allowNextUnload = true;
+      return true;
+    }
+
+    function shouldBlockUnload() {
+      if (allowNextUnload) {
+        allowNextUnload = false;
+        return false;
+      }
+      return state.dirty;
+    }
 
     return {
       state, load, replaceData, changeSourceField, setRequired, setEnabled,
-      upsertCustom, save, refresh, deleteMapping, canNavigateAway
+      upsertCustom, save, refresh, deleteMapping, canNavigateAway, shouldBlockUnload
     };
   }
 
@@ -331,7 +345,7 @@
     });
     document.querySelectorAll('[data-navigate]').forEach((button) => button.addEventListener('click', () => navigate(button.dataset.navigate)));
     window.addEventListener('beforeunload', (event) => {
-      if (!controller.state.dirty) return;
+      if (!controller.shouldBlockUnload()) return;
       event.preventDefault();
       event.returnValue = '';
     });
