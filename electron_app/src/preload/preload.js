@@ -17,6 +17,11 @@ contextBridge.exposeInMainWorld('titleOptimizationSourceFieldsAPI', {
   deleteCustomMapping: (id) => ipcRenderer.invoke('title-optimization-source-fields:delete', id)
 });
 
+contextBridge.exposeInMainWorld('titleOptimizationSourcePriorityAPI', {
+  load: () => ipcRenderer.invoke('title-optimization-source-priority:load'),
+  save: (order) => ipcRenderer.invoke('title-optimization-source-priority:save', order)
+});
+
 // Reporting API
 contextBridge.exposeInMainWorld('reportingAPI', {
   getSalespeople: () => ipcRenderer.invoke('reporting-get-salespeople'),

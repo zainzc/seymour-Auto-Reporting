@@ -11,7 +11,8 @@ test('all primary application screens use a 1280px maximum shell width', () => {
     ['../src/renderer/pages/milestone1/phase2-master-parts.html', /width:\s*min\(1280px,\s*calc\(100vw - 32px\)\)/],
     ['../src/renderer/pages/milestone1/phase5-batch-approval.html', /width:\s*min\(1280px,\s*calc\(100vw - 32px\)\)/],
     ['../src/renderer/pages/milestone11/index.html', /max-width:\s*1280px/],
-    ['../src/renderer/pages/title-optimization/source-fields.css', /\.workspace-shell\s*\{\s*max-width:\s*1280px/]
+    ['../src/renderer/pages/title-optimization/source-fields.css', /\.workspace-shell\s*\{\s*max-width:\s*1280px/],
+    ['../src/renderer/pages/title-optimization/source-priority.css', /\.priority-workspace\s*\{\s*max-width:\s*1280px/]
   ];
 
   for (const [relativePath, expectedWidth] of primaryPages) {

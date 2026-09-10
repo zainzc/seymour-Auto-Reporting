@@ -75,6 +75,14 @@ function getTitleOptimizationSourceFields() {
   return store.get('titleOptimization.sourceFields');
 }
 
+function saveTitleOptimizationSourcePriority(config) {
+  store.set('titleOptimization.sourcePriority', config);
+}
+
+function getTitleOptimizationSourcePriority() {
+  return store.get('titleOptimization.sourcePriority');
+}
+
 module.exports = {
   saveDbConfig,
   getDbConfig,
@@ -89,5 +97,7 @@ module.exports = {
   getInventoryConfig,
   clearInventoryConfig,
   saveTitleOptimizationSourceFields,
-  getTitleOptimizationSourceFields
+  getTitleOptimizationSourceFields,
+  saveTitleOptimizationSourcePriority,
+  getTitleOptimizationSourcePriority
 };
