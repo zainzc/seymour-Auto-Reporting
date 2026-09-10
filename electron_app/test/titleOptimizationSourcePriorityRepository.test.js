@@ -63,6 +63,17 @@ test('malformed persistence is safely displayed with issues and never silently r
   assert.equal(h.writes(), 0);
 });
 
+test('persisted null is malformed configuration rather than a first-run seed', async () => {
+  const h = harness({ stored: null });
+
+  const result = await h.repository.load();
+
+  assert.equal(result.requiresCorrection, true);
+  assert.equal(result.issues.length > 0, true);
+  assert.equal(h.stored(), null);
+  assert.equal(h.writes(), 0);
+});
+
 test('valid save is idempotent, last-write-wins, and stamps audit metadata', async () => {
   const h = harness();
   await h.repository.load();

@@ -87,7 +87,15 @@
 
     async function reset() {
       if (!await confirmReset()) return false;
-      return applyOrder([...DEFAULT_ORDER]);
+      const changed = applyOrder([...DEFAULT_ORDER]);
+      if (changed) return true;
+      state.dirty = true;
+      state.success = '';
+      state.error = '';
+      state.requiresCorrection = false;
+      state.issues = [];
+      notify();
+      return true;
     }
 
     async function save() {

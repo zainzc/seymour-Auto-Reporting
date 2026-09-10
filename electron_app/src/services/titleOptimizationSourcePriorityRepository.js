@@ -41,7 +41,7 @@ function createTitleOptimizationSourcePriorityRepository(dependencies = {}) {
 
   async function load() {
     const existing = readStored();
-    if (existing !== undefined && existing !== null) return decorate(existing);
+    if (existing !== undefined) return decorate(existing);
 
     const configuration = {
       version: VERSION,

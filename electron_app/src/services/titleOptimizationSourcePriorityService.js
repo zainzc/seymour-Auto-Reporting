@@ -84,11 +84,12 @@ function validateSourcePriority(order) {
 }
 
 function hydrateSourcePriority(raw = {}) {
-  const persistedOrder = Array.isArray(raw.order) ? [...raw.order] : raw.order;
-  const issues = validateSourcePriority(raw.order);
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const persistedOrder = Array.isArray(source.order) ? [...source.order] : source.order;
+  const issues = validateSourcePriority(source.order);
   const validUnique = [];
   const seen = new Set();
-  (Array.isArray(raw.order) ? raw.order : []).forEach((key) => {
+  (Array.isArray(source.order) ? source.order : []).forEach((key) => {
     if (!EXPECTED_KEYS.has(key) || seen.has(key) || key === 'manualOverride') return;
     seen.add(key);
     validUnique.push(key);
@@ -99,12 +100,12 @@ function hydrateSourcePriority(raw = {}) {
     ...DEFAULT_SOURCE_PRIORITY.filter((key) => key !== 'manualOverride' && !seen.has(key))
   ];
   return {
-    version: Number(raw.version) || 1,
-    policy: raw.policy || 'titleOptimizationSourcePriority',
+    version: Number(source.version) || 1,
+    policy: source.policy || 'titleOptimizationSourcePriority',
     order,
     persistedOrder,
-    updatedAt: raw.updatedAt || null,
-    updatedBy: raw.updatedBy || null,
+    updatedAt: source.updatedAt || null,
+    updatedBy: source.updatedBy || null,
     issues,
     requiresCorrection: issues.length > 0
   };

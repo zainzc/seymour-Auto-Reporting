@@ -123,6 +123,21 @@ test('malformed loaded configuration surfaces correction state without marking l
   assert.equal(controller.state.rows.at(-1).status, 'Needs correction');
 });
 
+test('confirmed reset marks a malformed default-looking configuration dirty so it can be repaired', async () => {
+  const { createSourcePriorityController } = require(MODULE_PATH);
+  const controller = createSourcePriorityController({ confirmReset: async () => true, api: {} });
+  controller.replaceData(payload({
+    requiresCorrection: true,
+    issues: [{ code: 'DUPLICATE_KEY', message: 'Duplicate source.' }]
+  }));
+
+  assert.equal(await controller.reset(), true);
+  assert.deepEqual(controller.state.order, DEFAULT_ORDER);
+  assert.equal(controller.state.requiresCorrection, false);
+  assert.equal(controller.state.issues.length, 0);
+  assert.equal(controller.state.dirty, true);
+});
+
 test('unsaved navigation confirmation authorizes one unload only', async () => {
   const { createSourcePriorityController } = require(MODULE_PATH);
   let confirmations = 0;
