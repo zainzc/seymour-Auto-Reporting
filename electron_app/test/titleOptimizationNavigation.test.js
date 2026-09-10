@@ -40,6 +40,11 @@ test('all Milestone 1 workspace navigation bars include Title Optimization', () 
 
   const titlePage = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-fields.html'), 'utf8');
   assert.match(titlePage, /data-navigate="\.\.\/milestone1\/index\.html"/);
+  assert.match(titlePage, /data-navigate="source-priority\.html"/);
+
+  const priorityPage = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-priority.html'), 'utf8');
+  assert.match(priorityPage, /data-navigate="\.\.\/milestone1\/index\.html"/);
+  assert.match(priorityPage, /data-navigate="source-fields\.html"/);
 });
 
 test('all Milestone 1 workspaces use the shared 1280px desktop width', () => {
@@ -54,4 +59,6 @@ test('all Milestone 1 workspaces use the shared 1280px desktop width', () => {
   }
   const titleCss = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-fields.css'), 'utf8');
   assert.match(titleCss, /\.workspace-shell\s*\{\s*max-width:\s*1280px/);
+  const priorityCss = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-priority.css'), 'utf8');
+  assert.match(priorityCss, /\.priority-workspace\s*\{\s*max-width:\s*1280px/);
 });

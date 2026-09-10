@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Source Priority - Title Optimization Workspace</title>
+  <link rel="stylesheet" href="source-fields.css">
+  <link rel="stylesheet" href="source-priority.css">
+</head>
+<body>
+  <main class="workspace-shell priority-workspace">
+    <nav class="workspace-navigation" aria-label="Application workspaces">
+      <button class="back-link" type="button" data-navigate="../milestone1/index.html">← Back to Milestone 1</button>
+      <div class="workspace-links">
+        <button type="button" data-navigate="../milestone1/powerlink-sheets.html">Inventory Sync Workspace</button>
+        <button type="button" data-navigate="../milestone1/phase2-master-parts.html">Master Parts Sync Workspace</button>
+        <button class="active" type="button" aria-current="page">Title Optimization Workspace</button>
+        <button type="button" data-navigate="../milestone1/phase5-batch-approval.html">Phase 5 Batch Approval</button>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow">Title Optimization</span>
+        <h1>Title Optimization Workspace</h1>
+        <p>Configure AI title generation rules, terminology, structure and validation to ensure accurate and optimized eBay titles.</p>
+      </div>
+      <section class="workspace-status" aria-label="Workspace status">
+        <div><span class="status-heading"><span class="status-dot"></span>Workspace Status</span><strong>Active</strong></div>
+        <div><span>Configuration Version</span><strong>v1.0</strong></div>
+        <div><span>Last Updated</span><strong id="last-updated">Not saved yet</strong></div>
+      </section>
+    </header>
+
+    <nav class="tab-navigation" aria-label="Title Optimization sections">
+      <button type="button" disabled>Overview</button>
+      <button type="button" data-navigate="source-fields.html">Source Fields</button>
+      <button class="active" type="button" aria-current="page">Source Priority</button>
+      <button type="button" disabled>Terminology Rules</button>
+      <button type="button" disabled>Synonyms</button>
+      <button type="button" disabled>Prefix Rules</button>
+      <button type="button" disabled>Restricted Terms</button>
+      <button type="button" disabled>Category Rules</button>
+      <button type="button" disabled>Title Structure</button>
+      <button type="button" disabled>Flag Reasons</button>
+      <button type="button" disabled>System Rules</button>
+    </nav>
+
+    <section class="source-card priority-card" aria-labelledby="source-priority-heading">
+      <div class="card-header">
+        <div>
+          <h2 id="source-priority-heading">Source Priority</h2>
+          <p>Control which approved data source takes precedence when listing information conflicts. Higher-ranked sources override lower-ranked sources.</p>
+        </div>
+        <div class="card-actions">
+          <button id="reset-button" class="button secondary" type="button">Reset to Default</button>
+          <button id="save-button" class="button primary" type="button" disabled>Save Changes</button>
+        </div>
+      </div>
+
+      <div class="priority-callout" role="note">
+        <strong>Priority affects conflicting values only.</strong> A lower-priority source may still be used when a higher-priority source does not provide the required value.
+      </div>
+
+      <div class="summary-row">
+        <span class="mapping-summary">9 authority sources</span>
+        <span id="dirty-state" class="dirty-badge" hidden>Unsaved changes</span>
+      </div>
+
+      <div id="loading-state" class="notice info" role="status">Loading Source Priority…</div>
+      <div id="error-message" class="notice error" role="alert" hidden></div>
+      <div id="success-message" class="notice success" role="status" hidden></div>
+      <div id="correction-message" class="notice warning" role="alert" hidden></div>
+
+      <div class="table-container priority-table-container" tabindex="0" aria-label="Source Priority order">
+        <table class="priority-table">
+          <thead>
+            <tr>
+              <th scope="col">Reorder</th>
+              <th scope="col">Priority</th>
+              <th scope="col">Source</th>
+              <th scope="col">Purpose</th>
+              <th scope="col">Status / Protection</th>
+              <th scope="col">Move</th>
+            </tr>
+          </thead>
+          <tbody id="priority-rows"></tbody>
+        </table>
+      </div>
+
+      <aside class="priority-explainer" aria-labelledby="priority-explainer-title">
+        <div class="info-icon" aria-hidden="true">i</div>
+        <div>
+          <h3 id="priority-explainer-title">How Source Priority Works</h3>
+          <p>If two approved sources contain different values, the higher-priority source wins. For example, if Structured Item Specifics says <strong>Honda</strong> and Raw Hollander says <strong>Acura</strong>, Honda wins. If the higher-priority source is blank, the optimizer may use the next approved source.</p>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <dialog id="reset-priority-dialog" class="confirm-dialog" aria-labelledby="reset-dialog-title">
+    <form method="dialog">
+      <div class="dialog-header"><div><h2 id="reset-dialog-title">Reset Source Priority?</h2><p>This changes the local editor only.</p></div></div>
+      <div class="dialog-content"><p>Restore the v5 default hierarchy? You must still click Save Changes to persist it.</p></div>
+      <div class="dialog-actions">
+        <button class="button secondary" type="submit" value="cancel">Cancel</button>
+        <button class="button primary" type="submit" value="reset">Reset to Default</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="discard-changes-dialog" class="confirm-dialog" aria-labelledby="discard-dialog-title">
+    <form method="dialog">
+      <div class="dialog-header"><div><h2 id="discard-dialog-title">Discard unsaved changes?</h2><p>Your Source Priority changes have not been saved.</p></div></div>
+      <div class="dialog-content"><p>Leave this workspace and discard the current priority order?</p></div>
+      <div class="dialog-actions">
+        <button class="button secondary" type="submit" value="cancel">Stay here</button>
+        <button class="button danger" type="submit" value="discard">Discard Changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="source-priority.js"></script>
+</body>
+</html>
