@@ -15,7 +15,9 @@ const {
   saveInventoryConfig,
   getInventoryConfig,
   saveTitleOptimizationSourceFields,
-  getTitleOptimizationSourceFields
+  getTitleOptimizationSourceFields,
+  saveTitleOptimizationSourcePriority,
+  getTitleOptimizationSourcePriority
 } = require('../config/configStore');
 
 const { initDb, initDbWindowsAuth } = require('../services/db');
@@ -78,6 +80,8 @@ const AirtableService = require('../services/airtableService');
 const AirtableSchemaService = require('../services/airtableSchemaService');
 const { createTitleOptimizationSourceFieldsRepository } = require('../services/titleOptimizationSourceFieldsRepository');
 const { registerTitleOptimizationSourceFieldsIpc } = require('./titleOptimizationSourceFieldsIpc');
+const { createTitleOptimizationSourcePriorityRepository } = require('../services/titleOptimizationSourcePriorityRepository');
+const { registerTitleOptimizationSourcePriorityIpc } = require('./titleOptimizationSourcePriorityIpc');
 const {
   AUDIT_BASE_ID: QUICKBOOKS_AUDIT_BASE_ID,
   getProcessingBreakdownForRun,
@@ -1762,6 +1766,11 @@ function loadDashboard() {
 /* ---------------------------
    IPC HANDLERS
 ---------------------------- */
+const getTitleOptimizationActor = async () => {
+  const user = await oauth2Service.getUserInfo('inventory');
+  return String(user?.email || user?.name || 'system').trim() || 'system';
+};
+
 const titleOptimizationSourceFieldsRepository = createTitleOptimizationSourceFieldsRepository({
   getStored: getTitleOptimizationSourceFields,
   setStored: saveTitleOptimizationSourceFields,
@@ -1776,12 +1785,16 @@ const titleOptimizationSourceFieldsRepository = createTitleOptimizationSourceFie
     const schemaService = new AirtableSchemaService({ token, baseId });
     return schemaService.listTables({ maxAttempts });
   },
-  getActor: async () => {
-    const user = await oauth2Service.getUserInfo('inventory');
-    return String(user?.email || user?.name || 'system').trim() || 'system';
-  }
+  getActor: getTitleOptimizationActor
 });
 registerTitleOptimizationSourceFieldsIpc(ipcMain, titleOptimizationSourceFieldsRepository);
+
+const titleOptimizationSourcePriorityRepository = createTitleOptimizationSourcePriorityRepository({
+  getStored: getTitleOptimizationSourcePriority,
+  setStored: saveTitleOptimizationSourcePriority,
+  getActor: getTitleOptimizationActor
+});
+registerTitleOptimizationSourcePriorityIpc(ipcMain, titleOptimizationSourcePriorityRepository);
 
 ipcMain.handle('save-db-config', async (_, config) => {
   try {
