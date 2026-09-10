@@ -93,7 +93,7 @@
       const field = state.fields.find((entry) => entry.id === input.sourceFieldId);
       if (input.id) {
         const existing = state.mappings.find((mapping) => mapping.id === input.id);
-        if (!existing?.isCustom) throw new Error('Only custom mappings can be edited with this form.');
+        if (!existing) throw new Error('Source mapping was not found.');
         updateLocal(input.id, {
           displayName, logicalKey, description: String(input.description || '').trim(),
           sourceFieldId: field?.id || null, sourceFieldName: field?.name || '', sourceFieldType: field?.type || '',
@@ -165,7 +165,6 @@
     async function deleteMapping(id) {
       const mapping = state.mappings.find((entry) => entry.id === id);
       if (!mapping) throw new Error('Source mapping was not found.');
-      if (mapping.protected) throw new Error('Core protected mappings cannot be deleted.');
       if (!confirmDelete(mapping)) return false;
       if (!mapping.updatedAt) {
         state.mappings = state.mappings.filter((entry) => entry.id !== id);
@@ -177,7 +176,7 @@
       const result = await api.deleteCustomMapping(id);
       if (!result?.success) throw new Error(result?.error?.message || 'Unable to delete source mapping.');
       replaceData(result.data);
-      state.success = 'Custom source mapping removed.';
+      state.success = 'Source mapping removed.';
       notify();
       return true;
     }
@@ -263,7 +262,7 @@
         <td><label class="switch-label"><input class="required-toggle" type="checkbox" ${mapping.required ? 'checked' : ''}><span>${mapping.required ? 'Yes' : 'No'}</span></label></td>
         <td><span class="status-badge status-${mapping.status.toLowerCase().replace(' ', '-')}">${escapeHtml(mapping.status)}</span>${state.errors[mapping.logicalKey] ? `<span class="row-error">${escapeHtml(state.errors[mapping.logicalKey])}</span>` : ''}</td>
         <td class="actions-cell">
-          ${mapping.isCustom ? `<button class="icon-btn edit-row" type="button" aria-label="Edit ${escapeHtml(mapping.displayName)}">Edit</button><button class="icon-btn delete-row" type="button" aria-label="Delete ${escapeHtml(mapping.displayName)}">Delete</button>` : '<span class="protected-label" title="Core mapping">Protected</span>'}
+          <button class="icon-btn edit-row" type="button" aria-label="Edit ${escapeHtml(mapping.displayName)}">Edit</button><button class="icon-btn delete-row" type="button" aria-label="Delete ${escapeHtml(mapping.displayName)}">Delete</button>
         </td>
       </tr>`;
     }).join('');
@@ -276,7 +275,7 @@
     elements.formError.hidden = true;
     elements.displayName.value = mapping?.displayName || '';
     elements.logicalKey.value = mapping?.logicalKey || '';
-    elements.logicalKey.disabled = Boolean(mapping?.protected);
+    elements.logicalKey.disabled = false;
     elements.airtableField.innerHTML = `<option value="">Select an Airtable field</option>${controller.state.fields.map((field) =>
       `<option value="${escapeHtml(field.id)}">${escapeHtml(field.name)} — ${escapeHtml(field.type)}</option>`).join('')}`;
     elements.airtableField.value = mapping?.sourceFieldId || '';

@@ -8,7 +8,7 @@ const {
 } = require('./titleOptimizationSourceFieldsService');
 
 const TABLE_NAME = 'eBay Listings (API)';
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
 const LEGACY_AUTO_REQUIRED_KEYS = new Set(['existingTitle', 'manualOverrideStatus', 'sku', 'ipnPrefix']);
 
 function sanitizeFields(fields = []) {
@@ -49,13 +49,16 @@ function createTitleOptimizationSourceFieldsRepository(dependencies = {}) {
     const raw = getStored();
     if (!raw || !Array.isArray(raw.mappings)) return null;
     const hydrated = validateAndHydrateConfiguration(raw);
-    if (Number(raw.version) >= CURRENT_VERSION) return hydrated;
+    const storedVersion = Number(raw.version) || 1;
+    if (storedVersion >= CURRENT_VERSION) return hydrated;
     const migrated = {
       ...hydrated,
       version: CURRENT_VERSION,
-      mappings: hydrated.mappings.map((mapping) => LEGACY_AUTO_REQUIRED_KEYS.has(mapping.logicalKey)
-        ? { ...mapping, required: false }
-        : mapping)
+      mappings: hydrated.mappings.map((mapping) => ({
+        ...mapping,
+        protected: false,
+        ...(storedVersion < 2 && LEGACY_AUTO_REQUIRED_KEYS.has(mapping.logicalKey) ? { required: false } : {})
+      }))
     };
     setStored(migrated);
     return migrated;
@@ -149,8 +152,10 @@ function createTitleOptimizationSourceFieldsRepository(dependencies = {}) {
     }
     const actor = await getActor();
     const at = now();
-    const updatedMappings = hydrated.mappings.map((mapping) => ({ ...mapping, updatedAt: at, updatedBy: actor }));
-    const configuration = { ...existing, mappings: updatedMappings, updatedAt: at, updatedBy: actor };
+    const updatedMappings = hydrated.mappings.map((mapping) => ({ ...mapping, protected: false, updatedAt: at, updatedBy: actor }));
+    const submittedIds = new Set(updatedMappings.map((mapping) => mapping.id));
+    const archivedMappings = (existing.mappings || []).filter((mapping) => mapping.deletedAt && !submittedIds.has(mapping.id));
+    const configuration = { ...existing, mappings: [...updatedMappings, ...archivedMappings], updatedAt: at, updatedBy: actor };
     setStored(configuration);
     return decorate(configuration);
   }

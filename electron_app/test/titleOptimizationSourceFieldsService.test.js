@@ -28,7 +28,7 @@ test('first-run seeding creates the approved core mappings without C:Model', () 
     'existingTitle', 'manualOverrideStatus', 'sku', 'ipnPrefix'
   ]);
   assert.equal(seeded.some((mapping) => mapping.logicalKey.toLowerCase().includes('model')), false);
-  assert.equal(seeded.every((mapping) => mapping.protected && !mapping.isCustom), true);
+  assert.equal(seeded.every((mapping) => !mapping.protected && !mapping.isCustom), true);
   assert.equal(seeded.every((mapping) => mapping.required === false), true);
 });
 
@@ -72,7 +72,7 @@ test('save validation requires only mappings explicitly marked required', () => 
   ]);
 });
 
-test('custom mapping lifecycle validates keys and soft-deletes without changing protected mappings', () => {
+test('all mapping lifecycle operations allow edits and soft deletion', () => {
   const {
     seedSourceMappings,
     createCustomMapping,
@@ -98,8 +98,10 @@ test('custom mapping lifecycle validates keys and soft-deletes without changing 
   assert.equal(custom.updatedBy, 'gary@example.com');
   assert.throws(() => createCustomMapping({ displayName: 'Bad', logicalKey: 'Paint Code' }, created, audit), /camelCase/);
   assert.throws(() => createCustomMapping({ displayName: 'Duplicate', logicalKey: 'paintCode' }, created, audit), /already exists/);
-  assert.throws(() => updateMapping(seeded[0].id, { logicalKey: 'changed' }, seeded, audit), /protected logical key/);
-  assert.throws(() => softDeleteCustomMapping(seeded[0].id, seeded, audit), /protected/);
+  const renamedCore = updateMapping(seeded[0].id, { logicalKey: 'changed' }, seeded, audit);
+  assert.equal(renamedCore[0].logicalKey, 'changed');
+  const deletedCore = softDeleteCustomMapping(seeded[0].id, seeded, audit);
+  assert.equal(deletedCore[0].deletedAt, audit.now);
 
   const optionalCore = updateMapping(seeded[0].id, { required: false }, seeded, audit);
   assert.equal(optionalCore[0].required, false);

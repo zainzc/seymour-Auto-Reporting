@@ -8,7 +8,7 @@ const MODULE_PATH = '../src/renderer/pages/title-optimization/source-fields.js';
 function payload() {
   return {
     mappings: [
-      { id: 'core', logicalKey: 'sku', displayName: 'SKU', protected: true, required: true, enabled: true, sourceFieldId: 'fld-sku', status: 'Mapped', updatedAt: '2026-09-09T10:00:00.000Z' },
+      { id: 'core', logicalKey: 'sku', displayName: 'SKU', protected: false, required: true, enabled: true, sourceFieldId: 'fld-sku', status: 'Mapped', updatedAt: '2026-09-09T10:00:00.000Z' },
       { id: 'custom', logicalKey: 'paintCode', displayName: 'Paint Code', protected: false, isCustom: true, required: false, enabled: true, sourceFieldId: null, status: 'Unmapped', updatedAt: '2026-09-09T10:00:00.000Z' }
     ],
     fields: [
@@ -101,7 +101,7 @@ test('custom rows can be added and edited locally while duplicate keys are rejec
   assert.equal(controller.state.mappings.at(-1).status, 'Disabled');
 });
 
-test('protected rows cannot be deleted and confirmed custom deletion uses the API', async () => {
+test('seeded and custom rows can both be edited and soft-deleted', async () => {
   const { createSourceFieldsController } = require(MODULE_PATH);
   let deletedId;
   const controller = createSourceFieldsController({
@@ -109,7 +109,11 @@ test('protected rows cannot be deleted and confirmed custom deletion uses the AP
     confirmDelete: () => true
   });
   controller.replaceData(payload());
-  await assert.rejects(controller.deleteMapping('core'), /protected/);
+  controller.upsertCustom({ id: 'core', displayName: 'Stock Number', logicalKey: 'stockNumber', sourceFieldId: 'fld-sku', enabled: true });
+  assert.equal(controller.state.mappings[0].logicalKey, 'stockNumber');
+  await controller.deleteMapping('core');
+  assert.equal(deletedId, 'core');
+  controller.replaceData(payload());
   await controller.deleteMapping('custom');
   assert.equal(deletedId, 'custom');
   assert.equal(controller.state.mappings.length, 1);
@@ -154,7 +158,7 @@ test('approved workspace navigation suppresses exactly one beforeunload prompt',
   assert.equal(controller.shouldBlockUnload(), true);
 });
 
-test('users can toggle Required off for protected core mappings', () => {
+test('users can toggle Required off for seeded mappings', () => {
   const { createSourceFieldsController } = require(MODULE_PATH);
   const controller = createSourceFieldsController({ api: {} });
   controller.replaceData(payload());
@@ -173,4 +177,5 @@ test('workspace navigation uses an in-app discard dialog and Source Field dialog
   assert.match(script, /confirmDiscardChanges/);
   assert.doesNotMatch(script, /window\.confirm\('You have unsaved Source Fields changes/);
   assert.match(script, /elements\.displayName\.focus\(\)/);
+  assert.doesNotMatch(script, /mapping\.isCustom\s*\?/);
 });

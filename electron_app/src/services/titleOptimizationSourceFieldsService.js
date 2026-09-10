@@ -50,7 +50,7 @@ function seedSourceMappings(fields = [], audit = {}) {
       sourceFieldType: field?.type || '',
       required,
       enabled: true,
-      protected: true,
+      protected: false,
       isCustom: false,
       sortOrder: index + 1,
       updatedAt: now,
@@ -127,9 +127,6 @@ function updateMapping(id, changes = {}, mappings = [], audit = {}) {
   const { actor, now } = auditValues(audit);
   const existing = mappings.find((mapping) => mapping.id === id);
   if (!existing) throw new Error('Source mapping was not found.');
-  if (existing.protected && changes.logicalKey !== undefined && changes.logicalKey !== existing.logicalKey) {
-    throw new Error('Cannot change a protected logical key.');
-  }
   const logicalKey = changes.logicalKey === undefined
     ? existing.logicalKey
     : assertLogicalKey(changes.logicalKey, mappings, id);
@@ -148,7 +145,6 @@ function updateMapping(id, changes = {}, mappings = [], audit = {}) {
 function softDeleteCustomMapping(id, mappings = [], audit = {}) {
   const target = mappings.find((mapping) => mapping.id === id);
   if (!target) throw new Error('Source mapping was not found.');
-  if (target.protected || !target.isCustom) throw new Error('Core protected mappings cannot be deleted.');
   const { actor, now } = auditValues(audit);
   return mappings.map((mapping) => mapping.id === id ? {
     ...mapping, enabled: false, deletedAt: now, deletedBy: actor, updatedAt: now, updatedBy: actor
@@ -157,7 +153,7 @@ function softDeleteCustomMapping(id, mappings = [], audit = {}) {
 
 function restoreCustomMapping(id, mappings = [], audit = {}) {
   const target = mappings.find((mapping) => mapping.id === id);
-  if (!target?.isCustom) throw new Error('Restorable custom source mapping was not found.');
+  if (!target) throw new Error('Restorable source mapping was not found.');
   const { actor, now } = auditValues(audit);
   return mappings.map((mapping) => mapping.id === id ? {
     ...mapping, enabled: true, deletedAt: null, deletedBy: null, updatedAt: now, updatedBy: actor

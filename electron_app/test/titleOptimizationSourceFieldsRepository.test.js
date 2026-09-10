@@ -48,13 +48,14 @@ test('first load fetches the exact listings table and persists seeded configurat
   assert.equal(result.fields.length, 4);
   assert.equal(result.mappings.length, 13);
   assert.equal(result.mappings.find((m) => m.logicalKey === 'sku').sourceFieldId, 'fld-sku');
+  assert.equal(result.mappings.every((mapping) => mapping.protected === false), true);
   assert.equal(h.writes(), 1);
   assert.equal(h.getStored().mappings.length, 13);
 });
 
 test('reload restores saved mappings without reseeding or fetching Airtable', async () => {
   const saved = {
-    version: 2,
+    version: 3,
     table: { id: 'tbl-listings', name: 'eBay Listings (API)' },
     fields: requiredFields(),
     mappings: [{ id: 'custom', logicalKey: 'customKey', displayName: 'Custom', isCustom: true, enabled: true }]
@@ -68,7 +69,7 @@ test('reload restores saved mappings without reseeding or fetching Airtable', as
   assert.equal(h.writes(), 0);
 });
 
-test('load migrates legacy automatic core requirements to user-controlled optional values once', async () => {
+test('load migrates legacy core mappings to optional and editable values once', async () => {
   const saved = {
     version: 1,
     table: { id: 'tbl-listings', name: 'eBay Listings (API)' },
@@ -82,10 +83,11 @@ test('load migrates legacy automatic core requirements to user-controlled option
 
   const result = await h.repo.load();
 
-  assert.equal(result.version, 2);
+  assert.equal(result.version, 3);
   assert.equal(result.mappings.find((mapping) => mapping.logicalKey === 'sku').required, false);
+  assert.equal(result.mappings.find((mapping) => mapping.logicalKey === 'sku').protected, false);
   assert.equal(result.mappings.find((mapping) => mapping.logicalKey === 'customKey').required, true);
-  assert.equal(h.getStored().version, 2);
+  assert.equal(h.getStored().version, 3);
   assert.equal(h.writes(), 1);
   assert.equal(h.calls(), 0);
 });
@@ -130,7 +132,7 @@ test('refresh follows a stable field ID across an Airtable rename and refreshes 
 
 test('failed refresh retains saved configuration and last-known schema', async () => {
   const saved = {
-    version: 2,
+    version: 3,
     table: { id: 'tbl-listings', name: 'eBay Listings (API)' },
     fields: requiredFields(),
     mappings: [{ id: 'source-sku', logicalKey: 'sku', displayName: 'SKU', sourceFieldId: 'fld-sku', sourceFieldName: 'SKU', enabled: true }]
@@ -185,6 +187,21 @@ test('normal queries omit soft-deleted records while restoration remains availab
 
   const restored = await h.repo.restore('custom-paint');
   assert.equal(restored.mappings.some((m) => m.id === 'custom-paint'), true);
+});
+
+test('seeded mappings can be soft-deleted and archived mappings survive later saves', async () => {
+  const h = harness();
+  const loaded = await h.repo.load();
+
+  const afterDelete = await h.repo.softDelete('source-sku');
+  assert.equal(afterDelete.mappings.some((mapping) => mapping.id === 'source-sku'), false);
+  assert.equal(h.getStored().mappings.find((mapping) => mapping.id === 'source-sku').deletedBy, 'user@example.com');
+
+  await h.repo.save(afterDelete.mappings);
+  assert.equal(h.getStored().mappings.find((mapping) => mapping.id === 'source-sku').deletedBy, 'user@example.com');
+
+  const restored = await h.repo.restore('source-sku');
+  assert.equal(restored.mappings.some((mapping) => mapping.id === 'source-sku'), true);
 });
 
 test('load quarantines malformed entries without reseeding over valid data', async () => {
