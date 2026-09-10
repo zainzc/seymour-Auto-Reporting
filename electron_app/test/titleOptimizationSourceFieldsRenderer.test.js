@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const MODULE_PATH = '../src/renderer/pages/title-optimization/source-fields.js';
 
@@ -161,4 +163,14 @@ test('users can toggle Required off for protected core mappings', () => {
 
   assert.equal(controller.state.mappings[0].required, false);
   assert.equal(controller.state.dirty, true);
+});
+
+test('workspace navigation uses an in-app discard dialog and Source Field dialog restores text focus', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-fields.html'), 'utf8');
+  const script = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-fields.js'), 'utf8');
+
+  assert.match(html, /id="discard-changes-dialog"/);
+  assert.match(script, /confirmDiscardChanges/);
+  assert.doesNotMatch(script, /window\.confirm\('You have unsaved Source Fields changes/);
+  assert.match(script, /elements\.displayName\.focus\(\)/);
 });

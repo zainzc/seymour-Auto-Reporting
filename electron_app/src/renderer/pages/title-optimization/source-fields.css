@@ -99,6 +99,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .button.primary:hover:not(:disabled) { background: var(--color-primary-hover); }
 .button.secondary { background: var(--slate-50); color: var(--slate-800); }
 .button.secondary:hover:not(:disabled) { background: var(--slate-100); border-color: #b9cde6; }
+.button.danger { color: var(--white); background: var(--red-700); border-color: var(--red-700); }
+.button.danger:hover:not(:disabled) { filter: brightness(.92); }
 .button:disabled { cursor: not-allowed; opacity: .5; }
 .summary-row { display: flex; gap: 10px; align-items: center; margin: 18px 0 10px; min-height: 25px; }
 .mapping-summary, .dirty-badge { border-radius: 999px; padding: 5px 10px; font-size: 12px; font-weight: 700; }
@@ -140,6 +142,8 @@ td strong { display: block; }
 
 dialog { width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 40px); padding: 0; border: 0; border-radius: var(--radius-md); color: var(--color-text); box-shadow: 0 30px 70px rgba(7, 28, 50, .28); }
 dialog::backdrop { background: rgba(8, 25, 43, .48); }
+.confirm-dialog { width: min(460px, calc(100vw - 32px)); }
+.confirm-dialog .dialog-content p { margin: 0; color: var(--color-muted); line-height: 1.5; }
 .dialog-header { display: flex; justify-content: space-between; gap: 20px; padding: 22px 24px 16px; border-bottom: 1px solid var(--color-border); }
 .dialog-header h2 { margin: 0 0 5px; font-size: 21px; }
 .dialog-header p { margin: 0; color: var(--color-muted); font-size: 13px; }

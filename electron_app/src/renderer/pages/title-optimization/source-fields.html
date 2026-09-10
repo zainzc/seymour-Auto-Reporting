@@ -118,6 +118,24 @@
     </form>
   </dialog>
 
+  <dialog id="discard-changes-dialog" class="confirm-dialog" aria-labelledby="discard-dialog-title">
+    <form method="dialog">
+      <div class="dialog-header">
+        <div>
+          <h2 id="discard-dialog-title">Discard unsaved changes?</h2>
+          <p>Your Source Fields changes have not been saved.</p>
+        </div>
+      </div>
+      <div class="dialog-content">
+        <p>Leave this workspace and discard the current changes?</p>
+      </div>
+      <div class="dialog-actions">
+        <button class="button secondary" type="submit" value="cancel">Stay here</button>
+        <button class="button danger" type="submit" value="discard">Discard and leave</button>
+      </div>
+    </form>
+  </dialog>
+
   <script src="source-fields.js"></script>
 </body>
 </html>

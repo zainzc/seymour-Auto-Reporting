@@ -197,9 +197,11 @@
       return state.dirty;
     }
 
+    function authorizeNextUnload() { allowNextUnload = true; }
+
     return {
       state, load, replaceData, changeSourceField, setRequired, setEnabled,
-      upsertCustom, save, refresh, deleteMapping, canNavigateAway, shouldBlockUnload
+      upsertCustom, save, refresh, deleteMapping, canNavigateAway, shouldBlockUnload, authorizeNextUnload
     };
   }
 
@@ -282,10 +284,23 @@
     elements.required.checked = Boolean(mapping?.required);
     elements.enabled.checked = mapping ? mapping.enabled !== false : true;
     elements.dialog.showModal();
+    requestAnimationFrame(() => elements.displayName.focus());
   }
 
-  function navigate(target) {
-    if (controller.canNavigateAway()) window.location.href = target;
+  function confirmDiscardChanges() {
+    return new Promise((resolve) => {
+      elements.discardDialog.returnValue = 'cancel';
+      elements.discardDialog.addEventListener('close', () => {
+        resolve(elements.discardDialog.returnValue === 'discard');
+      }, { once: true });
+      elements.discardDialog.showModal();
+    });
+  }
+
+  async function navigate(target) {
+    if (controller.state.dirty && !await confirmDiscardChanges()) return;
+    if (controller.state.dirty) controller.authorizeNextUnload();
+    requestAnimationFrame(() => { window.location.href = target; });
   }
 
   document.addEventListener('DOMContentLoaded', () => {
@@ -299,12 +314,12 @@
       form: document.querySelector('#source-field-form'), formError: document.querySelector('#form-error'),
       displayName: document.querySelector('#display-name'), logicalKey: document.querySelector('#logical-key'),
       airtableField: document.querySelector('#airtable-field'), description: document.querySelector('#description'),
-      required: document.querySelector('#required'), enabled: document.querySelector('#enabled')
+      required: document.querySelector('#required'), enabled: document.querySelector('#enabled'),
+      discardDialog: document.querySelector('#discard-changes-dialog')
     });
     controller = createSourceFieldsController({
       api: window.titleOptimizationSourceFieldsAPI,
       confirmDelete: (mapping) => window.confirm(`Delete “${mapping.displayName}”? It will be archived for audit and excluded from normal use.`),
-      confirmDiscard: () => window.confirm('You have unsaved Source Fields changes. Discard them and leave this workspace?'),
       onChange: render
     });
 
