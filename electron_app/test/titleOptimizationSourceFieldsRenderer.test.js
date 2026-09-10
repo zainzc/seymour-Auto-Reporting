@@ -140,3 +140,14 @@ test('navigation guard confirms only when changes are unsaved', () => {
   assert.equal(controller.canNavigateAway(), false);
   assert.equal(confirmations, 1);
 });
+
+test('users can toggle Required off for protected core mappings', () => {
+  const { createSourceFieldsController } = require(MODULE_PATH);
+  const controller = createSourceFieldsController({ api: {} });
+  controller.replaceData(payload());
+
+  controller.setRequired('core', false);
+
+  assert.equal(controller.state.mappings[0].required, false);
+  assert.equal(controller.state.dirty, true);
+});

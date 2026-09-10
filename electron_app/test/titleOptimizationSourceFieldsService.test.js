@@ -29,6 +29,7 @@ test('first-run seeding creates the approved core mappings without C:Model', () 
   ]);
   assert.equal(seeded.some((mapping) => mapping.logicalKey.toLowerCase().includes('model')), false);
   assert.equal(seeded.every((mapping) => mapping.protected && !mapping.isCustom), true);
+  assert.equal(seeded.every((mapping) => mapping.required === false), true);
 });
 
 test('seeding maps only a unique exact case-sensitive field name', () => {
@@ -57,14 +58,14 @@ test('status distinguishes mapped, unmapped, missing, and disabled mappings', ()
   assert.equal(getMappingStatus({ ...base, enabled: false }, available), 'Disabled');
 });
 
-test('save validation requires valid mappings for the four mandatory keys only', () => {
+test('save validation requires only mappings explicitly marked required', () => {
   const { seedSourceMappings, validateMappingsForSave } = require(SERVICE_PATH);
   const schema = fields();
   const mappings = seedSourceMappings(schema, {});
   assert.deepEqual(validateMappingsForSave(mappings, schema), []);
 
   const broken = mappings.map((mapping) => mapping.logicalKey === 'sku'
-    ? { ...mapping, sourceFieldId: null, sourceFieldName: '' }
+    ? { ...mapping, required: true, sourceFieldId: null, sourceFieldName: '' }
     : mapping);
   assert.deepEqual(validateMappingsForSave(broken, schema), [
     { logicalKey: 'sku', message: 'SKU must be mapped to an available Airtable field.' }
@@ -99,6 +100,9 @@ test('custom mapping lifecycle validates keys and soft-deletes without changing 
   assert.throws(() => createCustomMapping({ displayName: 'Duplicate', logicalKey: 'paintCode' }, created, audit), /already exists/);
   assert.throws(() => updateMapping(seeded[0].id, { logicalKey: 'changed' }, seeded, audit), /protected logical key/);
   assert.throws(() => softDeleteCustomMapping(seeded[0].id, seeded, audit), /protected/);
+
+  const optionalCore = updateMapping(seeded[0].id, { required: false }, seeded, audit);
+  assert.equal(optionalCore[0].required, false);
 
   const edited = updateMapping(custom.id, { displayName: 'Exterior Paint Code', required: true }, created, audit);
   assert.equal(edited.find((mapping) => mapping.id === custom.id).required, true);

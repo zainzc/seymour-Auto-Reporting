@@ -1,13 +1,12 @@
 const crypto = require('crypto');
 
-const MANDATORY_KEYS = new Set(['existingTitle', 'manualOverrideStatus', 'sku', 'ipnPrefix']);
 const LOGICAL_KEY_PATTERN = /^[a-z][A-Za-z0-9]*$/;
 
 const CORE_DEFINITIONS = [
-  ['existingTitle', 'Existing Title', 'Current authoritative/eBay listing title used as the starting point and for no-degrade comparison.', 'Title', true],
-  ['manualOverrideStatus', 'Manual Override Status', 'Indicates whether Seymour Auto manually approved or overrode the listing title.', 'Title Override Status', true],
-  ['sku', 'SKU', 'Listing SKU. Required exactly once at the end of the optimized title.', 'SKU', true],
-  ['ipnPrefix', 'IPN / Prefix', 'IPN or Hollander interchange prefix used for approved prefix-specific rules.', 'IPN', true],
+  ['existingTitle', 'Existing Title', 'Current authoritative/eBay listing title used as the starting point and for no-degrade comparison.', 'Title', false],
+  ['manualOverrideStatus', 'Manual Override Status', 'Indicates whether Seymour Auto manually approved or overrode the listing title.', 'Title Override Status', false],
+  ['sku', 'SKU', 'Listing SKU available to title optimization when selected.', 'SKU', false],
+  ['ipnPrefix', 'IPN / Prefix', 'IPN or Hollander interchange prefix used for approved prefix-specific rules.', 'IPN', false],
   ['fixedIpnValues', 'Fixed / Locked IPN Values', 'Locked or Fixed IPN-level values supplied by Airtable when available.', null, false],
   ['year', 'Structured Year', 'Verified structured vehicle year or year range when available.', null, false],
   ['brandMake', 'Brand / Make', 'Authoritative Brand/Make source such as C:Brand.', 'C:Brand', false],
@@ -75,12 +74,11 @@ function getMappingStatus(mapping, fields = []) {
 function validateMappingsForSave(mappings = [], fields = []) {
   const active = mappings.filter((mapping) => !mapping.deletedAt);
   const errors = [];
-  for (const logicalKey of MANDATORY_KEYS) {
-    const mapping = active.find((entry) => entry.logicalKey === logicalKey);
-    if (!mapping || getMappingStatus(mapping, fields) !== 'Mapped') {
+  for (const mapping of active.filter((entry) => entry.required)) {
+    if (getMappingStatus(mapping, fields) !== 'Mapped') {
       errors.push({
-        logicalKey,
-        message: `${mapping?.displayName || logicalKey} must be mapped to an available Airtable field.`
+        logicalKey: mapping.logicalKey,
+        message: `${mapping.displayName || mapping.logicalKey} must be mapped to an available Airtable field.`
       });
     }
   }
@@ -131,9 +129,6 @@ function updateMapping(id, changes = {}, mappings = [], audit = {}) {
   if (!existing) throw new Error('Source mapping was not found.');
   if (existing.protected && changes.logicalKey !== undefined && changes.logicalKey !== existing.logicalKey) {
     throw new Error('Cannot change a protected logical key.');
-  }
-  if (existing.protected && MANDATORY_KEYS.has(existing.logicalKey) && changes.required === false) {
-    throw new Error('Required status is locked for mandatory core mappings.');
   }
   const logicalKey = changes.logicalKey === undefined
     ? existing.logicalKey
@@ -211,7 +206,6 @@ function buildNormalizedTitleListingData(record = {}, mappings = []) {
 
 module.exports = {
   CORE_DEFINITIONS,
-  MANDATORY_KEYS,
   seedSourceMappings,
   getMappingStatus,
   validateMappingsForSave,

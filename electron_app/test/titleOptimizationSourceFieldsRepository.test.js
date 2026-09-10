@@ -54,7 +54,7 @@ test('first load fetches the exact listings table and persists seeded configurat
 
 test('reload restores saved mappings without reseeding or fetching Airtable', async () => {
   const saved = {
-    version: 1,
+    version: 2,
     table: { id: 'tbl-listings', name: 'eBay Listings (API)' },
     fields: requiredFields(),
     mappings: [{ id: 'custom', logicalKey: 'customKey', displayName: 'Custom', isCustom: true, enabled: true }]
@@ -66,6 +66,28 @@ test('reload restores saved mappings without reseeding or fetching Airtable', as
   assert.equal(result.mappings[0].logicalKey, 'customKey');
   assert.equal(h.calls(), 0);
   assert.equal(h.writes(), 0);
+});
+
+test('load migrates legacy automatic core requirements to user-controlled optional values once', async () => {
+  const saved = {
+    version: 1,
+    table: { id: 'tbl-listings', name: 'eBay Listings (API)' },
+    fields: requiredFields(),
+    mappings: [
+      { id: 'source-sku', logicalKey: 'sku', displayName: 'SKU', required: true, protected: true, isCustom: false, enabled: true },
+      { id: 'custom', logicalKey: 'customKey', displayName: 'Custom', required: true, protected: false, isCustom: true, enabled: true }
+    ]
+  };
+  const h = harness({ stored: saved });
+
+  const result = await h.repo.load();
+
+  assert.equal(result.version, 2);
+  assert.equal(result.mappings.find((mapping) => mapping.logicalKey === 'sku').required, false);
+  assert.equal(result.mappings.find((mapping) => mapping.logicalKey === 'customKey').required, true);
+  assert.equal(h.getStored().version, 2);
+  assert.equal(h.writes(), 1);
+  assert.equal(h.calls(), 0);
 });
 
 test('refresh preserves valid mappings and marks a removed source as missing', async () => {
@@ -108,7 +130,7 @@ test('refresh follows a stable field ID across an Airtable rename and refreshes 
 
 test('failed refresh retains saved configuration and last-known schema', async () => {
   const saved = {
-    version: 1,
+    version: 2,
     table: { id: 'tbl-listings', name: 'eBay Listings (API)' },
     fields: requiredFields(),
     mappings: [{ id: 'source-sku', logicalKey: 'sku', displayName: 'SKU', sourceFieldId: 'fld-sku', sourceFieldName: 'SKU', enabled: true }]
@@ -130,7 +152,7 @@ test('refresh rejects a missing exact table or an empty table schema', async () 
   await assert.rejects(harness({ tables: schemaTables([]) }).repo.refreshFields(), /no fields/i);
 });
 
-test('save is idempotent, validates mandatory mappings, and stamps audit fields', async () => {
+test('save is idempotent, validates user-selected required mappings, and stamps audit fields', async () => {
   const h = harness();
   const loaded = await h.repo.load();
   const once = await h.repo.save(loaded.mappings);
@@ -141,7 +163,7 @@ test('save is idempotent, validates mandatory mappings, and stamps audit fields'
   assert.equal(twice.updatedBy, 'user@example.com');
 
   const broken = twice.mappings.map((mapping) => mapping.logicalKey === 'ipnPrefix'
-    ? { ...mapping, sourceFieldId: null, sourceFieldName: '' }
+    ? { ...mapping, required: true, sourceFieldId: null, sourceFieldName: '' }
     : mapping);
   await assert.rejects(h.repo.save(broken), (error) => error.code === 'VALIDATION_ERROR');
 });

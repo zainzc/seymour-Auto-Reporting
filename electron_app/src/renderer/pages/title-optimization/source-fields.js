@@ -1,5 +1,4 @@
 (function initSourceFieldsModule(globalScope) {
-  const mandatoryKeys = new Set(['existingTitle', 'manualOverrideStatus', 'sku', 'ipnPrefix']);
 
   function suggestLogicalKey(value) {
     const words = String(value || '').trim().match(/[A-Za-z0-9]+/g) || [];
@@ -77,10 +76,6 @@
     }
 
     function setRequired(id, required) {
-      const mapping = state.mappings.find((entry) => entry.id === id);
-      if (mapping?.protected && mandatoryKeys.has(mapping.logicalKey) && !required) {
-        throw new Error('Required status is locked for this core mapping.');
-      }
       updateLocal(id, { required: Boolean(required) });
     }
 
@@ -244,13 +239,12 @@
         sourceMissingOption,
         ...state.fields.map((field) => `<option value="${escapeHtml(field.id)}" ${field.id === mapping.sourceFieldId ? 'selected' : ''}>${escapeHtml(field.name)} — ${escapeHtml(field.type)}</option>`)
       ].join('');
-      const requiredLocked = mapping.protected && mandatoryKeys.has(mapping.logicalKey);
       return `<tr data-id="${escapeHtml(mapping.id)}">
         <td><strong>${escapeHtml(mapping.displayName)}</strong><span class="logical-key">${escapeHtml(mapping.logicalKey)}</span></td>
         <td class="description-cell">${escapeHtml(mapping.description)}</td>
         <td><select class="field-select" aria-label="Airtable field for ${escapeHtml(mapping.displayName)}">${options}</select></td>
         <td>${escapeHtml(mapping.sourceFieldType || '—')}</td>
-        <td><label class="switch-label"><input class="required-toggle" type="checkbox" ${mapping.required ? 'checked' : ''} ${requiredLocked ? 'disabled' : ''}><span>${mapping.required ? 'Yes' : 'No'}</span></label></td>
+        <td><label class="switch-label"><input class="required-toggle" type="checkbox" ${mapping.required ? 'checked' : ''}><span>${mapping.required ? 'Yes' : 'No'}</span></label></td>
         <td><span class="status-badge status-${mapping.status.toLowerCase().replace(' ', '-')}">${escapeHtml(mapping.status)}</span>${state.errors[mapping.logicalKey] ? `<span class="row-error">${escapeHtml(state.errors[mapping.logicalKey])}</span>` : ''}</td>
         <td class="actions-cell">
           ${mapping.isCustom ? `<button class="icon-btn edit-row" type="button" aria-label="Edit ${escapeHtml(mapping.displayName)}">Edit</button><button class="icon-btn delete-row" type="button" aria-label="Delete ${escapeHtml(mapping.displayName)}">Delete</button>` : '<span class="protected-label" title="Core mapping">Protected</span>'}

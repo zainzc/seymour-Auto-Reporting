@@ -8,6 +8,8 @@ const {
 } = require('./titleOptimizationSourceFieldsService');
 
 const TABLE_NAME = 'eBay Listings (API)';
+const CURRENT_VERSION = 2;
+const LEGACY_AUTO_REQUIRED_KEYS = new Set(['existingTitle', 'manualOverrideStatus', 'sku', 'ipnPrefix']);
 
 function sanitizeFields(fields = []) {
   return fields.map((field) => ({
@@ -46,7 +48,17 @@ function createTitleOptimizationSourceFieldsRepository(dependencies = {}) {
   function hydrateStored() {
     const raw = getStored();
     if (!raw || !Array.isArray(raw.mappings)) return null;
-    return validateAndHydrateConfiguration(raw);
+    const hydrated = validateAndHydrateConfiguration(raw);
+    if (Number(raw.version) >= CURRENT_VERSION) return hydrated;
+    const migrated = {
+      ...hydrated,
+      version: CURRENT_VERSION,
+      mappings: hydrated.mappings.map((mapping) => LEGACY_AUTO_REQUIRED_KEYS.has(mapping.logicalKey)
+        ? { ...mapping, required: false }
+        : mapping)
+    };
+    setStored(migrated);
+    return migrated;
   }
 
   async function fetchSchema() {
@@ -78,7 +90,7 @@ function createTitleOptimizationSourceFieldsRepository(dependencies = {}) {
     }
     const at = now();
     const configuration = {
-      version: 1,
+      version: CURRENT_VERSION,
       ...schema,
       mappings: seedSourceMappings(schema.fields, { actor, now: at }),
       updatedAt: at,
@@ -96,7 +108,7 @@ function createTitleOptimizationSourceFieldsRepository(dependencies = {}) {
       const actor = await getActor();
       const at = now();
       const configuration = existing || {
-        version: 1,
+        version: CURRENT_VERSION,
         mappings: seedSourceMappings(schema.fields, { actor, now: at }),
         quarantined: []
       };
@@ -114,13 +126,13 @@ function createTitleOptimizationSourceFieldsRepository(dependencies = {}) {
     } catch (cause) {
       const error = new Error(friendlySchemaError(cause));
       error.code = 'SCHEMA_REFRESH_FAILED';
-      error.current = decorate(existing || { version: 1, table: { id: null, name: TABLE_NAME }, fields: [], mappings: [], quarantined: [] });
+      error.current = decorate(existing || { version: CURRENT_VERSION, table: { id: null, name: TABLE_NAME }, fields: [], mappings: [], quarantined: [] });
       throw error;
     }
   }
 
   async function save(mappings = []) {
-    const existing = hydrateStored() || { version: 1, table: { id: null, name: TABLE_NAME }, fields: [], quarantined: [] };
+    const existing = hydrateStored() || { version: CURRENT_VERSION, table: { id: null, name: TABLE_NAME }, fields: [], quarantined: [] };
     const hydrated = validateAndHydrateConfiguration({ mappings });
     if (hydrated.quarantined.length) {
       const error = new Error('One or more source mappings are malformed.');
