@@ -22,9 +22,11 @@ test('only the selected Airtable Run Log record button is active when retries sh
 
 test('processing totals replace provisional Run Log summary counters', () => {
   assert.match(html, /id="qb-import-summary"/);
+  assert.match(html, /id="qb-selected-run-imported"/);
   assert.match(html, /breakdown\.summary/);
   assert.match(html, /latestImportSummary =/);
   assert.match(html, /renderQuickBooksImportSummary/);
+  assert.match(html, /selectedRunImportedTarget\.textContent = displayNumber\(latestImportSummary\.imported\)/);
 });
 
 test('selected execution replaces historical success and failure cards', () => {

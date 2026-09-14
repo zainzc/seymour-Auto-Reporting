@@ -2302,6 +2302,8 @@
           quickBooksOverviewPayload.overview.latestImportSummary = latestImportSummary;
           const summaryTarget = document.getElementById('qb-import-summary');
           if (summaryTarget) summaryTarget.innerHTML = renderQuickBooksImportSummary(latestImportSummary);
+          const selectedRunImportedTarget = document.getElementById('qb-selected-run-imported');
+          if (selectedRunImportedTarget) selectedRunImportedTarget.textContent = displayNumber(latestImportSummary.imported);
         }
       }
       target.innerHTML = renderTransactionTable(breakdown);
@@ -2904,7 +2906,10 @@
             ${renderTimestampKv('Started at', selectedRun.startedAt, timezone)}
             ${renderTimestampKv('Finished at', selectedRun.finishedAt, timezone)}
             ${renderKv('Duration', formatDuration(selectedRun.durationSeconds))}
-            ${renderKv('Imported records', displayNumber(summary.imported))}
+            <div class="qb-kv">
+              <div class="qb-kv-label">Imported records</div>
+              <div id="qb-selected-run-imported" class="qb-kv-value">${escapeHtml(displayNumber(summary.imported))}</div>
+            </div>
             ${selectedRun.status === 'Failed' ? renderKv('Failure stage', selectedRun.failureStage || 'Unavailable') : ''}
             ${selectedRun.status === 'Failed' ? renderKv('Failure reason', selectedRun.failureReason || 'Unavailable') : ''}
           </div>
