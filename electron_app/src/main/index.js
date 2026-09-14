@@ -5005,6 +5005,7 @@ ipcMain.handle('quickbooks-automation:get-overview', async (_, payload = {}) => 
       auditBaseId: process.env.QUICKBOOKS_AUDIT_BASE_ID || '',
       stagingBaseId: process.env.QUICKBOOKS_STAGING_BASE_ID || '',
       includeProcessingBreakdown: false,
+      selectedRunRecordId: normalizeText(payload.selectedRunRecordId),
       selectedRunId: normalizeText(payload.selectedRunId)
     });
   } catch (error) {

@@ -10,9 +10,21 @@ test('QuickBooks overview provides an accessible day and execution selector', ()
   assert.match(html, /<label[^>]*for="qb-run-day-select"/);
   assert.match(html, /id="qb-run-options"/);
   assert.match(html, /aria-pressed/);
-  assert.match(html, /getOverview\(\{ selectedRunId \}\)/);
+  assert.match(html, /getOverview\(\{ selectedRunRecordId \}\)/);
   assert.match(html, /selectQuickBooksRunDay/);
   assert.match(html, /selectQuickBooksRun/);
+});
+
+test('only the selected Airtable Run Log record button is active when retries share a Run ID', () => {
+  assert.match(html, /run\.recordId === selectedRun\.recordId/);
+  assert.match(html, /selectQuickBooksRun\('\$\{encodeURIComponent\(run\.recordId\)\}'\)/);
+});
+
+test('processing totals replace provisional Run Log summary counters', () => {
+  assert.match(html, /id="qb-import-summary"/);
+  assert.match(html, /breakdown\.summary/);
+  assert.match(html, /latestImportSummary =/);
+  assert.match(html, /renderQuickBooksImportSummary/);
 });
 
 test('selected execution replaces historical success and failure cards', () => {
@@ -31,7 +43,7 @@ test('failed selection responses preserve the previously displayed overview', ()
 });
 
 test('automatic refresh preserves the exact selected Run ID', () => {
-  const preservingCalls = html.match(/loadQuickBooksOverview\(quickBooksOverviewPayload\?\.overview\?\.selectedRun\?\.runId \|\| ''\)/g) || [];
+  const preservingCalls = html.match(/loadQuickBooksOverview\(quickBooksOverviewPayload\?\.overview\?\.selectedRun\?\.recordId \|\| ''\)/g) || [];
   assert.equal(preservingCalls.length >= 2, true);
 });
 

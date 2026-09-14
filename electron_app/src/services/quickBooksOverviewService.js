@@ -204,6 +204,7 @@ function retryNumber(record) {
 
 function summarizeSelectableRun(record, label, retryAttempt = 0) {
   return {
+    recordId: normalizeText(record?.id),
     runId: getText(record, FIELD_ALIASES.runId),
     label,
     runType: getText(record, FIELD_ALIASES.runType) || (retryAttempt ? 'Retry' : 'Main'),
@@ -248,11 +249,15 @@ function buildRunDayCatalog(runLogs = [], timezone = 'America/New_York', maxDays
     });
 }
 
-function selectOverviewRun(catalog = [], selectedRunId = '') {
+function selectOverviewRun(catalog = [], selectedRunRecordId = '') {
   const days = Array.isArray(catalog) ? catalog : [];
-  const wanted = normalizeText(selectedRunId);
+  const wanted = normalizeText(selectedRunRecordId);
   if (wanted) {
-    return days.flatMap(day => day.runs || []).find(run => run.runId === wanted) || null;
+    const runs = days.flatMap(day => day.runs || []);
+    const recordMatch = runs.find(run => run.recordId === wanted);
+    if (recordMatch) return recordMatch;
+    const legacyMatches = runs.filter(run => run.runId === wanted);
+    return legacyMatches.length === 1 ? legacyMatches[0] : null;
   }
   const latestRuns = days[0]?.runs || [];
   const main = latestRuns.find(run => !run.isRetry);
@@ -517,6 +522,7 @@ async function getProcessingBreakdownForRun(auditService, runId, options = {}) {
       ? `No processing records were found for Run ID: ${selectedRunId}`
       : 'Processing records loaded.',
     rows,
+    summary: aggregate.summary,
     recordCount: Array.isArray(records) ? records.length : 0,
     dedupedRecordCount: dedupedRecords.length,
     unrecognizedStatuses
@@ -868,9 +874,10 @@ async function getQuickBooksAutomationOverview(options = {}) {
     getText(latestAutomationConfig, FIELD_ALIASES.timezone) ||
     'Configured timezone unavailable';
   const runDays = buildRunDayCatalog(runLogs || [], 'America/New_York', 30);
-  const selectedRunChoice = selectOverviewRun(runDays, options.selectedRunId);
+  const selectedRunChoice = selectOverviewRun(runDays, options.selectedRunRecordId || options.selectedRunId);
   const selectedRunRecord = selectedRunChoice
-    ? runLogs.find(record => getText(record, FIELD_ALIASES.runId) === selectedRunChoice.runId) || null
+    ? runLogs.find(record => normalizeText(record?.id) === selectedRunChoice.recordId) ||
+      runLogs.find(record => getText(record, FIELD_ALIASES.runId) === selectedRunChoice.runId) || null
     : null;
 
   const latestStatus = normalizeStatus(getText(latestFullRun, FIELD_ALIASES.finalStatus));

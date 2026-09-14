@@ -2154,7 +2154,7 @@
     `;
   }
 
-  async function loadQuickBooksOverview(selectedRunId = '') {
+  async function loadQuickBooksOverview(selectedRunRecordId = '') {
     if (quickBooksOverviewLoading) return;
     const refreshBtn = document.getElementById('qb-refresh-btn');
     const hadPreviousData = Boolean(quickBooksOverviewPayload?.overview);
@@ -2172,7 +2172,7 @@
     try {
       const previousRunId = quickBooksOverviewPayload?.overview?.selectedRun?.runId || '';
       const previousBreakdown = quickBooksOverviewPayload?.overview?.processingBreakdown || null;
-      const result = await window.quickBooksAutomationAPI.getOverview({ selectedRunId });
+      const result = await window.quickBooksAutomationAPI.getOverview({ selectedRunRecordId });
       if (!result?.overview) throw new Error(result?.message || 'QuickBooks Automation overview failed to load.');
       const canReusePreviousBreakdown = previousRunId === result.overview.selectedRun?.runId &&
         ['success', 'no_records'].includes(previousBreakdown?.status);
@@ -2206,20 +2206,20 @@
 
   function refreshQuickBooksOverview() {
     loadQuickBooksNotificationOwner();
-    loadQuickBooksOverview(quickBooksOverviewPayload?.overview?.selectedRun?.runId || '');
+    loadQuickBooksOverview(quickBooksOverviewPayload?.overview?.selectedRun?.recordId || '');
   }
 
   function selectQuickBooksRunDay(date) {
     const day = (quickBooksOverviewPayload?.overview?.runDays || []).find(item => item.date === date);
     if (!day?.runs?.length) return;
     const run = day.runs.find(item => !item.isRetry) || [...day.runs].sort((a, b) => Date.parse(b.startedAt || '') - Date.parse(a.startedAt || ''))[0];
-    loadQuickBooksOverview(run.runId);
+    loadQuickBooksOverview(run.recordId);
   }
 
-  function selectQuickBooksRun(encodedRunId) {
-    const runId = decodeURIComponent(encodedRunId || '');
-    if (!runId || runId === quickBooksOverviewPayload?.overview?.selectedRun?.runId) return;
-    loadQuickBooksOverview(runId);
+  function selectQuickBooksRun(encodedRecordId) {
+    const recordId = decodeURIComponent(encodedRecordId || '');
+    if (!recordId || recordId === quickBooksOverviewPayload?.overview?.selectedRun?.recordId) return;
+    loadQuickBooksOverview(recordId);
   }
 
   function renderQuickBooksRunSelector(overview) {
@@ -2228,7 +2228,7 @@
     if (!days.length || !selectedRun) {
       return '<div class="qb-card full"><div class="qb-empty">No QuickBooks runs are available for selection.</div></div>';
     }
-    const selectedDay = days.find(day => (day.runs || []).some(run => run.runId === selectedRun.runId)) || days[0];
+    const selectedDay = days.find(day => (day.runs || []).some(run => run.recordId === selectedRun.recordId)) || days[0];
     return `
       <div class="qb-card full qb-run-selector" aria-label="QuickBooks run selection">
         <div>
@@ -2240,7 +2240,7 @@
         <div>
           <div id="qb-run-options-label" class="qb-run-caption">Execution</div>
           <div id="qb-run-options" class="qb-run-options" role="group" aria-labelledby="qb-run-options-label">
-            ${(selectedDay.runs || []).map(run => `<button class="qb-run-option" type="button" aria-pressed="${run.runId === selectedRun.runId}" onclick="selectQuickBooksRun('${encodeURIComponent(run.runId)}')">${escapeHtml(run.label)}</button>`).join('')}
+            ${(selectedDay.runs || []).map(run => `<button class="qb-run-option" type="button" aria-pressed="${run.recordId === selectedRun.recordId}" onclick="selectQuickBooksRun('${encodeURIComponent(run.recordId)}')">${escapeHtml(run.label)}</button>`).join('')}
           </div>
         </div>
       </div>
@@ -2252,7 +2252,7 @@
     quickBooksAutoRefreshTimer = setInterval(() => {
       if (currentDataType !== 'quickbooks') return;
       loadQuickBooksScheduleStatus();
-      loadQuickBooksOverview(quickBooksOverviewPayload?.overview?.selectedRun?.runId || '');
+      loadQuickBooksOverview(quickBooksOverviewPayload?.overview?.selectedRun?.recordId || '');
     }, QUICKBOOKS_AUTO_REFRESH_MS);
   }
 
@@ -2291,6 +2291,18 @@
         quickBooksOverviewPayload.overview.processingBreakdown = breakdown;
         quickBooksOverviewPayload.overview.resultsByTransactionType = breakdown.rows || [];
         quickBooksOverviewPayload.overview.meta.processingRecordsMatched = breakdown.dedupedRecordCount || 0;
+        if (breakdown.summary) {
+          const latestImportSummary = {
+            ...(quickBooksOverviewPayload.overview.latestImportSummary || {}),
+            staged: breakdown.summary.total,
+            imported: breakdown.summary.imported,
+            duplicates: breakdown.summary.duplicates,
+            errors: breakdown.summary.errors
+          };
+          quickBooksOverviewPayload.overview.latestImportSummary = latestImportSummary;
+          const summaryTarget = document.getElementById('qb-import-summary');
+          if (summaryTarget) summaryTarget.innerHTML = renderQuickBooksImportSummary(latestImportSummary);
+        }
       }
       target.innerHTML = renderTransactionTable(breakdown);
     } catch (err) {
@@ -2701,6 +2713,15 @@
     `;
   }
 
+  function renderQuickBooksImportSummary(summary = {}) {
+    return `
+      ${renderMetric('Staged', summary.staged)}
+      ${renderMetric('Imported', summary.imported)}
+      ${renderMetric('Duplicates', summary.duplicates)}
+      ${renderMetric('Errors', summary.errors)}
+    `;
+  }
+
   function renderTransactionTable(result) {
     const breakdown = Array.isArray(result)
       ? { status: 'success', rows: result }
@@ -2901,11 +2922,8 @@
 
         <div class="qb-card full">
           <h4>Latest Import Summary</h4>
-          <div class="qb-metrics">
-            ${renderMetric('Staged', summary.staged)}
-            ${renderMetric('Imported', summary.imported)}
-            ${renderMetric('Duplicates', summary.duplicates)}
-            ${renderMetric('Errors', summary.errors)}
+          <div id="qb-import-summary" class="qb-metrics">
+            ${renderQuickBooksImportSummary(summary)}
           </div>
         </div>
 

@@ -4,7 +4,8 @@ const assert = require('node:assert/strict');
 const {
   buildRunDayCatalog,
   selectOverviewRun,
-  getQuickBooksAutomationOverview
+  getQuickBooksAutomationOverview,
+  getProcessingBreakdownForRun
 } = require('../src/services/quickBooksOverviewService');
 
 function run(runId, runType, startTime, status = 'Completed') {
@@ -77,6 +78,40 @@ test('honors an exact selected Run ID without falling back to another execution'
 
   assert.equal(selectOverviewRun(catalog, 'retry-1').runId, 'retry-1');
   assert.equal(selectOverviewRun(catalog, 'missing'), null);
+});
+
+test('distinguishes retry records that share the same Run ID by Airtable record ID', () => {
+  const retry1 = run('shared-run', 'Retry 1', '2026-09-15T05:00:00.000Z');
+  const retry2 = run('shared-run', 'Retry 2', '2026-09-15T06:00:00.000Z');
+  retry1.id = 'rec-retry-1';
+  retry2.id = 'rec-retry-2';
+
+  const catalog = buildRunDayCatalog([retry1, retry2], 'America/New_York');
+
+  assert.deepEqual(catalog[0].runs.map(item => item.recordId), ['rec-retry-1', 'rec-retry-2']);
+  assert.equal(selectOverviewRun(catalog, 'rec-retry-2').label, 'Retry 2');
+});
+
+test('processing breakdown exposes authoritative totals for the summary cards', async () => {
+  const processingRecords = [
+    { fields: { 'Run ID': 'shared-run', 'Transaction Type': 'Invoice', 'Ending Status': 'Imported', 'Source Record Key': 'a' } },
+    { fields: { 'Run ID': 'shared-run', 'Transaction Type': 'Payment', 'Ending Status': 'Imported', 'Source Record Key': 'b' } },
+    { fields: { 'Run ID': 'shared-run', 'Transaction Type': 'Invoice', 'Ending Status': 'Duplicate', 'Source Record Key': 'c' } }
+  ];
+  const breakdown = await getProcessingBreakdownForRun({
+    fetchRecordsByFormula: async () => processingRecords
+  }, 'shared-run');
+
+  assert.deepEqual(breakdown.summary, {
+    total: 3,
+    imported: 2,
+    duplicates: 1,
+    errors: 0,
+    needsReview: 0,
+    retryQueued: 0,
+    skipped: 0,
+    unclassified: 0
+  });
 });
 
 test('overview scopes preflight, errors, summaries, and metadata to the exact selected retry Run ID', async () => {
