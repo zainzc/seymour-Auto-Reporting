@@ -71,3 +71,20 @@ test('Current Automation Status never mixes historical full-run fields with the 
   assert.doesNotMatch(currentStatusCard, /latestRun/);
   assert.doesNotMatch(currentStatusCard, /Latest run status|Latest Run ID|Batch ID|Total duration|Displayed execution/);
 });
+
+test('schedule settings expose independent controls for all three workflows', () => {
+  for (const key of ['main', 'retry1', 'retry2']) {
+    assert.match(html, new RegExp(`id="qb-schedule-${key}-enabled"`));
+    assert.match(html, new RegExp(`id="qb-schedule-${key}-time"`));
+    assert.match(html, new RegExp(`id="qb-schedule-${key}-next-run"`));
+  }
+  assert.match(html, /confirmQuickBooksRunNow\(workflowKey\)/);
+  assert.match(html, /runNow\(workflowKey\)/);
+});
+
+test('QuickBooks schedule timestamps render in the supplied Eastern timezone', () => {
+  const formatterStart = html.indexOf('function formatQuickBooksTimestamp');
+  const formatterEnd = html.indexOf('function quickBooksBadgeClass', formatterStart);
+  const formatter = html.slice(formatterStart, formatterEnd);
+  assert.match(formatter, /timeZone:\s*timezone/);
+});

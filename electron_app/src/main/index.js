@@ -5175,9 +5175,9 @@ ipcMain.handle('quickbooks-automation:save-schedule-settings', async (_, payload
   }
 });
 
-ipcMain.handle('quickbooks-automation:run-now', async () => {
+ipcMain.handle('quickbooks-automation:run-now', async (_, payload = {}) => {
   try {
-    const result = quickBooksAutomationScheduler.runNowInBackground();
+    const result = quickBooksAutomationScheduler.runNowInBackground(normalizeText(payload.workflowKey) || 'main');
     return {
       success: true,
       message: result?.message || 'QuickBooks automation Run Now started.',

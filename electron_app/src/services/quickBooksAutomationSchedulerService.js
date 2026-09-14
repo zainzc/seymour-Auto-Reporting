@@ -3,16 +3,20 @@ const axios = require('axios');
 
 const CONFIG_KEY = 'quickBooksAutomationSettings';
 const LOGS_KEY = 'quickBooksAutomationWebhookLogs';
-const MAIN_WORKFLOW_WEBHOOK_URL = 'https://seymourauto.app.n8n.cloud/webhook/qb-01-main-controll';
+const WORKFLOW_DEFINITIONS = Object.freeze({
+  main: Object.freeze({ label: 'Main Run', webhookUrl: 'https://seymourauto.app.n8n.cloud/webhook/qb-01-main-controll' }),
+  retry1: Object.freeze({ label: 'Retry 1', webhookUrl: 'https://seymourauto.app.n8n.cloud/webhook/qb-10-retry1-controll' }),
+  retry2: Object.freeze({ label: 'Retry 2', webhookUrl: 'https://seymourauto.app.n8n.cloud/webhook/qb-10-retry2-controll' })
+});
 const DEFAULT_TIMEZONE = 'America/New_York';
 const DEFAULT_RUN_TIME = '01:00';
 const MAX_LOGS = 25;
 const MAX_SCHEDULED_RETRIES = 3;
 const RETRY_DELAY_MS = 30 * 60 * 1000;
 
-let activeJob = null;
-let activeRetryTimer = null;
-let isWebhookRunning = false;
+const activeJobs = new Map();
+const activeRetryTimers = new Map();
+const runningWorkflows = new Set();
 let configStore = null;
 
 function getConfigStore() {
@@ -37,6 +41,12 @@ function parseBoolean(value, fallback = false) {
   if (['true', '1', 'yes', 'active', 'enabled'].includes(text)) return true;
   if (['false', '0', 'no', 'paused', 'disabled'].includes(text)) return false;
   return fallback;
+}
+
+function getWorkflowDefinition(workflowKey = 'main') {
+  const definition = WORKFLOW_DEFINITIONS[String(workflowKey || '').trim()];
+  if (!definition) throw new Error(`Unknown QuickBooks workflow: ${workflowKey}`);
+  return definition;
 }
 
 function getZonedParts(date = new Date(), timezone = DEFAULT_TIMEZONE) {
@@ -140,10 +150,10 @@ function appendLog(entry = {}) {
   saveLogs(logs);
 }
 
-function getDefaultSettings() {
+function getDefaultWorkflow(runTime = DEFAULT_RUN_TIME) {
   return {
     enabled: false,
-    runTime: DEFAULT_RUN_TIME,
+    runTime,
     timezone: DEFAULT_TIMEZONE,
     nextRunAt: null,
     lastScheduledExecutionDate: '',
@@ -156,31 +166,53 @@ function getDefaultSettings() {
   };
 }
 
+function getDefaultSettings() {
+  return {
+    workflows: {
+      main: getDefaultWorkflow(DEFAULT_RUN_TIME),
+      retry1: getDefaultWorkflow('06:00'),
+      retry2: getDefaultWorkflow('10:00')
+    }
+  };
+}
+
+function normalizeWorkflowSettings(stored = {}) {
+  const defaults = getDefaultSettings();
+  const hasWorkflowShape = stored?.workflows && typeof stored.workflows === 'object';
+  const workflows = {};
+  Object.keys(WORKFLOW_DEFINITIONS).forEach(key => {
+    const legacyMain = key === 'main' && !hasWorkflowShape ? stored : {};
+    const source = hasWorkflowShape && stored.workflows[key] && typeof stored.workflows[key] === 'object'
+      ? stored.workflows[key]
+      : legacyMain;
+    const fallback = defaults.workflows[key];
+    workflows[key] = {
+      ...fallback,
+      ...source,
+      enabled: parseBoolean(source.enabled, fallback.enabled),
+      runTime: normalizeRunTime(source.runTime || fallback.runTime),
+      timezone: DEFAULT_TIMEZONE
+    };
+    workflows[key].nextRunAt = workflows[key].enabled ? calculateNextRunAt(workflows[key]) : null;
+  });
+  return { workflows };
+}
+
 function getSettings() {
   const { getInventoryConfig } = getConfigStore();
-  const stored = getInventoryConfig(CONFIG_KEY) || {};
-  const merged = {
-    ...getDefaultSettings(),
-    ...stored,
-    enabled: parseBoolean(stored.enabled, false),
-    runTime: normalizeRunTime(stored.runTime),
-    timezone: DEFAULT_TIMEZONE
-  };
-  merged.nextRunAt = merged.enabled ? calculateNextRunAt(merged) : null;
-  return merged;
+  return normalizeWorkflowSettings(getInventoryConfig(CONFIG_KEY) || {});
 }
 
 function saveSettings(next = {}) {
   const { saveInventoryConfig } = getConfigStore();
   const current = getSettings();
-  const merged = {
-    ...current,
-    ...next,
-    enabled: parseBoolean(next.enabled, current.enabled),
-    runTime: normalizeRunTime(next.runTime || current.runTime),
-    timezone: DEFAULT_TIMEZONE
-  };
-  merged.nextRunAt = merged.enabled ? calculateNextRunAt(merged) : null;
+  const incoming = next.workflows || {};
+  const merged = normalizeWorkflowSettings({
+    workflows: Object.fromEntries(Object.keys(WORKFLOW_DEFINITIONS).map(key => [key, {
+      ...current.workflows[key],
+      ...(incoming[key] || {})
+    }]))
+  });
   saveInventoryConfig(CONFIG_KEY, merged);
   return merged;
 }
@@ -200,39 +232,40 @@ function summarizeResponse(response) {
   return String(data).slice(0, 220);
 }
 
-function saveAttemptToSettings(attempt) {
+function saveAttemptToSettings(workflowKey, attempt) {
   const current = getSettings();
+  const workflow = current.workflows[workflowKey];
   const updates = {
     lastWebhookAttempt: attempt
   };
   if (attempt.success) {
     updates.lastScheduledSuccessAt = attempt.timestamp;
   }
-  saveSettings({
-    ...current,
-    ...updates
-  });
+  saveSettings({ workflows: { [workflowKey]: { ...workflow, ...updates } } });
 }
 
-async function triggerWebhook(triggerType = 'scheduled', meta = {}) {
-  if (isWebhookRunning) {
+async function triggerWebhook(workflowKey = 'main', triggerType = 'scheduled', meta = {}) {
+  const definition = getWorkflowDefinition(workflowKey);
+  if (runningWorkflows.has(workflowKey)) {
     const skipped = {
       triggerType,
+      workflowKey,
+      workflowLabel: definition.label,
       success: true,
       skipped: true,
       message: 'QuickBooks webhook skipped: previous invocation still in progress.',
-      configuredRunTime: meta.runTime || getSettings().runTime,
+      configuredRunTime: meta.runTime || getSettings().workflows[workflowKey].runTime,
       timezone: DEFAULT_TIMEZONE
     };
     appendLog(skipped);
     return skipped;
   }
 
-  isWebhookRunning = true;
-  const settings = getSettings();
+  runningWorkflows.add(workflowKey);
+  const settings = getSettings().workflows[workflowKey];
   const timestamp = new Date().toISOString();
   try {
-    const response = await axios.get(MAIN_WORKFLOW_WEBHOOK_URL, {
+    const response = await axios.get(definition.webhookUrl, {
       timeout: 30000,
       validateStatus: () => true
     });
@@ -240,70 +273,72 @@ async function triggerWebhook(triggerType = 'scheduled', meta = {}) {
     const attempt = {
       timestamp,
       triggerType,
+      workflowKey,
+      workflowLabel: definition.label,
       success,
       httpStatus: response.status,
       configuredRunTime: settings.runTime,
       timezone: DEFAULT_TIMEZONE,
       occurrenceDate: meta.occurrenceDate || '',
       retryAttempt: Number(meta.retryAttempt || 0),
-      message: success ? 'QuickBooks parent workflow webhook triggered.' : 'QuickBooks parent workflow webhook failed.',
+      message: success ? `${definition.label} workflow webhook triggered.` : `${definition.label} workflow webhook failed.`,
       responseSummary: summarizeResponse(response)
     };
     appendLog(attempt);
-    saveAttemptToSettings(attempt);
+    saveAttemptToSettings(workflowKey, attempt);
     return attempt;
   } catch (error) {
     const attempt = {
       timestamp,
       triggerType,
+      workflowKey,
+      workflowLabel: definition.label,
       success: false,
       httpStatus: error?.response?.status || null,
       configuredRunTime: settings.runTime,
       timezone: DEFAULT_TIMEZONE,
       occurrenceDate: meta.occurrenceDate || '',
       retryAttempt: Number(meta.retryAttempt || 0),
-      message: 'QuickBooks parent workflow webhook request failed.',
+      message: `${definition.label} workflow webhook request failed.`,
       errorSummary: String(error?.message || error || 'Unknown error').slice(0, 220)
     };
     appendLog(attempt);
-    saveAttemptToSettings(attempt);
+    saveAttemptToSettings(workflowKey, attempt);
     return attempt;
   } finally {
-    isWebhookRunning = false;
+    runningWorkflows.delete(workflowKey);
   }
 }
 
-function stopRetryTimer() {
-  if (activeRetryTimer) {
-    clearTimeout(activeRetryTimer);
-    activeRetryTimer = null;
+function stopRetryTimer(workflowKey) {
+  const timer = activeRetryTimers.get(workflowKey);
+  if (timer) {
+    clearTimeout(timer);
+    activeRetryTimers.delete(workflowKey);
   }
 }
 
-function scheduleRetry(occurrenceDate) {
-  stopRetryTimer();
-  const settings = getSettings();
+function scheduleRetry(workflowKey, occurrenceDate) {
+  stopRetryTimer(workflowKey);
+  const settings = getSettings().workflows[workflowKey];
   if (!settings.enabled) return;
   if (!occurrenceDate) return;
   const attempts = Number(settings.retryAttempts || 0);
   if (attempts >= MAX_SCHEDULED_RETRIES) return;
 
   const nextRetryAt = new Date(Date.now() + RETRY_DELAY_MS).toISOString();
-  saveSettings({
-    ...settings,
-    retryOccurrenceDate: occurrenceDate,
-    retryAttempts: attempts,
-    nextRetryAt
-  });
+  saveSettings({ workflows: { [workflowKey]: { ...settings, retryOccurrenceDate: occurrenceDate, retryAttempts: attempts, nextRetryAt } } });
 
-  activeRetryTimer = setTimeout(async () => {
-    activeRetryTimer = null;
-    await executeScheduledRetry(occurrenceDate);
+  const timer = setTimeout(async () => {
+    activeRetryTimers.delete(workflowKey);
+    await executeScheduledRetry(workflowKey, occurrenceDate);
   }, RETRY_DELAY_MS);
+  activeRetryTimers.set(workflowKey, timer);
 }
 
-async function executeScheduledRetry(occurrenceDate) {
-  const settings = getSettings();
+async function executeScheduledRetry(workflowKey = 'main', occurrenceDate) {
+  getWorkflowDefinition(workflowKey);
+  const settings = getSettings().workflows[workflowKey];
   if (!settings.enabled) return { success: false, skipped: true, message: 'QuickBooks automation paused.' };
   if (settings.retryOccurrenceDate !== occurrenceDate) {
     return { success: false, skipped: true, message: 'Retry occurrence no longer active.' };
@@ -313,23 +348,20 @@ async function executeScheduledRetry(occurrenceDate) {
     return { success: false, skipped: true, message: 'Retry limit reached.' };
   }
 
-  saveSettings({
-    ...settings,
-    retryAttempts: nextAttempt,
-    nextRetryAt: null
-  });
-  const result = await triggerWebhook('scheduled_retry', {
+  saveSettings({ workflows: { [workflowKey]: { ...settings, retryAttempts: nextAttempt, nextRetryAt: null } } });
+  const result = await triggerWebhook(workflowKey, 'delivery_retry', {
     occurrenceDate,
     retryAttempt: nextAttempt
   });
   if (!result.success && nextAttempt < MAX_SCHEDULED_RETRIES) {
-    scheduleRetry(occurrenceDate);
+    scheduleRetry(workflowKey, occurrenceDate);
   }
   return result;
 }
 
-async function executeScheduledOccurrence() {
-  const settings = getSettings();
+async function executeScheduledOccurrence(workflowKey = 'main') {
+  getWorkflowDefinition(workflowKey);
+  const settings = getSettings().workflows[workflowKey];
   if (!settings.enabled) {
     return { success: false, skipped: true, message: 'QuickBooks automation paused.' };
   }
@@ -338,6 +370,8 @@ async function executeScheduledOccurrence() {
   if (settings.lastScheduledExecutionDate === occurrenceDate) {
     appendLog({
       triggerType: 'scheduled',
+      workflowKey,
+      workflowLabel: getWorkflowDefinition(workflowKey).label,
       success: true,
       skipped: true,
       occurrenceDate,
@@ -348,94 +382,83 @@ async function executeScheduledOccurrence() {
     return { success: true, skipped: true, message: 'Scheduled occurrence already attempted.' };
   }
 
-  saveSettings({
+  saveSettings({ workflows: { [workflowKey]: {
     ...settings,
     lastScheduledExecutionDate: occurrenceDate,
     lastScheduledExecutionAt: new Date().toISOString(),
-    retryOccurrenceDate: '',
-    retryAttempts: 0,
-    nextRetryAt: null
-  });
+    retryOccurrenceDate: '', retryAttempts: 0, nextRetryAt: null
+  } } });
 
-  const result = await triggerWebhook('scheduled', {
+  const result = await triggerWebhook(workflowKey, 'scheduled', {
     occurrenceDate,
     retryAttempt: 0
   });
 
   if (!result.success) {
-    scheduleRetry(occurrenceDate);
+    scheduleRetry(workflowKey, occurrenceDate);
   }
 
-  const fresh = getSettings();
-  saveSettings({
-    ...fresh,
-    nextRunAt: calculateNextRunAt(fresh)
-  });
+  const fresh = getSettings().workflows[workflowKey];
+  saveSettings({ workflows: { [workflowKey]: { ...fresh, nextRunAt: calculateNextRunAt(fresh) } } });
   return result;
 }
 
 function stopSchedule(options = {}) {
-  if (activeJob) {
-    activeJob.stop();
-    activeJob = null;
-  }
-  stopRetryTimer();
+  activeJobs.forEach(job => job.stop());
+  activeJobs.clear();
+  Object.keys(WORKFLOW_DEFINITIONS).forEach(stopRetryTimer);
 
   if (options.persistPaused) {
     const current = getSettings();
-    saveSettings({
-      ...current,
-      enabled: false,
-      nextRunAt: null
-    });
+    saveSettings({ workflows: Object.fromEntries(Object.entries(current.workflows).map(([key, workflow]) => [key, {
+      ...workflow, enabled: false, nextRunAt: null
+    }])) });
   }
 }
 
 function startSchedule(settings = getSettings()) {
   stopSchedule({ persistPaused: false });
-  const normalized = saveSettings({
-    ...settings,
-    enabled: true,
-    runTime: settings.runTime
-  });
-  const cronExpression = buildDailyCron(normalized.runTime);
-  activeJob = cron.schedule(
-    cronExpression,
-    () => {
-      executeScheduledOccurrence().catch(error => {
+  const normalized = saveSettings(settings);
+  Object.entries(normalized.workflows).forEach(([workflowKey, workflow]) => {
+    if (!workflow.enabled) return;
+    const job = cron.schedule(buildDailyCron(workflow.runTime), () => {
+      executeScheduledOccurrence(workflowKey).catch(error => {
         appendLog({
           triggerType: 'scheduled',
+          workflowKey,
+          workflowLabel: getWorkflowDefinition(workflowKey).label,
           success: false,
           message: 'QuickBooks scheduled webhook failed before request.',
           errorSummary: String(error?.message || error || 'Unknown error').slice(0, 220),
-          configuredRunTime: normalized.runTime,
+          configuredRunTime: workflow.runTime,
           timezone: DEFAULT_TIMEZONE
         });
       });
-    },
-    {
+    }, {
       scheduled: true,
       timezone: DEFAULT_TIMEZONE
-    }
-  );
+    });
+    activeJobs.set(workflowKey, job);
+  });
 
-  const fresh = getSettings();
-  if (fresh.nextRetryAt && fresh.retryOccurrenceDate) {
-    const delay = Date.parse(fresh.nextRetryAt) - Date.now();
+  Object.entries(getSettings().workflows).forEach(([workflowKey, workflow]) => {
+    if (!workflow.enabled || !workflow.nextRetryAt || !workflow.retryOccurrenceDate) return;
+    const delay = Date.parse(workflow.nextRetryAt) - Date.now();
     if (delay > 0 && delay <= RETRY_DELAY_MS) {
-      activeRetryTimer = setTimeout(async () => {
-        activeRetryTimer = null;
-        await executeScheduledRetry(fresh.retryOccurrenceDate);
+      const timer = setTimeout(async () => {
+        activeRetryTimers.delete(workflowKey);
+        await executeScheduledRetry(workflowKey, workflow.retryOccurrenceDate);
       }, delay);
+      activeRetryTimers.set(workflowKey, timer);
     }
-  }
+  });
 
   return getStatus();
 }
 
 function resumeSchedule() {
   const settings = getSettings();
-  if (!settings.enabled) {
+  if (!Object.values(settings.workflows).some(workflow => workflow.enabled)) {
     stopSchedule({ persistPaused: false });
     return getStatus();
   }
@@ -444,58 +467,58 @@ function resumeSchedule() {
 
 function updateSettings(payload = {}) {
   const current = getSettings();
-  const enabled = parseBoolean(payload.enabled, current.enabled);
-  const next = saveSettings({
-    ...current,
-    enabled,
-    runTime: normalizeRunTime(payload.runTime || current.runTime),
-    timezone: DEFAULT_TIMEZONE
-  });
+  const incoming = payload.workflows || {
+    main: { enabled: payload.enabled, runTime: payload.runTime }
+  };
+  const next = saveSettings({ workflows: Object.fromEntries(Object.keys(WORKFLOW_DEFINITIONS).map(key => [key, {
+    ...current.workflows[key],
+    ...(incoming[key] || {})
+  }])) });
 
-  if (enabled) {
+  if (Object.values(next.workflows).some(workflow => workflow.enabled)) {
     return startSchedule(next);
   }
 
   stopSchedule({ persistPaused: false });
-  saveSettings({
-    ...next,
-    enabled: false,
-    nextRunAt: null
-  });
   return getStatus();
 }
 
-async function runNow() {
-  return triggerWebhook('manual', {
+async function runNow(workflowKey = 'main') {
+  return triggerWebhook(workflowKey, 'manual', {
     occurrenceDate: '',
     retryAttempt: 0
   });
 }
 
-function runNowInBackground() {
+function runNowInBackground(workflowKey = 'main') {
+  const definition = getWorkflowDefinition(workflowKey);
   const requested = {
     timestamp: new Date().toISOString(),
     triggerType: 'manual',
+    workflowKey,
+    workflowLabel: definition.label,
     success: true,
     pending: true,
-    configuredRunTime: getSettings().runTime,
+    configuredRunTime: getSettings().workflows[workflowKey].runTime,
     timezone: DEFAULT_TIMEZONE,
     occurrenceDate: '',
     retryAttempt: 0,
-    message: 'QuickBooks manual webhook request started.'
+    message: `${definition.label} webhook request started.`
   };
   appendLog(requested);
 
   setTimeout(() => {
-    triggerWebhook('manual', {
+    triggerWebhook(workflowKey, 'manual', {
       occurrenceDate: '',
       retryAttempt: 0
     }).catch(error => {
       const failed = {
         timestamp: new Date().toISOString(),
         triggerType: 'manual',
+        workflowKey,
+        workflowLabel: definition.label,
         success: false,
-        configuredRunTime: getSettings().runTime,
+        configuredRunTime: getSettings().workflows[workflowKey].runTime,
         timezone: DEFAULT_TIMEZONE,
         occurrenceDate: '',
         retryAttempt: 0,
@@ -503,7 +526,7 @@ function runNowInBackground() {
         errorSummary: String(error?.message || error || 'Unknown error').slice(0, 220)
       };
       appendLog(failed);
-      saveAttemptToSettings(failed);
+      saveAttemptToSettings(workflowKey, failed);
     });
   }, 0);
 
@@ -512,9 +535,15 @@ function runNowInBackground() {
 
 function getStatus() {
   const settings = getSettings();
+  const main = settings.workflows.main;
   return {
     ...settings,
-    status: settings.enabled ? 'Active' : 'Paused',
+    enabled: main.enabled,
+    runTime: main.runTime,
+    timezone: DEFAULT_TIMEZONE,
+    nextRunAt: main.nextRunAt,
+    lastWebhookAttempt: main.lastWebhookAttempt,
+    status: Object.values(settings.workflows).some(workflow => workflow.enabled) ? 'Active' : 'Paused',
     logs: getLogs(),
     retryDelayMinutes: RETRY_DELAY_MS / 60000,
     maxScheduledRetries: MAX_SCHEDULED_RETRIES
@@ -522,6 +551,7 @@ function getStatus() {
 }
 
 module.exports = {
+  WORKFLOW_DEFINITIONS,
   DEFAULT_TIMEZONE,
   DEFAULT_RUN_TIME,
   MAX_LOGS,
@@ -538,5 +568,8 @@ module.exports = {
   executeScheduledOccurrence,
   executeScheduledRetry,
   zonedDateKey,
-  buildDailyCron
+  buildDailyCron,
+  normalizeWorkflowSettings,
+  getWorkflowDefinition,
+  triggerWebhook
 };

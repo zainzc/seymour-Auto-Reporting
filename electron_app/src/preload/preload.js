@@ -56,7 +56,7 @@ contextBridge.exposeInMainWorld('quickBooksAutomationAPI', {
   getNotificationOwner: (payload) => ipcRenderer.invoke('quickbooks-automation:get-notification-owner', payload),
   searchClickUpUsers: (payload) => ipcRenderer.invoke('quickbooks-automation:search-clickup-users', payload),
   saveNotificationOwner: (payload) => ipcRenderer.invoke('quickbooks-automation:save-notification-owner', payload),
-  runNow: () => ipcRenderer.invoke('quickbooks-automation:run-now'),
+  runNow: (workflowKey = 'main') => ipcRenderer.invoke('quickbooks-automation:run-now', { workflowKey }),
   openExternal: (url) => ipcRenderer.invoke('quickbooks-automation:open-external', url)
 });
 

@@ -944,6 +944,29 @@
       border-top: 1px solid #d9e6f4;
     }
 
+    .qb-workflow-schedules {
+      display: grid;
+      gap: 12px;
+    }
+
+    .qb-workflow-schedule {
+      display: grid;
+      grid-template-columns: minmax(150px, 1fr) minmax(150px, 0.8fr) minmax(220px, 1.35fr);
+      gap: 14px;
+      align-items: center;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+
+    .qb-workflow-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
     .qb-owner-card {
       margin-top: 0;
     }
@@ -1251,6 +1274,7 @@
       .qb-kv-grid,
       .qb-settings-grid,
       .qb-control-grid,
+      .qb-workflow-schedule,
       .qb-owner-current,
       .qb-owner-selected {
         grid-template-columns: 1fr;
@@ -1356,34 +1380,28 @@
       <div class="qb-control-hero paused" id="qb-control-hero">
         <div class="qb-control-copy">
           <div class="qb-control-eyebrow">Automation control panel</div>
-          <h4 id="qb-schedule-status-text">Daily Schedule Paused</h4>
-          <p id="qb-schedule-toggle-hint">Automatic scheduled runs are paused. Run Now remains available for an intentional manual start.</p>
+          <h4 id="qb-schedule-status-text">Workflow Schedules Paused</h4>
+          <p id="qb-schedule-toggle-hint">Configure Main Run and retry workflows independently in Eastern time.</p>
         </div>
-        <div class="qb-control-switch-wrap">
-          <span class="qb-badge gray" id="qb-schedule-status-badge">Paused</span>
-          <label class="qb-toggle" aria-label="QuickBooks daily schedule active toggle">
-            <input type="checkbox" id="qb-schedule-enabled" onchange="previewQuickBooksScheduleToggle()" />
-            <span class="qb-toggle-slider"></span>
-          </label>
-        </div>
+        <span class="qb-badge gray" id="qb-schedule-status-badge">Paused</span>
       </div>
 
       <div class="qb-control-body">
-        <div class="qb-control-grid">
-          <div class="qb-control-item">
-            <div class="qb-control-label">Daily Run Time</div>
-            <input type="time" id="qb-run-time" step="60" value="01:00" />
-            <div class="qb-control-note">Interpreted in Eastern time. You can select a time a few minutes ahead for testing.</div>
+        <div class="qb-workflow-schedules">
+          <div class="qb-workflow-schedule">
+            <div class="qb-control-item"><div class="qb-workflow-heading"><div class="qb-control-label">Main Run</div><label class="qb-toggle" aria-label="Main Run daily schedule active toggle"><input type="checkbox" id="qb-schedule-main-enabled" onchange="previewQuickBooksScheduleToggle()" /><span class="qb-toggle-slider"></span></label></div><div class="qb-control-note">Calls only the main workflow webhook.</div></div>
+            <div class="qb-control-item"><label class="qb-control-label" for="qb-schedule-main-time">Daily time</label><input type="time" id="qb-schedule-main-time" step="60" value="01:00" /><div class="qb-control-note">Eastern time</div></div>
+            <div class="qb-control-item"><div class="qb-control-label">Next scheduled run</div><div class="qb-control-value" id="qb-schedule-main-next-run">Paused</div></div>
           </div>
-          <div class="qb-control-item">
-            <div class="qb-control-label">Timezone</div>
-            <div class="qb-control-value" id="qb-schedule-timezone">America/New_York</div>
-            <div class="qb-control-note">EST and EDT are handled automatically.</div>
+          <div class="qb-workflow-schedule">
+            <div class="qb-control-item"><div class="qb-workflow-heading"><div class="qb-control-label">Retry 1</div><label class="qb-toggle" aria-label="Retry 1 daily schedule active toggle"><input type="checkbox" id="qb-schedule-retry1-enabled" onchange="previewQuickBooksScheduleToggle()" /><span class="qb-toggle-slider"></span></label></div><div class="qb-control-note">Calls only the Retry 1 workflow webhook.</div></div>
+            <div class="qb-control-item"><label class="qb-control-label" for="qb-schedule-retry1-time">Daily time</label><input type="time" id="qb-schedule-retry1-time" step="60" value="06:00" /><div class="qb-control-note">Eastern time</div></div>
+            <div class="qb-control-item"><div class="qb-control-label">Next scheduled run</div><div class="qb-control-value" id="qb-schedule-retry1-next-run">Paused</div></div>
           </div>
-          <div class="qb-control-item">
-            <div class="qb-control-label">Next Scheduled Run</div>
-            <div class="qb-control-value" id="qb-next-run">Paused</div>
-            <div class="qb-control-note">Changing the time and saving recalculates the next run.</div>
+          <div class="qb-workflow-schedule">
+            <div class="qb-control-item"><div class="qb-workflow-heading"><div class="qb-control-label">Retry 2</div><label class="qb-toggle" aria-label="Retry 2 daily schedule active toggle"><input type="checkbox" id="qb-schedule-retry2-enabled" onchange="previewQuickBooksScheduleToggle()" /><span class="qb-toggle-slider"></span></label></div><div class="qb-control-note">Calls only the Retry 2 workflow webhook.</div></div>
+            <div class="qb-control-item"><label class="qb-control-label" for="qb-schedule-retry2-time">Daily time</label><input type="time" id="qb-schedule-retry2-time" step="60" value="10:00" /><div class="qb-control-note">Eastern time</div></div>
+            <div class="qb-control-item"><div class="qb-control-label">Next scheduled run</div><div class="qb-control-value" id="qb-schedule-retry2-next-run">Paused</div></div>
           </div>
         </div>
 
@@ -1394,10 +1412,12 @@
         </div>
         <div class="status-box hidden" id="qb-settings-status"></div>
         <div class="qb-confirm-panel" id="qb-run-now-confirm">
-          <strong>Run the production QuickBooks automation now?</strong><br>
-          This will call the live n8n parent workflow.
+          <strong>Choose a production workflow to run now</strong><br>
+          This immediately calls the selected live n8n webhook.
           <div class="qb-confirm-actions">
-            <button class="action-btn success qb-link-btn" type="button" onclick="confirmQuickBooksRunNow()">Yes, Run Now</button>
+            <button class="action-btn success qb-link-btn" type="button" onclick="confirmQuickBooksRunNow('main')">Main Run</button>
+            <button class="action-btn secondary qb-link-btn" type="button" onclick="confirmQuickBooksRunNow('retry1')">Retry 1</button>
+            <button class="action-btn secondary qb-link-btn" type="button" onclick="confirmQuickBooksRunNow('retry2')">Retry 2</button>
             <button class="action-btn secondary qb-link-btn" type="button" onclick="cancelQuickBooksRunNow()">Cancel</button>
           </div>
         </div>
@@ -2107,6 +2127,7 @@
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return escapeHtml(value);
     return new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
       year: 'numeric',
       month: 'short',
       day: '2-digit',
@@ -2339,28 +2360,30 @@
 
   function renderQuickBooksScheduleStatus() {
     const status = quickBooksScheduleStatus || {};
-    const enabled = Boolean(status.enabled);
+    const workflows = status.workflows || {};
+    const enabledCount = Object.values(workflows).filter(workflow => workflow?.enabled).length;
+    const enabled = enabledCount > 0;
     const timezone = status.timezone || 'America/New_York';
-    const statusText = enabled ? 'Daily Schedule Active' : 'Daily Schedule Paused';
+    const statusText = enabled ? `${enabledCount} Workflow Schedule${enabledCount === 1 ? '' : 's'} Active` : 'Workflow Schedules Paused';
     const badge = document.getElementById('qb-schedule-status-badge');
     const hero = document.getElementById('qb-control-hero');
-    const enabledInput = document.getElementById('qb-schedule-enabled');
-    const runTimeInput = document.getElementById('qb-run-time');
-    const latestAttempt = status.lastWebhookAttempt || (Array.isArray(status.logs) ? status.logs[0] : null);
+    const latestAttempt = Array.isArray(status.logs) && status.logs.length ? status.logs[0] : status.lastWebhookAttempt;
     const attemptsPanel = document.getElementById('qb-attempts-panel');
     const attemptsBtn = document.getElementById('qb-toggle-attempts-btn');
 
     hero.className = `qb-control-hero ${enabled ? 'active' : 'paused'}`;
-    enabledInput.checked = enabled;
-    runTimeInput.value = status.runTime || '01:00';
+    ['main', 'retry1', 'retry2'].forEach(key => {
+      const workflow = workflows[key] || {};
+      document.getElementById(`qb-schedule-${key}-enabled`).checked = Boolean(workflow.enabled);
+      document.getElementById(`qb-schedule-${key}-time`).value = workflow.runTime || (key === 'main' ? '01:00' : key === 'retry1' ? '06:00' : '10:00');
+      document.getElementById(`qb-schedule-${key}-next-run`).textContent = workflow.enabled
+        ? formatQuickBooksTimestamp(workflow.nextRunAt, timezone)
+        : 'Paused';
+    });
     document.getElementById('qb-schedule-status-text').textContent = statusText;
     document.getElementById('qb-schedule-toggle-hint').textContent = enabled
-      ? 'The Electron app will start the parent QuickBooks workflow once per day at the saved Eastern time.'
-      : 'Automatic scheduled runs are paused. Run Now remains available for an intentional manual start.';
-    document.getElementById('qb-schedule-timezone').textContent = timezone;
-    document.getElementById('qb-next-run').textContent = enabled
-      ? formatQuickBooksTimestamp(status.nextRunAt, timezone)
-      : 'Paused';
+      ? 'Each active workflow will call its own webhook once per day at its saved Eastern time.'
+      : 'All automatic workflow schedules are paused. Run Now remains available.';
     badge.className = `qb-badge ${enabled ? 'green' : 'gray'}`;
     badge.textContent = enabled ? 'Active' : 'Paused';
 
@@ -2379,15 +2402,16 @@
   }
 
   function previewQuickBooksScheduleToggle() {
-    const enabled = document.getElementById('qb-schedule-enabled').checked;
-    const statusText = enabled ? 'Daily Schedule Active after save' : 'Daily Schedule Paused after save';
+    const enabledCount = ['main', 'retry1', 'retry2'].filter(key => document.getElementById(`qb-schedule-${key}-enabled`).checked).length;
+    const enabled = enabledCount > 0;
+    const statusText = enabled ? `${enabledCount} Workflow Schedule${enabledCount === 1 ? '' : 's'} Active after save` : 'Workflow Schedules Paused after save';
     const badge = document.getElementById('qb-schedule-status-badge');
     const hero = document.getElementById('qb-control-hero');
     hero.className = `qb-control-hero ${enabled ? 'active' : 'paused'}`;
     document.getElementById('qb-schedule-status-text').textContent = statusText;
     document.getElementById('qb-schedule-toggle-hint').textContent = enabled
-      ? 'Click Save Settings to activate the daily QuickBooks schedule.'
-      : 'Click Save Settings to pause automatic scheduled runs.';
+      ? 'Click Save Settings to activate the selected daily workflow schedules.'
+      : 'Click Save Settings to pause all automatic workflow schedules.';
     badge.className = `qb-badge ${enabled ? 'yellow' : 'gray'}`;
     badge.textContent = 'Unsaved';
   }
@@ -2574,10 +2598,11 @@
     const triggerType = String(attempt?.triggerType || 'unknown').replace(/_/g, ' ');
     const statusLabel = skipped ? 'Skipped' : success ? 'Success' : 'Failed';
     const httpStatus = attempt?.httpStatus ? `HTTP ${attempt.httpStatus}` : 'HTTP unavailable';
-    const retry = Number(attempt?.retryAttempt || 0) > 0 ? `Retry ${attempt.retryAttempt}` : '';
+    const workflowLabel = attempt?.workflowLabel || (attempt?.workflowKey === 'retry1' ? 'Retry 1' : attempt?.workflowKey === 'retry2' ? 'Retry 2' : 'Main Run');
+    const deliveryRetry = Number(attempt?.retryAttempt || 0) > 0 ? `Delivery attempt ${Number(attempt.retryAttempt) + 1}` : '';
     const detail = attempt?.responseSummary || attempt?.errorSummary || attempt?.message || 'No additional details.';
     const body = `
-      <div class="qb-attempt-title">${escapeHtml(statusLabel)} - ${escapeHtml(triggerType)} ${retry ? `(${escapeHtml(retry)})` : ''}</div>
+      <div class="qb-attempt-title">${escapeHtml(workflowLabel)} — ${escapeHtml(statusLabel)} · ${escapeHtml(triggerType)} ${deliveryRetry ? `(${escapeHtml(deliveryRetry)})` : ''}</div>
       <div class="qb-attempt-meta">
         ${formatQuickBooksTimestamp(attempt?.timestamp, timezone)} | ${escapeHtml(httpStatus)}<br>
         ${escapeHtml(detail)}
@@ -2591,8 +2616,10 @@
     const statusEl = document.getElementById('qb-settings-status');
     const saveBtn = document.getElementById('qb-save-settings-btn');
     const payload = {
-      enabled: document.getElementById('qb-schedule-enabled').checked,
-      runTime: document.getElementById('qb-run-time').value || '01:00'
+      workflows: Object.fromEntries(['main', 'retry1', 'retry2'].map(key => [key, {
+        enabled: document.getElementById(`qb-schedule-${key}-enabled`).checked,
+        runTime: document.getElementById(`qb-schedule-${key}-time`).value || (key === 'main' ? '01:00' : key === 'retry1' ? '06:00' : '10:00')
+      }]))
     };
     saveBtn.disabled = true;
     showStatus(statusEl, 'info', 'Saving QuickBooks automation settings...');
@@ -2603,7 +2630,8 @@
       }
       quickBooksScheduleStatus = result.status || null;
       renderQuickBooksScheduleStatus();
-      const savedStatus = quickBooksScheduleStatus?.enabled ? 'Automation is Active.' : 'Automation is Paused because the toggle is off.';
+      const activeCount = Object.values(quickBooksScheduleStatus?.workflows || {}).filter(workflow => workflow?.enabled).length;
+      const savedStatus = activeCount ? `${activeCount} workflow schedule${activeCount === 1 ? '' : 's'} active.` : 'All workflow schedules are paused.';
       showStatus(statusEl, 'success', `${result.message || 'QuickBooks automation settings saved.'} ${savedStatus}`);
     } catch (err) {
       showStatus(statusEl, 'error', err.message || 'Failed to save QuickBooks automation settings.');
@@ -2624,16 +2652,17 @@
     ensureQuickBooksOwnerSearchEnabled();
   }
 
-  async function confirmQuickBooksRunNow() {
+  async function confirmQuickBooksRunNow(workflowKey) {
     const panel = document.getElementById('qb-run-now-confirm');
     if (panel) panel.style.display = 'none';
     const statusEl = document.getElementById('qb-settings-status');
     const runBtn = document.getElementById('qb-run-now-btn');
     runBtn.disabled = true;
     ensureQuickBooksOwnerSearchEnabled();
-    showStatus(statusEl, 'info', 'Calling QuickBooks production webhook...');
+    const workflowLabel = workflowKey === 'retry1' ? 'Retry 1' : workflowKey === 'retry2' ? 'Retry 2' : 'Main Run';
+    showStatus(statusEl, 'info', `Calling ${workflowLabel} production webhook...`);
     try {
-      const result = await window.quickBooksAutomationAPI.runNow();
+      const result = await window.quickBooksAutomationAPI.runNow(workflowKey);
       quickBooksScheduleStatus = result?.status || quickBooksScheduleStatus;
       renderQuickBooksScheduleStatus();
       ensureQuickBooksOwnerSearchEnabled();
