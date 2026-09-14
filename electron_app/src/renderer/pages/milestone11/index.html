@@ -396,6 +396,53 @@
       font-weight: 700;
     }
 
+    .qb-run-selector {
+      display: grid;
+      grid-template-columns: minmax(210px, 300px) 1fr;
+      gap: 16px;
+      align-items: end;
+    }
+
+    .qb-run-selector label,
+    .qb-run-caption {
+      display: block;
+      margin-bottom: 6px;
+      color: #2b4a71;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .qb-run-options {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .qb-run-option {
+      width: auto;
+      min-height: 44px;
+      padding: 9px 14px;
+      border: 1px solid #b9cce3;
+      border-radius: 9px;
+      background: #f7faff;
+      color: #244a73;
+      cursor: pointer;
+      font: inherit;
+      font-size: 13px;
+      font-weight: 800;
+    }
+
+    .qb-run-option[aria-pressed="true"] {
+      border-color: var(--brand);
+      background: var(--brand);
+      color: #ffffff;
+    }
+
+    .qb-run-option:focus-visible {
+      outline: 3px solid rgba(11, 92, 171, 0.22);
+      outline-offset: 2px;
+    }
+
     #qb-overview-content {
       background: #f5f8fc;
       min-height: 180px;
@@ -1225,6 +1272,10 @@
     }
 
     @media (max-width: 700px) {
+      .qb-run-selector {
+        grid-template-columns: 1fr;
+        align-items: stretch;
+      }
       .date-range,
       .schedule-controls,
       .inline-action-row {
@@ -1353,7 +1404,7 @@
 
         <div class="qb-attempts-panel" id="qb-attempts-panel">
           <div class="logs-toolbar">
-            <strong>Webhook Attempt History</strong>
+            <strong>Webhook Start History — All Runs</strong>
           </div>
           <div class="logs-container qb-attempts-scroll">
             <div id="qb-latest-attempt" class="qb-empty">No QuickBooks webhook attempts yet.</div>
@@ -2103,7 +2154,7 @@
     `;
   }
 
-  async function loadQuickBooksOverview() {
+  async function loadQuickBooksOverview(selectedRunId = '') {
     if (quickBooksOverviewLoading) return;
     const refreshBtn = document.getElementById('qb-refresh-btn');
     const hadPreviousData = Boolean(quickBooksOverviewPayload?.overview);
@@ -2119,10 +2170,19 @@
     }
 
     try {
-      const result = await window.quickBooksAutomationAPI.getOverview();
+      const previousRunId = quickBooksOverviewPayload?.overview?.selectedRun?.runId || '';
+      const previousBreakdown = quickBooksOverviewPayload?.overview?.processingBreakdown || null;
+      const result = await window.quickBooksAutomationAPI.getOverview({ selectedRunId });
+      if (!result?.overview) throw new Error(result?.message || 'QuickBooks Automation overview failed to load.');
+      const canReusePreviousBreakdown = previousRunId === result.overview.selectedRun?.runId &&
+        ['success', 'no_records'].includes(previousBreakdown?.status);
+      if (canReusePreviousBreakdown) {
+        result.overview.processingBreakdown = previousBreakdown;
+        result.overview.resultsByTransactionType = previousBreakdown.rows || [];
+      }
       quickBooksOverviewPayload = result;
       renderQuickBooksOverview(result);
-      loadQuickBooksProcessingBreakdown(result?.overview?.meta?.processingRunId);
+      loadQuickBooksProcessingBreakdown(result?.overview?.meta?.processingRunId, canReusePreviousBreakdown ? previousBreakdown : null);
     } catch (err) {
       const failedPayload = {
         success: false,
@@ -2146,7 +2206,45 @@
 
   function refreshQuickBooksOverview() {
     loadQuickBooksNotificationOwner();
-    loadQuickBooksOverview();
+    loadQuickBooksOverview(quickBooksOverviewPayload?.overview?.selectedRun?.runId || '');
+  }
+
+  function selectQuickBooksRunDay(date) {
+    const day = (quickBooksOverviewPayload?.overview?.runDays || []).find(item => item.date === date);
+    if (!day?.runs?.length) return;
+    const run = day.runs.find(item => !item.isRetry) || [...day.runs].sort((a, b) => Date.parse(b.startedAt || '') - Date.parse(a.startedAt || ''))[0];
+    loadQuickBooksOverview(run.runId);
+  }
+
+  function selectQuickBooksRun(encodedRunId) {
+    const runId = decodeURIComponent(encodedRunId || '');
+    if (!runId || runId === quickBooksOverviewPayload?.overview?.selectedRun?.runId) return;
+    loadQuickBooksOverview(runId);
+  }
+
+  function renderQuickBooksRunSelector(overview) {
+    const days = Array.isArray(overview?.runDays) ? overview.runDays : [];
+    const selectedRun = overview?.selectedRun || null;
+    if (!days.length || !selectedRun) {
+      return '<div class="qb-card full"><div class="qb-empty">No QuickBooks runs are available for selection.</div></div>';
+    }
+    const selectedDay = days.find(day => (day.runs || []).some(run => run.runId === selectedRun.runId)) || days[0];
+    return `
+      <div class="qb-card full qb-run-selector" aria-label="QuickBooks run selection">
+        <div>
+          <label for="qb-run-day-select">Run day (Eastern time)</label>
+          <select id="qb-run-day-select" onchange="selectQuickBooksRunDay(this.value)">
+            ${days.map(day => `<option value="${escapeHtml(day.date)}" ${day.date === selectedDay.date ? 'selected' : ''}>${escapeHtml(day.date)}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <div id="qb-run-options-label" class="qb-run-caption">Execution</div>
+          <div id="qb-run-options" class="qb-run-options" role="group" aria-labelledby="qb-run-options-label">
+            ${(selectedDay.runs || []).map(run => `<button class="qb-run-option" type="button" aria-pressed="${run.runId === selectedRun.runId}" onclick="selectQuickBooksRun('${encodeURIComponent(run.runId)}')">${escapeHtml(run.label)}</button>`).join('')}
+          </div>
+        </div>
+      </div>
+    `;
   }
 
   function startQuickBooksAutoRefresh() {
@@ -2154,7 +2252,7 @@
     quickBooksAutoRefreshTimer = setInterval(() => {
       if (currentDataType !== 'quickbooks') return;
       loadQuickBooksScheduleStatus();
-      loadQuickBooksOverview();
+      loadQuickBooksOverview(quickBooksOverviewPayload?.overview?.selectedRun?.runId || '');
     }, QUICKBOOKS_AUTO_REFRESH_MS);
   }
 
@@ -2173,16 +2271,15 @@
     }, delayMs);
   }
 
-  async function loadQuickBooksProcessingBreakdown(runId) {
+  async function loadQuickBooksProcessingBreakdown(runId, previousBreakdown = null) {
     const target = document.getElementById('qb-processing-results');
     const selectedRunId = String(runId || '').trim();
     if (!target || !selectedRunId) return;
     const requestId = ++quickBooksProcessingRequestId;
     quickBooksProcessingLoading = true;
-    target.innerHTML = renderTransactionTable({
-      status: 'deferred',
-      rows: []
-    });
+    if (!previousBreakdown) {
+      target.innerHTML = renderTransactionTable({ status: 'deferred', rows: [] });
+    }
     try {
       const result = await window.quickBooksAutomationAPI.getProcessingBreakdown({ runId: selectedRunId });
       if (requestId !== quickBooksProcessingRequestId) return;
@@ -2198,7 +2295,10 @@
       target.innerHTML = renderTransactionTable(breakdown);
     } catch (err) {
       if (requestId !== quickBooksProcessingRequestId) return;
-      target.innerHTML = `<div class="qb-error-state">${escapeHtml(err.message || 'Unable to load transaction results.')}</div>`;
+      const message = escapeHtml(err.message || 'Unable to load transaction results.');
+      target.innerHTML = previousBreakdown
+        ? `<div class="qb-warning"><strong>Transaction results refresh failed:</strong> ${message} Showing the last loaded results.</div>${renderTransactionTable(previousBreakdown)}`
+        : `<div class="qb-error-state">${message}</div>`;
     } finally {
       if (requestId === quickBooksProcessingRequestId) {
         quickBooksProcessingLoading = false;
@@ -2740,6 +2840,7 @@
 
     const current = overview.currentStatus || {};
     const latestRun = current.latestFullRun || {};
+    const selectedRun = overview.selectedRun || {};
     const activeRunId = current.activeRunId && current.activeRunId !== 'Unavailable'
       ? current.activeRunId
       : '';
@@ -2769,6 +2870,8 @@
       ${refreshError}
       ${warnings}
       <div class="qb-section-grid">
+        ${renderQuickBooksRunSelector(overview)}
+
         <div class="qb-card primary full">
           <h4>Current Automation Status <span class="qb-badge ${quickBooksBadgeClass(current.status)}">${escapeHtml(current.status || 'Unknown')}</span></h4>
           <div class="qb-kv-grid">
@@ -2780,11 +2883,25 @@
             ${renderTimestampKv('Started at', statusStartedAt, timezone)}
             ${statusFinishedAt}
             ${renderKv('Total duration', statusDuration)}
+            ${renderKv('Displayed execution', selectedRun.label || 'Unavailable')}
           </div>
         </div>
 
-        ${renderRunCard('Last Successful Import', overview.lastSuccessfulImport, 'No successful imports found.', timezone)}
-        ${renderRunCard('Last Failed Import', overview.lastFailedImport, 'No failed imports found.', timezone)}
+        <div class="qb-card full">
+          <h4>Selected Run Details <span class="qb-badge ${quickBooksBadgeClass(selectedRun.status)}">${escapeHtml(selectedRun.status || 'Unknown')}</span></h4>
+          <div class="qb-kv-grid">
+            ${renderKv('Execution', selectedRun.label || 'Unavailable')}
+            ${renderKv('Run type', selectedRun.runType || 'Unknown')}
+            ${renderKv('Run ID', selectedRun.runId || 'Unavailable')}
+            ${renderKv('Batch ID', selectedRun.batchId || 'Unavailable')}
+            ${renderTimestampKv('Started at', selectedRun.startedAt, timezone)}
+            ${renderTimestampKv('Finished at', selectedRun.finishedAt, timezone)}
+            ${renderKv('Duration', formatDuration(selectedRun.durationSeconds))}
+            ${renderKv('Imported records', displayNumber(summary.imported))}
+            ${selectedRun.status === 'Failed' ? renderKv('Failure stage', selectedRun.failureStage || 'Unavailable') : ''}
+            ${selectedRun.status === 'Failed' ? renderKv('Failure reason', selectedRun.failureReason || 'Unavailable') : ''}
+          </div>
+        </div>
 
         <div class="qb-card full">
           <h4>Latest Preflight <span class="qb-badge ${quickBooksBadgeClass(preflight.status)}">${escapeHtml(preflight.status || 'Unknown')}</span></h4>

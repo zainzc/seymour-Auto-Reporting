@@ -183,6 +183,83 @@ function isRetryRun(record) {
   return /\bretry\b/.test(type) && !/\bfull\b/.test(type);
 }
 
+function businessDateForTimestamp(value, timezone = 'America/New_York') {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.filter(part => part.type !== 'literal').map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function retryNumber(record) {
+  const type = getText(record, FIELD_ALIASES.runType);
+  const match = type.match(/\bretry\s*#?\s*(\d+)\b/i);
+  return match ? Number(match[1]) : null;
+}
+
+function summarizeSelectableRun(record, label, retryAttempt = 0) {
+  return {
+    runId: getText(record, FIELD_ALIASES.runId),
+    label,
+    runType: getText(record, FIELD_ALIASES.runType) || (retryAttempt ? 'Retry' : 'Main'),
+    retryAttempt,
+    isRetry: retryAttempt > 0,
+    startedAt: getRecordTime(record, FIELD_ALIASES.startTime),
+    status: normalizeStatus(getText(record, FIELD_ALIASES.finalStatus))
+  };
+}
+
+function buildRunDayCatalog(runLogs = [], timezone = 'America/New_York', maxDays = 30) {
+  const byDay = new Map();
+  (Array.isArray(runLogs) ? runLogs : []).forEach(record => {
+    const runId = getText(record, FIELD_ALIASES.runId);
+    const startedAt = getRecordTime(record, FIELD_ALIASES.startTime);
+    const date = businessDateForTimestamp(startedAt, timezone);
+    if (!runId || !date) return;
+    if (!byDay.has(date)) byDay.set(date, []);
+    byDay.get(date).push(record);
+  });
+
+  return [...byDay.entries()]
+    .sort(([left], [right]) => right.localeCompare(left))
+    .slice(0, Math.max(0, Number(maxDays) || 30))
+    .map(([date, records]) => {
+      const ordered = [...records].sort((a, b) => runTimestampMs(a) - runTimestampMs(b));
+      const mainRecords = ordered.filter(record => !isRetryRun(record));
+      const retryRecords = ordered.filter(isRetryRun);
+      const usedRetryNumbers = new Set();
+      let nextRetryNumber = 1;
+      const retries = retryRecords.map(record => {
+        let attempt = retryNumber(record);
+        if (!attempt || usedRetryNumbers.has(attempt)) {
+          while (usedRetryNumbers.has(nextRetryNumber)) nextRetryNumber += 1;
+          attempt = nextRetryNumber;
+        }
+        usedRetryNumbers.add(attempt);
+        return summarizeSelectableRun(record, `Retry ${attempt}`, attempt);
+      }).sort((a, b) => a.retryAttempt - b.retryAttempt || Date.parse(a.startedAt || '') - Date.parse(b.startedAt || ''));
+      const main = mainRecords.length ? summarizeSelectableRun(mainRecords.at(-1), 'Main Run', 0) : null;
+      return { date, runs: [...(main ? [main] : []), ...retries] };
+    });
+}
+
+function selectOverviewRun(catalog = [], selectedRunId = '') {
+  const days = Array.isArray(catalog) ? catalog : [];
+  const wanted = normalizeText(selectedRunId);
+  if (wanted) {
+    return days.flatMap(day => day.runs || []).find(run => run.runId === wanted) || null;
+  }
+  const latestRuns = days[0]?.runs || [];
+  const main = latestRuns.find(run => !run.isRetry);
+  if (main) return main;
+  return [...latestRuns].sort((a, b) => Date.parse(b.startedAt || '') - Date.parse(a.startedAt || ''))[0] || null;
+}
+
 function normalizeStatus(value = '') {
   const text = normalizeText(value).toLowerCase();
   if (!text) return 'Unknown';
@@ -624,14 +701,22 @@ async function fetchTable(service, tableName) {
 
 async function fetchRecentRecordsSafe(service, tableName, warnings, options = {}) {
   try {
-    const params = {};
     const maxRecords = Number(options.maxRecords || 0);
-    if (maxRecords > 0) params.maxRecords = maxRecords;
-    if (options.sortField) {
-      params.sort = [{ field: options.sortField, direction: 'desc' }];
-    }
-    const data = await service.request('GET', `/${encodeURIComponent(tableName)}`, { params });
-    return Array.isArray(data?.records) ? data.records : [];
+    const records = [];
+    let offset = '';
+    do {
+      const params = {};
+      if (offset) params.offset = offset;
+      if (maxRecords > 0) params.maxRecords = Math.min(100, maxRecords - records.length);
+      if (options.sortField) params.sort = [{ field: options.sortField, direction: 'desc' }];
+      const data = await service.request('GET', `/${encodeURIComponent(tableName)}`, { params });
+      records.push(...(Array.isArray(data?.records) ? data.records : []));
+      offset = data?.offset || '';
+      const enoughDays = Number(options.minDistinctRunDays || 0) > 0 &&
+        buildRunDayCatalog(records, options.timezone || 'America/New_York', options.minDistinctRunDays).length >= Number(options.minDistinctRunDays);
+      if (enoughDays) offset = '';
+    } while (offset && (!maxRecords || records.length < maxRecords));
+    return maxRecords > 0 ? records.slice(0, maxRecords) : records;
   } catch (error) {
     warnings.push(`${tableName}: ${AirtableService.getAirtableErrorMessage(error)}`);
     return null;
@@ -748,7 +833,10 @@ async function getQuickBooksAutomationOverview(options = {}) {
   const [runLogs, runLocks, runtimeConfig, automationConfig] = await Promise.all([
     fetchRecentRecordsSafe(auditService, AUDIT_TABLES.runLogs, warnings, {
       sortField: 'Start Time',
-      maxRecords: 40
+      // Read through the first record of day 31 so day 30 is complete even
+      // when an Airtable page boundary splits its runs.
+      minDistinctRunDays: 31,
+      timezone: 'America/New_York'
     }),
     fetchTableSafe(stagingService, STAGING_TABLES.runLocks, warnings),
     fetchTableSafe(stagingService, STAGING_TABLES.automationRuntimeConfiguration, warnings),
@@ -779,6 +867,11 @@ async function getQuickBooksAutomationOverview(options = {}) {
     getText(latestRuntimeConfig, FIELD_ALIASES.timezone) ||
     getText(latestAutomationConfig, FIELD_ALIASES.timezone) ||
     'Configured timezone unavailable';
+  const runDays = buildRunDayCatalog(runLogs || [], 'America/New_York', 30);
+  const selectedRunChoice = selectOverviewRun(runDays, options.selectedRunId);
+  const selectedRunRecord = selectedRunChoice
+    ? runLogs.find(record => getText(record, FIELD_ALIASES.runId) === selectedRunChoice.runId) || null
+    : null;
 
   const latestStatus = normalizeStatus(getText(latestFullRun, FIELD_ALIASES.finalStatus));
   const hasValidConfig = Boolean(latestRuntimeConfig || latestAutomationConfig);
@@ -793,7 +886,7 @@ async function getQuickBooksAutomationOverview(options = {}) {
           ? 'Active'
           : 'Unknown';
 
-  const identity = runIdentity(latestFullRun || {});
+  const identity = runIdentity(selectedRunRecord || {});
   const runIdFormula = buildRunIdFormula(identity.runId);
   const [preflightLogsForLatest, errorRecordsForLatest] = runIdFormula
     ? await Promise.all([
@@ -810,7 +903,7 @@ async function getQuickBooksAutomationOverview(options = {}) {
         .sort((a, b) => compareByTimeDesc(a, b, FIELD_ALIASES.preflightTimestamp))[0] || null
     : null;
   const shouldLoadProcessingBreakdown = options.includeProcessingBreakdown !== false;
-  const processingRunIdentity = selectProcessingRunIdentity(runLogs, runLocks, options.selectedRunId);
+  const processingRunIdentity = selectProcessingRunIdentity(runLogs, runLocks, selectedRunChoice?.runId || options.selectedRunId);
   let processingBreakdown;
   if (shouldLoadProcessingBreakdown) {
     try {
@@ -850,6 +943,9 @@ async function getQuickBooksAutomationOverview(options = {}) {
     lastSuccessfulSummary.importedTransactionCount = getNumber(lastSuccessfulRun, FIELD_ALIASES.importedCount) || 0;
   }
   const lastFailedSummary = summarizeRun(lastFailedRun);
+  const selectedRunSummary = selectedRunRecord
+    ? { ...summarizeRun(selectedRunRecord), ...selectedRunChoice }
+    : null;
 
   const overview = {
     success: warnings.length === 0,
@@ -874,8 +970,10 @@ async function getQuickBooksAutomationOverview(options = {}) {
     },
     lastSuccessfulImport: lastSuccessfulSummary,
     lastFailedImport: lastFailedSummary,
+    runDays,
+    selectedRun: selectedRunSummary,
     latestPreflight: summarizePreflight(preflightForLatest),
-    latestImportSummary: latestImportSummaryFromRun(latestFullRun),
+    latestImportSummary: latestImportSummaryFromRun(selectedRunRecord),
     processingBreakdown,
     resultsByTransactionType: processingBreakdown.rows,
     recentErrors: buildRecentErrors(errorRecordsForLatest, []),
@@ -888,7 +986,8 @@ async function getQuickBooksAutomationOverview(options = {}) {
       stagingBaseId
     }),
     meta: {
-      latestFullRunId: identity.runId || '',
+      latestFullRunId: getText(latestFullRun, FIELD_ALIASES.runId) || '',
+      selectedRunId: identity.runId || '',
       processingRunId: processingBreakdown.runId || '',
       processingRunSource: processingBreakdown.source || '',
       processingRecordsMatched: processingBreakdown.dedupedRecordCount || 0,
@@ -924,6 +1023,8 @@ module.exports = {
   getQuickBooksAutomationOverview,
   getProcessingBreakdownForRun,
   selectProcessingRunIdentity,
+  buildRunDayCatalog,
+  selectOverviewRun,
   selectLatestFullRunForProcessing,
   selectLatestRunLockFallback,
   dedupeProcessingRecords,

@@ -49,7 +49,7 @@ contextBridge.exposeInMainWorld('workOrdersAPI', {
 });
 
 contextBridge.exposeInMainWorld('quickBooksAutomationAPI', {
-  getOverview: () => ipcRenderer.invoke('quickbooks-automation:get-overview'),
+  getOverview: (payload = {}) => ipcRenderer.invoke('quickbooks-automation:get-overview', payload),
   getProcessingBreakdown: (payload) => ipcRenderer.invoke('quickbooks-automation:get-processing-breakdown', payload),
   getScheduleStatus: () => ipcRenderer.invoke('quickbooks-automation:get-schedule-status'),
   saveScheduleSettings: (payload) => ipcRenderer.invoke('quickbooks-automation:save-schedule-settings', payload),

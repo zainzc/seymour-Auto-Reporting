@@ -4998,13 +4998,14 @@ ipcMain.handle('phase5:openExternal', async (_, url = '') => {
   return { success: true };
 });
 
-ipcMain.handle('quickbooks-automation:get-overview', async () => {
+ipcMain.handle('quickbooks-automation:get-overview', async (_, payload = {}) => {
   try {
     return await getQuickBooksAutomationOverview({
       airtableToken: resolveQuickBooksAirtableToken(),
       auditBaseId: process.env.QUICKBOOKS_AUDIT_BASE_ID || '',
       stagingBaseId: process.env.QUICKBOOKS_STAGING_BASE_ID || '',
-      includeProcessingBreakdown: false
+      includeProcessingBreakdown: false,
+      selectedRunId: normalizeText(payload.selectedRunId)
     });
   } catch (error) {
     return {
