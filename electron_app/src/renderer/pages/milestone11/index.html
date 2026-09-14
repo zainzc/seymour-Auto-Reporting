@@ -2839,20 +2839,10 @@
     refreshed.textContent = `Last refreshed: ${formatQuickBooksTimestamp(overview.generatedAt, timezone)}`;
 
     const current = overview.currentStatus || {};
-    const latestRun = current.latestFullRun || {};
     const selectedRun = overview.selectedRun || {};
     const activeRunId = current.activeRunId && current.activeRunId !== 'Unavailable'
       ? current.activeRunId
       : '';
-    const statusRunId = activeRunId || latestRun.runId || 'Unavailable';
-    const statusStartedAt = activeRunId ? current.lockAcquiredAt : latestRun.startedAt;
-    const statusFinishedAt = activeRunId
-      ? renderKv('Finished at', 'Processing')
-      : renderTimestampKv('Finished at', latestRun.finishedAt, timezone);
-    const statusDuration = activeRunId ? 'Processing' : formatDuration(latestRun.durationSeconds);
-    const batchRow = activeRunId || !latestRun.batchId || latestRun.batchId === 'Unavailable'
-      ? ''
-      : renderKv('Batch ID', latestRun.batchId);
     const preflight = overview.latestPreflight || {};
     const summary = overview.latestImportSummary || {};
     const refreshNotice = state.refreshing
@@ -2876,14 +2866,10 @@
           <h4>Current Automation Status <span class="qb-badge ${quickBooksBadgeClass(current.status)}">${escapeHtml(current.status || 'Unknown')}</span></h4>
           <div class="qb-kv-grid">
             ${renderKv('Selected environment', current.selectedEnvironment || overview.environment?.selected || 'Unknown')}
+            ${renderKv('Automation state', current.status || 'Unknown')}
             ${renderKv('Active Run ID', current.activeRunId || 'Unavailable')}
-            ${renderKv('Latest run status', activeRunId ? 'Processing' : latestRun.status || 'Unknown')}
-            ${renderKv('Latest Run ID', statusRunId)}
-            ${batchRow}
-            ${renderTimestampKv('Started at', statusStartedAt, timezone)}
-            ${statusFinishedAt}
-            ${renderKv('Total duration', statusDuration)}
-            ${renderKv('Displayed execution', selectedRun.label || 'Unavailable')}
+            ${renderTimestampKv('Active since', activeRunId ? current.lockAcquiredAt : null, timezone)}
+            ${renderTimestampKv('Lock expires', activeRunId ? current.lockExpiresAt : null, timezone)}
           </div>
         </div>
 

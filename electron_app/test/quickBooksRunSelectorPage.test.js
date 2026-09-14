@@ -46,3 +46,14 @@ test('execution button group uses a semantic caption', () => {
   assert.match(html, /aria-labelledby="qb-run-options-label"/);
   assert.doesNotMatch(html, /<label>Execution<\/label>/);
 });
+
+test('Current Automation Status never mixes historical full-run fields with the selected execution', () => {
+  const start = html.indexOf('<h4>Current Automation Status');
+  const end = html.indexOf('<h4>Selected Run Details', start);
+  const currentStatusCard = html.slice(start, end);
+
+  assert.match(currentStatusCard, /Selected environment/);
+  assert.match(currentStatusCard, /Active Run ID/);
+  assert.doesNotMatch(currentStatusCard, /latestRun/);
+  assert.doesNotMatch(currentStatusCard, /Latest run status|Latest Run ID|Batch ID|Total duration|Displayed execution/);
+});
