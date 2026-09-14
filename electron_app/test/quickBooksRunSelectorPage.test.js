@@ -100,3 +100,12 @@ test('workflow schedules use responsive cards with visible individual states', (
   assert.match(html, /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
   assert.match(html, /\.qb-toggle input:focus-visible \+ \.qb-toggle-slider/);
 });
+
+test('daily schedule inputs use accessible premium time capsules', () => {
+  assert.equal((html.match(/class="qb-time-capsule"/g) || []).length, 3);
+  assert.equal((html.match(/class="qb-timezone-chip" aria-hidden="true">ET</g) || []).length, 3);
+  assert.equal((html.match(/class="qb-sr-only"> Eastern time</g) || []).length, 3);
+  assert.match(html, /\.qb-time-capsule:focus-within/);
+  assert.match(html, /\.qb-workflow-card\.active \.qb-time-capsule/);
+  assert.match(html, /font-variant-numeric:\s*tabular-nums/);
+});
