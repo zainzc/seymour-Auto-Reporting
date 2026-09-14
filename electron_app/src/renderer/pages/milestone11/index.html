@@ -770,6 +770,11 @@
       background: var(--accent);
     }
 
+    .qb-toggle input:focus-visible + .qb-toggle-slider {
+      outline: 3px solid var(--brand);
+      outline-offset: 3px;
+    }
+
     .qb-toggle input:checked + .qb-toggle-slider::before {
       transform: translateX(24px);
     }
@@ -946,18 +951,27 @@
 
     .qb-workflow-schedules {
       display: grid;
-      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
     }
 
-    .qb-workflow-schedule {
-      display: grid;
-      grid-template-columns: minmax(150px, 1fr) minmax(150px, 0.8fr) minmax(220px, 1.35fr);
-      gap: 14px;
-      align-items: center;
-      padding: 14px;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--surface);
+    .qb-workflow-card {
+      display: flex;
+      min-width: 0;
+      min-height: 238px;
+      flex-direction: column;
+      padding: 18px;
+      border: 1px solid #d2dfef;
+      border-radius: 12px;
+      background: #ffffff;
+      box-shadow: 0 8px 18px rgba(12, 35, 58, 0.05);
+      transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease;
+    }
+
+    .qb-workflow-card.active {
+      border-color: #8fcbb8;
+      background: linear-gradient(180deg, #ffffff 0%, #f2fbf7 100%);
+      box-shadow: 0 10px 22px rgba(15, 138, 106, 0.10);
     }
 
     .qb-workflow-heading {
@@ -965,6 +979,61 @@
       align-items: center;
       justify-content: space-between;
       gap: 10px;
+    }
+
+    .qb-workflow-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .qb-workflow-index {
+      display: inline-grid;
+      width: 32px;
+      height: 32px;
+      place-items: center;
+      flex: 0 0 32px;
+      border-radius: 9px;
+      background: #e5f0fc;
+      color: var(--brand);
+      font-size: 12px;
+      font-weight: 900;
+    }
+
+    .qb-workflow-title {
+      color: #173d66;
+      font-size: 15px;
+      font-weight: 900;
+    }
+
+    .qb-workflow-description {
+      min-height: 38px;
+      margin: 12px 0 16px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .qb-workflow-time {
+      min-height: 44px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .qb-workflow-footer {
+      margin-top: auto;
+      padding-top: 14px;
+      border-top: 1px solid #e0e9f4;
+    }
+
+    .qb-workflow-next-run {
+      margin-top: 5px;
+      color: #14375d;
+      font-size: 13px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      overflow-wrap: anywhere;
     }
 
     .qb-owner-card {
@@ -1274,7 +1343,7 @@
       .qb-kv-grid,
       .qb-settings-grid,
       .qb-control-grid,
-      .qb-workflow-schedule,
+      .qb-workflow-schedules,
       .qb-owner-current,
       .qb-owner-selected {
         grid-template-columns: 1fr;
@@ -1388,20 +1457,23 @@
 
       <div class="qb-control-body">
         <div class="qb-workflow-schedules">
-          <div class="qb-workflow-schedule">
-            <div class="qb-control-item"><div class="qb-workflow-heading"><div class="qb-control-label">Main Run</div><label class="qb-toggle" aria-label="Main Run daily schedule active toggle"><input type="checkbox" id="qb-schedule-main-enabled" onchange="previewQuickBooksScheduleToggle()" /><span class="qb-toggle-slider"></span></label></div><div class="qb-control-note">Calls only the main workflow webhook.</div></div>
-            <div class="qb-control-item"><label class="qb-control-label" for="qb-schedule-main-time">Daily time</label><input type="time" id="qb-schedule-main-time" step="60" value="01:00" /><div class="qb-control-note">Eastern time</div></div>
-            <div class="qb-control-item"><div class="qb-control-label">Next scheduled run</div><div class="qb-control-value" id="qb-schedule-main-next-run">Paused</div></div>
+          <div class="qb-workflow-card" id="qb-workflow-main-card">
+            <div class="qb-workflow-heading"><div class="qb-workflow-title-wrap"><span class="qb-workflow-index">M</span><div class="qb-workflow-title">Main Run</div></div><label class="qb-toggle" aria-label="Main Run daily schedule active toggle"><input type="checkbox" id="qb-schedule-main-enabled" onchange="previewQuickBooksScheduleToggle()" /><span class="qb-toggle-slider"></span></label></div>
+            <div class="qb-workflow-description">Starts the complete daily QuickBooks import workflow.</div>
+            <label class="qb-control-label" for="qb-schedule-main-time">Daily time · Eastern</label><input class="qb-workflow-time" type="time" id="qb-schedule-main-time" step="60" value="01:00" />
+            <div class="qb-workflow-footer"><span class="qb-badge gray" id="qb-schedule-main-badge">Paused</span><div class="qb-workflow-next-run" id="qb-schedule-main-next-run">No run scheduled</div></div>
           </div>
-          <div class="qb-workflow-schedule">
-            <div class="qb-control-item"><div class="qb-workflow-heading"><div class="qb-control-label">Retry 1</div><label class="qb-toggle" aria-label="Retry 1 daily schedule active toggle"><input type="checkbox" id="qb-schedule-retry1-enabled" onchange="previewQuickBooksScheduleToggle()" /><span class="qb-toggle-slider"></span></label></div><div class="qb-control-note">Calls only the Retry 1 workflow webhook.</div></div>
-            <div class="qb-control-item"><label class="qb-control-label" for="qb-schedule-retry1-time">Daily time</label><input type="time" id="qb-schedule-retry1-time" step="60" value="06:00" /><div class="qb-control-note">Eastern time</div></div>
-            <div class="qb-control-item"><div class="qb-control-label">Next scheduled run</div><div class="qb-control-value" id="qb-schedule-retry1-next-run">Paused</div></div>
+          <div class="qb-workflow-card" id="qb-workflow-retry1-card">
+            <div class="qb-workflow-heading"><div class="qb-workflow-title-wrap"><span class="qb-workflow-index">R1</span><div class="qb-workflow-title">Retry 1</div></div><label class="qb-toggle" aria-label="Retry 1 daily schedule active toggle"><input type="checkbox" id="qb-schedule-retry1-enabled" onchange="previewQuickBooksScheduleToggle()" /><span class="qb-toggle-slider"></span></label></div>
+            <div class="qb-workflow-description">Reprocesses eligible records after the Main Run completes.</div>
+            <label class="qb-control-label" for="qb-schedule-retry1-time">Daily time · Eastern</label><input class="qb-workflow-time" type="time" id="qb-schedule-retry1-time" step="60" value="06:00" />
+            <div class="qb-workflow-footer"><span class="qb-badge gray" id="qb-schedule-retry1-badge">Paused</span><div class="qb-workflow-next-run" id="qb-schedule-retry1-next-run">No run scheduled</div></div>
           </div>
-          <div class="qb-workflow-schedule">
-            <div class="qb-control-item"><div class="qb-workflow-heading"><div class="qb-control-label">Retry 2</div><label class="qb-toggle" aria-label="Retry 2 daily schedule active toggle"><input type="checkbox" id="qb-schedule-retry2-enabled" onchange="previewQuickBooksScheduleToggle()" /><span class="qb-toggle-slider"></span></label></div><div class="qb-control-note">Calls only the Retry 2 workflow webhook.</div></div>
-            <div class="qb-control-item"><label class="qb-control-label" for="qb-schedule-retry2-time">Daily time</label><input type="time" id="qb-schedule-retry2-time" step="60" value="10:00" /><div class="qb-control-note">Eastern time</div></div>
-            <div class="qb-control-item"><div class="qb-control-label">Next scheduled run</div><div class="qb-control-value" id="qb-schedule-retry2-next-run">Paused</div></div>
+          <div class="qb-workflow-card" id="qb-workflow-retry2-card">
+            <div class="qb-workflow-heading"><div class="qb-workflow-title-wrap"><span class="qb-workflow-index">R2</span><div class="qb-workflow-title">Retry 2</div></div><label class="qb-toggle" aria-label="Retry 2 daily schedule active toggle"><input type="checkbox" id="qb-schedule-retry2-enabled" onchange="previewQuickBooksScheduleToggle()" /><span class="qb-toggle-slider"></span></label></div>
+            <div class="qb-workflow-description">Runs the final retry pass for records still requiring processing.</div>
+            <label class="qb-control-label" for="qb-schedule-retry2-time">Daily time · Eastern</label><input class="qb-workflow-time" type="time" id="qb-schedule-retry2-time" step="60" value="10:00" />
+            <div class="qb-workflow-footer"><span class="qb-badge gray" id="qb-schedule-retry2-badge">Paused</span><div class="qb-workflow-next-run" id="qb-schedule-retry2-next-run">No run scheduled</div></div>
           </div>
         </div>
 
@@ -2374,11 +2446,17 @@
     hero.className = `qb-control-hero ${enabled ? 'active' : 'paused'}`;
     ['main', 'retry1', 'retry2'].forEach(key => {
       const workflow = workflows[key] || {};
+      const workflowEnabled = Boolean(workflow.enabled);
       document.getElementById(`qb-schedule-${key}-enabled`).checked = Boolean(workflow.enabled);
       document.getElementById(`qb-schedule-${key}-time`).value = workflow.runTime || (key === 'main' ? '01:00' : key === 'retry1' ? '06:00' : '10:00');
-      document.getElementById(`qb-schedule-${key}-next-run`).textContent = workflow.enabled
+      document.getElementById(`qb-schedule-${key}-next-run`).textContent = workflowEnabled
         ? formatQuickBooksTimestamp(workflow.nextRunAt, timezone)
-        : 'Paused';
+        : 'No run scheduled';
+      const workflowCard = document.getElementById(`qb-workflow-${key}-card`);
+      const workflowBadge = document.getElementById(`qb-schedule-${key}-badge`);
+      workflowCard.classList.toggle('active', workflowEnabled);
+      workflowBadge.className = `qb-badge ${workflowEnabled ? 'green' : 'gray'}`;
+      workflowBadge.textContent = workflowEnabled ? 'Active' : 'Paused';
     });
     document.getElementById('qb-schedule-status-text').textContent = statusText;
     document.getElementById('qb-schedule-toggle-hint').textContent = enabled
@@ -2414,6 +2492,14 @@
       : 'Click Save Settings to pause all automatic workflow schedules.';
     badge.className = `qb-badge ${enabled ? 'yellow' : 'gray'}`;
     badge.textContent = 'Unsaved';
+    ['main', 'retry1', 'retry2'].forEach(key => {
+      const workflowEnabled = document.getElementById(`qb-schedule-${key}-enabled`).checked;
+      const workflowCard = document.getElementById(`qb-workflow-${key}-card`);
+      const workflowBadge = document.getElementById(`qb-schedule-${key}-badge`);
+      workflowCard.classList.toggle('active', workflowEnabled);
+      workflowBadge.className = 'qb-badge yellow';
+      workflowBadge.textContent = workflowEnabled ? 'Active · Unsaved' : 'Paused · Unsaved';
+    });
   }
 
   function toggleQuickBooksAttempts() {

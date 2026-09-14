@@ -88,3 +88,15 @@ test('QuickBooks schedule timestamps render in the supplied Eastern timezone', (
   const formatter = html.slice(formatterStart, formatterEnd);
   assert.match(formatter, /timeZone:\s*timezone/);
 });
+
+test('workflow schedules use responsive cards with visible individual states', () => {
+  assert.match(html, /class="qb-workflow-card" id="qb-workflow-main-card"/);
+  assert.match(html, /class="qb-workflow-card" id="qb-workflow-retry1-card"/);
+  assert.match(html, /class="qb-workflow-card" id="qb-workflow-retry2-card"/);
+  for (const key of ['main', 'retry1', 'retry2']) {
+    assert.match(html, new RegExp(`id="qb-schedule-${key}-badge"`));
+  }
+  assert.match(html, /\.qb-workflow-card\.active/);
+  assert.match(html, /grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(html, /\.qb-toggle input:focus-visible \+ \.qb-toggle-slider/);
+});
