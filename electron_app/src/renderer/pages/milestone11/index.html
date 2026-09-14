@@ -2575,10 +2575,7 @@
   }
 
   function getQuickBooksOwnerEnvironment() {
-    return quickBooksOwnerStatus?.environment ||
-      quickBooksOverviewPayload?.overview?.environment?.selected ||
-      quickBooksOverviewPayload?.overview?.environment?.quickBooks ||
-      'SANDBOX';
+    return 'PRODUCTION';
   }
 
   async function loadQuickBooksNotificationOwner() {

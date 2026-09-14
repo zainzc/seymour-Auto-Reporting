@@ -4,7 +4,7 @@ const STAGING_BASE_ID = 'appBCWdJiujeXGtsy';
 const RUNTIME_CONFIG_TABLE = 'Automation Runtime Configuration';
 const OWNER_NAME_KEY = 'quickBooks.notification.ownerName';
 const OWNER_CLICKUP_ID_KEY = 'quickBooks.notification.ownerClickUpId';
-const DEFAULT_ENVIRONMENT = 'SANDBOX';
+const DEFAULT_ENVIRONMENT = 'PRODUCTION';
 
 function normalizeText(value = '') {
   if (Array.isArray(value)) {
@@ -71,7 +71,7 @@ async function getQuickBooksNotificationOwner(options = {}) {
   const serviceFromOptions = options.airtableService;
   const token = normalizeText(options.airtableToken || process.env.QUICKBOOKS_AIRTABLE_TOKEN || process.env.AIRTABLE_TOKEN);
   const stagingBaseId = normalizeText(options.stagingBaseId || process.env.QUICKBOOKS_STAGING_BASE_ID || STAGING_BASE_ID);
-  const environment = normalizeEnvironment(options.environment || process.env.QUICKBOOKS_ENVIRONMENT || DEFAULT_ENVIRONMENT);
+  const environment = DEFAULT_ENVIRONMENT;
 
   if (!token && !serviceFromOptions) {
     throw new Error('Airtable token is required to load notification owner configuration.');
@@ -102,7 +102,7 @@ async function updateQuickBooksNotificationOwner(options = {}) {
   const serviceFromOptions = options.airtableService;
   const token = normalizeText(options.airtableToken || process.env.QUICKBOOKS_AIRTABLE_TOKEN || process.env.AIRTABLE_TOKEN);
   const stagingBaseId = normalizeText(options.stagingBaseId || process.env.QUICKBOOKS_STAGING_BASE_ID || STAGING_BASE_ID);
-  const environment = normalizeEnvironment(options.environment || process.env.QUICKBOOKS_ENVIRONMENT || DEFAULT_ENVIRONMENT);
+  const environment = DEFAULT_ENVIRONMENT;
   const ownerName = normalizeText(options.ownerName);
   const ownerClickUpId = normalizeText(options.ownerClickUpId);
 

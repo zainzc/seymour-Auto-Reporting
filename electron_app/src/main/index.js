@@ -159,7 +159,7 @@ function normalizeText(value) {
 }
 
 function resolveQuickBooksEnvironment(value = '') {
-  return normalizeText(value || process.env.QUICKBOOKS_ENVIRONMENT || 'SANDBOX').toUpperCase();
+  return 'PRODUCTION';
 }
 
 function resolveQuickBooksAirtableToken() {
