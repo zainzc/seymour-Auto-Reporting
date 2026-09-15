@@ -215,9 +215,26 @@ function summarizeSelectableRun(record, label, retryAttempt = 0) {
   };
 }
 
+function isStagingReadyRun(record = {}) {
+  return normalizeEndingStatus(getText(record, FIELD_ALIASES.finalStatus)) === 'STAGING_READY';
+}
+
+function finalProcessingRunLogs(runLogs = []) {
+  const byRunId = new Map();
+  (Array.isArray(runLogs) ? runLogs : []).forEach(record => {
+    const runId = getText(record, FIELD_ALIASES.runId);
+    if (!runId || isStagingReadyRun(record)) return;
+    const current = byRunId.get(runId);
+    if (!current || runTimestampMs(record) >= runTimestampMs(current)) {
+      byRunId.set(runId, record);
+    }
+  });
+  return [...byRunId.values()];
+}
+
 function buildRunDayCatalog(runLogs = [], timezone = 'America/New_York', maxDays = 30) {
   const byDay = new Map();
-  (Array.isArray(runLogs) ? runLogs : []).forEach(record => {
+  finalProcessingRunLogs(runLogs).forEach(record => {
     const runId = getText(record, FIELD_ALIASES.runId);
     const startedAt = getRecordTime(record, FIELD_ALIASES.startTime);
     const date = businessDateForTimestamp(startedAt, timezone);
@@ -397,7 +414,7 @@ function lockTimestampMs(record = {}) {
 }
 
 function selectLatestFullRunForProcessing(runLogs = []) {
-  return (Array.isArray(runLogs) ? runLogs : [])
+  return finalProcessingRunLogs(runLogs)
     .filter(record => getText(record, FIELD_ALIASES.runId))
     .filter(record => !isRetryRun(record))
     .sort((a, b) => runTimestampMs(b) - runTimestampMs(a))[0] || null;
@@ -849,9 +866,10 @@ async function getQuickBooksAutomationOverview(options = {}) {
     fetchTableSafe(stagingService, STAGING_TABLES.automationConfiguration, warnings)
   ]);
 
-  const fullRuns = Array.isArray(runLogs)
-    ? runLogs.filter(record => !isRetryRun(record)).sort((a, b) => compareByTimeDesc(a, b, FIELD_ALIASES.startTime))
-    : [];
+  const finalRunLogs = finalProcessingRunLogs(runLogs);
+  const fullRuns = finalRunLogs
+    .filter(record => !isRetryRun(record))
+    .sort((a, b) => compareByTimeDesc(a, b, FIELD_ALIASES.startTime));
   const latestFullRun = selectLatestFullRunForProcessing(runLogs);
   const lastSuccessfulRun = fullRuns.find(record => isCompletedStatus(getText(record, FIELD_ALIASES.finalStatus))) || null;
   const lastFailedRun = fullRuns.find(record => isFailedStatus(getText(record, FIELD_ALIASES.finalStatus))) || null;
@@ -953,6 +971,9 @@ async function getQuickBooksAutomationOverview(options = {}) {
   const selectedRunSummary = selectedRunRecord
     ? { ...summarizeRun(selectedRunRecord), ...selectedRunChoice }
     : null;
+  if (selectedRunSummary && activeLock && recordMatchesIdentity(activeLock, identity)) {
+    selectedRunSummary.status = 'Running';
+  }
 
   const overview = {
     success: warnings.length === 0,

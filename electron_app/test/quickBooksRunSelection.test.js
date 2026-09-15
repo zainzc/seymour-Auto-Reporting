@@ -80,16 +80,63 @@ test('honors an exact selected Run ID without falling back to another execution'
   assert.equal(selectOverviewRun(catalog, 'missing'), null);
 });
 
-test('distinguishes retry records that share the same Run ID by Airtable record ID', () => {
-  const retry1 = run('shared-run', 'Retry 1', '2026-09-15T05:00:00.000Z');
-  const retry2 = run('shared-run', 'Retry 2', '2026-09-15T06:00:00.000Z');
-  retry1.id = 'rec-retry-1';
-  retry2.id = 'rec-retry-2';
+test('one Run ID produces one selector entry using the final processing record', () => {
+  const staging = {
+    id: 'rec-staging',
+    fields: {
+      'Run ID': 'QBO-RETRY-RETRY_2-20260915095327-41626',
+      'Batch ID': 'QBO-BATCH-20260915095413-41629',
+      'Run Type': 'Retry 2',
+      'Start Time': '2026-09-15T09:53:27.000Z',
+      'Finish Time': '2026-09-15T09:54:13.000Z',
+      'Overall Status': 'STAGING_READY',
+      'Records Staged': 5201,
+      'Records Imported': 5201
+    }
+  };
+  const final = {
+    id: 'rec-final',
+    fields: {
+      'Run ID': 'QBO-RETRY-RETRY_2-20260915095327-41626',
+      'Batch ID': 'QBO-BATCH-20260915095413-41629',
+      'Run Type': 'Retry 2',
+      'Start Time': '2026-09-15T09:54:14.000Z',
+      'Finish Time': '2026-09-15T10:39:42.000Z',
+      'Overall Status': 'Completed',
+      'Records Imported': 463,
+      'Duplicates': 7,
+      'Errors': 2
+    }
+  };
 
-  const catalog = buildRunDayCatalog([retry1, retry2], 'America/New_York');
+  const catalog = buildRunDayCatalog([staging, final], 'America/New_York');
 
-  assert.deepEqual(catalog[0].runs.map(item => item.recordId), ['rec-retry-1', 'rec-retry-2']);
-  assert.equal(selectOverviewRun(catalog, 'rec-retry-2').label, 'Retry 2');
+  assert.equal(catalog[0].runs.length, 1);
+  assert.deepEqual(catalog[0].runs[0], {
+    recordId: 'rec-final',
+    runId: 'QBO-RETRY-RETRY_2-20260915095327-41626',
+    label: 'Retry 2',
+    runType: 'Retry 2',
+    retryAttempt: 2,
+    isRetry: true,
+    startedAt: '2026-09-15T09:54:14.000Z',
+    status: 'Completed'
+  });
+});
+
+test('a staging-only Run ID is not exposed as a selectable execution', () => {
+  const catalog = buildRunDayCatalog([{
+    id: 'rec-staging-only',
+    fields: {
+      'Run ID': 'staging-only',
+      'Run Type': 'Full',
+      'Start Time': '2026-09-15T09:53:27.000Z',
+      'Overall Status': 'STAGING_READY',
+      'Records Imported': 5201
+    }
+  }], 'America/New_York');
+
+  assert.deepEqual(catalog, []);
 });
 
 test('processing breakdown exposes authoritative totals for the summary cards', async () => {
@@ -149,6 +196,94 @@ test('overview scopes preflight, errors, summaries, and metadata to the exact se
   assert.equal(result.overview.meta.processingRunId, 'retry-1');
   assert.equal(formulas.length, 2);
   assert.equal(formulas.every(entry => entry.formula.includes('retry-1')), true);
+});
+
+test('overview uses final processing fields instead of staging totals for a shared Run ID', async () => {
+  const runId = 'QBO-RETRY-RETRY_2-20260915095327-41626';
+  const records = [
+    {
+      id: 'rec-staging',
+      fields: {
+        'Run ID': runId,
+        'Batch ID': 'QBO-BATCH-20260915095413-41629',
+        'Run Type': 'Retry 2',
+        'Start Time': '2026-09-15T09:53:27.000Z',
+        'Finish Time': '2026-09-15T09:54:13.000Z',
+        'Overall Status': 'STAGING_READY',
+        'Records Staged': 5201,
+        'Records Imported': 5201,
+        'Duplicates': 0,
+        'Errors': 0
+      }
+    },
+    {
+      id: 'rec-final',
+      fields: {
+        'Run ID': runId,
+        'Batch ID': 'QBO-BATCH-20260915095413-41629',
+        'Run Type': 'Retry 2',
+        'Start Time': '2026-09-15T09:54:14.000Z',
+        'Finish Time': '2026-09-15T10:39:42.000Z',
+        'Overall Status': 'Completed',
+        'Records Staged': 463,
+        'Records Imported': 463,
+        'Duplicates': 7,
+        'Errors': 2,
+        'Needs Review': 3
+      }
+    }
+  ];
+  const auditService = {
+    request: async (_method, tablePath) => tablePath.includes('Run%20Logs') ? { records } : { records: [] },
+    fetchRecordsByFormula: async () => []
+  };
+  const stagingService = {
+    fetchAllRecords: async table => table === 'Run Locks'
+      ? [{ fields: { 'Run ID': runId, Status: 'Released', 'Released At': '2026-09-15T10:39:43.000Z' } }]
+      : []
+  };
+
+  const result = await getQuickBooksAutomationOverview({
+    airtableToken: 'token', auditService, stagingService,
+    selectedRunId: runId, includeProcessingBreakdown: false
+  });
+
+  assert.equal(result.overview.runDays[0].runs.length, 1);
+  assert.equal(result.overview.selectedRun.recordId, 'rec-final');
+  assert.equal(result.overview.selectedRun.status, 'Completed');
+  assert.equal(result.overview.selectedRun.startedAt, '2026-09-15T09:54:14.000Z');
+  assert.equal(result.overview.selectedRun.finishedAt, '2026-09-15T10:39:42.000Z');
+  assert.equal(result.overview.selectedRun.durationSeconds, 2728);
+  assert.deepEqual(result.overview.latestImportSummary, {
+    recordsRead: 0,
+    staged: 463,
+    imported: 463,
+    duplicates: 7,
+    errors: 2,
+    needsReview: 3
+  });
+});
+
+test('a completed processing record remains Running while its Run Lock is active', async () => {
+  const runId = 'locked-run';
+  const auditService = {
+    request: async (_method, tablePath) => tablePath.includes('Run%20Logs')
+      ? { records: [run(runId, 'Full', '2026-09-15T09:54:14.000Z', 'Completed')] }
+      : { records: [] },
+    fetchRecordsByFormula: async () => []
+  };
+  const stagingService = {
+    fetchAllRecords: async table => table === 'Run Locks'
+      ? [{ fields: { 'Run ID': runId, Status: 'Active', 'Lock Acquisition Time': '2026-09-15T09:54:13.000Z' } }]
+      : []
+  };
+
+  const result = await getQuickBooksAutomationOverview({
+    airtableToken: 'token', auditService, stagingService,
+    selectedRunId: runId, includeProcessingBreakdown: false
+  });
+
+  assert.equal(result.overview.selectedRun.status, 'Running');
 });
 
 test('overview stops paging after at least 30 distinct run-days are available', async () => {
