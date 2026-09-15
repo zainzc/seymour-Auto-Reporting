@@ -169,7 +169,6 @@
       <button class="btn btn-back" onclick="goBack()">Back</button>
       <button class="btn btn-primary" onclick="goToPowerlinkSheets()">Open Inventory Sync Workspace</button>
       <button class="btn btn-primary" onclick="goToPhase2()">Open Master Parts Sync Workspace</button>
-      <button class="btn btn-primary" onclick="goToTitleOptimization()">Open Title Optimization Workspace</button>
       <button class="btn btn-primary" onclick="goToPhase5BatchApproval()">Open Phase 5 Batch Approval</button>
     </div>
 
@@ -196,19 +195,6 @@
       </div>
       <p class="description">
         Run and monitor master parts processing from the same milestone flow. This workspace reads inventory sheet data, upserts Airtable Master Parts, and creates ClickUp tasks for unresolved categories.
-      </p>
-    </section>
-
-    <section class="panel">
-      <h3>Title Optimization Workspace</h3>
-      <div class="pill-row">
-        <span class="pill">Airtable Source Mapping</span>
-        <span class="pill">Protected Core Fields</span>
-        <span class="pill">Custom Logical Fields</span>
-        <span class="pill">Title Rules Foundation</span>
-      </div>
-      <p class="description">
-        Configure the approved source fields that title optimization uses without coupling title logic to Airtable column names.
       </p>
     </section>
 
@@ -243,9 +229,6 @@
       window.location.href = 'phase5-batch-approval.html';
     }
 
-    function goToTitleOptimization() {
-      window.location.href = '../title-optimization/source-fields.html';
-    }
   </script>
 </body>
 </html>
