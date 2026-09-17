@@ -29,6 +29,14 @@ contextBridge.exposeInMainWorld('titleOptimizationTerminologyRulesAPI', {
   softDelete: (id) => ipcRenderer.invoke('title-optimization-terminology-rules:delete', id)
 });
 
+contextBridge.exposeInMainWorld('titleOptimizationSynonymsAPI', {
+  load: () => ipcRenderer.invoke('title-optimization-synonyms:load'),
+  save: rule => ipcRenderer.invoke('title-optimization-synonyms:save', rule),
+  setRuleEnabled: (id, enabled) => ipcRenderer.invoke('title-optimization-synonyms:toggle-rule', id, enabled),
+  setMasterEnabled: enabled => ipcRenderer.invoke('title-optimization-synonyms:toggle-master', enabled),
+  softDelete: id => ipcRenderer.invoke('title-optimization-synonyms:delete', id)
+});
+
 // Reporting API
 contextBridge.exposeInMainWorld('reportingAPI', {
   getSalespeople: () => ipcRenderer.invoke('reporting-get-salespeople'),

@@ -91,6 +91,14 @@ function getTitleOptimizationTerminologyRules() {
   return store.get('titleOptimization.terminologyRules');
 }
 
+function saveTitleOptimizationSynonyms(config) {
+  store.set('titleOptimization.synonyms', config);
+}
+
+function getTitleOptimizationSynonyms() {
+  return store.get('titleOptimization.synonyms');
+}
+
 module.exports = {
   saveDbConfig,
   getDbConfig,
@@ -109,5 +117,7 @@ module.exports = {
   saveTitleOptimizationSourcePriority,
   getTitleOptimizationSourcePriority,
   saveTitleOptimizationTerminologyRules,
-  getTitleOptimizationTerminologyRules
+  getTitleOptimizationTerminologyRules,
+  saveTitleOptimizationSynonyms,
+  getTitleOptimizationSynonyms
 };

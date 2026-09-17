@@ -1,0 +1,26 @@
+@import url('terminology-rules.css');
+
+.synonyms-heading-row { align-items: flex-start; gap: var(--space-4); }
+.master-setting { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); flex: 0 0 min(320px, 100%); padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--slate-50); cursor: pointer; }
+.master-setting span { display: grid; gap: 3px; }
+.master-setting strong { font-size: 13px; }
+.master-setting small { color: var(--color-muted); font-size: 12px; line-height: 1.4; }
+.master-setting input { width: 20px; height: 20px; accent-color: var(--green-700); cursor: pointer; }
+.synonyms-table { overflow-x: hidden; overflow-y: auto; }
+.synonyms-table th:nth-child(1) { width: 22%; }
+.synonyms-table th:nth-child(2) { width: 30%; }
+.synonyms-table th:nth-child(3) { width: 16%; }
+.synonyms-table th:nth-child(4) { width: 14%; }
+.synonyms-table th:nth-child(5) { width: 8%; }
+.synonyms-table th:nth-child(6) { width: 10%; }
+.synonym-chip-list, .synonym-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.synonym-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; border-radius: var(--radius-sm); padding: 4px 7px; color: var(--color-primary); background: var(--slate-100); overflow-wrap: anywhere; }
+.synonym-chip button { border: 0; background: transparent; color: var(--slate-800); font-size: 16px; line-height: 1; cursor: pointer; }
+.synonym-entry { display: flex; gap: var(--space-2); }
+.synonym-entry input { flex: 1; min-width: 0; }
+.synonym-entry button { flex: 0 0 auto; }
+.synonym-chips { min-height: 20px; }
+.guidance p { margin: 7px 0 0; }
+#cv-policy-note { margin-top: 12px; font-weight: 700; }
+@media (max-width: 760px) { .synonyms-heading-row { flex-direction: column; } .master-setting { flex-basis: auto; width: 100%; } }
+@media (max-width: 440px) { .synonym-entry { flex-wrap: wrap; } .synonym-entry button { width: 100%; } }
