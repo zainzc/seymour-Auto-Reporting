@@ -143,3 +143,16 @@ test('dirty navigation uses discard confirmation and authorizes one unload', asy
   assert.equal(h.controller.shouldBlockUnload(), false);
   assert.equal(h.controller.shouldBlockUnload(), true);
 });
+
+test('closing the editor preserves an unsaved draft unless discard is confirmed', async () => {
+  let approved = false;
+  const h = harness({ confirmDiscard: async () => approved });
+  await h.controller.load();
+  h.controller.setFormField('sourceTerm', 'Draft rule');
+  assert.equal(await h.controller.cancel(), false);
+  assert.equal(h.controller.state.form.sourceTerm, 'Draft rule');
+  approved = true;
+  assert.equal(await h.controller.cancel(), true);
+  assert.equal(h.controller.state.form.sourceTerm, '');
+  assert.equal(h.controller.state.dirty, false);
+});

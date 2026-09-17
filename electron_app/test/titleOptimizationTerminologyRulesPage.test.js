@@ -28,3 +28,13 @@ test('Terminology Rules layout keeps the table full-width with vertical-only scr
     assert.match(renderer, new RegExp(`data-label="${label}"`));
   }
 });
+
+test('Add and Edit use a hidden modal editor instead of a persistent panel', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/terminology-rules.html'), 'utf8');
+  const renderer = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/terminology-rules.js'), 'utf8');
+  assert.match(html, /<dialog id="rule-editor"[^>]*aria-labelledby="editor-heading"/);
+  assert.match(html, /id="close-rule"/);
+  assert.match(renderer, /editorDialog\.showModal\(\)/);
+  assert.match(renderer, /editorDialog\.close\(\)/);
+  assert.match(renderer, /editorDialog\.addEventListener\('cancel'/);
+});

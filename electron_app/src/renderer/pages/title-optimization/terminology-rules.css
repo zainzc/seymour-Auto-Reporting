@@ -31,7 +31,6 @@
 .terminology-table .priority-cell { font-variant-numeric: tabular-nums; }
 .terminology-table .empty-row { text-align: center; color: var(--color-muted); padding: var(--space-6); }
 .editor-card h2 { margin: 0 0 6px; font-size: 20px; }
-.editor-card form { max-width: 720px; }
 .editor-intro { margin: 0 0 var(--space-4); color: var(--color-muted); font-size: 13px; line-height: 1.5; }
 .editor-card form { display: grid; }
 .editor-card form > label, #replacement-group > label, #verification-group > label { display: block; margin: 12px 0 6px; font-size: 13px; font-weight: 700; }
@@ -48,6 +47,13 @@ dialog { max-width: min(440px, calc(100vw - 32px)); border: 1px solid var(--colo
 dialog::backdrop { background: rgba(20, 35, 58, .35); }
 dialog h2 { margin: 0 0 8px; font-size: 18px; }
 dialog p { margin: 0; color: var(--color-muted); line-height: 1.5; }
+.rule-editor-dialog { width: min(680px, calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100vh - 40px); padding: 0; overflow: hidden; }
+.rule-editor-dialog .dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding: 20px 24px 16px; border-bottom: 1px solid var(--color-border); }
+.rule-editor-dialog .dialog-header h2 { margin: 0 0 5px; font-size: 20px; }
+.rule-editor-dialog .dialog-header .editor-intro { margin: 0; }
+.rule-editor-dialog .close-button { flex: 0 0 40px; }
+.rule-editor-dialog form { max-height: calc(100vh - 155px); overflow-y: auto; padding: 6px 24px 22px; }
+.rule-editor-dialog .editor-actions { position: sticky; bottom: -22px; z-index: 1; margin-top: var(--space-4); padding: 14px 0 0; background: var(--color-surface); border-top: 1px solid var(--color-border); }
 @media (max-width: 1060px) {
   .terminology-table table, .terminology-table tbody, .terminology-table tr { display: block; width: 100%; }
   .terminology-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }

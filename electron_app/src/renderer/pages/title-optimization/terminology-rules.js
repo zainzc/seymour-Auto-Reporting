@@ -357,7 +357,7 @@
       error: document.querySelector('#error-message'), success: document.querySelector('#success-message'),
       quarantine: document.querySelector('#quarantine-message'), dirty: document.querySelector('#dirty-state'),
       updated: document.querySelector('#last-updated'), count: document.querySelector('#rule-count'),
-      editorHeading: document.querySelector('#editor-heading'), save: document.querySelector('#save-rule'),
+      editorDialog: document.querySelector('#rule-editor'), editorHeading: document.querySelector('#editor-heading'), save: document.querySelector('#save-rule'),
       form: document.querySelector('#rule-form'), formError: document.querySelector('#form-error'),
       replacementGroup: document.querySelector('#replacement-group'), verificationGroup: document.querySelector('#verification-group'),
       discardDialog: document.querySelector('#discard-changes-dialog'), deleteDialog: document.querySelector('#delete-rule-dialog')
@@ -368,10 +368,13 @@
       confirmDelete: () => confirmDialog(elements.deleteDialog, 'delete'),
       onChange: render
     });
+    const editorDialog = elements.editorDialog;
+    const openEditor = () => { editorDialog.showModal(); document.getElementById('source-term').focus(); };
+    const closeEditor = async () => { if (await controller.cancel()) editorDialog.close(); };
     elements.rows.addEventListener('click', event => {
       const id = event.target.closest('tr[data-id]')?.dataset.id;
       if (!id) return;
-      if (event.target.closest('.edit-row')) controller.beginEdit(id).then(changed => { if (changed) document.getElementById('source-term').focus(); });
+      if (event.target.closest('.edit-row')) controller.beginEdit(id).then(changed => { if (changed) openEditor(); });
       if (event.target.closest('.delete-row')) controller.deleteRule(id).catch(() => {});
     });
     elements.rows.addEventListener('change', event => {
@@ -386,11 +389,16 @@
       const field = Object.keys(formIds).find(key => formIds[key] === event.target.id);
       if (field) controller.setFormField(field, field === 'enabled' ? event.target.checked : event.target.value);
     });
-    elements.form.addEventListener('submit', event => { event.preventDefault(); controller.save().catch(() => {}); });
-    document.querySelector('#add-button').addEventListener('click', async () => {
-      if (await controller.beginAdd()) document.getElementById('source-term').focus();
+    elements.form.addEventListener('submit', async event => {
+      event.preventDefault();
+      try { await controller.save(); editorDialog.close(); } catch { /* Keep the editor open with its draft and errors. */ }
     });
-    document.querySelector('#cancel-rule').addEventListener('click', () => controller.cancel().catch(() => {}));
+    document.querySelector('#add-button').addEventListener('click', async () => {
+      if (await controller.beginAdd()) openEditor();
+    });
+    document.querySelector('#cancel-rule').addEventListener('click', () => closeEditor().catch(() => {}));
+    document.querySelector('#close-rule').addEventListener('click', () => closeEditor().catch(() => {}));
+    editorDialog.addEventListener('cancel', event => { event.preventDefault(); closeEditor().catch(() => {}); });
     document.querySelector('#refresh-button').addEventListener('click', () => controller.refresh().catch(() => {}));
     document.querySelector('#rule-search').addEventListener('input', event => controller.setFilters({ search: event.target.value }));
     document.querySelector('#condition-filter').addEventListener('change', event => controller.setFilters({ condition: event.target.value }));
