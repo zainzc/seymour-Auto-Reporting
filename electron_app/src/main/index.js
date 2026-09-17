@@ -21,7 +21,9 @@ const {
   saveTitleOptimizationTerminologyRules,
   getTitleOptimizationTerminologyRules,
   saveTitleOptimizationSynonyms,
-  getTitleOptimizationSynonyms
+  getTitleOptimizationSynonyms,
+  saveTitleOptimizationPrefixRules,
+  getTitleOptimizationPrefixRules
 } = require('../config/configStore');
 
 const { initDb, initDbWindowsAuth } = require('../services/db');
@@ -90,6 +92,8 @@ const { createTitleOptimizationTerminologyRulesRepository } = require('../servic
 const { registerTitleOptimizationTerminologyRulesIpc } = require('./titleOptimizationTerminologyRulesIpc');
 const { createTitleOptimizationSynonymsRepository } = require('../services/titleOptimizationSynonymsRepository');
 const { registerTitleOptimizationSynonymsIpc } = require('./titleOptimizationSynonymsIpc');
+const { createTitleOptimizationPrefixRulesRepository } = require('../services/titleOptimizationPrefixRulesRepository');
+const { registerTitleOptimizationPrefixRulesIpc } = require('./titleOptimizationPrefixRulesIpc');
 const {
   AUDIT_BASE_ID: QUICKBOOKS_AUDIT_BASE_ID,
   getProcessingBreakdownForRun,
@@ -1817,6 +1821,13 @@ const titleOptimizationSynonymsRepository = createTitleOptimizationSynonymsRepos
   getActor: getTitleOptimizationActor
 });
 registerTitleOptimizationSynonymsIpc(ipcMain, titleOptimizationSynonymsRepository);
+
+const titleOptimizationPrefixRulesRepository = createTitleOptimizationPrefixRulesRepository({
+  getStored: getTitleOptimizationPrefixRules,
+  setStored: saveTitleOptimizationPrefixRules,
+  getActor: getTitleOptimizationActor
+});
+registerTitleOptimizationPrefixRulesIpc(ipcMain, titleOptimizationPrefixRulesRepository);
 
 ipcMain.handle('save-db-config', async (_, config) => {
   try {

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prefix Rules - Title Optimization Workspace</title>
+  <link rel="stylesheet" href="prefix-rules.css">
+</head>
+<body>
+  <main class="workspace-shell">
+    <nav class="workspace-navigation" aria-label="Application workspaces">
+      <button class="back-link" type="button" data-navigate="../milestone1/index.html">← Back to Milestone 1</button>
+      <div class="workspace-links">
+        <button type="button" data-navigate="../milestone1/powerlink-sheets.html">Inventory Sync Workspace</button>
+        <button type="button" data-navigate="../milestone1/phase2-master-parts.html">Master Parts Sync Workspace</button>
+        <button class="active" type="button" aria-current="page">Title Optimization Workspace</button>
+        <button type="button" data-navigate="../milestone1/phase5-batch-approval.html">Phase 5 Batch Approval</button>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="hero-copy"><span class="eyebrow">Title Optimization</span><h1>Title Optimization Workspace</h1><p>Configure AI title generation rules, terminology, structure and validation to ensure accurate and optimized eBay titles.</p></div>
+      <section class="workspace-status" aria-label="Workspace status">
+        <div><span class="status-heading"><span class="status-dot"></span>Workspace Status</span><strong>Active</strong></div>
+        <div><span>Configuration Version</span><strong>v1.0</strong></div>
+        <div><span>Last Updated</span><strong id="last-updated">Not saved yet</strong></div>
+      </section>
+    </header>
+
+    <nav class="tab-navigation" aria-label="Title Optimization sections">
+      <button type="button" disabled>Overview</button>
+      <button type="button" data-navigate="source-fields.html">Source Fields</button>
+      <button type="button" data-navigate="source-priority.html">Source Priority</button>
+      <button type="button" data-navigate="terminology-rules.html">Terminology Rules</button>
+      <button type="button" data-navigate="synonyms.html">Synonyms</button>
+      <button class="active" type="button" aria-current="page">Prefix Rules</button>
+      <button type="button" disabled>Restricted Terms</button>
+      <button type="button" disabled>Category Rules</button>
+      <button type="button" disabled>Title Structure</button>
+      <button type="button" disabled>Flag Reasons</button>
+      <button type="button" disabled>System Rules</button>
+    </nav>
+
+    <section class="source-card terminology-card" aria-labelledby="prefix-heading">
+      <div class="card-header"><div><h2 id="prefix-heading">Prefix Rules</h2><p>Configure verified Hollander/IPN prefix mappings used to confirm or disambiguate part identity during title optimization.</p></div></div>
+      <div class="rules-toolbar">
+        <label class="search-field"><span class="sr-only">Search prefixes or part meanings</span><input id="rule-search" type="search" placeholder="Search prefixes or part meanings…" autocomplete="off"></label>
+        <label class="filter-field"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All Status</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
+        <div class="toolbar-spacer"></div>
+        <button id="refresh-button" class="button secondary" type="button">Refresh</button>
+        <button id="add-button" class="button primary" type="button">+ Add Prefix Rule</button>
+      </div>
+      <div class="summary-row"><span id="rule-count" class="mapping-summary">0 rules</span><span id="dirty-state" class="dirty-badge" hidden>Unsaved changes</span></div>
+      <div id="loading-state" class="notice info" role="status">Loading Prefix Rules…</div>
+      <div id="error-message" class="notice error" role="alert" hidden></div>
+      <div id="success-message" class="notice success" role="status" hidden></div>
+      <div id="quarantine-message" class="notice warning" role="alert" hidden></div>
+      <div class="table-container terminology-table prefix-table" tabindex="0" aria-label="Prefix rules table">
+        <table><thead><tr><th scope="col">Prefix</th><th scope="col">Approved Part Terms</th><th scope="col">Special Rule / Note</th><th scope="col">Enabled</th><th scope="col">Actions</th></tr></thead><tbody id="rule-rows"></tbody></table>
+      </div>
+      <div class="guidance" role="note"><strong>How Prefix Rules Work</strong><p>Prefix Rules use verified Hollander/IPN prefixes to confirm or disambiguate part identity. A prefix meaning is used only when that prefix is verified. Unlisted prefixes are never guessed and are not automatically errors when another authoritative source establishes the part.</p><p>Prefix Rules do not replace Source Priority or Category Rules. No runtime title logic is implemented in this tab.</p></div>
+    </section>
+  </main>
+
+  <dialog id="prefix-editor" class="rule-editor-dialog editor-card" aria-labelledby="editor-heading">
+    <div class="dialog-header"><div><h2 id="editor-heading">Add Prefix Rule</h2><p class="editor-intro">Configure approved terms for a verified Hollander/IPN prefix.</p></div><button id="close-rule" class="close-button" type="button" aria-label="Close prefix rule editor">&times;</button></div>
+    <div id="form-error" class="notice error" role="alert" hidden></div>
+    <form id="rule-form" novalidate>
+      <label for="prefix">Prefix <span aria-hidden="true">*</span></label><input id="prefix" required autocomplete="off" inputmode="numeric"><small class="helper-text">Enter the exact prefix as text; leading zeros are preserved.</small><small id="prefix-error" class="field-error" hidden></small>
+      <label for="approved-term-input">Approved Part Terms <span aria-hidden="true">*</span></label><div id="approved-term-chips" class="term-chips" aria-label="Approved part terms"></div><div class="term-entry"><input id="approved-term-input" autocomplete="off" placeholder="Enter a term and press Enter"><button id="add-term" class="button secondary" type="button">Add term</button></div><small class="helper-text">Add each approved term separately.</small><small id="approvedPartTerms-error" class="field-error" hidden></small>
+      <label for="special-trigger">Special Source Term / Trigger</label><input id="special-trigger" autocomplete="off" placeholder="Optional source term"><small id="specialTrigger-error" class="field-error" hidden></small>
+      <label for="special-replacement">Special Replacement</label><input id="special-replacement" autocomplete="off" placeholder="Optional approved buyer-facing term"><small id="specialReplacement-error" class="field-error" hidden></small>
+      <label for="note">Notes</label><textarea id="note" rows="3" placeholder="Optional guidance for future runtime"></textarea><small id="note-error" class="field-error" hidden></small>
+      <label class="editor-toggle" for="enabled">Enabled <input id="enabled" type="checkbox" checked></label>
+      <div class="editor-actions"><button id="cancel-rule" class="button secondary" type="button">Cancel</button><button id="save-rule" class="button primary" type="submit">Save Rule</button></div>
+    </form>
+  </dialog>
+  <dialog id="discard-changes-dialog" aria-labelledby="discard-title"><form method="dialog"><h2 id="discard-title">Discard unsaved prefix changes?</h2><p>Your Add/Edit changes will be lost.</p><div class="dialog-actions"><button class="button secondary" value="cancel">Stay</button><button class="button danger" value="discard">Discard changes</button></div></form></dialog>
+  <dialog id="delete-rule-dialog" aria-labelledby="delete-title"><form method="dialog"><h2 id="delete-title">Delete custom prefix rule?</h2><p>This rule will be archived and excluded from normal use.</p><div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button danger" value="delete">Delete rule</button></div></form></dialog>
+  <script src="prefix-rules.js"></script>
+</body>
+</html>

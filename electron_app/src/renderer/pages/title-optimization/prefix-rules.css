@@ -1,0 +1,20 @@
+@import url('terminology-rules.css');
+
+.prefix-table { overflow-x: hidden; overflow-y: auto; }
+.prefix-table th:nth-child(1) { width: 11%; }
+.prefix-table th:nth-child(2) { width: 34%; }
+.prefix-table th:nth-child(3) { width: 34%; }
+.prefix-table th:nth-child(4) { width: 10%; }
+.prefix-table th:nth-child(5) { width: 11%; }
+.term-chip-list, .term-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.term-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; border-radius: var(--radius-sm); padding: 4px 7px; color: var(--color-primary); background: var(--slate-100); overflow-wrap: anywhere; }
+.term-chip button { border: 0; background: transparent; color: var(--slate-800); font-size: 16px; line-height: 1; cursor: pointer; }
+.term-entry { display: flex; gap: var(--space-2); }
+.term-entry input { flex: 1; min-width: 0; }
+.term-entry button { flex: 0 0 auto; }
+.term-chips { min-height: 20px; }
+.prefix-rule-detail { display: grid; gap: 4px; }
+.prefix-rule-detail small { color: var(--color-muted); line-height: 1.4; }
+.guidance p { margin: 7px 0 0; }
+#prefix[readonly] { background: var(--slate-50); cursor: not-allowed; }
+@media (max-width: 440px) { .term-entry { flex-wrap: wrap; } .term-entry button { width: 100%; } }

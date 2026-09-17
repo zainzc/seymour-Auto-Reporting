@@ -14,7 +14,8 @@ test('Synonyms opens inside the existing workspace and later tabs remain disable
   assert.match(html, /class="workspace-navigation"/);
   assert.match(html, /class="active"[^>]*aria-current="page"[^>]*>Synonyms/);
   assert.doesNotMatch(html, /class="[^"]*sidebar/);
-  for (const tab of ['Overview', 'Prefix Rules', 'Restricted Terms', 'Category Rules', 'Title Structure', 'Flag Reasons', 'System Rules']) {
+  assert.match(html, /data-navigate="prefix-rules\.html"[^>]*>Prefix Rules/);
+  for (const tab of ['Overview', 'Restricted Terms', 'Category Rules', 'Title Structure', 'Flag Reasons', 'System Rules']) {
     assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
   }
 });
