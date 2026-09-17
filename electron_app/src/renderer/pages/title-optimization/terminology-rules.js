@@ -309,14 +309,14 @@
     elements.save.disabled = state.saving;
     elements.save.textContent = state.saving ? 'Saving…' : 'Save Rule';
     elements.rows.innerHTML = controller.filteredRules().map(rule => `<tr data-id="${escapeHtml(rule.id)}">
-      <td><span class="term-name">${escapeHtml(rule.sourceTerm)}</span><span class="origin-label">${rule.origin === 'client-v5' ? 'Client v5 default' : 'Custom rule'}</span></td>
-      <td>${rule.action === 'remove' ? 'Remove' : 'Replace'}</td>
-      <td>${escapeHtml(replacementLabel(rule))}</td>
-      <td>${escapeHtml(conditionLabel(rule.condition))}</td>
-      <td>${rule.appliesTo === 'transmission' ? 'Transmission' : 'All Categories'}</td>
-      <td><input class="enabled-switch" type="checkbox" aria-label="Enable ${escapeHtml(rule.sourceTerm)}" ${rule.enabled ? 'checked' : ''} ${state.togglingId === rule.id ? 'disabled' : ''}></td>
-      <td class="priority-cell">${escapeHtml(rule.priority)}</td>
-      <td><div class="row-actions"><button class="edit-row" type="button" aria-label="Edit ${escapeHtml(rule.sourceTerm)}">Edit</button>${rule.origin === 'custom' ? `<button class="delete-row" type="button" aria-label="Delete ${escapeHtml(rule.sourceTerm)}">Delete</button>` : ''}</div></td>
+      <td data-label="Source Term"><span class="term-name">${escapeHtml(rule.sourceTerm)}</span><span class="origin-label">${rule.origin === 'client-v5' ? 'Client v5 default' : 'Custom rule'}</span></td>
+      <td data-label="Action">${rule.action === 'remove' ? 'Remove' : 'Replace'}</td>
+      <td data-label="Replacement Term">${escapeHtml(replacementLabel(rule))}</td>
+      <td data-label="Condition">${escapeHtml(conditionLabel(rule.condition))}</td>
+      <td data-label="Applies To">${rule.appliesTo === 'transmission' ? 'Transmission' : 'All Categories'}</td>
+      <td data-label="Enabled"><input class="enabled-switch" type="checkbox" aria-label="Enable ${escapeHtml(rule.sourceTerm)}" ${rule.enabled ? 'checked' : ''} ${state.togglingId === rule.id ? 'disabled' : ''}></td>
+      <td data-label="Priority" class="priority-cell">${escapeHtml(rule.priority)}</td>
+      <td data-label="Actions"><div class="row-actions"><button class="edit-row" type="button" aria-label="Edit ${escapeHtml(rule.sourceTerm)}">Edit</button>${rule.origin === 'custom' ? `<button class="delete-row" type="button" aria-label="Delete ${escapeHtml(rule.sourceTerm)}">Delete</button>` : ''}</div></td>
     </tr>`).join('') || '<tr><td colspan="8" class="empty-row">No rules match these filters.</td></tr>';
 
     if (renderedFormRevision !== state.formRevision) {
