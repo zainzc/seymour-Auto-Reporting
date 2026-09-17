@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terminology Rules - Title Optimization Workspace</title>
+  <link rel="stylesheet" href="terminology-rules.css">
+</head>
+<body>
+  <main class="workspace-shell">
+    <nav class="workspace-navigation" aria-label="Application workspaces">
+      <button class="back-link" type="button" data-navigate="../milestone1/index.html">← Back to Milestone 1</button>
+      <div class="workspace-links">
+        <button type="button" data-navigate="../milestone1/powerlink-sheets.html">Inventory Sync Workspace</button>
+        <button type="button" data-navigate="../milestone1/phase2-master-parts.html">Master Parts Sync Workspace</button>
+        <button class="active" type="button" aria-current="page">Title Optimization Workspace</button>
+        <button type="button" data-navigate="../milestone1/phase5-batch-approval.html">Phase 5 Batch Approval</button>
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="hero-copy">
+        <span class="eyebrow">Title Optimization</span>
+        <h1>Title Optimization Workspace</h1>
+        <p>Configure AI title generation rules, terminology, structure and validation to ensure accurate and optimized eBay titles.</p>
+      </div>
+      <section class="workspace-status" aria-label="Workspace status">
+        <div><span class="status-heading"><span class="status-dot"></span>Workspace Status</span><strong>Active</strong></div>
+        <div><span>Configuration Version</span><strong>v1.0</strong></div>
+        <div><span>Last Updated</span><strong id="last-updated">Not saved yet</strong></div>
+      </section>
+    </header>
+
+    <nav class="tab-navigation" aria-label="Title Optimization sections">
+      <button type="button" disabled>Overview</button>
+      <button type="button" data-navigate="source-fields.html">Source Fields</button>
+      <button type="button" data-navigate="source-priority.html">Source Priority</button>
+      <button class="active" type="button" aria-current="page">Terminology Rules</button>
+      <button type="button" disabled>Synonyms</button>
+      <button type="button" disabled>Prefix Rules</button>
+      <button type="button" disabled>Restricted Terms</button>
+      <button type="button" disabled>Category Rules</button>
+      <button type="button" disabled>Title Structure</button>
+      <button type="button" disabled>Flag Reasons</button>
+      <button type="button" disabled>System Rules</button>
+    </nav>
+
+    <div class="terminology-layout">
+      <section class="source-card terminology-card" aria-labelledby="terminology-heading">
+        <div class="card-header">
+          <div>
+            <h2 id="terminology-heading">Terminology Rules</h2>
+            <p>Define preferred terminology transformations used to keep generated titles consistent and buyer-friendly.</p>
+          </div>
+        </div>
+        <div class="rules-toolbar">
+          <label class="search-field"><span class="sr-only">Search rules</span><input id="rule-search" type="search" placeholder="Search rules…" autocomplete="off"></label>
+          <label class="filter-field"><span class="sr-only">Filter by condition</span><select id="condition-filter"><option value="all">All Conditions</option><option value="always">Always</option><option value="transmission-context">Transmission Context Only</option><option value="context-verified">Context Verified</option></select></label>
+          <label class="filter-field"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All Status</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
+          <div class="toolbar-spacer"></div>
+          <button id="refresh-button" class="button secondary" type="button">Refresh</button>
+          <button id="add-button" class="button primary" type="button">+ Add Rule</button>
+        </div>
+        <div class="summary-row"><span id="rule-count" class="mapping-summary">0 rules</span><span id="dirty-state" class="dirty-badge" hidden>Unsaved changes</span></div>
+        <div id="loading-state" class="notice info" role="status">Loading Terminology Rules…</div>
+        <div id="error-message" class="notice error" role="alert" hidden></div>
+        <div id="success-message" class="notice success" role="status" hidden></div>
+        <div id="quarantine-message" class="notice warning" role="alert" hidden></div>
+        <div class="table-container terminology-table" tabindex="0" aria-label="Terminology Rules table">
+          <table>
+            <thead><tr><th scope="col">Source Term</th><th scope="col">Action</th><th scope="col">Replacement Term</th><th scope="col">Condition</th><th scope="col">Applies To</th><th scope="col">Enabled</th><th scope="col">Priority</th><th scope="col">Actions</th></tr></thead>
+            <tbody id="rule-rows"></tbody>
+          </table>
+        </div>
+        <div class="guidance" role="note"><strong>How Terminology Rules Work</strong><br>When an enabled rule matches approved listing data, its preferred term can be used by the future title optimizer. Conditional rules apply only in their configured context. User-created rules can be added as requirements evolve. This screen stores rules; it does not execute them yet.</div>
+      </section>
+
+      <aside id="rule-editor" class="source-card editor-card" aria-labelledby="editor-heading">
+        <h2 id="editor-heading">Add Terminology Rule</h2>
+        <p class="editor-intro">Add a preferred term or edit a rule from the table.</p>
+        <div id="form-error" class="notice error" role="alert" hidden></div>
+        <form id="rule-form" novalidate>
+          <label for="source-term">Source Term <span aria-hidden="true">*</span></label><input id="source-term" name="sourceTerm" required autocomplete="off"><small id="source-term-error" class="field-error" hidden></small>
+          <label for="action">Action <span aria-hidden="true">*</span></label><select id="action" name="action" required><option value="replace">Replace</option><option value="remove">Remove</option></select><small id="action-error" class="field-error" hidden></small>
+          <div id="replacement-group"><label for="replacement-term">Replacement Term <span aria-hidden="true">*</span></label><input id="replacement-term" name="replacementTerm" autocomplete="off"><small id="replacement-term-error" class="field-error" hidden></small></div>
+          <label for="condition">Condition <span aria-hidden="true">*</span></label><select id="condition" name="condition" required><option value="always">Always</option><option value="transmission-context">Transmission Context Only</option><option value="context-verified">Context Verified</option></select><small id="condition-error" class="field-error" hidden></small>
+          <div id="verification-group" hidden>
+            <p class="condition-help">For verified context, specify the evidence and what to use when it is or is not confirmed.</p>
+            <label for="verification-criterion">Verification Criterion <span aria-hidden="true">*</span></label><input id="verification-criterion" autocomplete="off" placeholder="e.g., pump-verified"><small id="verification-criterion-error" class="field-error" hidden></small>
+            <label for="verified-replacement">Verified Replacement <span aria-hidden="true">*</span></label><input id="verified-replacement" autocomplete="off"><small id="verified-replacement-error" class="field-error" hidden></small>
+            <label for="otherwise-replacement">Otherwise Replacement</label><input id="otherwise-replacement" autocomplete="off" placeholder="Leave blank if the rule must not apply otherwise">
+          </div>
+          <label for="applies-to">Applies To</label><select id="applies-to" name="appliesTo"><option value="all">All Categories</option><option value="transmission">Transmission</option></select><small id="applies-to-error" class="field-error" hidden></small>
+          <label for="priority">Priority <span aria-hidden="true">*</span></label><input id="priority" name="priority" type="number" min="1" step="1" required><small class="helper-text">Lower number = higher terminology priority.</small><small id="priority-error" class="field-error" hidden></small>
+          <label for="note">Rule Note</label><textarea id="note" name="note" rows="2" placeholder="Optional context for future title logic"></textarea>
+          <label class="editor-toggle" for="enabled">Enabled <input id="enabled" name="enabled" type="checkbox" checked></label>
+          <div class="editor-actions"><button id="cancel-rule" class="button secondary" type="button">Cancel</button><button id="save-rule" class="button primary" type="submit">Save Rule</button></div>
+        </form>
+      </aside>
+    </div>
+  </main>
+
+  <dialog id="discard-changes-dialog" aria-labelledby="discard-title"><form method="dialog"><h2 id="discard-title">Discard unsaved rule changes?</h2><p>Your Add/Edit changes will be lost.</p><div class="dialog-actions"><button class="button secondary" value="cancel">Stay</button><button class="button danger" value="discard">Discard changes</button></div></form></dialog>
+  <dialog id="delete-rule-dialog" aria-labelledby="delete-title"><form method="dialog"><h2 id="delete-title">Delete custom rule?</h2><p>This rule will be archived and excluded from normal use.</p><div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button danger" value="delete">Delete rule</button></div></form></dialog>
+  <script src="terminology-rules.js"></script>
+</body>
+</html>

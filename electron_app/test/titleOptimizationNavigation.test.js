@@ -13,11 +13,11 @@ function executeInlineScripts(relativePath) {
   return { context, html };
 }
 
-test('Milestone 1 dashboard keeps its existing workspace count while Title Optimization is hidden', () => {
+test('Milestone 1 restores Title Optimization without changing dashboard workspace count', () => {
   const milestone = executeInlineScripts('../src/renderer/pages/milestone1/index.html');
-  assert.doesNotMatch(milestone.html, /Title Optimization Workspace/);
-  assert.doesNotMatch(milestone.html, /title-optimization\/source-fields\.html/);
-  assert.equal(typeof milestone.context.goToTitleOptimization, 'undefined');
+  assert.match(milestone.html, /Open Title Optimization Workspace/);
+  milestone.context.goToTitleOptimization();
+  assert.equal(milestone.context.window.location.href, '../title-optimization/source-fields.html');
 
   const dashboard = executeInlineScripts('../src/renderer/pages/main-dashboard.html');
   assert.equal((dashboard.html.match(/class="workspace-card"/g) || []).length, 2);
@@ -27,7 +27,7 @@ test('Milestone 1 dashboard keeps its existing workspace count while Title Optim
   assert.equal(dashboard.context.window.location.href, 'milestone11/index.html');
 });
 
-test('client-facing Milestone 1 navigation hides Title Optimization', () => {
+test('client-facing Milestone 1 navigation restores Title Optimization', () => {
   const pages = [
     '../src/renderer/pages/milestone1/powerlink-sheets.html',
     '../src/renderer/pages/milestone1/phase2-master-parts.html',
@@ -35,8 +35,8 @@ test('client-facing Milestone 1 navigation hides Title Optimization', () => {
   ];
   for (const page of pages) {
     const html = fs.readFileSync(path.join(__dirname, page), 'utf8');
-    assert.doesNotMatch(html, /Title Optimization Workspace/);
-    assert.doesNotMatch(html, /\.\.\/title-optimization\/source-fields\.html/);
+    assert.match(html, /Title Optimization Workspace/);
+    assert.match(html, /\.\.\/title-optimization\/source-fields\.html/);
   }
 });
 

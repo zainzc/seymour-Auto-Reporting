@@ -83,6 +83,14 @@ function getTitleOptimizationSourcePriority() {
   return store.get('titleOptimization.sourcePriority');
 }
 
+function saveTitleOptimizationTerminologyRules(config) {
+  store.set('titleOptimization.terminologyRules', config);
+}
+
+function getTitleOptimizationTerminologyRules() {
+  return store.get('titleOptimization.terminologyRules');
+}
+
 module.exports = {
   saveDbConfig,
   getDbConfig,
@@ -99,5 +107,7 @@ module.exports = {
   saveTitleOptimizationSourceFields,
   getTitleOptimizationSourceFields,
   saveTitleOptimizationSourcePriority,
-  getTitleOptimizationSourcePriority
+  getTitleOptimizationSourcePriority,
+  saveTitleOptimizationTerminologyRules,
+  getTitleOptimizationTerminologyRules
 };

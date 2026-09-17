@@ -17,7 +17,9 @@ const {
   saveTitleOptimizationSourceFields,
   getTitleOptimizationSourceFields,
   saveTitleOptimizationSourcePriority,
-  getTitleOptimizationSourcePriority
+  getTitleOptimizationSourcePriority,
+  saveTitleOptimizationTerminologyRules,
+  getTitleOptimizationTerminologyRules
 } = require('../config/configStore');
 
 const { initDb, initDbWindowsAuth } = require('../services/db');
@@ -82,6 +84,8 @@ const { createTitleOptimizationSourceFieldsRepository } = require('../services/t
 const { registerTitleOptimizationSourceFieldsIpc } = require('./titleOptimizationSourceFieldsIpc');
 const { createTitleOptimizationSourcePriorityRepository } = require('../services/titleOptimizationSourcePriorityRepository');
 const { registerTitleOptimizationSourcePriorityIpc } = require('./titleOptimizationSourcePriorityIpc');
+const { createTitleOptimizationTerminologyRulesRepository } = require('../services/titleOptimizationTerminologyRulesRepository');
+const { registerTitleOptimizationTerminologyRulesIpc } = require('./titleOptimizationTerminologyRulesIpc');
 const {
   AUDIT_BASE_ID: QUICKBOOKS_AUDIT_BASE_ID,
   getProcessingBreakdownForRun,
@@ -1795,6 +1799,13 @@ const titleOptimizationSourcePriorityRepository = createTitleOptimizationSourceP
   getActor: getTitleOptimizationActor
 });
 registerTitleOptimizationSourcePriorityIpc(ipcMain, titleOptimizationSourcePriorityRepository);
+
+const titleOptimizationTerminologyRulesRepository = createTitleOptimizationTerminologyRulesRepository({
+  getStored: getTitleOptimizationTerminologyRules,
+  setStored: saveTitleOptimizationTerminologyRules,
+  getActor: getTitleOptimizationActor
+});
+registerTitleOptimizationTerminologyRulesIpc(ipcMain, titleOptimizationTerminologyRulesRepository);
 
 ipcMain.handle('save-db-config', async (_, config) => {
   try {
