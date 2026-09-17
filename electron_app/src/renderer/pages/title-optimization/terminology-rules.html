@@ -68,7 +68,7 @@
         <div id="quarantine-message" class="notice warning" role="alert" hidden></div>
         <div class="table-container terminology-table" tabindex="0" aria-label="Terminology Rules table">
           <table>
-            <thead><tr><th scope="col">Source Term</th><th scope="col">Action</th><th scope="col">Replacement Term</th><th scope="col">Condition</th><th scope="col">Applies To</th><th scope="col">Enabled</th><th scope="col">Priority</th><th scope="col">Actions</th></tr></thead>
+            <thead><tr><th scope="col">Source Term</th><th scope="col">Action</th><th scope="col">Replacement Term</th><th scope="col">Condition</th><th scope="col">Applies To</th><th scope="col">Enabled</th><th scope="col">Actions</th></tr></thead>
             <tbody id="rule-rows"></tbody>
           </table>
         </div>
@@ -96,7 +96,6 @@
             <label for="otherwise-replacement">Otherwise Replacement</label><input id="otherwise-replacement" autocomplete="off" placeholder="Leave blank if the rule must not apply otherwise">
           </div>
           <label for="applies-to">Applies To</label><select id="applies-to" name="appliesTo"><option value="all">All Categories</option><option value="transmission">Transmission</option></select><small id="applies-to-error" class="field-error" hidden></small>
-          <label for="priority">Priority <span aria-hidden="true">*</span></label><input id="priority" name="priority" type="number" min="1" step="1" required><small class="helper-text">Lower number = higher terminology priority.</small><small id="priority-error" class="field-error" hidden></small>
           <label for="note">Rule Note</label><textarea id="note" name="note" rows="2" placeholder="Optional context for future title logic"></textarea>
           <label class="editor-toggle" for="enabled">Enabled <input id="enabled" name="enabled" type="checkbox" checked></label>
           <div class="editor-actions"><button id="cancel-rule" class="button secondary" type="button">Cancel</button><button id="save-rule" class="button primary" type="submit">Save Rule</button></div>

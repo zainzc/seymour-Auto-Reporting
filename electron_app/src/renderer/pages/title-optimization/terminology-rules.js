@@ -191,7 +191,7 @@
       const rule = state.rules.find(item => item.id === id);
       if (!rule) return false;
       if (rule.origin !== 'custom') {
-        state.error = 'Client-v5 rules cannot be deleted. Disable the rule instead.';
+        state.error = 'This rule cannot be deleted. Disable it instead.';
         notify();
         return false;
       }
@@ -269,9 +269,9 @@
   const formIds = {
     sourceTerm: 'source-term', action: 'action', replacementTerm: 'replacement-term', condition: 'condition',
     verificationCriterion: 'verification-criterion', verifiedReplacement: 'verified-replacement',
-    otherwiseReplacement: 'otherwise-replacement', appliesTo: 'applies-to', priority: 'priority', enabled: 'enabled', note: 'note'
+    otherwiseReplacement: 'otherwise-replacement', appliesTo: 'applies-to', enabled: 'enabled', note: 'note'
   };
-  const errorIds = { sourceTerm: 'source-term-error', action: 'action-error', replacementTerm: 'replacement-term-error', condition: 'condition-error', 'conditionConfig.criterion': 'verification-criterion-error', 'conditionConfig.whenVerified': 'verified-replacement-error', appliesTo: 'applies-to-error', priority: 'priority-error' };
+  const errorIds = { sourceTerm: 'source-term-error', action: 'action-error', replacementTerm: 'replacement-term-error', condition: 'condition-error', 'conditionConfig.criterion': 'verification-criterion-error', 'conditionConfig.whenVerified': 'verified-replacement-error', appliesTo: 'applies-to-error' };
 
   function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
@@ -309,15 +309,14 @@
     elements.save.disabled = state.saving;
     elements.save.textContent = state.saving ? 'Saving…' : 'Save Rule';
     elements.rows.innerHTML = controller.filteredRules().map(rule => `<tr data-id="${escapeHtml(rule.id)}">
-      <td data-label="Source Term"><span class="term-name">${escapeHtml(rule.sourceTerm)}</span><span class="origin-label">${rule.origin === 'client-v5' ? 'Client v5 default' : 'Custom rule'}</span></td>
+      <td data-label="Source Term"><span class="term-name">${escapeHtml(rule.sourceTerm)}</span></td>
       <td data-label="Action">${rule.action === 'remove' ? 'Remove' : 'Replace'}</td>
       <td data-label="Replacement Term">${escapeHtml(replacementLabel(rule))}</td>
       <td data-label="Condition">${escapeHtml(conditionLabel(rule.condition))}</td>
       <td data-label="Applies To">${rule.appliesTo === 'transmission' ? 'Transmission' : 'All Categories'}</td>
       <td data-label="Enabled"><input class="enabled-switch" type="checkbox" aria-label="Enable ${escapeHtml(rule.sourceTerm)}" ${rule.enabled ? 'checked' : ''} ${state.togglingId === rule.id ? 'disabled' : ''}></td>
-      <td data-label="Priority" class="priority-cell">${escapeHtml(rule.priority)}</td>
       <td data-label="Actions"><div class="row-actions"><button class="edit-row" type="button" aria-label="Edit ${escapeHtml(rule.sourceTerm)}">Edit</button>${rule.origin === 'custom' ? `<button class="delete-row" type="button" aria-label="Delete ${escapeHtml(rule.sourceTerm)}">Delete</button>` : ''}</div></td>
-    </tr>`).join('') || '<tr><td colspan="8" class="empty-row">No rules match these filters.</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="7" class="empty-row">No rules match these filters.</td></tr>';
 
     if (renderedFormRevision !== state.formRevision) {
       Object.entries(formIds).forEach(([field, id]) => {

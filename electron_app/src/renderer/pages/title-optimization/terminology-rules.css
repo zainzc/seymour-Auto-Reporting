@@ -13,22 +13,19 @@
 .terminology-table { max-height: min(580px, 62vh); overflow-x: hidden; overflow-y: auto; }
 .terminology-table table { width: 100%; min-width: 0; table-layout: fixed; }
 .terminology-table th, .terminology-table td { min-width: 0; padding: 10px 8px; vertical-align: middle; overflow-wrap: anywhere; }
-.terminology-table th:nth-child(1) { width: 17%; }
-.terminology-table th:nth-child(2) { width: 8%; }
-.terminology-table th:nth-child(3) { width: 19%; }
-.terminology-table th:nth-child(4) { width: 16%; }
+.terminology-table th:nth-child(1) { width: 20%; }
+.terminology-table th:nth-child(2) { width: 9%; }
+.terminology-table th:nth-child(3) { width: 23%; }
+.terminology-table th:nth-child(4) { width: 18%; }
 .terminology-table th:nth-child(5) { width: 11%; }
 .terminology-table th:nth-child(6) { width: 8%; }
-.terminology-table th:nth-child(7) { width: 8%; }
-.terminology-table th:nth-child(8) { width: 13%; }
+.terminology-table th:nth-child(7) { width: 11%; }
 .terminology-table .term-name { font-weight: 700; }
-.terminology-table .origin-label { display: block; color: var(--color-muted); font-size: 11px; margin-top: 3px; }
 .terminology-table .row-actions { display: flex; gap: 5px; flex-wrap: wrap; }
 .terminology-table .row-actions button { padding: 5px 8px; min-height: 32px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-primary); }
 .terminology-table .row-actions .delete-row { color: var(--red-700); }
 .terminology-table .row-actions button:hover { background: var(--slate-50); }
 .terminology-table .enabled-switch { width: 19px; height: 19px; accent-color: var(--green-700); }
-.terminology-table .priority-cell { font-variant-numeric: tabular-nums; }
 .terminology-table .empty-row { text-align: center; color: var(--color-muted); padding: var(--space-6); }
 .editor-card h2 { margin: 0 0 6px; font-size: 20px; }
 .editor-intro { margin: 0 0 var(--space-4); color: var(--color-muted); font-size: 13px; line-height: 1.5; }

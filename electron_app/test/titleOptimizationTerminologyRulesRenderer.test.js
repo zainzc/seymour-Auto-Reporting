@@ -30,6 +30,7 @@ test('Add and Edit keep form changes local until Save Rule', async () => {
   await h.controller.save();
   assert.equal(h.calls[0][0], 'save');
   assert.equal(h.calls[0][1].sourceTerm, 'New Term');
+  assert.equal(h.calls[0][1].priority, 20);
   assert.equal(h.controller.state.dirty, false);
   await h.controller.beginEdit('client-v5-01');
   h.controller.setFormField('replacementTerm', 'New Headlight');
@@ -37,6 +38,7 @@ test('Add and Edit keep form changes local until Save Rule', async () => {
   await h.controller.save();
   assert.equal(h.calls[1][1].id, 'client-v5-01');
   assert.equal(h.calls[1][1].replacementTerm, 'New Headlight');
+  assert.equal(h.calls[1][1].priority, 10);
 });
 
 test('Remove sends null replacement and Context Verified sends structured outcomes', async () => {
