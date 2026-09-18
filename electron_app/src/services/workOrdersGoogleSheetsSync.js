@@ -1091,33 +1091,6 @@ function canonicalFieldName(value = '') {
   return normalizeCell(value).toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-function buildDeliveryIdentityFromParts(parts = {}) {
-  const values = [
-    parts.name,
-    parts.billingName,
-    parts.shippingName,
-    parts.shippingAddress,
-    parts.shippingCity,
-    parts.shippingState,
-    parts.shipVia
-  ]
-    .map(value => canonicalFieldName(value))
-    .filter(Boolean);
-  return values.join('|');
-}
-
-function buildDeliveryIdentityFromRow(row = {}) {
-  return buildDeliveryIdentityFromParts({
-    name: buildDeliveryTaskName(row),
-    billingName: row['Billing Customer Name'],
-    shippingName: row['Shipping Customer Name'],
-    shippingAddress: row['Shipping Customer Address'],
-    shippingCity: row['Shipping City'],
-    shippingState: row['Shipping State'],
-    shipVia: row['Ship Via']
-  });
-}
-
 function resolveCustomFieldMeta(fieldMetaLookup, targetName = '') {
   const lookup = fieldMetaLookup || {};
   const byName = lookup.byName instanceof Map ? lookup.byName : new Map();
@@ -1492,19 +1465,6 @@ function buildDeliveryAutomationCustomFieldsFromTaskDescription(task = {}, field
       }
     }
   );
-}
-
-function buildDeliveryIdentityFromTask(task = {}) {
-  const values = getDescriptionFieldValues(task?.description || task?.text_content || '');
-  return buildDeliveryIdentityFromParts({
-    name: task?.name,
-    billingName: getDescriptionValue(values, ['Billing Name', 'Billing Customer Name']),
-    shippingName: getDescriptionValue(values, ['Shipping Name', 'Shipping Customer Name']),
-    shippingAddress: getDescriptionValue(values, ['Shipping Address', 'Shipping Customer Address']),
-    shippingCity: getDescriptionValue(values, ['Shipping City']),
-    shippingState: getDescriptionValue(values, ['Shipping State']),
-    shipVia: getDescriptionValue(values, ['Ship Via'])
-  });
 }
 
 function buildClickUpCreateCustomFields(customFields = []) {
@@ -2344,7 +2304,15 @@ async function syncRowsToClickUp({
   };
 }
 
-async function syncRowsToDeliveryAutomation({
+let deliverySyncTail = Promise.resolve();
+
+function syncRowsToDeliveryAutomation(options) {
+  const run = deliverySyncTail.then(() => syncRowsToDeliveryAutomationOnce(options));
+  deliverySyncTail = run.then(() => undefined, () => undefined);
+  return run;
+}
+
+async function syncRowsToDeliveryAutomationOnce({
   clickupToken = '',
   mainClickupListId = '',
   deliveryClickupListId = DELIVERY_AUTOMATION_LIST_ID,
@@ -2391,12 +2359,20 @@ async function syncRowsToDeliveryAutomation({
     normalizedDeliveryClickupListId
   );
   const deliveryTaskByKey = buildTaskMap(deliveryTasks);
-  const deliveryTasksByIdentity = new Map();
+  const deliveryTaskIdsByKey = new Map();
   for (const task of deliveryTasks) {
-    const identity = buildDeliveryIdentityFromTask(task);
-    if (!identity) continue;
-    if (!deliveryTasksByIdentity.has(identity)) deliveryTasksByIdentity.set(identity, []);
-    deliveryTasksByIdentity.get(identity).push(task);
+    const key = extractTaskKey(task);
+    if (!key) continue;
+    if (!deliveryTaskIdsByKey.has(key)) deliveryTaskIdsByKey.set(key, []);
+    deliveryTaskIdsByKey.get(key).push(normalizeCell(task?.id));
+  }
+  const duplicateKeys = new Set();
+  const duplicateTaskIds = new Set();
+  for (const [key, ids] of deliveryTaskIdsByKey) {
+    if (ids.length < 2) continue;
+    duplicateKeys.add(key);
+    ids.forEach(id => duplicateTaskIds.add(id));
+    result.errors.push(`Delivery Automation duplicate record key ${key}: task IDs ${ids.join(', ')}. Review manually; no task was changed or deleted.`);
   }
   const deliveryTaskIdsSyncedFromRows = new Set();
 
@@ -2409,21 +2385,10 @@ async function syncRowsToDeliveryAutomation({
     seenKeys.add(key);
     uniqueEligibleRows.push(row);
   }
-  const eligibleRowByDeliveryIdentity = new Map();
-  for (const row of uniqueEligibleRows) {
-    const identity = buildDeliveryIdentityFromRow(row);
-    if (identity && !eligibleRowByDeliveryIdentity.has(identity)) {
-      eligibleRowByDeliveryIdentity.set(identity, row);
-    }
-  }
-
   for (const row of uniqueEligibleRows) {
     const key = buildTaskKey(row);
-    const rowIdentity = buildDeliveryIdentityFromRow(row);
-    const existingTask =
-      deliveryTaskByKey.get(key) ||
-      (rowIdentity ? (deliveryTasksByIdentity.get(rowIdentity) || []).find(task => !deliveryTaskIdsSyncedFromRows.has(normalizeCell(task?.id))) : null) ||
-      null;
+    if (duplicateKeys.has(key)) continue;
+    const existingTask = deliveryTaskByKey.get(key) || null;
     const status = getDeliveryAutomationStatus(row);
 
     if (existingTask) {
@@ -2528,47 +2493,10 @@ async function syncRowsToDeliveryAutomation({
 
   for (const task of deliveryTasks) {
     const taskId = normalizeCell(task?.id);
-    if (!taskId || deliveryTaskIdsSyncedFromRows.has(taskId)) continue;
+    if (!taskId || deliveryTaskIdsSyncedFromRows.has(taskId) || duplicateTaskIds.has(taskId)) continue;
 
     try {
       const detailedTask = task;
-      const taskIdentity = buildDeliveryIdentityFromTask(detailedTask);
-      const matchingRow = taskIdentity ? eligibleRowByDeliveryIdentity.get(taskIdentity) : null;
-      if (matchingRow) {
-        const rowCustomFields = buildDeliveryAutomationCustomFields(matchingRow, deliveryFieldMeta, {
-          includeClearFields: true
-        });
-        const changedRowFields = rowCustomFields.filter(field => hasCustomFieldChanged(detailedTask, field));
-        const desiredDescription = buildDeliveryTaskDescription(matchingRow);
-        const currentDescription = normalizeMultilineTextForCompare(
-          detailedTask?.description || detailedTask?.text_content || ''
-        );
-        const status = getDeliveryAutomationStatus(matchingRow);
-        const existingStatus = normalizeClickUpStatusToken(detailedTask?.status?.status || detailedTask?.status || '');
-        const desiredStatus = normalizeClickUpStatusToken(status);
-        const taskKey = buildTaskKey(matchingRow) || extractTaskKey(detailedTask) || normalizeCell(detailedTask?.name) || taskId;
-        let rowUpdated = false;
-        if (normalizeMultilineTextForCompare(desiredDescription) !== currentDescription) {
-          await deliveryClickup.updateTask(taskId, {
-            description: desiredDescription
-          });
-          rowUpdated = true;
-        }
-        if (desiredStatus && existingStatus !== desiredStatus) {
-          await deliveryClickup.updateTaskStatus(taskId, status);
-          rowUpdated = true;
-        }
-        if (changedRowFields.length > 0) {
-          await applyTaskCustomFields(deliveryClickup, taskId, changedRowFields, taskKey, result);
-          rowUpdated = true;
-        }
-        if (rowUpdated) {
-          console.log(`[WorkOrders] Delivery Automation task refreshed from sheet row: ${taskKey}`);
-          result.updated += 1;
-          continue;
-        }
-      }
-
       const descriptionCustomFields = buildDeliveryAutomationCustomFieldsFromTaskDescription(detailedTask, deliveryFieldMeta);
       if (descriptionCustomFields.length === 0 && normalizeCell(detailedTask?.description || detailedTask?.text_content)) {
         console.warn(
@@ -3020,6 +2948,7 @@ module.exports = {
   buildRecordKey,
   readWorkOrdersRowsFromSheet,
   runClickUpSyncFromSheet,
+  syncRowsToDeliveryAutomation,
   syncWorkOrdersRowsToSheet,
   runWorkOrdersSync
 };
