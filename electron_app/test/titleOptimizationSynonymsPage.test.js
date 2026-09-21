@@ -17,8 +17,9 @@ test('Synonyms opens inside the existing workspace and unfinished tabs remain di
   assert.match(html, /data-navigate="prefix-rules\.html"[^>]*>Prefix Rules/);
   assert.match(html, /data-navigate="restricted-terms\.html"[^>]*>Restricted Terms/);
   assert.match(html, /data-navigate="category-rules\.html"[^>]*>Category Rules/);
-  for (const tab of ['Overview', 'Title Structure', 'Flag Reasons', 'System Rules']) {
-    assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
+  assert.match(html, /data-navigate="title-structure\.html"[^>]*>Title Structure<\/button>/);
+  for (const tab of ['Overview', 'Flag Reasons', 'System Rules']) {
+    assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
   }
 });
 

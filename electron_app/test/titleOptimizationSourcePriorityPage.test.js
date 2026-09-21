@@ -33,9 +33,11 @@ test('implemented Title Optimization tabs are enabled while unfinished tabs rema
   for (const page of [sourceFields, sourcePriority, terminology]) assert.match(page, /data-navigate="prefix-rules\.html"[^>]*>Prefix Rules/);
   for (const page of [sourceFields, sourcePriority, terminology]) assert.match(page, /data-navigate="restricted-terms\.html"[^>]*>Restricted Terms/);
   for (const page of [sourceFields, sourcePriority, terminology]) assert.match(page, /data-navigate="category-rules\.html"[^>]*>Category Rules/);
-  for (const tab of ['Overview', 'Title Structure', 'Flag Reasons', 'System Rules']) {
-    assert.match(sourcePriority, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
-    assert.match(terminology, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
+  assert.match(sourcePriority, /data-navigate="title-structure\.html"[^>]*>Title Structure<\/button>/);
+  assert.match(terminology, /data-navigate="title-structure\.html"[^>]*>Title Structure<\/button>/);
+  for (const tab of ['Overview', 'Flag Reasons', 'System Rules']) {
+    assert.match(sourcePriority, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
+    assert.match(terminology, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
   }
 });
 

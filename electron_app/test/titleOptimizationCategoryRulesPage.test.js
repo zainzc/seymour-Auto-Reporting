@@ -18,7 +18,8 @@ test('Category Rules page uses existing shell popup table filters and keeps unfi
   assert.match(html, /id="prefix-chips"/); assert.match(html, /id="series-chips"/); assert.match(html, /id="detail-chips"/);
   assert.match(html, /How Category Rules Work/); assert.doesNotMatch(html, /sidebar|permanent right-side/i);
   for (const label of ['Category', 'Prefix / Series', 'Important Verified Details', 'Enabled', 'Actions']) assert.match(html, new RegExp(`<th[^>]*>${label}<\\/th>`));
-  for (const tab of ['Overview', 'Title Structure', 'Flag Reasons', 'System Rules']) assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
+  assert.match(html, /data-navigate="title-structure\.html"[^>]*>Title Structure<\/button>/);
+  for (const tab of ['Overview', 'Flag Reasons', 'System Rules']) assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
   assert.match(css, /overflow-x:\s*hidden/); assert.match(css, /overflow-y:\s*auto/);
   assert.match(script, /titleOptimizationCategoryRulesAPI/); assert.doesNotMatch(script, /configStore/);
 });
