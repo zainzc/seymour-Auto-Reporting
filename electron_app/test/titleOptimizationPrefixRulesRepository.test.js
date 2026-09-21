@@ -26,11 +26,11 @@ test('seeds exactly once only when configuration is absent', async () => {
   }
 });
 
-test('seeded prefix is immutable but its terms, pair, note, and enabled state can change', async () => {
+test('seeded prefix and all popup fields can change while the seeded rule remains non-deletable', async () => {
   const h = harness(undefined);
   const first = (await h.repository.load()).rules[0];
-  await assert.rejects(h.repository.saveRule({ ...first, prefix: '235' }), error => error.code === 'PROTECTED_PREFIX');
-  const edited = await h.repository.saveRule({ ...first, approvedPartTerms: ['Accelerator'], specialTrigger: 'Source', specialReplacement: 'Buyer', note: 'Reviewed', enabled: false });
+  const edited = await h.repository.saveRule({ ...first, prefix: '235', approvedPartTerms: ['Accelerator'], specialTrigger: 'Source', specialReplacement: 'Buyer', note: 'Reviewed', enabled: false });
+  assert.equal(edited.prefix, '235');
   assert.deepEqual(edited.approvedPartTerms, ['Accelerator']);
   assert.equal(edited.specialReplacement, 'Buyer');
   assert.equal(edited.updatedBy, 'gary');

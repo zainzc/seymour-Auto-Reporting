@@ -26,18 +26,18 @@ test('seeds exactly once only when stored configuration is absent', async () => 
   assert.equal(existing.writes, 0);
 });
 
-test('all seeded term identity fields are immutable and locked terms cannot be disabled or deleted', async () => {
+test('seeded identity fields can change while safety rules stay enabled and all seeded rules stay non-deletable', async () => {
   const h = harness(undefined);
   const longBlock = (await h.repository.load()).rules.find(rule => rule.term === 'Long Block');
   const rebuilt = (await h.repository.load()).rules.find(rule => rule.term === 'Rebuilt');
-  await assert.rejects(h.repository.saveRule({ ...rebuilt, term: 'Refurbished' }), error => error.code === 'PROTECTED_RULE');
-  await assert.rejects(h.repository.saveRule({ ...rebuilt, ruleType: 'remove-noise' }), error => error.code === 'PROTECTED_RULE');
-  await assert.rejects(h.repository.saveRule({ ...rebuilt, scope: 'all' }), error => error.code === 'PROTECTED_RULE');
-  const updated = await h.repository.saveRule({ ...rebuilt, note: 'Reviewed', enabled: false });
+  const updated = await h.repository.saveRule({ ...rebuilt, term: 'Refurbished', ruleType: 'remove-noise', scope: 'all', note: 'Reviewed', enabled: false });
+  assert.deepEqual({ term: updated.term, ruleType: updated.ruleType, scope: updated.scope }, { term: 'Refurbished', ruleType: 'remove-noise', scope: 'all' });
   assert.equal(updated.note, 'Reviewed');
   assert.equal(updated.enabled, false);
   await assert.rejects(h.repository.setRuleEnabled(longBlock.id, false), error => error.code === 'LOCKED_RULE');
   await assert.rejects(h.repository.saveRule({ ...longBlock, enabled: false }), error => error.code === 'LOCKED_RULE');
+  const renamedSafetyRule = await h.repository.saveRule({ ...longBlock, term: 'Engine Block', ruleType: 'must-preserve', scope: 'all', enabled: true });
+  assert.deepEqual({ term: renamedSafetyRule.term, ruleType: renamedSafetyRule.ruleType, scope: renamedSafetyRule.scope }, { term: 'Engine Block', ruleType: 'must-preserve', scope: 'all' });
   await assert.rejects(h.repository.softDelete(longBlock.id), error => error.code === 'PROTECTED_RULE');
   await assert.rejects(h.repository.softDelete(rebuilt.id), error => error.code === 'PROTECTED_RULE');
 });

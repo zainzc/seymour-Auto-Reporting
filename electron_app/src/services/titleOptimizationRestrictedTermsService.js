@@ -74,9 +74,9 @@ function validatePersistedRestrictedTerm(rule, peers = []) {
     const definition = SEED_BY_ID.get(rule.id);
     if (!definition) add('id', 'Unknown client-v5 rule ID.');
     else {
-      const [, term, ruleType, scope, locked] = definition;
-      if (rule.term !== term || rule.ruleType !== ruleType || rule.scope !== scope || rule.locked !== locked) {
-        add('rule', 'Client-v5 term identity or lock metadata is invalid.');
+      const [, , , , locked] = definition;
+      if (rule.locked !== locked) {
+        add('rule', 'Client-v5 lock metadata is invalid.');
       }
     }
   }
@@ -96,9 +96,9 @@ function canonicalLockedRule(definition) {
 }
 
 function isAvailableLockedRule(rule, definition) {
-  const [, term, ruleType, scope] = definition;
+  const [slug] = definition;
   return rule && !rule.deletedAt && rule.enabled === true && rule.locked === true && rule.origin === 'client-v5'
-    && normalizedTerm(rule.term) === normalizedTerm(term) && rule.ruleType === ruleType && rule.scope === scope;
+    && rule.id === `client-v5-${slug}`;
 }
 
 function lockedWarnings(rules) {
@@ -145,8 +145,8 @@ function compareRules(a, b) {
 
 function enabledRestrictedTerms(config = {}) {
   const rules = Array.isArray(config.rules) ? config.rules : [];
-  const lockedTerms = new Set(LOCKED_DEFINITIONS.map(([, term]) => normalizedTerm(term)));
-  const enabled = rules.filter(rule => rule && rule.enabled && !rule.deletedAt && !lockedTerms.has(normalizedTerm(rule.term)));
+  const lockedIds = new Set(LOCKED_DEFINITIONS.map(([slug]) => `client-v5-${slug}`));
+  const enabled = rules.filter(rule => rule && rule.enabled && !rule.deletedAt && !lockedIds.has(rule.id));
   const locked = LOCKED_DEFINITIONS.map(definition => rules.find(rule => isAvailableLockedRule(rule, definition)) || canonicalLockedRule(definition));
   return [...locked, ...enabled].sort(compareRules);
 }

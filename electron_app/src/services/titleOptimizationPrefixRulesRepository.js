@@ -65,7 +65,6 @@ function createTitleOptimizationPrefixRulesRepository(dependencies = {}) {
     const old = index >= 0 ? raw.rules[index] : null;
     if (old?.deletedAt) throw failure('DELETED_RULE', 'Deleted rules cannot be edited.');
     if (old && !hydratePrefixRulesConfiguration(raw).rules.some(rule => rule.id === id)) throw failure('CONFIG_INVALID', 'This saved rule is malformed and cannot be edited safely.');
-    if (old?.origin === 'client-v5' && input?.prefix !== old.prefix) throw failure('PROTECTED_PREFIX', 'The client-approved prefix cannot be changed. Add a custom rule for another prefix.');
     const at = now(), by = await actor();
     const maxPriority = raw.rules.reduce((max, rule) => Math.max(max, Number.isSafeInteger(rule?.priority) ? rule.priority : 0), 0);
     const candidate = {

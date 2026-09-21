@@ -41,13 +41,12 @@
       const rule = state.rules.find(item => item.id === id);
       if (!rule) return false;
       state.form = { term: rule.term, ruleType: rule.ruleType, scope: rule.scope, note: rule.note || '', enabled: rule.enabled === true };
-      state.editingId = id; state.identityLocked = rule.origin === 'client-v5'; state.safetyLocked = rule.locked === true;
+      state.editingId = id; state.identityLocked = false; state.safetyLocked = rule.locked === true;
       state.formErrors = {}; state.dirty = false; state.error = ''; state.success = ''; state.formRevision += 1; notify();
       return true;
     }
     function setFormField(field, value) {
       if (state.saving || !Object.hasOwn(state.form, field)) return false;
-      if (state.identityLocked && ['term', 'ruleType', 'scope'].includes(field)) return false;
       if (state.safetyLocked && field === 'enabled') return false;
       state.form[field] = value; state.dirty = true; state.error = ''; state.success = '';
       delete state.formErrors[field]; notify(); return true;

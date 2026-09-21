@@ -35,25 +35,25 @@
       const rule = state.rules.find(item => item.id === id); if (!rule) return false;
       state.form = { categoryName: rule.categoryName, prefixRefs: [...rule.prefixRefs], seriesRefs: [...rule.seriesRefs], priorityDetails: [...rule.priorityDetails], note: rule.note || '', enabled: rule.enabled === true };
       state.chipDrafts = { prefixRefs: '', seriesRefs: '', priorityDetails: '' };
-      state.editingId = id; state.identityLocked = rule.origin === 'client-v5'; state.formErrors = {}; state.dirty = false; state.error = ''; state.success = ''; state.formRevision++; notify(); return true;
+      state.editingId = id; state.identityLocked = false; state.formErrors = {}; state.dirty = false; state.error = ''; state.success = ''; state.formRevision++; notify(); return true;
     }
     function setFormField(field, value) {
-      if (state.saving || !Object.hasOwn(state.form, field) || Array.isArray(state.form[field]) || (state.identityLocked && field === 'categoryName')) return false;
+      if (state.saving || !Object.hasOwn(state.form, field) || Array.isArray(state.form[field])) return false;
       state.form[field] = value; state.dirty = true; state.error = ''; state.success = ''; delete state.formErrors[field]; notify(); return true;
     }
     function addChip(field, value) {
-      if (state.saving || !['prefixRefs', 'seriesRefs', 'priorityDetails'].includes(field) || (state.identityLocked && ['prefixRefs', 'seriesRefs'].includes(field))) return false;
+      if (state.saving || !['prefixRefs', 'seriesRefs', 'priorityDetails'].includes(field)) return false;
       const display = String(value ?? '').trim();
       if (!display) { state.formErrors[field] = 'Blank values are not allowed.'; notify(); return false; }
       if (state.form[field].some(entry => normalize(entry) === normalize(display))) { state.formErrors[field] = 'This value is already in the list.'; notify(); return false; }
       state.form[field].push(display); state.dirty = true; delete state.formErrors[field]; state.success = ''; notify(); return true;
     }
     function setChipDraft(field, value) {
-      if (state.saving || !Object.hasOwn(state.chipDrafts, field) || (state.identityLocked && ['prefixRefs', 'seriesRefs'].includes(field))) return false;
+      if (state.saving || !Object.hasOwn(state.chipDrafts, field)) return false;
       state.chipDrafts[field] = String(value ?? ''); state.dirty = true; state.success = ''; delete state.formErrors[field]; notify(); return true;
     }
     function removeChip(field, index) {
-      if (state.saving || !['prefixRefs', 'seriesRefs', 'priorityDetails'].includes(field) || (state.identityLocked && ['prefixRefs', 'seriesRefs'].includes(field)) || !Number.isInteger(index) || index < 0 || index >= state.form[field].length) return false;
+      if (state.saving || !['prefixRefs', 'seriesRefs', 'priorityDetails'].includes(field) || !Number.isInteger(index) || index < 0 || index >= state.form[field].length) return false;
       state.form[field].splice(index, 1); state.dirty = true; notify(); return true;
     }
     function moveDetail(index, delta) {

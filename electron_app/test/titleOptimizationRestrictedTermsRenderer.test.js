@@ -5,7 +5,7 @@ const { createRestrictedTermsController } = require('../src/renderer/pages/title
 const rule = (overrides = {}) => ({ id: 'client-v5-ecm', term: 'ECM', ruleType: 'must-preserve', scope: 'all', note: '', enabled: true, origin: 'client-v5', locked: false, ...overrides });
 const response = data => ({ success: true, data });
 
-test('seeded identity is read-only but notes and enabled can change', async () => {
+test('seeded identity notes and enabled are editable', async () => {
   const saves = [];
   const controller = createRestrictedTermsController({ api: {
     load: async () => response({ rules: [rule()], issues: [] }),
@@ -13,12 +13,12 @@ test('seeded identity is read-only but notes and enabled can change', async () =
   } });
   await controller.load();
   await controller.beginEdit('client-v5-ecm');
-  assert.equal(controller.setFormField('term', 'Other'), false);
-  assert.equal(controller.setFormField('ruleType', 'remove-noise'), false);
-  assert.equal(controller.setFormField('scope', 'engine'), false);
+  assert.equal(controller.setFormField('term', 'Other'), true);
+  assert.equal(controller.setFormField('ruleType', 'remove-noise'), true);
+  assert.equal(controller.setFormField('scope', 'engine'), true);
   controller.setFormField('note', 'Keep when verified');
   await controller.save();
-  assert.equal(saves[0].term, 'ECM');
+  assert.deepEqual({ term: saves[0].term, ruleType: saves[0].ruleType, scope: saves[0].scope }, { term: 'Other', ruleType: 'remove-noise', scope: 'engine' });
   assert.equal(saves[0].note, 'Keep when verified');
 });
 

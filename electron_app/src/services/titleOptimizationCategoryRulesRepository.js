@@ -49,19 +49,12 @@ function createTitleOptimizationCategoryRulesRepository(dependencies = {}) {
     if (issues.length) throw failure('VALIDATION_ERROR', 'Please correct the rule fields and try again.', issues);
   }
   function cleanedList(value) { return Array.isArray(value) ? value.map(entry => typeof entry === 'string' ? entry.trim() : entry) : value; }
-  function assertSeedIdentity(old, input) {
-    if (old?.origin !== 'client-v5') return;
-    if (input?.categoryName !== old.categoryName || JSON.stringify(input?.prefixRefs) !== JSON.stringify(old.prefixRefs) || JSON.stringify(input?.seriesRefs) !== JSON.stringify(old.seriesRefs) || input?.seedOrder !== old.seedOrder) {
-      throw failure('PROTECTED_RULE', 'Client-v5 Category Name, references, and seed order cannot be changed.');
-    }
-  }
   async function saveRuleImpl(input) {
     const raw = mutable(await ensureRaw());
     const id = input?.id ? String(input.id) : String(createId());
     const index = findIndex(raw, id);
     if (input?.id && index < 0) throw failure('NOT_FOUND', 'The rule no longer exists or requires configuration repair.');
     const old = index >= 0 ? raw.rules[index] : null;
-    assertSeedIdentity(old, input);
     const at = now(), by = await actor();
     const candidate = {
       id, categoryName: typeof input?.categoryName === 'string' ? input.categoryName.trim() : input?.categoryName,

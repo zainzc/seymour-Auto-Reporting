@@ -67,7 +67,7 @@
       };
       state.termDraft = '';
       state.editingId = id;
-      state.prefixLocked = rule.origin === 'client-v5';
+      state.prefixLocked = false;
       state.formErrors = {};
       state.dirty = false;
       state.error = '';
@@ -77,7 +77,7 @@
       return true;
     }
     function setFormField(field, value) {
-      if (state.saving || !Object.hasOwn(state.form, field) || field === 'approvedPartTerms' || (field === 'prefix' && state.prefixLocked)) return false;
+      if (state.saving || !Object.hasOwn(state.form, field) || field === 'approvedPartTerms') return false;
       state.form[field] = value;
       state.dirty = true;
       state.success = '';

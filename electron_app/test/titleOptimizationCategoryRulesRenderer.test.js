@@ -5,21 +5,22 @@ const { createCategoryRulesController } = require('../src/renderer/pages/title-o
 const response = data => ({ success: true, data });
 const rule = (overrides = {}) => ({ id: 'client-v5-engines', categoryName: 'Engines', prefixRefs: [], seriesRefs: ['300 Series'], priorityDetails: ['Size', 'Engine Code'], note: 'Note', enabled: true, origin: 'client-v5', seedOrder: 1, ...overrides });
 
-test('seeded identity and references are locked while details notes and enabled remain draft editable', async () => {
+test('seeded identity references details notes and enabled are draft editable', async () => {
   const saves = [];
   const controller = createCategoryRulesController({ api: {
     load: async () => response({ rules: [rule()], issues: [] }),
     save: async input => { saves.push(input); return response(rule(input)); }
   } });
   await controller.load(); await controller.beginEdit('client-v5-engines');
-  assert.equal(controller.setFormField('categoryName', 'Motors'), false);
-  assert.equal(controller.addChip('prefixRefs', '300'), false);
-  assert.equal(controller.removeChip('seriesRefs', 0), false);
+  assert.equal(controller.setFormField('categoryName', 'Motors'), true);
+  assert.equal(controller.addChip('prefixRefs', '300'), true);
+  assert.equal(controller.removeChip('seriesRefs', 0), true);
   controller.setFormField('note', 'Changed\nLine'); controller.setFormField('enabled', false);
   controller.addChip('priorityDetails', 'VIN Identifier');
   await controller.save();
-  assert.equal(saves[0].categoryName, 'Engines');
-  assert.deepEqual(saves[0].seriesRefs, ['300 Series']);
+  assert.equal(saves[0].categoryName, 'Motors');
+  assert.deepEqual(saves[0].prefixRefs, ['300']);
+  assert.deepEqual(saves[0].seriesRefs, []);
   assert.deepEqual(saves[0].priorityDetails, ['Size', 'Engine Code', 'VIN Identifier']);
   assert.equal(saves[0].enabled, false);
 });

@@ -23,13 +23,11 @@ test('seeds once only for absent storage and never reseeds existing empty config
   assert.equal(empty.writes, 0);
 });
 
-test('seeded identity and references are immutable while details notes and enabled remain editable', async () => {
+test('seeded identity references details notes and enabled are editable while deletion remains blocked', async () => {
   const h = harness(undefined);
   const engines = (await h.repository.load()).rules[0];
-  for (const change of [
-    { categoryName: 'Motors' }, { prefixRefs: ['300'] }, { seriesRefs: [] }, { seedOrder: 2 }
-  ]) await assert.rejects(h.repository.saveRule({ ...engines, ...change }), error => error.code === 'PROTECTED_RULE');
-  const saved = await h.repository.saveRule({ ...engines, priorityDetails: ['Engine Code', 'Size'], note: 'Changed\nExactly', enabled: false });
+  const saved = await h.repository.saveRule({ ...engines, categoryName: 'Motors', prefixRefs: ['300'], seriesRefs: [], priorityDetails: ['Engine Code', 'Size'], note: 'Changed\nExactly', enabled: false });
+  assert.deepEqual({ categoryName: saved.categoryName, prefixRefs: saved.prefixRefs, seriesRefs: saved.seriesRefs }, { categoryName: 'Motors', prefixRefs: ['300'], seriesRefs: [] });
   assert.deepEqual(saved.priorityDetails, ['Engine Code', 'Size']);
   assert.equal(saved.note, 'Changed\nExactly');
   assert.equal(saved.enabled, false);

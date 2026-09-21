@@ -67,14 +67,6 @@ function createTitleOptimizationRestrictedTermsRepository(dependencies = {}) {
     const issues = validateRestrictedTerm(candidate, candidatePeers(raw, candidate.id));
     if (issues.length) throw failure('VALIDATION_ERROR', 'Please correct the rule fields and try again.', issues);
   }
-  function assertSeedIdentity(old, input) {
-    if (old?.origin !== 'client-v5') return;
-    for (const field of ['term', 'ruleType', 'scope']) {
-      if (input?.[field] !== old[field]) {
-        throw failure('PROTECTED_RULE', 'Client-v5 term, rule type, and scope cannot be changed.');
-      }
-    }
-  }
   async function saveRule(input) {
     const raw = mutable(await ensureRaw());
     const id = input?.id ? String(input.id) : String(createId());
@@ -82,7 +74,6 @@ function createTitleOptimizationRestrictedTermsRepository(dependencies = {}) {
     if (input?.id && index < 0) throw failure('NOT_FOUND', 'The rule no longer exists. Refresh and try again.');
     if (!input?.id && raw.rules.some(rule => rule?.id === id)) throw failure('DUPLICATE_ID', 'A rule with this ID already exists.');
     const old = index >= 0 ? raw.rules[index] : null;
-    assertSeedIdentity(old, input);
     if (old?.locked && input?.enabled !== true) throw failure('LOCKED_RULE', 'Locked client-v5 rules must remain enabled.');
     const at = now(), by = await actor();
     const candidate = {

@@ -77,12 +77,7 @@ function validatePersisted(rule) {
   if (rule?.origin === 'client-v5') {
     const seed = SEED_BY_ID.get(rule.id);
     if (!seed) add('id', 'Unknown client-v5 rule ID.');
-    else {
-      const [, categoryName, prefixRefs, seriesRefs] = seed.definition;
-      if (rule.categoryName !== categoryName || JSON.stringify(rule.prefixRefs) !== JSON.stringify(prefixRefs) || JSON.stringify(rule.seriesRefs) !== JSON.stringify(seriesRefs) || rule.seedOrder !== seed.seedOrder) {
-        add('rule', 'Client-v5 category identity, references, or seed order is invalid.');
-      }
-    }
+    else if (rule.seedOrder !== seed.seedOrder) add('seedOrder', 'Client-v5 seed order is invalid.');
   } else if (rule?.seedOrder != null) add('seedOrder', 'Custom rules cannot use a client seed order.');
   for (const field of ['createdAt', 'updatedAt']) if (typeof rule?.[field] !== 'string' || !Number.isFinite(Date.parse(rule[field]))) add(field, `${field} is missing or invalid.`);
   for (const field of ['createdBy', 'updatedBy']) if (typeof rule?.[field] !== 'string' || !rule[field].trim()) add(field, `${field} is missing or invalid.`);

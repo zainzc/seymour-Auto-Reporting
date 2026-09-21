@@ -16,7 +16,7 @@ function harness(overrides = {}) {
   return { controller, calls };
 }
 
-test('Add/Edit keeps terms local until Save and locks a seeded prefix', async () => {
+test('Add/Edit keeps terms local until Save and allows editing a seeded prefix', async () => {
   const h = harness();
   await h.controller.load();
   await h.controller.beginAdd();
@@ -29,11 +29,11 @@ test('Add/Edit keeps terms local until Save and locks a seeded prefix', async ()
   assert.deepEqual(h.calls[0][1].approvedPartTerms, ['First', 'Second']);
   assert.equal(h.calls[0][1].prefix, '046');
   await h.controller.beginEdit('client-v5-646');
-  assert.equal(h.controller.state.prefixLocked, true);
-  assert.equal(h.controller.setFormField('prefix', '647'), false);
+  assert.equal(h.controller.state.prefixLocked, false);
+  assert.equal(h.controller.setFormField('prefix', '647'), true);
   h.controller.setFormField('note', 'Reviewed');
   await h.controller.save();
-  assert.equal(h.calls[1][1].prefix, '646');
+  assert.equal(h.calls[1][1].prefix, '647');
   assert.equal(h.calls[1][1].note, 'Reviewed');
 });
 

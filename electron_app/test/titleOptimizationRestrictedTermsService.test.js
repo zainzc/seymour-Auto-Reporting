@@ -59,12 +59,12 @@ test('future read excludes invalid, disabled, and deleted entries but injects un
   assert.ok(enabledRestrictedTerms(hydrated).slice(0, 2).every(rule => rule.enabled && rule.locked && rule.scope === 'engine'));
 });
 
-test('hydration treats tampered client-v5 identity and lock metadata as malformed', () => {
+test('hydration accepts edited client-v5 identity but rejects tampered lock metadata', () => {
   const seed = seedRestrictedTermsConfiguration({ now: NOW, actor: 'Gary' });
   const tamperedLong = { ...seed.rules[0], locked: false };
   const tamperedSeed = { ...seed.rules[2], scope: 'all' };
   const hydrated = hydrateRestrictedTermsConfiguration({ rules: [tamperedLong, tamperedSeed, seed.rules[1]] });
-  assert.deepEqual(hydrated.rules.map(rule => rule.term), ['Short Block']);
-  assert.deepEqual(hydrated.quarantined.map(rule => rule.term), ['Long Block', 'Complete']);
+  assert.deepEqual(hydrated.rules.map(rule => rule.term), ['Complete', 'Short Block']);
+  assert.deepEqual(hydrated.quarantined.map(rule => rule.term), ['Long Block']);
   assert.ok(hydrated.issues.some(issue => /Long Block.*canonical enabled rule/i.test(issue.message)));
 });
