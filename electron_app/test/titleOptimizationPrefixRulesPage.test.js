@@ -23,7 +23,8 @@ test('Prefix Rules page uses existing shell, full-width table, and popup editor'
   assert.match(html, /data-navigate="restricted-terms\.html"[^>]*>Restricted Terms/);
   assert.match(html, /data-navigate="category-rules\.html"[^>]*>Category Rules/);
   assert.match(html, /data-navigate="title-structure\.html"[^>]*>Title Structure<\/button>/);
-  for (const tab of ['Overview', 'Flag Reasons', 'System Rules']) assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
+  assert.match(html, /data-navigate="flag-reasons\.html"[^>]*>Flag Reasons/);
+  for (const tab of ['Overview', 'System Rules']) assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
   assert.match(css, /overflow-x:\s*hidden/);
   assert.match(css, /overflow-y:\s*auto/);
 });

@@ -29,7 +29,9 @@ const {
   saveTitleOptimizationCategoryRules,
   getTitleOptimizationCategoryRules,
   saveTitleOptimizationTitleStructures,
-  getTitleOptimizationTitleStructures
+  getTitleOptimizationTitleStructures,
+  saveTitleOptimizationFlagReasons,
+  getTitleOptimizationFlagReasons
 } = require('../config/configStore');
 
 const { initDb, initDbWindowsAuth } = require('../services/db');
@@ -106,6 +108,8 @@ const { createTitleOptimizationCategoryRulesRepository } = require('../services/
 const { registerTitleOptimizationCategoryRulesIpc } = require('./titleOptimizationCategoryRulesIpc');
 const { createTitleOptimizationTitleStructuresRepository } = require('../services/titleOptimizationTitleStructuresRepository');
 const { registerTitleOptimizationTitleStructuresIpc } = require('./titleOptimizationTitleStructuresIpc');
+const { createTitleOptimizationFlagReasonsRepository } = require('../services/titleOptimizationFlagReasonsRepository');
+const { registerTitleOptimizationFlagReasonsIpc } = require('./titleOptimizationFlagReasonsIpc');
 const {
   AUDIT_BASE_ID: QUICKBOOKS_AUDIT_BASE_ID,
   getProcessingBreakdownForRun,
@@ -1857,6 +1861,8 @@ registerTitleOptimizationCategoryRulesIpc(ipcMain, titleOptimizationCategoryRule
 
 const titleOptimizationTitleStructuresRepository = createTitleOptimizationTitleStructuresRepository({ getStored: getTitleOptimizationTitleStructures, setStored: saveTitleOptimizationTitleStructures, getActor: getTitleOptimizationActor });
 registerTitleOptimizationTitleStructuresIpc(ipcMain, titleOptimizationTitleStructuresRepository);
+const titleOptimizationFlagReasonsRepository = createTitleOptimizationFlagReasonsRepository({ getStored: getTitleOptimizationFlagReasons, setStored: saveTitleOptimizationFlagReasons, getActor: getTitleOptimizationActor });
+registerTitleOptimizationFlagReasonsIpc(ipcMain, titleOptimizationFlagReasonsRepository);
 
 ipcMain.handle('save-db-config', async (_, config) => {
   try {

@@ -1,0 +1,2 @@
+@import url('terminology-rules.css');
+.flag-table{max-height:min(580px,62vh);overflow-y:auto;overflow-x:hidden}.flag-table table{table-layout:fixed}.flag-table th:nth-child(1){width:32%}.flag-table th:nth-child(2){width:11%}.flag-table th:nth-child(3){width:11%}.flag-table th:nth-child(4){width:32%}.flag-table th:nth-child(5){width:14%}.origin-badge,.required-badge{display:inline-flex;padding:4px 8px;border-radius:999px;background:var(--slate-100);color:var(--color-primary);font-size:12px;font-weight:700}.required-badge{background:var(--green-100);color:var(--green-700)}

@@ -1,0 +1,4 @@
+const test = require('node:test'); const assert = require('node:assert/strict'); const fs=require('node:fs'); const path=require('node:path');
+const read=n=>fs.readFileSync(path.join(__dirname,'../src/renderer/pages/title-optimization',n),'utf8');
+test('Flag Reasons uses the shared shell popup and friendly origin labels',()=>{ const html=read('flag-reasons.html'); assert.match(html,/Title Optimization Workspace/); assert.match(html,/All Origins/); assert.match(html,/>Required</); assert.match(html,/>Custom</); assert.match(html,/dialog[^>]+id="flag-reason-editor"/); assert.doesNotMatch(html,/configStore/); });
+test('Flag Reasons navigation is enabled from every implemented page',()=>{ for(const name of ['source-fields.html','source-priority.html','terminology-rules.html','synonyms.html','prefix-rules.html','restricted-terms.html','category-rules.html','title-structure.html']) assert.match(read(name),/data-navigate="flag-reasons\.html"[^>]*>Flag Reasons</); });

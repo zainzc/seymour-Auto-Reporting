@@ -10,7 +10,7 @@ test('Category Rules is reachable from all six previously implemented tabs', () 
   }
 });
 
-test('Category Rules page uses existing shell popup table filters and keeps unfinished tabs disabled', () => {
+test('Category Rules page uses existing shell popup table filters and exposes Flag Reasons', () => {
   const html = read('category-rules.html'), css = read('category-rules.css'), script = read('category-rules.js');
   assert.match(html, /class="workspace-shell"/); assert.match(html, /class="workspace-navigation"/);
   assert.match(html, /class="active"[^>]*aria-current="page"[^>]*>Category Rules/);
@@ -19,7 +19,8 @@ test('Category Rules page uses existing shell popup table filters and keeps unfi
   assert.match(html, /How Category Rules Work/); assert.doesNotMatch(html, /sidebar|permanent right-side/i);
   for (const label of ['Category', 'Prefix / Series', 'Important Verified Details', 'Enabled', 'Actions']) assert.match(html, new RegExp(`<th[^>]*>${label}<\\/th>`));
   assert.match(html, /data-navigate="title-structure\.html"[^>]*>Title Structure<\/button>/);
-  for (const tab of ['Overview', 'Flag Reasons', 'System Rules']) assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
+  assert.match(html, /data-navigate="flag-reasons\.html"[^>]*>Flag Reasons/);
+  for (const tab of ['Overview', 'System Rules']) assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
   assert.match(css, /overflow-x:\s*hidden/); assert.match(css, /overflow-y:\s*auto/);
   assert.match(script, /titleOptimizationCategoryRulesAPI/); assert.doesNotMatch(script, /configStore/);
 });

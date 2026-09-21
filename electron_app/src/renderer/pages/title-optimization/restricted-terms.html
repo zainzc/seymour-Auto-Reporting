@@ -9,7 +9,7 @@
 <body>
   <main class="workspace-shell">
     <nav class="workspace-navigation" aria-label="Application workspaces">
-      <button class="back-link" type="button" data-navigate="../milestone1/index.html">← Back to Milestone 1</button>
+      <button class="back-link" type="button" data-navigate="../milestone1/index.html">â† Back to Milestone 1</button>
       <div class="workspace-links">
         <button type="button" data-navigate="../milestone1/powerlink-sheets.html">Inventory Sync Workspace</button>
         <button type="button" data-navigate="../milestone1/phase2-master-parts.html">Master Parts Sync Workspace</button>
@@ -35,20 +35,20 @@
       <button class="active" type="button" aria-current="page">Restricted Terms</button>
       <button type="button" data-navigate="category-rules.html">Category Rules</button>
       <button type="button" data-navigate="title-structure.html">Title Structure</button>
-      <button type="button" disabled>Flag Reasons</button>
+      <button type="button" data-navigate="flag-reasons.html">Flag Reasons</button>
       <button type="button" disabled>System Rules</button>
     </nav>
     <section class="source-card terminology-card" aria-labelledby="restricted-heading">
       <div class="card-header"><div><h2 id="restricted-heading">Restricted Terms</h2><p>Manage terms that must not be introduced, should be removed as noise, require authorization, or must be preserved when verified.</p></div></div>
       <div class="rules-toolbar">
-        <label class="search-field"><span class="sr-only">Search terms and notes</span><input id="rule-search" type="search" placeholder="Search terms or notes…" autocomplete="off"></label>
+        <label class="search-field"><span class="sr-only">Search terms and notes</span><input id="rule-search" type="search" placeholder="Search terms or notesâ€¦" autocomplete="off"></label>
         <label class="filter-field"><span class="sr-only">Filter by rule type</span><select id="type-filter"><option value="all">All Rule Types</option><option value="never-introduce">Never Introduce</option><option value="remove-noise">Remove as Noise</option><option value="requires-authorization">Requires Authorization</option><option value="must-preserve">Protected / Must Preserve</option></select></label>
         <label class="filter-field"><span class="sr-only">Filter by scope</span><select id="scope-filter"><option value="all">All Scopes</option><option value="engine">Engine Only</option><option value="all-categories">All Categories</option></select></label>
         <label class="filter-field"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All Status</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
         <div class="toolbar-spacer"></div><button id="refresh-button" class="button secondary" type="button">Refresh</button><button id="add-button" class="button primary" type="button">+ Add Restricted Term</button>
       </div>
       <div class="summary-row"><span id="rule-count" class="mapping-summary">0 rules</span><span id="dirty-state" class="dirty-badge" hidden>Unsaved changes</span></div>
-      <div id="loading-state" class="notice info" role="status">Loading Restricted Terms…</div>
+      <div id="loading-state" class="notice info" role="status">Loading Restricted Termsâ€¦</div>
       <div id="error-message" class="notice error" role="alert" hidden></div>
       <div id="success-message" class="notice success" role="status" hidden></div>
       <div id="quarantine-message" class="notice warning" role="alert" hidden></div>
