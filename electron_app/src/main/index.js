@@ -110,6 +110,8 @@ const { createTitleOptimizationTitleStructuresRepository } = require('../service
 const { registerTitleOptimizationTitleStructuresIpc } = require('./titleOptimizationTitleStructuresIpc');
 const { createTitleOptimizationFlagReasonsRepository } = require('../services/titleOptimizationFlagReasonsRepository');
 const { registerTitleOptimizationFlagReasonsIpc } = require('./titleOptimizationFlagReasonsIpc');
+const { getTitleOptimizationSystemRules } = require('../services/titleOptimizationSystemRulesService');
+const { registerTitleOptimizationSystemRulesIpc } = require('./titleOptimizationSystemRulesIpc');
 const {
   AUDIT_BASE_ID: QUICKBOOKS_AUDIT_BASE_ID,
   getProcessingBreakdownForRun,
@@ -1863,6 +1865,7 @@ const titleOptimizationTitleStructuresRepository = createTitleOptimizationTitleS
 registerTitleOptimizationTitleStructuresIpc(ipcMain, titleOptimizationTitleStructuresRepository);
 const titleOptimizationFlagReasonsRepository = createTitleOptimizationFlagReasonsRepository({ getStored: getTitleOptimizationFlagReasons, setStored: saveTitleOptimizationFlagReasons, getActor: getTitleOptimizationActor });
 registerTitleOptimizationFlagReasonsIpc(ipcMain, titleOptimizationFlagReasonsRepository);
+registerTitleOptimizationSystemRulesIpc(ipcMain, getTitleOptimizationSystemRules);
 
 ipcMain.handle('save-db-config', async (_, config) => {
   try {

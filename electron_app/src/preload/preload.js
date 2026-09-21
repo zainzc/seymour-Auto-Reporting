@@ -72,6 +72,10 @@ contextBridge.exposeInMainWorld('titleOptimizationFlagReasonsAPI', {
   softDelete: id => ipcRenderer.invoke('title-optimization-flag-reasons:delete', id)
 });
 
+contextBridge.exposeInMainWorld('titleOptimizationSystemRulesAPI', {
+  load: () => ipcRenderer.invoke('title-optimization-system-rules:load')
+});
+
 // Reporting API
 contextBridge.exposeInMainWorld('reportingAPI', {
   getSalespeople: () => ipcRenderer.invoke('reporting-get-salespeople'),

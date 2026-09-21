@@ -19,9 +19,8 @@ test('Synonyms opens inside the existing workspace and exposes Flag Reasons', ()
   assert.match(html, /data-navigate="category-rules\.html"[^>]*>Category Rules/);
   assert.match(html, /data-navigate="title-structure\.html"[^>]*>Title Structure<\/button>/);
   assert.match(html, /data-navigate="flag-reasons\.html"[^>]*>Flag Reasons/);
-  for (const tab of ['Overview', 'System Rules']) {
-    assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
-  }
+  assert.match(html, /data-navigate="system-rules\.html"[^>]*>System Rules/);
+  assert.match(html, /<button[^>]*disabled[^>]*>Overview<\/button>/);
 });
 
 test('Synonyms shows a full-width table and popup-only editor without internal metadata', () => {

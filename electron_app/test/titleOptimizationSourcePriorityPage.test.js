@@ -37,10 +37,10 @@ test('implemented Title Optimization tabs are enabled while unfinished tabs rema
   assert.match(terminology, /data-navigate="title-structure\.html"[^>]*>Title Structure<\/button>/);
   assert.match(sourcePriority, /data-navigate="flag-reasons\.html"[^>]*>Flag Reasons/);
   assert.match(terminology, /data-navigate="flag-reasons\.html"[^>]*>Flag Reasons/);
-  for (const tab of ['Overview', 'System Rules']) {
-    assert.match(sourcePriority, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
-    assert.match(terminology, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\/button>`));
-  }
+  assert.match(sourcePriority, /data-navigate="system-rules\.html"[^>]*>System Rules/);
+  assert.match(terminology, /data-navigate="system-rules\.html"[^>]*>System Rules/);
+  assert.match(sourcePriority, /<button[^>]*disabled[^>]*>Overview<\/button>/);
+  assert.match(terminology, /<button[^>]*disabled[^>]*>Overview<\/button>/);
 });
 
 test('priority table includes lock, drag, keyboard controls, save/reset, feedback, and dialogs', () => {
