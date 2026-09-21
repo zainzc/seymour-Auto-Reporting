@@ -51,6 +51,13 @@ contextBridge.exposeInMainWorld('titleOptimizationRestrictedTermsAPI', {
   softDelete: id => ipcRenderer.invoke('title-optimization-restricted-terms:delete', id)
 });
 
+contextBridge.exposeInMainWorld('titleOptimizationCategoryRulesAPI', {
+  load: () => ipcRenderer.invoke('title-optimization-category-rules:load'),
+  save: rule => ipcRenderer.invoke('title-optimization-category-rules:save', rule),
+  setRuleEnabled: (id, enabled) => ipcRenderer.invoke('title-optimization-category-rules:toggle', id, enabled),
+  softDelete: id => ipcRenderer.invoke('title-optimization-category-rules:delete', id)
+});
+
 // Reporting API
 contextBridge.exposeInMainWorld('reportingAPI', {
   getSalespeople: () => ipcRenderer.invoke('reporting-get-salespeople'),

@@ -32,7 +32,8 @@ test('implemented Title Optimization tabs are enabled while unfinished tabs rema
   for (const page of [sourceFields, sourcePriority, terminology]) assert.match(page, /data-navigate="synonyms\.html"[^>]*>Synonyms/);
   for (const page of [sourceFields, sourcePriority, terminology]) assert.match(page, /data-navigate="prefix-rules\.html"[^>]*>Prefix Rules/);
   for (const page of [sourceFields, sourcePriority, terminology]) assert.match(page, /data-navigate="restricted-terms\.html"[^>]*>Restricted Terms/);
-  for (const tab of ['Overview', 'Category Rules', 'Title Structure', 'Flag Reasons', 'System Rules']) {
+  for (const page of [sourceFields, sourcePriority, terminology]) assert.match(page, /data-navigate="category-rules\.html"[^>]*>Category Rules/);
+  for (const tab of ['Overview', 'Title Structure', 'Flag Reasons', 'System Rules']) {
     assert.match(sourcePriority, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
     assert.match(terminology, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
   }
