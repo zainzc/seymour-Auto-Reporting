@@ -1,0 +1,16 @@
+@import url('terminology-rules.css');
+
+.restricted-table { overflow-x: hidden; overflow-y: auto; }
+.restricted-table th:nth-child(1) { width: 17%; }
+.restricted-table th:nth-child(2) { width: 20%; }
+.restricted-table th:nth-child(3) { width: 13%; }
+.restricted-table th:nth-child(4) { width: 27%; }
+.restricted-table th:nth-child(5) { width: 10%; }
+.restricted-table th:nth-child(6) { width: 13%; }
+.restricted-table .rule-badge { display: inline-block; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--slate-100); color: var(--color-primary); font-size: 12px; font-weight: 600; }
+.restricted-table .rule-badge.never-introduce { background: var(--red-100); color: var(--red-700); }
+.restricted-table .rule-badge.requires-authorization { background: var(--amber-100); color: var(--amber-800); }
+.restricted-table .rule-badge.must-preserve { background: var(--green-100); color: var(--green-700); }
+.restricted-table .locked-label { color: var(--color-muted); font-size: 12px; font-weight: 700; }
+.restricted-table .note-cell { color: var(--color-muted); line-height: 1.4; }
+.rule-editor-dialog input[readonly], .rule-editor-dialog select:disabled, .rule-editor-dialog input:disabled { background: var(--slate-50); cursor: not-allowed; }

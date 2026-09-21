@@ -18,7 +18,7 @@ test('Source Priority page uses the existing workspace shell without a sidebar',
   assert.match(html, /How Source Priority Works/);
 });
 
-test('Source Fields, Source Priority, Terminology Rules, Synonyms, and Prefix Rules are enabled while unfinished tabs remain disabled', () => {
+test('implemented Title Optimization tabs are enabled while unfinished tabs remain disabled', () => {
   const sourceFields = read('../src/renderer/pages/title-optimization/source-fields.html');
   const sourcePriority = read('../src/renderer/pages/title-optimization/source-priority.html');
   const terminology = read('../src/renderer/pages/title-optimization/terminology-rules.html');
@@ -31,7 +31,8 @@ test('Source Fields, Source Priority, Terminology Rules, Synonyms, and Prefix Ru
   assert.match(terminology, /class="active"[^>]*aria-current="page"[^>]*>Terminology Rules/);
   for (const page of [sourceFields, sourcePriority, terminology]) assert.match(page, /data-navigate="synonyms\.html"[^>]*>Synonyms/);
   for (const page of [sourceFields, sourcePriority, terminology]) assert.match(page, /data-navigate="prefix-rules\.html"[^>]*>Prefix Rules/);
-  for (const tab of ['Overview', 'Restricted Terms', 'Category Rules', 'Title Structure', 'Flag Reasons', 'System Rules']) {
+  for (const page of [sourceFields, sourcePriority, terminology]) assert.match(page, /data-navigate="restricted-terms\.html"[^>]*>Restricted Terms/);
+  for (const tab of ['Overview', 'Category Rules', 'Title Structure', 'Flag Reasons', 'System Rules']) {
     assert.match(sourcePriority, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
     assert.match(terminology, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
   }

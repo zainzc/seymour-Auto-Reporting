@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Restricted Terms - Title Optimization Workspace</title>
+  <link rel="stylesheet" href="restricted-terms.css">
+</head>
+<body>
+  <main class="workspace-shell">
+    <nav class="workspace-navigation" aria-label="Application workspaces">
+      <button class="back-link" type="button" data-navigate="../milestone1/index.html">← Back to Milestone 1</button>
+      <div class="workspace-links">
+        <button type="button" data-navigate="../milestone1/powerlink-sheets.html">Inventory Sync Workspace</button>
+        <button type="button" data-navigate="../milestone1/phase2-master-parts.html">Master Parts Sync Workspace</button>
+        <button class="active" type="button" aria-current="page">Title Optimization Workspace</button>
+        <button type="button" data-navigate="../milestone1/phase5-batch-approval.html">Phase 5 Batch Approval</button>
+      </div>
+    </nav>
+    <header class="hero">
+      <div class="hero-copy"><span class="eyebrow">Title Optimization</span><h1>Title Optimization Workspace</h1><p>Configure AI title generation rules, terminology, structure and validation to ensure accurate and optimized eBay titles.</p></div>
+      <section class="workspace-status" aria-label="Workspace status">
+        <div><span class="status-heading"><span class="status-dot"></span>Workspace Status</span><strong>Active</strong></div>
+        <div><span>Configuration Version</span><strong>v1.0</strong></div>
+        <div><span>Last Updated</span><strong id="last-updated">Not saved yet</strong></div>
+      </section>
+    </header>
+    <nav class="tab-navigation" aria-label="Title Optimization sections">
+      <button type="button" disabled>Overview</button>
+      <button type="button" data-navigate="source-fields.html">Source Fields</button>
+      <button type="button" data-navigate="source-priority.html">Source Priority</button>
+      <button type="button" data-navigate="terminology-rules.html">Terminology Rules</button>
+      <button type="button" data-navigate="synonyms.html">Synonyms</button>
+      <button type="button" data-navigate="prefix-rules.html">Prefix Rules</button>
+      <button class="active" type="button" aria-current="page">Restricted Terms</button>
+      <button type="button" disabled>Category Rules</button>
+      <button type="button" disabled>Title Structure</button>
+      <button type="button" disabled>Flag Reasons</button>
+      <button type="button" disabled>System Rules</button>
+    </nav>
+    <section class="source-card terminology-card" aria-labelledby="restricted-heading">
+      <div class="card-header"><div><h2 id="restricted-heading">Restricted Terms</h2><p>Manage terms that must not be introduced, should be removed as noise, require authorization, or must be preserved when verified.</p></div></div>
+      <div class="rules-toolbar">
+        <label class="search-field"><span class="sr-only">Search terms and notes</span><input id="rule-search" type="search" placeholder="Search terms or notes…" autocomplete="off"></label>
+        <label class="filter-field"><span class="sr-only">Filter by rule type</span><select id="type-filter"><option value="all">All Rule Types</option><option value="never-introduce">Never Introduce</option><option value="remove-noise">Remove as Noise</option><option value="requires-authorization">Requires Authorization</option><option value="must-preserve">Protected / Must Preserve</option></select></label>
+        <label class="filter-field"><span class="sr-only">Filter by scope</span><select id="scope-filter"><option value="all">All Scopes</option><option value="engine">Engine Only</option><option value="all-categories">All Categories</option></select></label>
+        <label class="filter-field"><span class="sr-only">Filter by status</span><select id="status-filter"><option value="all">All Status</option><option value="enabled">Enabled</option><option value="disabled">Disabled</option></select></label>
+        <div class="toolbar-spacer"></div><button id="refresh-button" class="button secondary" type="button">Refresh</button><button id="add-button" class="button primary" type="button">+ Add Restricted Term</button>
+      </div>
+      <div class="summary-row"><span id="rule-count" class="mapping-summary">0 rules</span><span id="dirty-state" class="dirty-badge" hidden>Unsaved changes</span></div>
+      <div id="loading-state" class="notice info" role="status">Loading Restricted Terms…</div>
+      <div id="error-message" class="notice error" role="alert" hidden></div>
+      <div id="success-message" class="notice success" role="status" hidden></div>
+      <div id="quarantine-message" class="notice warning" role="alert" hidden></div>
+      <div class="table-container terminology-table restricted-table" tabindex="0" aria-label="Restricted terms table">
+        <table><thead><tr><th scope="col">Term</th><th scope="col">Rule Type</th><th scope="col">Scope</th><th scope="col">Notes</th><th scope="col">Enabled</th><th scope="col">Actions</th></tr></thead><tbody id="rule-rows"></tbody></table>
+      </div>
+      <div class="guidance" role="note"><strong>How Restricted Terms Work</strong><p>Never Introduce terms are prohibited, Requires Authorization terms need a separate approved Seymour Auto rule, Remove as Noise terms are unwanted source text, and Protected terms must be preserved when verified and relevant.</p><p>Protected does not mean automatically add the term. It means do not remove a verified relevant term merely to shorten the title. Long Block and Short Block are locked safety restrictions. Runtime title enforcement is not implemented here.</p></div>
+    </section>
+  </main>
+  <dialog id="restricted-editor" class="rule-editor-dialog editor-card" aria-labelledby="editor-heading">
+    <div class="dialog-header"><div><h2 id="editor-heading">Add Restricted Term</h2><p class="editor-intro">Configure a restricted word or phrase.</p></div><button id="close-rule" class="close-button" type="button" aria-label="Close restricted term editor">&times;</button></div>
+    <div id="form-error" class="notice error" role="alert" hidden></div>
+    <form id="rule-form" novalidate>
+      <label for="term">Term <span aria-hidden="true">*</span></label><input id="term" required autocomplete="off" placeholder="Enter the exact word or phrase"><small id="term-error" class="field-error" hidden></small>
+      <label for="rule-type">Rule Type <span aria-hidden="true">*</span></label><select id="rule-type"><option value="never-introduce">Never Introduce</option><option value="remove-noise">Remove as Noise</option><option value="requires-authorization">Requires Authorization</option><option value="must-preserve">Protected / Must Preserve</option></select><small id="ruleType-error" class="field-error" hidden></small>
+      <label for="scope">Scope <span aria-hidden="true">*</span></label><select id="scope"><option value="all">All Categories</option><option value="engine">Engine Only</option></select><small id="scope-error" class="field-error" hidden></small>
+      <label for="note">Notes</label><textarea id="note" rows="3" placeholder="Optional guidance"></textarea><small id="note-error" class="field-error" hidden></small>
+      <label class="editor-toggle" for="enabled">Enabled <input id="enabled" type="checkbox" checked></label><small id="locked-help" class="helper-text" hidden>Safety-locked: this rule must remain enabled.</small>
+      <div class="editor-actions"><button id="cancel-rule" class="button secondary" type="button">Cancel</button><button id="save-rule" class="button primary" type="submit">Save Rule</button></div>
+    </form>
+  </dialog>
+  <dialog id="discard-changes-dialog" aria-labelledby="discard-title"><form method="dialog"><h2 id="discard-title">Discard unsaved restricted term changes?</h2><p>Your Add/Edit changes will be lost.</p><div class="dialog-actions"><button class="button secondary" value="cancel">Stay</button><button class="button danger" value="discard">Discard changes</button></div></form></dialog>
+  <dialog id="delete-rule-dialog" aria-labelledby="delete-title"><form method="dialog"><h2 id="delete-title">Delete custom restricted term?</h2><p>This rule will be archived and excluded from normal use.</p><div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button danger" value="delete">Delete rule</button></div></form></dialog>
+  <script src="restricted-terms.js"></script>
+</body>
+</html>

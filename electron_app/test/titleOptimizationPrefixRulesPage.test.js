@@ -20,7 +20,8 @@ test('Prefix Rules page uses existing shell, full-width table, and popup editor'
   assert.match(html, /How Prefix Rules Work/);
   assert.doesNotMatch(html, /<th[^>]*>(Origin|Priority)<\/th>|sidebar/);
   for (const label of ['Prefix', 'Approved Part Terms', 'Special Rule / Note', 'Enabled', 'Actions']) assert.match(html, new RegExp(`<th[^>]*>${label}<\\/th>`));
-  for (const tab of ['Overview', 'Restricted Terms', 'Category Rules', 'Title Structure', 'Flag Reasons', 'System Rules']) assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
+  assert.match(html, /data-navigate="restricted-terms\.html"[^>]*>Restricted Terms/);
+  for (const tab of ['Overview', 'Category Rules', 'Title Structure', 'Flag Reasons', 'System Rules']) assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
   assert.match(css, /overflow-x:\s*hidden/);
   assert.match(css, /overflow-y:\s*auto/);
 });

@@ -107,6 +107,14 @@ function getTitleOptimizationPrefixRules() {
   return store.get('titleOptimization.prefixRules');
 }
 
+function saveTitleOptimizationRestrictedTerms(config) {
+  store.set('titleOptimization.restrictedTerms', config);
+}
+
+function getTitleOptimizationRestrictedTerms() {
+  return store.get('titleOptimization.restrictedTerms');
+}
+
 module.exports = {
   saveDbConfig,
   getDbConfig,
@@ -129,5 +137,7 @@ module.exports = {
   saveTitleOptimizationSynonyms,
   getTitleOptimizationSynonyms,
   saveTitleOptimizationPrefixRules,
-  getTitleOptimizationPrefixRules
+  getTitleOptimizationPrefixRules,
+  saveTitleOptimizationRestrictedTerms,
+  getTitleOptimizationRestrictedTerms
 };

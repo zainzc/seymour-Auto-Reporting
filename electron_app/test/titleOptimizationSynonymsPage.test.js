@@ -5,7 +5,7 @@ const path = require('node:path');
 
 const read = name => fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization', name), 'utf8');
 
-test('Synonyms opens inside the existing workspace and later tabs remain disabled', () => {
+test('Synonyms opens inside the existing workspace and unfinished tabs remain disabled', () => {
   for (const name of ['source-fields.html', 'source-priority.html', 'terminology-rules.html']) {
     assert.match(read(name), /data-navigate="synonyms\.html"[^>]*>Synonyms/);
   }
@@ -15,7 +15,8 @@ test('Synonyms opens inside the existing workspace and later tabs remain disable
   assert.match(html, /class="active"[^>]*aria-current="page"[^>]*>Synonyms/);
   assert.doesNotMatch(html, /class="[^"]*sidebar/);
   assert.match(html, /data-navigate="prefix-rules\.html"[^>]*>Prefix Rules/);
-  for (const tab of ['Overview', 'Restricted Terms', 'Category Rules', 'Title Structure', 'Flag Reasons', 'System Rules']) {
+  assert.match(html, /data-navigate="restricted-terms\.html"[^>]*>Restricted Terms/);
+  for (const tab of ['Overview', 'Category Rules', 'Title Structure', 'Flag Reasons', 'System Rules']) {
     assert.match(html, new RegExp(`<button[^>]*disabled[^>]*>${tab}<\\/button>`));
   }
 });
