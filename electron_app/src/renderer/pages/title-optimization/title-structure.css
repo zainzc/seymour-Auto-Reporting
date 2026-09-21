@@ -1,0 +1,45 @@
+@import url('category-rules.css');
+
+.structure-card { padding: var(--space-5); }
+.structure-card .card-header { align-items: flex-start; margin-bottom: 0; }
+.structure-card .rules-toolbar { max-width: none; }
+.structure-table { max-height: 520px; overflow-x: hidden; overflow-y: auto; }
+.structure-table th:nth-child(1) { width: 20%; }
+.structure-table th:nth-child(2) { width: 18%; }
+.structure-table th:nth-child(3) { width: 43%; }
+.structure-table th:nth-child(4) { width: 8%; text-align: center; }
+.structure-table th:nth-child(5) { width: 11%; text-align: center; }
+.structure-preview { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.structure-segment { display: inline-flex; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--slate-100); color: var(--color-primary); }
+.structure-arrow { color: var(--color-muted); }
+
+.structure-editor.rule-editor-dialog { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 40px); }
+.structure-editor.rule-editor-dialog form { display: block; max-height: calc(100vh - 155px); padding: 6px 24px 22px; overflow-y: auto; }
+.structure-editor .structure-form-body { display: grid; gap: 16px; padding: 6px 0 0; overflow: visible; }
+.structure-editor .structure-form-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
+.structure-form-body label { display: grid; gap: 7px; font-weight: 700; color: var(--color-primary); }
+.structure-form-body input,
+.structure-form-body select,
+.structure-form-body textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.notes-field textarea { min-height: 96px; resize: vertical; }
+.segments-fieldset { margin: 0; padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.segments-fieldset legend { padding: 0 6px; font-weight: 700; color: var(--color-primary); }
+.field-help { margin: 0 0 12px; color: var(--color-muted); font-size: 13px; }
+.segments-list { display: grid; gap: 8px; max-height: 300px; overflow-y: auto; }
+.segment-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) 90px auto; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
+.segment-number { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.segment-kind { justify-self: start; padding: 3px 8px; border-radius: 999px; background: var(--slate-100); color: var(--color-primary); font-size: 12px; text-transform: capitalize; }
+.segment-actions { display: flex; gap: 6px; }
+.segment-actions button { min-width: 36px; min-height: 34px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-primary); cursor: pointer; }
+.segment-actions button:disabled { opacity: .4; cursor: not-allowed; }
+.segment-actions .remove-segment { color: var(--color-danger); }
+.segment-entry { display: grid; grid-template-columns: minmax(0, 1fr) 150px auto; align-items: end; gap: 10px; margin-top: 14px; }
+.segment-entry .button { min-height: 42px; white-space: nowrap; }
+.structure-editor .editor-toggle { flex-direction: row-reverse; justify-content: flex-end; margin-top: 0; }
+.structure-editor .editor-actions { margin-top: 0; }
+
+@media (max-width: 720px) {
+  .segment-entry { grid-template-columns: 1fr; }
+  .segment-row { grid-template-columns: 32px minmax(0, 1fr); }
+  .segment-kind, .segment-actions { grid-column: 2; }
+}
