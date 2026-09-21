@@ -123,6 +123,9 @@ function getTitleOptimizationCategoryRules() {
   return store.get('titleOptimization.categoryRules');
 }
 
+function saveTitleOptimizationTitleStructures(config) { store.set('titleOptimization.titleStructures', config); }
+function getTitleOptimizationTitleStructures() { return store.get('titleOptimization.titleStructures'); }
+
 module.exports = {
   saveDbConfig,
   getDbConfig,
@@ -149,5 +152,7 @@ module.exports = {
   saveTitleOptimizationRestrictedTerms,
   getTitleOptimizationRestrictedTerms,
   saveTitleOptimizationCategoryRules,
-  getTitleOptimizationCategoryRules
+  getTitleOptimizationCategoryRules,
+  saveTitleOptimizationTitleStructures,
+  getTitleOptimizationTitleStructures
 };
