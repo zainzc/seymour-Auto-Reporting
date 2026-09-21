@@ -39,8 +39,8 @@ test('implemented Title Optimization tabs are enabled while unfinished tabs rema
   assert.match(terminology, /data-navigate="flag-reasons\.html"[^>]*>Flag Reasons/);
   assert.match(sourcePriority, /data-navigate="system-rules\.html"[^>]*>System Rules/);
   assert.match(terminology, /data-navigate="system-rules\.html"[^>]*>System Rules/);
-  assert.match(sourcePriority, /<button[^>]*disabled[^>]*>Overview<\/button>/);
-  assert.match(terminology, /<button[^>]*disabled[^>]*>Overview<\/button>/);
+  assert.match(sourcePriority, /data-navigate="overview\.html"[^>]*>Overview/);
+  assert.match(terminology, /data-navigate="overview\.html"[^>]*>Overview/);
 });
 
 test('priority table includes lock, drag, keyboard controls, save/reset, feedback, and dialogs', () => {

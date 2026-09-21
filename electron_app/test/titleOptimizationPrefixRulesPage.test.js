@@ -25,7 +25,7 @@ test('Prefix Rules page uses existing shell, full-width table, and popup editor'
   assert.match(html, /data-navigate="title-structure\.html"[^>]*>Title Structure<\/button>/);
   assert.match(html, /data-navigate="flag-reasons\.html"[^>]*>Flag Reasons/);
   assert.match(html, /data-navigate="system-rules\.html"[^>]*>System Rules/);
-  assert.match(html, /<button[^>]*disabled[^>]*>Overview<\/button>/);
+  assert.match(html, /data-navigate="overview\.html"[^>]*>Overview/);
   assert.match(css, /overflow-x:\s*hidden/);
   assert.match(css, /overflow-y:\s*auto/);
 });

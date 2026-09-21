@@ -112,6 +112,8 @@ const { createTitleOptimizationFlagReasonsRepository } = require('../services/ti
 const { registerTitleOptimizationFlagReasonsIpc } = require('./titleOptimizationFlagReasonsIpc');
 const { getTitleOptimizationSystemRules } = require('../services/titleOptimizationSystemRulesService');
 const { registerTitleOptimizationSystemRulesIpc } = require('./titleOptimizationSystemRulesIpc');
+const { createTitleOptimizationOverviewService } = require('../services/titleOptimizationOverviewService');
+const { registerTitleOptimizationOverviewIpc } = require('./titleOptimizationOverviewIpc');
 const {
   AUDIT_BASE_ID: QUICKBOOKS_AUDIT_BASE_ID,
   getProcessingBreakdownForRun,
@@ -1866,6 +1868,19 @@ registerTitleOptimizationTitleStructuresIpc(ipcMain, titleOptimizationTitleStruc
 const titleOptimizationFlagReasonsRepository = createTitleOptimizationFlagReasonsRepository({ getStored: getTitleOptimizationFlagReasons, setStored: saveTitleOptimizationFlagReasons, getActor: getTitleOptimizationActor });
 registerTitleOptimizationFlagReasonsIpc(ipcMain, titleOptimizationFlagReasonsRepository);
 registerTitleOptimizationSystemRulesIpc(ipcMain, getTitleOptimizationSystemRules);
+const titleOptimizationOverviewService = createTitleOptimizationOverviewService({
+  'Source Fields': () => titleOptimizationSourceFieldsRepository.load(),
+  'Source Priority': () => titleOptimizationSourcePriorityRepository.load(),
+  'Terminology Rules': () => titleOptimizationTerminologyRulesRepository.load(),
+  'Synonyms': () => titleOptimizationSynonymsRepository.load(),
+  'Prefix Rules': () => titleOptimizationPrefixRulesRepository.load(),
+  'Restricted Terms': () => titleOptimizationRestrictedTermsRepository.load(),
+  'Category Rules': () => titleOptimizationCategoryRulesRepository.load(),
+  'Title Structure': () => titleOptimizationTitleStructuresRepository.load(),
+  'Flag Reasons': () => titleOptimizationFlagReasonsRepository.load(),
+  'System Rules': () => getTitleOptimizationSystemRules()
+});
+registerTitleOptimizationOverviewIpc(ipcMain, titleOptimizationOverviewService);
 
 ipcMain.handle('save-db-config', async (_, config) => {
   try {

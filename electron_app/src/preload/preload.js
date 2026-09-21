@@ -76,6 +76,10 @@ contextBridge.exposeInMainWorld('titleOptimizationSystemRulesAPI', {
   load: () => ipcRenderer.invoke('title-optimization-system-rules:load')
 });
 
+contextBridge.exposeInMainWorld('titleOptimizationOverviewAPI', {
+  load: () => ipcRenderer.invoke('title-optimization-overview:load')
+});
+
 // Reporting API
 contextBridge.exposeInMainWorld('reportingAPI', {
   getSalespeople: () => ipcRenderer.invoke('reporting-get-salespeople'),
