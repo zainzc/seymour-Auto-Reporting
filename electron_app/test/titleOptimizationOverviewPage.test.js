@@ -36,6 +36,18 @@ test('Overview styles preserve dense hierarchy, bounded warnings, focus, and res
   assert.match(css, /overflow-x:\s*auto/);
 });
 
+test('Overview typography and colors follow the shared Title Optimization tab system', () => {
+  const css = read('overview.css');
+  assert.match(css, /\.summary-card>span,\.card-kicker\{[^}]*font-size:12px/s);
+  assert.match(css, /\.dashboard-card-header h2,\.section-heading h2\{[^}]*font-size:20px/s);
+  assert.match(css, /\.preview-table table\{[^}]*font-size:12px/s);
+  assert.match(css, /\.preview-table th\{[^}]*font-size:12px/s);
+  assert.match(css, /\.preview-table th\{[^}]*color:var\(--color-primary\)/s);
+  assert.match(css, /\.text-button\{[^}]*border:1px solid var\(--color-border\)/s);
+  assert.doesNotMatch(css, /text-transform:uppercase/);
+  assert.doesNotMatch(css, /#9fc9f5|#eef7ff|#fbfdff|#f4f9ff|#f8fbff/);
+});
+
 test('Overview contains no screenshot sample data or editable configuration controls', () => {
   const joined = [read('overview.html'), read('overview.js')].join('\n');
   for (const fake of ['56 active','1554743','Mazda MPV','Fuse Box Engine Bay']) assert.doesNotMatch(joined, new RegExp(fake, 'i'));
