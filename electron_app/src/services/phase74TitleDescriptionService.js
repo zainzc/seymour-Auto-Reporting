@@ -3,6 +3,7 @@ const AirtableSchemaService = require('./airtableSchemaService');
 const Phase4AiEvaluatorService = require('./phase4AiEvaluatorService');
 const { asIdentitySet, isPublishedIdentity } = require('./phase5IdentityService');
 const { isManualOverrideForField: isManualOverrideFromGovernance } = require('./phase5GovernanceService');
+const { runTitleOptimizationRuntimeShadow } = require('./titleOptimizationRuntimeShadowService');
 
 const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API)';
 const DEFAULT_MASTER_TABLE = 'Master Parts Table';
@@ -852,6 +853,10 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   const testIpnSet = new Set(testIpnList);
   const maxListings = Math.max(0, Number(options.phase74MaxListings || process.env.PHASE74_MAX_LISTINGS || 0) || 0);
   const sampleLimit = Math.max(5, Number(options.sampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20);
+  const titleOptimizationRuntimeShadowEnabled = parseBoolean(
+    options.titleOptimizationRuntimeShadowEnabled ?? process.env.TITLE_OPTIMIZATION_RUNTIME_SHADOW_ENABLED ?? 'false',
+    false
+  );
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!airtableBaseId) throw new Error('Missing AIRTABLE_BASE_ID.');
@@ -907,6 +912,14 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     writesAttempted: 0,
     writesSucceeded: 0,
     writeFailures: 0,
+    titleOptimizationRuntimeShadow: {
+      enabled: titleOptimizationRuntimeShadowEnabled,
+      attempted: 0,
+      completed: 0,
+      bypassed: 0,
+      failed: 0,
+      samples: []
+    },
     samples: [],
     errors: []
   };
@@ -1203,6 +1216,64 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     let nextReviewReason = normalizeText(generated?.titleReviewReason);
     let nextReviewNotes =
       normalizeText(generated?.titleReviewNotes) || normalizeText(generated?.reasoningSummary);
+
+    if (titleOptimizationRuntimeShadowEnabled) {
+      summary.titleOptimizationRuntimeShadow.attempted += 1;
+      try {
+        const shadowRunner =
+          options.titleOptimizationRuntimeShadowService &&
+          typeof options.titleOptimizationRuntimeShadowService.run === 'function'
+            ? (input) => options.titleOptimizationRuntimeShadowService.run(input)
+            : runTitleOptimizationRuntimeShadow;
+        const shadowResult = await shadowRunner({
+          shadowEnabled: true,
+          listing: {
+            recordId: row.id,
+            ipn,
+            listingRecord: row,
+            masterRecord: master
+          },
+          legacyResult: {
+            generatedTitle: nextTitle,
+            generatedDescription: nextDescription,
+            shortDescription: nextShortDescription,
+            titleReviewStatus: nextReviewStatus,
+            titleReviewReason: nextReviewReason,
+            titleReviewNotes: nextReviewNotes
+          },
+          options: {
+            fields: ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku']
+          },
+          dependencies: {
+            executeAi: ({ promptArtifact }) => aiService.generateTitleAndDescriptionFromRuntimePrompt(promptArtifact)
+          }
+        });
+        if (shadowResult.status === 'COMPLETED') summary.titleOptimizationRuntimeShadow.completed += 1;
+        else if (shadowResult.status === 'BYPASSED') summary.titleOptimizationRuntimeShadow.bypassed += 1;
+        else summary.titleOptimizationRuntimeShadow.failed += 1;
+        if (summary.titleOptimizationRuntimeShadow.samples.length < sampleLimit) {
+          summary.titleOptimizationRuntimeShadow.samples.push({
+            recordId: row.id,
+            ipn,
+            status: shadowResult.status,
+            riskLevel: shadowResult.comparison?.riskLevel || null,
+            decision: shadowResult.shadow?.decision?.decision || null,
+            legacyTitle: shadowResult.legacy?.title || '',
+            shadowFinalTitle: shadowResult.shadow?.decision?.finalTitle || ''
+          });
+        }
+      } catch (error) {
+        summary.titleOptimizationRuntimeShadow.failed += 1;
+        if (summary.titleOptimizationRuntimeShadow.samples.length < sampleLimit) {
+          summary.titleOptimizationRuntimeShadow.samples.push({
+            recordId: row.id,
+            ipn,
+            status: 'SHADOW_UNHANDLED_FAILURE',
+            message: compactText(error.message, 180)
+          });
+        }
+      }
+    }
 
     if (!nextTitle || !nextDescription) {
       const writeFields = {};

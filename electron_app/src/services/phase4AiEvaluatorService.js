@@ -1313,6 +1313,112 @@ class Phase4AiEvaluatorService {
       recognizedKeys
     };
   }
+
+  async generateTitleAndDescriptionFromRuntimePrompt(promptArtifact = {}) {
+    if (!promptArtifact || promptArtifact.kind === 'title-generation-bypass') {
+      return {
+        generatedTitle: '',
+        generatedDescription: '',
+        shortDescription: '',
+        reasoningSummary: 'Config-driven runtime prompt bypassed title generation.',
+        titleReviewStatus: 'Skipped - Manual Override',
+        titleReviewReason: 'manual_override',
+        titleReviewNotes: 'Manual override bypassed shadow title generation.',
+        rawContent: '',
+        parsedKeys: [],
+        recognizedKeys: []
+      };
+    }
+    const systemMessage = normalizeText(promptArtifact.systemMessage);
+    if (!systemMessage) throw new Error('Runtime prompt artifact is missing systemMessage.');
+
+    const promptKeySource = JSON.stringify({
+      systemMessage,
+      userPayload: promptArtifact.userPayload || {}
+    });
+    const promptDigest = crypto
+      .createHash('sha256')
+      .update(promptKeySource, 'utf8')
+      .digest('hex')
+      .slice(0, 16);
+
+    const requestBody = {
+      model: this.model,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: systemMessage },
+        { role: 'user', content: JSON.stringify(promptArtifact.userPayload || {}) }
+      ]
+    };
+
+    const shouldUsePromptCache = this.promptCacheEnabled && this.promptCacheKey;
+    if (shouldUsePromptCache) {
+      requestBody.prompt_cache_key = `${this.promptCacheKey}:runtime:${promptDigest}`;
+    }
+
+    let response;
+    try {
+      response = await retryWithBackoff(
+        async () => this.client.post('/chat/completions', requestBody),
+        {
+          maxAttempts: this.maxAttempts,
+          baseDelayMs: this.baseDelayMs
+        }
+      );
+    } catch (error) {
+      if (!shouldUsePromptCache || !isPromptCacheUnsupported(error)) {
+        throw error;
+      }
+      this.promptCacheEnabled = false;
+      delete requestBody.prompt_cache_key;
+      response = await retryWithBackoff(
+        async () => this.client.post('/chat/completions', requestBody),
+        {
+          maxAttempts: this.maxAttempts,
+          baseDelayMs: this.baseDelayMs
+        }
+      );
+    }
+
+    const content = String(response?.data?.choices?.[0]?.message?.content || '').trim();
+    const parsed = extractJsonObject(content) || {};
+    const generatedTitle = readParsedText(parsed, ['generatedTitle', 'title', 'optimizedTitle']);
+    const generatedDescription = readParsedText(parsed, ['generatedDescription', 'description', 'aiDescription']);
+    const titleReviewStatus = readParsedText(parsed, ['titleReviewStatus', 'reviewStatus']);
+    const titleReviewReason = readParsedText(parsed, ['titleReviewReason', 'reviewReason']);
+    const titleReviewNotes = readParsedText(parsed, ['titleReviewNotes', 'reviewNotes']);
+    const recognizedKeys = Object.keys(parsed).filter(key =>
+      [
+        'generatedTitle',
+        'title',
+        'optimizedTitle',
+        'generatedDescription',
+        'description',
+        'aiDescription',
+        'shortDescription',
+        'reasoningSummary',
+        'titleReviewStatus',
+        'reviewStatus',
+        'titleReviewReason',
+        'reviewReason',
+        'titleReviewNotes',
+        'reviewNotes'
+      ].includes(key)
+    );
+    return {
+      generatedTitle,
+      generatedDescription,
+      shortDescription: normalizeText(parsed.shortDescription),
+      reasoningSummary: normalizeText(parsed.reasoningSummary),
+      titleReviewStatus,
+      titleReviewReason,
+      titleReviewNotes,
+      rawContent: content,
+      parsedKeys: Object.keys(parsed),
+      recognizedKeys
+    };
+  }
 }
 
 module.exports = Phase4AiEvaluatorService;
