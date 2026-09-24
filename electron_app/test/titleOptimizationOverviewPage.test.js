@@ -36,14 +36,17 @@ test('Overview styles preserve dense hierarchy, bounded warnings, focus, and res
   assert.match(css, /overflow-x:\s*auto/);
 });
 
-test('Overview typography and colors follow the shared Title Optimization tab system', () => {
+test('Overview typography follows the shared system while content uses neutral black styling', () => {
   const css = read('overview.css');
   assert.match(css, /\.summary-card>span,\.card-kicker\{[^}]*font-size:12px/s);
   assert.match(css, /\.dashboard-card-header h2,\.section-heading h2\{[^}]*font-size:20px/s);
   assert.match(css, /\.preview-table table\{[^}]*font-size:12px/s);
   assert.match(css, /\.preview-table th\{[^}]*font-size:12px/s);
-  assert.match(css, /\.preview-table th\{[^}]*color:var\(--color-primary\)/s);
-  assert.match(css, /\.text-button\{[^}]*border:1px solid var\(--color-border\)/s);
+  assert.match(css, /\.preview-table th\{[^}]*color:#111827/s);
+  assert.match(css, /\.summary-card>span,\.card-kicker\{[^}]*color:#111827/s);
+  assert.match(css, /\.dashboard-card-header h2,\.section-heading h2\{[^}]*color:#111827/s);
+  assert.match(css, /\.text-button\{[^}]*color:#111827/s);
+  assert.doesNotMatch(css, /color:var\(--color-primary\)|color:var\(--color-accent\)|rgba\(37,131,232/);
   assert.doesNotMatch(css, /text-transform:uppercase/);
   assert.doesNotMatch(css, /#9fc9f5|#eef7ff|#fbfdff|#f4f9ff|#f8fbff/);
 });
