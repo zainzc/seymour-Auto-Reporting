@@ -92,7 +92,7 @@ function listing(fields = {}) {
   };
 }
 
-test('normalizes configured listing evidence without using partFitment as title authority', () => {
+test('normalizes configured listing evidence with partFitment as title authority', () => {
   const normalized = normalizeListingEvidence({
     runtimeSnapshot: snapshot(),
     listingRecord: listing(),
@@ -114,8 +114,188 @@ test('normalizes configured listing evidence without using partFitment as title 
     'C:Part': 'Side View Mirror',
     'C:MPN': 'MPN-9'
   });
-  assert.equal(normalized.descriptionOnly.partFitment.value, 'Fits 2011 Toyota Camry front only');
-  assert.equal(normalized.titleAuthority.partFitment, undefined);
+  assert.equal(normalized.titleAuthority.partFitment.value, 'Fits 2011 Toyota Camry front only');
+  assert.equal(normalized.titleAuthority.partFitment.titleAuthority, true);
+});
+
+test('derives title-safe vehicle and part details from mapped listing evidence', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': 'Seat Belt Front Bucket Seat Sedan Passenger Fits 11-16 ELANTRA 1588313',
+      Title: 'Seat Belt Front Bucket Seat Sedan Passenger Fits 11-16 ELANTRA 1588313',
+      SKU: '1588313',
+      IPN: '210-52921',
+      'Structured Year': '',
+      'C:Brand': 'HYUNDAI',
+      'Category Name': 'eBay Motors:Parts & Accessories:Car & Truck Parts & Accessories:Interior Parts & Accessories:Interior Safety:Seat Belts & Parts',
+      'Conditions & Options': '',
+      'C:Manufacturer Part Number': '888203X500RY',
+      'Item Specifics - All C: values relevant to item': JSON.stringify({
+        Brand: 'HYUNDAI',
+        'C:Features': '2-Point Harness',
+        'C:Type': 'Seat Belt',
+        'C:Number in Pack': '1',
+        'C:Color': 'Beige'
+      }),
+      'Current eBay Fields': JSON.stringify({
+        donorModel: 'ELANTRA',
+        donorYear: '2011',
+        donorNotes: 'PASS RETRACTOR YDA - BEIGE'
+      })
+    }),
+    masterRecord: {
+      fields: {
+        'Part Fitment': 'Fits 2011-2015 Hyundai Elantra Seat Belt Front Bucket Seat Sedan Passenger Retractor; 2016 Hyundai Elantra Seat Belt Front Bucket Seat Sedan Passenger Retractor'
+      }
+    }
+  });
+
+  assert.equal(result.resolved.fields.yearRange.resolvedValue, '2011-2015');
+  assert.equal(result.resolved.fields.model.resolvedValue, 'ELANTRA');
+  assert.equal(result.resolved.fields.side.resolvedValue, 'Passenger Right RH');
+  assert.equal(result.resolved.fields.componentType.resolvedValue, 'Retractor');
+  assert.equal(result.resolved.fields.color.resolvedValue, 'Beige');
+  assert.equal(result.resolved.fields.sku.resolvedValue, '1588313');
+  assert.equal(result.resolved.missing.includes('model'), false);
+  assert.equal(result.normalized.titleAuthority.partFitment.value.includes('2011-2015 Hyundai Elantra'), true);
+});
+
+test('derives donor values from mapped HTML description source', () => {
+  const sourceFields = {
+    available: true,
+    items: snapshot().sections.sourceFields.items.map(item =>
+      item.logicalKey === 'currentEbayFields'
+        ? { ...item, sourceFieldName: 'Description' }
+        : item
+    )
+  };
+  const htmlDescription = `
+    <!-- PLModel: 535045435452412020 --><!-- PLYear: 32303039 --><!-- PLStockNumber: 323630383731 -->
+    <div class="des_section"><div class="d_left">Model :</div><div class="d_right">SPECTRA  </div></div>
+    <div class="des_section"><div class="d_left">Year :</div><div class="d_right">2009</div></div>
+    <div class="des_section"><div class="d_left">Stock Number :</div><div class="d_right">260871</div></div>
+    <div class="des_section"><div class="d_left">Notes :</div><div class="d_right">FRNT </div></div>
+  `;
+
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: {
+      ...snapshot(),
+      sections: { ...snapshot().sections, sourceFields }
+    },
+    listingRecord: listing({
+      'Item Title': 'Driver Left Power Window Motor Front Sedan Fits 04-09 SPECTRA 1586203',
+      SKU: '1586203',
+      IPN: '617-58916L',
+      'Structured Year': '',
+      'Conditions & Options': '',
+      Description: htmlDescription,
+      'Current eBay Fields': undefined
+    })
+  });
+
+  assert.equal(result.resolved.fields.yearRange.missing, true);
+  assert.equal(result.resolved.fields.year.resolvedValue, '2009');
+  assert.equal(result.resolved.fields.model.resolvedValue, 'SPECTRA');
+  assert.equal(result.resolved.fields.side.resolvedValue, 'Driver Left LH');
+});
+
+test('resolves two-digit partFitment ranges when title does not contain a year range', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': 'Driver Left Power Window Motor Front Sedan SPECTRA 1586203',
+      SKU: '1586203',
+      IPN: '617-58916L',
+      'Structured Year': '',
+      'Conditions & Options': '',
+      'Current eBay Fields': JSON.stringify({ donorModel: 'SPECTRA', donorYear: '2009', donorNotes: 'FRNT' })
+    }),
+    masterRecord: {
+      fields: {
+        'Part Fitment': 'SPECTRA 04 Front; 2.0L (4 cylinder), L.; SPECTRA 05-09 Front; Sdn, L.; SPECTRA 05-09 Rear; SW, L.'
+      }
+    }
+  });
+
+  assert.equal(result.resolved.fields.yearRange.resolvedValue, '2005-2009');
+  assert.equal(result.normalized.titleAuthority.partFitment.value, 'SPECTRA 04 Front; 2.0L (4 cylinder), L.; SPECTRA 05-09 Front; Sdn, L.; SPECTRA 05-09 Rear; SW, L.');
+  assert.equal(result.normalized.titleAuthority.partFitment.titleAuthority, true);
+});
+
+test('resolves full-year partFitment ranges and treats equivalent side labels as non-conflicting', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': '2009 Kia Spectra Driver Left Power Window Motor 824502F000 1586203',
+      SKU: '1586203',
+      IPN: '617-58916L',
+      'Structured Year': '',
+      'C:Brand': 'KIA',
+      'Category Name': 'Window Motors & Regulators',
+      'Conditions & Options': '',
+      'Item Specifics - All C: values relevant to item': JSON.stringify({
+        'Placement on Vehicle': 'Driver/Left',
+        'C:Manufacturer Part Number': '824502F000'
+      }),
+      'Current eBay Fields': JSON.stringify({ donorModel: 'SPECTRA', donorYear: '2009', donorNotes: 'FRNT' })
+    }),
+    masterRecord: {
+      fields: {
+        'Part Fitment': 'Fits 2004 Kia Spectra Window Motor Front Left; 2005-2009 Kia Spectra Window Motor Front Left'
+      }
+    }
+  });
+
+  assert.equal(result.resolved.fields.yearRange.resolvedValue, '2005-2009');
+  assert.equal(result.normalized.titleAuthority.partFitment.value.includes('2005-2009 Kia Spectra'), true);
+  assert.equal(result.resolved.fields.side.resolvedValue, 'Driver/Left');
+  assert.equal(result.resolved.fields.side.conflict, false);
+});
+
+test('uses fitment and category cleanup for missing make and cleaner part names', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': 'Seat Belt Front Bucket Seat Sedan Passenger 1588313',
+      SKU: '1588313',
+      IPN: '210-52921',
+      'C:Brand': '',
+      'Structured Year': '',
+      'Category Name': 'eBay Motors:Parts & Accessories:Car & Truck Parts & Accessories:Interior Parts & Accessories:Interior Safety:Seat Belts & Parts',
+      'Conditions & Options': '',
+      'Item Specifics - All C: values relevant to item': JSON.stringify({
+        'C:Color': 'Beige'
+      }),
+      'Current eBay Fields': JSON.stringify({ donorModel: 'ELANTRA', donorYear: '2011', donorNotes: 'PASS RETRACTOR YDA - BEIGE' })
+    }),
+    masterRecord: {
+      fields: {
+        'Part Fitment': 'Fits 2011-2015 Hyundai Elantra Seat Belt Front Bucket Seat Sedan Passenger Retractor; 2016 Hyundai Elantra Seat Belt Front Bucket Seat Sedan Passenger Retractor'
+      }
+    }
+  });
+
+  assert.equal(result.resolved.fields.brandMake.resolvedValue, 'Hyundai');
+  assert.equal(result.resolved.fields.brandMake.resolvedSource, 'partFitment');
+  assert.equal(result.resolved.fields.part.resolvedValue, 'Seat Belt');
+});
+
+test('derives common placement and feature abbreviations from donor notes', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': 'Power Window Motor SPECTRA 1586203',
+      SKU: '1586203',
+      IPN: '617-58916L',
+      'Structured Year': '',
+      'Conditions & Options': '',
+      'Current eBay Fields': JSON.stringify({ donorModel: 'SPECTRA', donorYear: '2009', donorNotes: 'FRNT PWR' })
+    })
+  });
+
+  assert.equal(result.resolved.fields.placement.resolvedValue, 'Front');
+  assert.equal(result.resolved.fields.keyFitmentDetail.resolvedValue, 'Power');
 });
 
 test('normalization marks optional blanks missing and ignores disabled or deleted mappings', () => {

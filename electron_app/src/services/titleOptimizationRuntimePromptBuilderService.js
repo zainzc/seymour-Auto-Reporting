@@ -194,8 +194,12 @@ function stablePolicy() {
       'Use only supplied verified evidence; never invent unsupported facts.',
       'Accuracy and safety outrank enrichment, wording preferences, and title length targets.',
       'Obey the supplied canonical System Rules and applicable configuration.',
-      'Do not use description-only partFitment to determine title year, make, model, side, or part identity.',
+      'Part Fitment is supplied title evidence and may be used for title year, make, model, side, and part identity when it is the best verified source.',
+      'Use the deterministic resolved year or yearRange winner; lower-priority evidence may support diagnostics but must not override it.',
+      'Follow the selectedTitleStructure segments strictly; use its field and literal segment order for the generated title.',
+      'Normalize raw fitment wording into the selectedTitleStructure fields; do not keep raw fitment wording when the structure provides separate year, make, model, or part segments.',
       'Use deterministic source winners as authoritative; lower-priority evidence is context only.',
+      'Use deterministicTitlePart as the authoritative part when supplied; do not substitute a generic category part.',
       'Omit unavailable optional field segments instead of inventing values.',
       'A generated candidate must not degrade an already-better existing title; final enforcement happens later.',
       'Return valid JSON only using the supplied output contract.'
@@ -233,8 +237,8 @@ function skuGuidance(applicableRules = {}) {
   };
 }
 
-function authoritativeValues(listingResolution = {}) {
-  const keys = ['title', 'brandMake', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku'];
+function authoritativeValues(listingResolution = {}, applicableRules = {}) {
+  const keys = ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'yearRange', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
   const out = {};
   for (const key of keys) {
     const value = resolvedField(listingResolution, key);
@@ -244,20 +248,19 @@ function authoritativeValues(listingResolution = {}) {
 }
 
 function sourceEvidenceMap(listingResolution = {}) {
-  const keys = ['title', 'brandMake', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku'];
+  const keys = ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'yearRange', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
   const out = {};
   for (const key of keys) out[key] = sourceEvidence(listingResolution, key);
   return out;
 }
 
-function descriptionOnly(listingResolution = {}) {
-  const partFitment = listingResolution?.normalized?.descriptionOnly?.partFitment || {};
+function titleEvidence(listingResolution = {}) {
+  const partFitment = listingResolution?.normalized?.titleAuthority?.partFitment || {};
   return {
     partFitment: {
       value: partFitment.value || null,
-      boundary: 'DESCRIPTION ONLY',
-      titleIdentityAllowed: false,
-      forbiddenTitleUses: ['year', 'make', 'model', 'side', 'part identity']
+      boundary: 'TITLE EVIDENCE',
+      titleIdentityAllowed: true
     }
   };
 }
@@ -276,9 +279,9 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
   const terms = terminologyRules(applicableRules);
   const restricted = restrictedTerms(applicableRules);
   const flags = flagReasons(applicableRules);
-  const authoritative = authoritativeValues(listingResolution);
+  const authoritative = authoritativeValues(listingResolution, applicableRules);
   const evidence = sourceEvidenceMap(listingResolution);
-  const descriptionEvidence = descriptionOnly(listingResolution);
+  const titleEvidencePayload = titleEvidence(listingResolution);
   const currentTitle = fieldValue(listingResolution, 'existingTitle') || authoritative.title?.value || null;
 
   const userPayload = {
@@ -294,16 +297,20 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
       synonyms: synonyms.rules,
       prefixRule: prefix,
       categoryRules: cats,
+      deterministicTitlePart: applicableRules.deterministicTitlePart || null,
       restrictedTerms: restricted,
       flagReasons: flags,
       instructions: bypass
         ? [
           'Manual title override is active; do not create a replacement title in this shadow artifact.',
-          'Do not use description-only partFitment for title identity.'
+          'Part Fitment remains available as verified title evidence for explanation only.'
         ]
         : [
           'Create a title candidate using the selected structure and supplied evidence only.',
-          'Do not use description-only partFitment for title identity.'
+          'Part Fitment is title evidence when it is the best verified source.',
+          'Follow the selectedTitleStructure segments strictly.',
+          'Use the resolved authoritative year or yearRange value; do not independently select a lower-priority year or range.',
+          'Do not keep raw fitment wording in generatedTitle when the selected structure has separate fields for that information.'
         ]
     },
     outputContract: outputContract(),
@@ -312,7 +319,7 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
       authoritativeValues: authoritative,
       missing: listingResolution?.resolved?.missing || [],
       supportingAndConflictingEvidence: evidence,
-      descriptionOnly: descriptionEvidence
+      titleEvidence: titleEvidencePayload
     },
     existingTitle: {
       currentTitle,
@@ -336,7 +343,7 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
       : 'Use the supplied authoritative resolved values and applicable rules to create a safe replacement title candidate.',
     'System Rules in the payload are mandatory.',
     '80 characters is the hard maximum; 65 characters is a target only, not a minimum.',
-    'Do not use description-only partFitment for title identity.'
+    'Part Fitment is allowed as verified title evidence.'
   ].join(' ');
 
   return {

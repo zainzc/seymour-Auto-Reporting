@@ -223,6 +223,18 @@ test('validates side from verified evidence and never from description-only fitm
   const preserved = validate({ candidateTitle: '2011 Honda Accord Driver Mirror ABS MPN-9 K24A BAYA VIN J 00123' });
   assert.equal(preserved.valid, true);
 
+  const equivalentLeft = validate({
+    sourceResolution: {
+      ...baseInputs().sourceResolution,
+      resolved: {
+        ...baseInputs().sourceResolution.resolved,
+        fields: { ...baseInputs().sourceResolution.resolved.fields, side: resolvedField('Driver/Left') }
+      }
+    },
+    candidateTitle: '2011 Honda Accord Driver Left LH Side View Mirror ABS MPN-9 K24A BAYA VIN J 00123'
+  });
+  assert.equal(equivalentLeft.valid, true);
+
   const unsupported = validate({ candidateTitle: '2011 Honda Accord Passenger Side View Mirror ABS 00123' });
   assert.equal(unsupported.valid, false);
   assert.equal(unsupported.safeToContinue, false);
@@ -358,4 +370,31 @@ test('maps only approved flag reasons and remains deterministic and idempotent',
   const idempotent = validate({ candidateTitle: cleanup.validatedTitle });
   assert.equal(idempotent.validatedTitle, cleanup.validatedTitle);
   assert.deepEqual(idempotent.corrections, []);
+});
+
+test('flags ambiguous model evidence instead of silently normalizing it', () => {
+  const result = validate({
+    sourceResolution: {
+      ...baseInputs().sourceResolution,
+      resolved: {
+        ...baseInputs().sourceResolution.resolved,
+        modelAmbiguity: {
+          ambiguous: true,
+          candidates: [
+            { value: 'OUTBAKLEG', sources: ['itemSpecifics'] },
+            { value: 'OUTBACK', sources: ['currentEbay'] },
+            { value: 'LEGACY', sources: ['partFitment'] }
+          ]
+        }
+      }
+    },
+    ruleResolution: {
+      ...baseInputs().ruleResolution,
+      flagReasons: [...baseInputs().ruleResolution.flagReasons, { id: 'flag-model', reason: 'Model cannot be normalized safely', enabled: true }]
+    },
+    candidateTitle: '2011 Honda Accord Driver Side View Mirror ABS MPN-9 K24A BAYA VIN J 00123'
+  });
+  assert.equal(result.outcome, 'FLAG');
+  assert.equal(result.suggestedReviewReasons[0].reason, 'Model cannot be normalized safely');
+  assert.equal(result.violations.some(item => item.checkId === 'model-ambiguity'), false);
 });

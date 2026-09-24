@@ -28,7 +28,12 @@ const ITEM_SPECIFIC_ALIASES = Object.freeze({
   part: ['C:Part', 'Part', 'Part Type', 'Category', 'Category Name'],
   manufacturerPartNumber: ['C:MPN', 'MPN', 'Manufacturer Part Number', 'C:Manufacturer Part Number'],
   side: ['Side', 'Placement on Vehicle', 'C:Side'],
-  year: ['Year', 'C:Year', 'Year Range']
+  year: ['Year', 'C:Year', 'Year Range'],
+  model: ['Model', 'C:Model'],
+  color: ['Color', 'C:Color', 'Paint Color'],
+  componentType: ['Component Type', 'C:Component Type'],
+  placement: ['Placement', 'Position', 'C:Placement', 'C:Position'],
+  keyFitmentDetail: ['Key Fitment Detail', 'Feature', 'Features', 'C:Features']
 });
 
 class RuntimeConfigurationError extends Error {
@@ -44,6 +49,10 @@ function normalizeText(value) {
   if (Array.isArray(value)) return normalizeText(value[0]);
   if (value === null || value === undefined) return '';
   return String(value).trim().replace(/\s+/g, ' ');
+}
+
+function titleCaseWords(value = '') {
+  return normalizeText(value).toLowerCase().replace(/\b[a-z]/g, char => char.toUpperCase());
 }
 
 function normalizeCompare(value) {
@@ -91,6 +100,259 @@ function normalizeObjectValues(value) {
     if (text) out[name] = text;
   }
   return Object.keys(out).length ? out : null;
+}
+
+function decodeHtmlEntities(value = '') {
+  return normalizeText(value)
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function stripHtmlToText(value = '') {
+  return decodeHtmlEntities(
+    normalizeText(value)
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<\/(?:div|p|li|tr|h[1-6])>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+  ).replace(/\s+/g, ' ').trim();
+}
+
+function decodeHexCommentValue(value = '') {
+  const hex = normalizeText(value).replace(/\s+/g, '');
+  if (!hex || hex.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(hex)) return '';
+  let out = '';
+  for (let i = 0; i < hex.length; i += 2) {
+    const code = Number.parseInt(hex.slice(i, i + 2), 16);
+    if (Number.isFinite(code) && code > 0) out += String.fromCharCode(code);
+  }
+  return normalizeText(out);
+}
+
+function readHtmlCommentValue(html = '', name = '') {
+  const escaped = normalizeText(name).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!escaped) return '';
+  const match = String(html || '').match(new RegExp(`<!--\\s*${escaped}\\s*:\\s*([\\s\\S]*?)\\s*-->`, 'i'));
+  return normalizeText(match?.[1]);
+}
+
+function readDescriptionLabel(html = '', label = '') {
+  const escaped = normalizeText(label).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!escaped) return '';
+  const raw = String(html || '');
+  const divPattern = new RegExp(
+    `<div[^>]*>\\s*${escaped}\\s*:\\s*<\\/div>\\s*<div[^>]*>([\\s\\S]*?)<\\/div>`,
+    'i'
+  );
+  const divMatch = raw.match(divPattern);
+  if (divMatch) return stripHtmlToText(divMatch[1]);
+
+  const text = stripHtmlToText(raw);
+  const labels = 'Model|Year|Mileage|Stock Number|Notes';
+  const labelMatch = text.match(new RegExp(`${escaped}\\s*:\\s*([\\s\\S]*?)(?=\\s*(?:${labels})\\s*:|\\s*This Part Will Fit|$)`, 'i'));
+  return normalizeText(labelMatch?.[1]);
+}
+
+function normalizeCurrentEbayFields(value = {}) {
+  const structured = normalizeObjectValues(value);
+  if (structured) return structured;
+  const html = typeof value === 'string' ? value : '';
+  if (!normalizeText(html)) return {};
+
+  const out = {};
+  const model = readDescriptionLabel(html, 'Model') || decodeHexCommentValue(readHtmlCommentValue(html, 'PLModel'));
+  const year = readDescriptionLabel(html, 'Year') || decodeHexCommentValue(readHtmlCommentValue(html, 'PLYear'));
+  const notes = readDescriptionLabel(html, 'Notes');
+  const stockNumber =
+    readDescriptionLabel(html, 'Stock Number') ||
+    decodeHexCommentValue(readHtmlCommentValue(html, 'PLStockNumber'));
+
+  if (model) out.donorModel = model;
+  if (year) out.donorYear = year;
+  if (notes) out.donorNotes = notes;
+  if (stockNumber) out.donorStockNumber = stockNumber;
+  return out;
+}
+
+function expandTwoDigitYear(value) {
+  const number = Number.parseInt(value, 10);
+  if (!Number.isFinite(number)) return '';
+  return String(number <= 30 ? 2000 + number : 1900 + number);
+}
+
+function parseFitmentApplications(value = '') {
+  const text = normalizeText(value);
+  if (!text) return [];
+  const out = [];
+  const withMakePattern = /\b(?:Fits\s+)?(\d{4})(?:\s*-\s*(\d{4}))?\s+([A-Z][A-Za-z]+)\s+([A-Z][A-Za-z0-9-]+)\b/g;
+  let withMake;
+  while ((withMake = withMakePattern.exec(text)) !== null) {
+    out.push({
+      startYear: withMake[1],
+      endYear: withMake[2] || withMake[1],
+      make: titleCaseWords(withMake[3]),
+      model: normalizeText(withMake[4]).toUpperCase()
+    });
+  }
+
+  const yearFirstPattern = /\b(?:Fits\s+)?(\d{4})(?:\s*-\s*(\d{4}))?\s+([A-Z][A-Za-z0-9-]+)\s+([A-Z][A-Za-z0-9-]+)\b/g;
+  let yearFirst;
+  while ((yearFirst = yearFirstPattern.exec(text)) !== null) {
+    const first = normalizeText(yearFirst[3]);
+    const second = normalizeText(yearFirst[4]);
+    if (!first || !second) continue;
+    out.push({
+      startYear: yearFirst[1],
+      endYear: yearFirst[2] || yearFirst[1],
+      make: titleCaseWords(first),
+      model: second.toUpperCase()
+    });
+  }
+
+  const compactPattern = /\b([A-Z][A-Z0-9-]{2,})\s+(\d{2,4})(?:\s*-\s*(\d{2,4}))?\b/gi;
+  let compact;
+  while ((compact = compactPattern.exec(text)) !== null) {
+    const startYear = compact[2].length === 2 ? expandTwoDigitYear(compact[2]) : normalizeText(compact[2]);
+    const endYear = compact[3]
+      ? compact[3].length === 2 ? expandTwoDigitYear(compact[3]) : normalizeText(compact[3])
+      : startYear;
+    out.push({
+      startYear,
+      endYear,
+      make: '',
+      model: normalizeText(compact[1]).toUpperCase()
+    });
+  }
+  return out;
+}
+
+function deriveMakeFromFitment(value = '', model = '', year = '') {
+  const normalizedModel = normalizeText(model).toUpperCase();
+  const targetYear = Number.parseInt(normalizeText(year), 10);
+  const applications = parseFitmentApplications(value).filter(item => item.make);
+  const matching = applications.find(item => {
+    if (normalizedModel && item.model !== normalizedModel) return false;
+    const start = Number.parseInt(item.startYear, 10);
+    const end = Number.parseInt(item.endYear, 10);
+    if (Number.isFinite(targetYear) && Number.isFinite(start) && Number.isFinite(end)) {
+      return targetYear >= start && targetYear <= end;
+    }
+    return true;
+  });
+  return matching?.make || '';
+}
+
+function deriveYearRangeFromFitment(value = '') {
+  const text = normalizeText(value);
+  const ranges = [];
+  const pattern = /\b((?:19|20)\d{2})\s*[-–]\s*((?:19|20)\d{2})\b/g;
+  let match;
+  while ((match = pattern.exec(text)) !== null) {
+    const range = `${match[1]}-${match[2]}`;
+    if (!ranges.includes(range)) ranges.push(range);
+  }
+  const shortPattern = /\b(\d{2})\s*[-–]\s*(\d{2})\b/g;
+  while ((match = shortPattern.exec(text)) !== null) {
+    const start = expandTwoDigitYear(match[1]);
+    const end = expandTwoDigitYear(match[2]);
+    const range = `${start}-${end}`;
+    if (!ranges.includes(range)) ranges.push(range);
+  }
+  return ranges[0] || '';
+}
+
+function deriveModelFromTitle(value = '') {
+  const text = normalizeText(value);
+  const fitMatch = text.match(/\bFits\s+\d{2}\s*-\s*\d{2}\s+([A-Z][A-Z0-9-]{2,})\b/i);
+  if (fitMatch) return normalizeText(fitMatch[1]).toUpperCase();
+  return '';
+}
+
+function modelEvidenceCandidates({ itemSpecifics = {}, existingTitle = '', partFitment = '' } = {}) {
+  const values = [];
+  const itemSpecificModel = itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.model);
+  if (itemSpecificModel) values.push({ value: itemSpecificModel, source: 'itemSpecifics' });
+  const titleModels = normalizeText(existingTitle).match(/\b(OUTBACK|LEGACY|OUTBAKLEG)\b/gi) || [];
+  for (const value of titleModels) values.push({ value: value.toUpperCase(), source: 'currentEbay' });
+  for (const application of parseFitmentApplications(partFitment)) {
+    if (application.model) values.push({ value: application.model, source: 'partFitment' });
+  }
+  return values;
+}
+
+function modelAmbiguity(candidates = []) {
+  const unique = [];
+  for (const candidate of candidates) {
+    const value = normalizeText(candidate.value).toUpperCase();
+    if (!value || unique.some(item => normalizeCompare(item.value) === normalizeCompare(value))) continue;
+    unique.push({ value, sources: [candidate.source] });
+  }
+  for (const candidate of candidates) {
+    const entry = unique.find(item => normalizeCompare(item.value) === normalizeCompare(candidate.value));
+    if (entry && !entry.sources.includes(candidate.source)) entry.sources.push(candidate.source);
+  }
+  return { ambiguous: unique.length > 1, candidates: unique };
+}
+
+function deriveSideFromText(value = '') {
+  const text = normalizeText(value).toUpperCase();
+  if (/\b(PASS|PASSENGER|RIGHT|RH)\b/.test(text)) return 'Passenger Right RH';
+  if (/\b(DRIVER|LEFT|LH)\b/.test(text)) return 'Driver Left LH';
+  return '';
+}
+
+function canonicalResolvedValue(field = '', value = '') {
+  const text = normalizeText(value);
+  if (field !== 'side') return normalizeCompare(text);
+  const upper = text.toUpperCase().replace(/[\/_-]+/g, ' ');
+  if (/\b(DRIVER|LEFT|LH)\b/.test(upper)) return 'driver-left-lh';
+  if (/\b(PASS|PASSENGER|RIGHT|RH)\b/.test(upper)) return 'passenger-right-rh';
+  return normalizeCompare(text);
+}
+
+function derivePlacementFromText(value = '') {
+  const text = normalizeText(value).toUpperCase();
+  if (/\b(FRNT|FRONT|FRT)\b/.test(text)) return 'Front';
+  if (/\b(REAR|RR)\b/.test(text)) return 'Rear';
+  return '';
+}
+
+function deriveKeyFitmentDetailFromText(value = '') {
+  const text = normalizeText(value).toUpperCase();
+  const details = [];
+  if (/\b(PWR|POWER)\b/.test(text)) details.push('Power');
+  if (/\bILLUM|ILLUMINATED|ILLUMINATION\b/.test(text)) details.push('With Illumination');
+  return details.join(', ');
+}
+
+function cleanCategoryPartName(value = '') {
+  const raw = normalizeText(value);
+  if (!raw) return '';
+  const last = raw.split(':').map(item => normalizeText(item)).filter(Boolean).pop() || raw;
+  const normalized = normalizeCompare(last);
+  if (normalized.includes('seat belts')) return 'Seat Belt';
+  if (normalized.includes('interior safety')) return 'Seat Belt';
+  if (normalized.includes('mirrors')) return 'Side View Mirror';
+  return last.replace(/\s*&\s*Parts\b/i, '').trim();
+}
+
+function deriveComponentTypeFromText(value = '') {
+  const text = normalizeText(value);
+  if (/\bretractor\b/i.test(text)) return 'Retractor';
+  if (/\bbuckle\b/i.test(text)) return 'Buckle';
+  if (/\breceiver\b/i.test(text)) return 'Receiver';
+  return '';
+}
+
+function deriveColorFromText(value = '') {
+  const text = normalizeText(value);
+  const match = text.match(/(?:^|[-\s])\b(BEIGE|BLACK|GRAY|GREY|TAN|BROWN|BLUE|RED|GREEN|WHITE|IVORY|SILVER)\b(?:$|[-\s])/i);
+  if (!match) return '';
+  const color = match[1].toLowerCase() === 'grey' ? 'gray' : match[1];
+  return titleCaseWords(color);
 }
 
 function deriveIpnPrefix(value) {
@@ -187,12 +449,25 @@ function evidence(value, source, mapping = null, rawValue = value, extra = {}) {
   };
 }
 
+function derivedEvidence(value, source, sourceFieldName, rawValue = value, extra = {}) {
+  return evidence(value, source, {
+    sourceFieldName,
+    sourceFieldId: null,
+    id: null
+  }, rawValue, {
+    derived: true,
+    ...extra
+  });
+}
+
 function setMappedField(out, mapping, rawValue) {
   const key = mapping.logicalKey;
   const source = SEMANTIC_SOURCE[key] || (mapping.isCustom ? 'otherStructuredFields' : 'otherStructuredFields');
-  const structured = key === 'itemSpecifics' || key === 'currentEbayFields'
+  const structured = key === 'itemSpecifics'
     ? normalizeObjectValues(rawValue)
-    : null;
+    : key === 'currentEbayFields'
+      ? normalizeCurrentEbayFields(rawValue)
+      : null;
   const value = structured || rawValue;
   const target = structured ? out.structured : out.fields;
   target[key] = evidence(value, source, mapping, rawValue, {
@@ -220,6 +495,7 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
     },
     descriptionOnly: {},
     titleAuthority: {},
+    derived: {},
     missing: [],
     unresolved: [],
     allEvidence: []
@@ -242,9 +518,105 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
   out.manualOverride.active = /manual|override|approved/i.test(normalizeText(out.manualOverride.status.value));
 
   const partFitment = normalizeText(masterFields['Part Fitment'] || masterFields.partFitment);
-  out.descriptionOnly.partFitment = evidence(partFitment, 'descriptionOnly', null, partFitment, {
-    titleAuthority: false
+  out.titleAuthority.partFitment = evidence(partFitment, 'partFitment', null, partFitment, {
+    titleAuthority: true
   });
+
+  const existingTitle = normalizeText(out.fields.existingTitle?.value);
+  const legacyTitle = normalizeText(out.fields.legacyTitle?.value || out.fields.rawSourceTitle?.value);
+  const currentEbayFields = out.structured.currentEbayFields?.value || {};
+  const itemSpecifics = out.structured.itemSpecifics?.value || {};
+  const donorNotes = normalizeText(
+    currentEbayFields.donorNotes ||
+    currentEbayFields.Notes ||
+    currentEbayFields.notes ||
+    currentEbayFields['Donor Notes']
+  );
+  const donorModel = normalizeText(
+    currentEbayFields.donorModel ||
+    currentEbayFields.Model ||
+    currentEbayFields.model ||
+    currentEbayFields['Donor Model']
+  );
+  const donorYear = normalizeText(
+    currentEbayFields.donorYear ||
+    currentEbayFields.Year ||
+    currentEbayFields.year ||
+    currentEbayFields['Donor Year']
+  );
+
+  out.derived.makeFromFitment = derivedEvidence(
+    deriveMakeFromFitment(partFitment, donorModel || deriveModelFromTitle(existingTitle || legacyTitle), donorYear),
+    'partFitment',
+    'Part Fitment',
+    partFitment,
+    { logicalKey: 'brandMake' }
+  );
+  out.derived.yearRangeFromFitment = derivedEvidence(
+    deriveYearRangeFromFitment(partFitment),
+    'partFitment',
+    'Part Fitment',
+    partFitment,
+    { logicalKey: 'yearRange' }
+  );
+  out.derived.modelFromCurrentTitle = derivedEvidence(
+    deriveModelFromTitle(existingTitle || legacyTitle),
+    'currentEbay',
+    'Item Title',
+    existingTitle || legacyTitle,
+    { logicalKey: 'model' }
+  );
+  out.derived.modelFromDonor = derivedEvidence(donorModel, 'currentEbay', 'Current eBay Fields', currentEbayFields, {
+    logicalKey: 'model'
+  });
+  out.derived.modelAmbiguity = modelAmbiguity(modelEvidenceCandidates({ itemSpecifics, existingTitle, partFitment }));
+  out.derived.yearFromDonor = derivedEvidence(donorYear, 'currentEbay', 'Current eBay Fields', currentEbayFields, {
+    logicalKey: 'year'
+  });
+  out.derived.sideFromTitle = derivedEvidence(deriveSideFromText(existingTitle), 'currentEbay', 'Item Title', existingTitle, {
+    logicalKey: 'side'
+  });
+  out.derived.sideFromNotes = derivedEvidence(deriveSideFromText(donorNotes), 'currentEbay', 'Current eBay Fields', donorNotes, {
+    logicalKey: 'side'
+  });
+  out.derived.componentTypeFromNotes = derivedEvidence(
+    deriveComponentTypeFromText(donorNotes || existingTitle),
+    'currentEbay',
+    donorNotes ? 'Current eBay Fields' : 'Item Title',
+    donorNotes || existingTitle,
+    { logicalKey: 'componentType' }
+  );
+  out.derived.colorFromNotes = derivedEvidence(deriveColorFromText(donorNotes), 'currentEbay', 'Current eBay Fields', donorNotes, {
+    logicalKey: 'color'
+  });
+  out.derived.colorFromItemSpecifics = derivedEvidence(
+    itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.color),
+    'itemSpecifics',
+    'Item Specifics - All C: values relevant to item',
+    itemSpecifics,
+    { logicalKey: 'color' }
+  );
+  out.derived.placementFromNotes = derivedEvidence(
+    derivePlacementFromText(donorNotes || existingTitle),
+    'currentEbay',
+    donorNotes ? 'Current eBay Fields' : 'Item Title',
+    donorNotes || existingTitle,
+    { logicalKey: 'placement' }
+  );
+  out.derived.keyFitmentDetailFromNotes = derivedEvidence(
+    deriveKeyFitmentDetailFromText(donorNotes),
+    'currentEbay',
+    'Current eBay Fields',
+    donorNotes,
+    { logicalKey: 'keyFitmentDetail' }
+  );
+  out.derived.cleanedCategoryPart = derivedEvidence(
+    cleanCategoryPartName(out.fields.categoryPart?.value || out.fields.conditionsOptions?.value),
+    'categoryConditions',
+    out.fields.categoryPart?.sourceFieldName || out.fields.conditionsOptions?.sourceFieldName || null,
+    out.fields.categoryPart?.rawValue || out.fields.conditionsOptions?.rawValue || '',
+    { logicalKey: 'part' }
+  );
 
   for (const [key, item] of Object.entries(out.fields)) {
     if (item?.missing) out.missing.push(key);
@@ -294,9 +666,17 @@ function candidatesForField(field, normalized, priorities) {
   } else if (field === 'brandMake') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.brandMake), normalized.structured.itemSpecifics);
     add(out, 'brandMake', normalized.fields.brandMake?.value, normalized.fields.brandMake);
+    add(out, 'partFitment', normalized.derived.makeFromFitment?.value, normalized.derived.makeFromFitment);
   } else if (field === 'part') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.part), normalized.structured.itemSpecifics);
-    add(out, 'categoryConditions', normalized.fields.categoryPart?.value || normalized.fields.conditionsOptions?.value, normalized.fields.categoryPart || normalized.fields.conditionsOptions);
+    add(
+      out,
+      'categoryConditions',
+      normalized.derived.cleanedCategoryPart?.value || normalized.fields.categoryPart?.value || normalized.fields.conditionsOptions?.value,
+      normalized.derived.cleanedCategoryPart?.value
+        ? normalized.derived.cleanedCategoryPart
+        : normalized.fields.categoryPart || normalized.fields.conditionsOptions
+    );
     add(out, 'rawHollander', normalized.fields.rawSourceTitle?.value || normalized.fields.legacyTitle?.value, normalized.fields.rawSourceTitle || normalized.fields.legacyTitle);
   } else if (field === 'manufacturerPartNumber') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.manufacturerPartNumber), normalized.structured.itemSpecifics);
@@ -304,9 +684,32 @@ function candidatesForField(field, normalized, priorities) {
   } else if (field === 'side') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.side), normalized.structured.itemSpecifics);
     add(out, 'categoryConditions', normalized.fields.conditionsOptions?.value, normalized.fields.conditionsOptions);
+    add(out, 'currentEbay', normalized.derived.sideFromNotes?.value, normalized.derived.sideFromNotes);
+    add(out, 'currentEbay', normalized.derived.sideFromTitle?.value, normalized.derived.sideFromTitle);
   } else if (field === 'year') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.year), normalized.structured.itemSpecifics);
     add(out, 'otherStructuredFields', normalized.fields.year?.value || normalized.fields.structuredYear?.value, normalized.fields.year || normalized.fields.structuredYear);
+    add(out, 'currentEbay', normalized.derived.yearFromDonor?.value, normalized.derived.yearFromDonor);
+  } else if (field === 'yearRange') {
+    add(out, 'partFitment', normalized.derived.yearRangeFromFitment?.value, normalized.derived.yearRangeFromFitment);
+    add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.year), normalized.structured.itemSpecifics);
+    add(out, 'otherStructuredFields', normalized.fields.year?.value || normalized.fields.structuredYear?.value, normalized.fields.year || normalized.fields.structuredYear);
+  } else if (field === 'model') {
+    add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.model), normalized.structured.itemSpecifics);
+    add(out, 'currentEbay', normalized.derived.modelFromDonor?.value, normalized.derived.modelFromDonor);
+    add(out, 'currentEbay', normalized.derived.modelFromCurrentTitle?.value, normalized.derived.modelFromCurrentTitle);
+  } else if (field === 'componentType') {
+    add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.componentType), normalized.structured.itemSpecifics);
+    add(out, 'currentEbay', normalized.derived.componentTypeFromNotes?.value, normalized.derived.componentTypeFromNotes);
+  } else if (field === 'color') {
+    add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.color), normalized.structured.itemSpecifics);
+    add(out, 'currentEbay', normalized.derived.colorFromNotes?.value, normalized.derived.colorFromNotes);
+  } else if (field === 'placement') {
+    add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.placement), normalized.structured.itemSpecifics);
+    add(out, 'currentEbay', normalized.derived.placementFromNotes?.value, normalized.derived.placementFromNotes);
+  } else if (field === 'keyFitmentDetail') {
+    add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.keyFitmentDetail), normalized.structured.itemSpecifics);
+    add(out, 'currentEbay', normalized.derived.keyFitmentDetailFromNotes?.value, normalized.derived.keyFitmentDetailFromNotes);
   } else if (field === 'sku') {
     add(out, 'otherStructuredFields', normalized.fields.sku?.value, normalized.fields.sku);
   } else if (normalized.fields[field]) {
@@ -331,11 +734,11 @@ function resolveField(field, candidates = []) {
     };
   }
   const winner = present[0];
-  const winnerKey = normalizeCompare(winner.value);
+  const winnerKey = canonicalResolvedValue(field, winner.value);
   const conflicts = [];
   const seen = new Set([winnerKey]);
   for (const item of present.slice(1)) {
-    const key = normalizeCompare(item.value);
+    const key = canonicalResolvedValue(field, item.value);
     if (!key || key === winnerKey || seen.has(key)) continue;
     seen.add(key);
     conflicts.push(item);
@@ -354,8 +757,8 @@ function resolveField(field, candidates = []) {
 function resolveSourcePriority({ runtimeSnapshot, normalizedListing, fields = [] } = {}) {
   const priorities = activePriorityRows(runtimeSnapshot);
   const requested = Array.isArray(fields) && fields.length
-    ? fields
-    : ['title', 'brandMake', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku'];
+    ? [...new Set([...fields, 'yearRange'])]
+    : ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'yearRange', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
   const resolvedFields = {};
   for (const field of requested) {
     resolvedFields[field] = resolveField(field, candidatesForField(field, normalizedListing, priorities));
@@ -373,6 +776,7 @@ function resolveSourcePriority({ runtimeSnapshot, normalizedListing, fields = []
 function normalizeAndResolveListing({ runtimeSnapshot, listingRecord, masterRecord = {}, fields = [] } = {}) {
   const normalized = normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord });
   const resolved = resolveSourcePriority({ runtimeSnapshot, normalizedListing: normalized, fields });
+  resolved.modelAmbiguity = normalized.derived.modelAmbiguity || { ambiguous: false, candidates: [] };
   return {
     contractVersion: 1,
     mode: 'shadow-only',

@@ -137,14 +137,41 @@ function titleContainsValue(title, value) {
   return Boolean(wanted && text.includes(wanted));
 }
 
+function canonicalSide(value) {
+  const text = normalizeKey(value).replace(/[\/_-]+/g, ' ');
+  const hasDriver = /\b(driver|left|lh)\b/i.test(text);
+  const hasPassenger = /\b(passenger|right|rh)\b/i.test(text);
+  if (hasDriver && !hasPassenger) return 'driver-left-lh';
+  if (hasPassenger && !hasDriver) return 'passenger-right-rh';
+  return '';
+}
+
+function sideLabel(canonical) {
+  if (canonical === 'driver-left-lh') return 'driver/left/lh';
+  if (canonical === 'passenger-right-rh') return 'passenger/right/rh';
+  return '';
+}
+
 function detectUnsupportedSide(title, verifiedSide) {
   const sideTerms = ['driver', 'passenger', 'left', 'right', 'lh', 'rh'];
   const lower = normalizeKey(title);
   const present = sideTerms.filter(term => new RegExp(`\\b${term}\\b`, 'i').test(lower));
   if (!present.length) return null;
+  const titleSide = canonicalSide(title);
+  const verifiedCanonical = canonicalSide(verifiedSide);
+  if (titleSide && verifiedCanonical && titleSide === verifiedCanonical) return null;
+  if (titleSide && (!verifiedCanonical || titleSide !== verifiedCanonical)) return sideLabel(titleSide) || present[0];
   const verified = normalizeKey(verifiedSide);
   if (!verified) return present[0];
-  return present.find(term => !verified.includes(term) && !(term === 'driver' && verified.includes('left')) && !(term === 'passenger' && verified.includes('right'))) || null;
+  return present.find(term =>
+    !verified.includes(term) &&
+    !(term === 'driver' && verified.includes('left')) &&
+    !(term === 'left' && verified.includes('driver')) &&
+    !(term === 'lh' && (verified.includes('driver') || verified.includes('left'))) &&
+    !(term === 'passenger' && verified.includes('right')) &&
+    !(term === 'right' && verified.includes('passenger')) &&
+    !(term === 'rh' && (verified.includes('passenger') || verified.includes('right')))
+  ) || null;
 }
 
 function detectMpnTokens(title, sourceResolution) {
@@ -301,6 +328,18 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
         relatedConfigIds: []
       }));
     }
+  }
+
+  if (sourceResolution?.resolved?.modelAmbiguity?.ambiguous) {
+    const flag = approvedFlag(ruleResolution, 'Model cannot be normalized safely');
+    uniquePush(suggestedReviewReasons, flag);
+    append(checkRecord({
+      checkId: 'model-ambiguity',
+      status: 'WARN',
+      severity: 'warning',
+      message: 'Model evidence contains materially different values and cannot be normalized safely.',
+      suggestedFlagReason: flag
+    }));
   }
 
   for (const field of ['engineCode', 'transmissionCode', 'vin']) {

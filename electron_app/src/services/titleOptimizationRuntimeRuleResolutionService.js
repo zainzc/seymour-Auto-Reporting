@@ -84,6 +84,30 @@ function contextText(context = {}) {
   ].map(normalizeText).filter(Boolean).join(' ');
 }
 
+function titleEvidenceText(listingResolution = {}) {
+  return normalizeText(listingResolution?.normalized?.titleAuthority?.partFitment?.value);
+}
+
+function resolveDeterministicTitlePart(prefixRule, categoryRules, listingResolution) {
+  const evidence = titleEvidenceText(listingResolution);
+  const prefix = prefixRule?.rule;
+  if (prefix?.specialTrigger && prefix.specialReplacement && includesWord(evidence, prefix.specialTrigger)) {
+    return {
+      value: normalizeText(prefix.specialReplacement).replace(/\s*\/\s*/g, ' '),
+      source: 'prefixRule.specialReplacement',
+      ruleId: prefix.id,
+      trigger: prefix.specialTrigger
+    };
+  }
+  const approvedPart = (prefix?.approvedPartTerms || []).find(term => includesWord(evidence, term));
+  if (approvedPart) return { value: normalizeText(approvedPart), source: 'prefixRule.approvedPartTerm', ruleId: prefix.id };
+  const priorityDetail = categoryRules
+    .flatMap(entry => entry.rule.priorityDetails || [])
+    .find(detail => includesWord(evidence, detail));
+  if (priorityDetail) return { value: normalizeText(priorityDetail), source: 'categoryRule.priorityDetail' };
+  return null;
+}
+
 function includesWord(text, word) {
   const source = normalizeKey(text);
   const target = normalizeKey(word);
@@ -260,7 +284,7 @@ function resolveApplicableTitleOptimizationRules({ runtimeSnapshot, listingResol
     });
   }
   const titleStructure = selectTitleStructure(runtimeSnapshot, context);
-  if (titleStructure.fallback) unresolved.push({ code: 'TITLE_STRUCTURE_GENERAL_FALLBACK', section: 'titleStructures' });
+  const deterministicTitlePart = resolveDeterministicTitlePart(prefixRule, categoryRules, listingResolution);
 
   return {
     contractVersion: 1,
@@ -272,6 +296,7 @@ function resolveApplicableTitleOptimizationRules({ runtimeSnapshot, listingResol
     prefixRule,
     restrictedTerms: selectRestrictedTerms(runtimeSnapshot, context),
     categoryRules,
+    deterministicTitlePart,
     titleStructure,
     flagReasons: selectFlagReasons(runtimeSnapshot),
     systemRules,

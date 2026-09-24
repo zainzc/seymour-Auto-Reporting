@@ -169,6 +169,45 @@ test('retains existing when candidate loses critical verified data preserved by 
   }
 });
 
+test('retains existing when candidate shrinks explicit title year range to a single year', () => {
+  const result = decide({
+    sourceResolution: {
+      ...baseInputs().sourceResolution,
+      normalized: {
+        ...baseInputs().sourceResolution.normalized,
+        fields: {
+          ...baseInputs().sourceResolution.normalized.fields,
+          existingTitle: { value: 'Engine 2.4L VIN 1 6th Digit Coupe Federal Emissions Fits 13-15 ACCORD 1585847' },
+          sku: { value: '1585847' }
+        }
+      },
+      resolved: {
+        ...baseInputs().sourceResolution.resolved,
+        fields: {
+          ...baseInputs().sourceResolution.resolved.fields,
+          title: field('Engine 2.4L VIN 1 6th Digit Coupe Federal Emissions Fits 13-15 ACCORD 1585847', 'currentEbay'),
+          sku: field('1585847', 'otherStructuredFields'),
+          year: field('2013'),
+          brandMake: field('Honda'),
+          model: field('Accord'),
+          part: field('Engine'),
+          engineDisplacement: field('2.4L'),
+          vin: field('VIN 1')
+        }
+      }
+    },
+    validationResult: {
+      ...baseInputs().validationResult,
+      validatedTitle: '2013 Honda Accord Engine 2.4L VIN 1 Coupe Federal Emissions 1585847'
+    }
+  });
+
+  assert.equal(result.decision, 'RETAIN_EXISTING');
+  assert.equal(result.reviewRequired, true);
+  assert.equal(result.reviewReason, 'Proposed title would degrade existing title');
+  assert.equal(result.degradationChecks.some(item => item.checkId === 'explicit-year-range-loss'), true);
+});
+
 test('critical data unavailable or not preserved by existing title is not required for candidate acceptance', () => {
   const inputs = baseInputs();
   const result = decide({

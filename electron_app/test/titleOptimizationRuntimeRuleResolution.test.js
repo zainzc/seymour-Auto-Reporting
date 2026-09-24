@@ -155,6 +155,7 @@ test('global disabled synonyms, unknown prefix, and no category match remain non
   assert.deepEqual(result.categoryRules, []);
   assert.equal(result.titleStructure.selected.id, 'structure-general');
   assert.equal(result.titleStructure.fallback, true);
+  assert.deepEqual(result.unresolved, []);
 });
 
 test('optional unavailable synonyms do not block, but required unavailable sections do', () => {

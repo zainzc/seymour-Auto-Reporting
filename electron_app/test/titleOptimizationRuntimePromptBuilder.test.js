@@ -148,9 +148,14 @@ test('builds deterministic prompt artifact with output contract and no giant pro
   assert.match(text, /80 characters.*hard maximum/i);
   assert.match(text, /65 characters.*target/i);
   assert.match(text, /not.*minimum/i);
+  assert.match(text, /deterministic resolved year or yearRange winner/i);
+  assert.match(text, /follow the selectedTitleStructure segments strictly/i);
+  assert.match(text, /do not keep raw fitment wording/i);
+  assert.match(text, /do not independently select a lower-priority year or range/i);
+  assert.doesNotMatch(text, /13-15/);
 });
 
-test('serializes resolved evidence, conflicts, description-only partFitment, and no-degrade context', () => {
+test('serializes resolved evidence, conflicts, title-authority partFitment, and no-degrade context', () => {
   const artifact = buildTitleOptimizationRuntimePrompt(buildInputs());
   const titlePolicy = artifact.userPayload.titlePolicy;
   const listing = artifact.userPayload.resolvedListing;
@@ -158,11 +163,11 @@ test('serializes resolved evidence, conflicts, description-only partFitment, and
   assert.equal(listing.authoritativeValues.brandMake.value, 'Honda');
   assert.equal(listing.authoritativeValues.brandMake.source, 'itemSpecifics');
   assert.equal(listing.supportingAndConflictingEvidence.brandMake.conflicts[0].value, 'Toyota');
-  assert.equal(listing.descriptionOnly.partFitment.value, 'Fits 2011 Honda Accord from donor vehicle');
-  assert.equal(listing.descriptionOnly.partFitment.titleIdentityAllowed, false);
+  assert.equal(listing.titleEvidence.partFitment.value, 'Fits 2011 Honda Accord from donor vehicle');
+  assert.equal(listing.titleEvidence.partFitment.titleIdentityAllowed, true);
   assert.equal(artifact.userPayload.existingTitle.currentTitle, '2011 Honda Door Mirror 00123');
   assert.equal(artifact.userPayload.existingTitle.finalNoDegradeDecisionInThisPhase, false);
-  assert.match(JSON.stringify(titlePolicy), /Do not use description-only partFitment/i);
+  assert.match(JSON.stringify(titlePolicy), /Part Fitment is title evidence/i);
 });
 
 test('serializes selected structure, terminology, synonyms, prefix, categories, restricted terms, flags, and system rules only', () => {
@@ -226,4 +231,97 @@ test('manual override returns title-generation bypass artifact while preserving 
   assert.equal(artifact.userPayload.descriptionPolicy.descriptionGenerationStillAllowed, true);
   assert.match(artifact.systemMessage, /do not create a replacement title/i);
   assert.doesNotMatch(artifact.systemMessage, /Use the supplied authoritative resolved values.*create a safe replacement title/i);
+});
+
+test('uses deterministic prefix replacement as the authoritative title part', () => {
+  const runtimeSnapshot = snapshot({
+    sections: {
+      ...snapshot().sections,
+      prefixRules: section([{
+        id: 'prefix-629',
+        prefix: '629',
+        approvedPartTerms: ['Wiper Switch', 'Turn Signal Switch', 'Multifunction Switch'],
+        specialTrigger: 'Column Switch',
+        specialReplacement: 'Wiper / Turn Signal / Multifunction Switch',
+        enabled: true
+      }]),
+      categoryRules: section([{
+        id: 'cat-column',
+        categoryName: 'Column Switch',
+        prefixRefs: ['629'],
+        seriesRefs: [],
+        priorityDetails: ['Wiper / Turn Signal / Multifunction'],
+        enabled: true
+      }])
+    }
+  });
+  const listingResolution = normalizeAndResolveListing({
+    runtimeSnapshot,
+    listingRecord: {
+      id: 'rec-629',
+      fields: {
+        'Item Title': '2010-2012 Subaru Outback Column Switch Assembly 1459826',
+        SKU: '1459826',
+        IPN: '629-50937A',
+        'C:Brand': 'Subaru',
+        'Category Name': 'Switches & Controls',
+        'Item Specifics': JSON.stringify({ 'C:Part': 'Column Switch Assembly' })
+      }
+    },
+    masterRecord: { fields: { 'Part Fitment': 'Fits 2010-2012 Subaru Legacy Column Switch Assembly Outback, with fog lamps' } },
+    fields: ['title', 'brandMake', 'model', 'part', 'year', 'yearRange', 'sku']
+  });
+  const applicableRules = resolveApplicableTitleOptimizationRules({ runtimeSnapshot, listingResolution });
+  const artifact = buildTitleOptimizationRuntimePrompt({ runtimeSnapshot, listingResolution, applicableRules });
+
+  assert.equal(applicableRules.deterministicTitlePart.value, 'Wiper Turn Signal Multifunction Switch');
+  assert.equal(artifact.userPayload.resolvedListing.authoritativeValues.part.value, 'Column Switch Assembly');
+  assert.equal(artifact.userPayload.resolvedListing.authoritativeValues.part.source, 'itemSpecifics');
+  assert.equal(artifact.userPayload.titlePolicy.deterministicTitlePart.value, 'Wiper Turn Signal Multifunction Switch');
+  assert.equal(artifact.userPayload.resolvedListing.authoritativeValues.yearRange.value, '2010-2012');
+});
+
+test('keeps exact 629 model ambiguity reviewable without overriding source priority', () => {
+  const inputs = buildInputs({
+    'Item Title': '2010-2012 Subaru Outback Column Switch Assembly Station Wgn LEGACY 1459826',
+    IPN: '629-50937A',
+    'C:Brand': 'Subaru',
+    'Category Name': 'Switches & Controls',
+    'Item Specifics': JSON.stringify({ Model: 'OUTBAKLEG', 'C:Part': 'Column Switch Assembly' })
+  }, {
+    sections: {
+      ...snapshot().sections,
+      prefixRules: section([{
+        id: 'prefix-629', prefix: '629', approvedPartTerms: ['Wiper Switch', 'Turn Signal Switch', 'Multifunction Switch'],
+        specialTrigger: 'Column Switch', specialReplacement: 'Wiper / Turn Signal / Multifunction Switch', enabled: true
+      }]),
+      categoryRules: section([{ id: 'cat-column', categoryName: 'Column Switch', prefixRefs: ['629'], seriesRefs: [], priorityDetails: ['Wiper / Turn Signal / Multifunction'], enabled: true }]),
+      flagReasons: section([
+        ...snapshot().sections.flagReasons.items,
+        { id: 'flag-model', reason: 'Model cannot be normalized safely', enabled: true }
+      ])
+    }
+  });
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value = 'Fits 2010-2012 Subaru Legacy Column Switch Assembly Outback, with fog lamps';
+  inputs.listingResolution.resolved.modelAmbiguity = {
+    ambiguous: true,
+    candidates: [{ value: 'OUTBAKLEG', sources: ['itemSpecifics'] }, { value: 'OUTBACK', sources: ['currentEbay'] }, { value: 'LEGACY', sources: ['currentEbay', 'partFitment'] }]
+  };
+  inputs.listingResolution.resolved.fields.model = { resolvedValue: 'OUTBAKLEG', resolvedSource: 'itemSpecifics', missing: false };
+  const artifact = buildTitleOptimizationRuntimePrompt({
+    ...inputs,
+    applicableRules: {
+      ...inputs.applicableRules,
+      deterministicTitlePart: {
+        value: 'Wiper Turn Signal Multifunction Switch',
+        source: 'prefixRule.specialReplacement',
+        ruleId: 'prefix-629'
+      }
+    }
+  });
+
+  assert.equal(artifact.userPayload.resolvedListing.authoritativeValues.model.value, 'OUTBAKLEG');
+  assert.equal(artifact.userPayload.titlePolicy.deterministicTitlePart.value, 'Wiper Turn Signal Multifunction Switch');
+  assert.equal(artifact.userPayload.resolvedListing.titleEvidence.partFitment.titleIdentityAllowed, true);
+  assert.doesNotMatch(JSON.stringify(artifact.userPayload), /derive the best title|Choose the displayed title year/);
 });
