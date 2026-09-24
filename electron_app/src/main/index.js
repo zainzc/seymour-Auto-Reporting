@@ -114,6 +114,7 @@ const { getTitleOptimizationSystemRules } = require('../services/titleOptimizati
 const { registerTitleOptimizationSystemRulesIpc } = require('./titleOptimizationSystemRulesIpc');
 const { createTitleOptimizationOverviewService } = require('../services/titleOptimizationOverviewService');
 const { registerTitleOptimizationOverviewIpc } = require('./titleOptimizationOverviewIpc');
+const { createTitleOptimizationRuntimeConfigService } = require('../services/titleOptimizationRuntimeConfigService');
 const {
   AUDIT_BASE_ID: QUICKBOOKS_AUDIT_BASE_ID,
   getProcessingBreakdownForRun,
@@ -1329,7 +1330,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     testTableName: '',
     testMaxTables: 0,
     openaiApiKey: phase4OpenAiKey,
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
     phase4BClickupListName: String(stored.phase4BClickupListName || '').trim(),
     phase4BClickupListId: phase4BListId,
@@ -1401,7 +1402,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     phase4DListingsTable: listingsTable,
     phase4DTestIpn: '',
     openaiApiKey: phase4OpenAiKey,
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
     phase4SharedMasterRows: sharedMasterContext?.masterRows,
     phase4SharedMasterByIpn: sharedMasterContext?.masterByIpn
@@ -1430,7 +1431,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     phaseSharedMasterByIpn: sharedMasterContext?.masterByIpn,
     airtableMasterTable: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
     phase6PromptCacheEnabled:
       String(stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
@@ -1477,7 +1478,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     phase74ListingsTable: listingsTable,
     airtableMasterTable: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
     phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
       stored.phase74TitleRulesPrompt
     ),
@@ -1493,6 +1494,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
     ).trim(),
     phase74TestIpns: '',
     phase74MaxListings: 0,
+    titleOptimizationRuntimeLoadSnapshot: loadTitleOptimizationRuntimeSnapshot,
     sampleLimit: Number(stored.phase74SampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20
   }, buildPostImportProgressBridge('ebaysandbox_post_import_phase74', 'Phase 7.4')));
   emitInventoryAutoChainLog(
@@ -1608,7 +1610,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
           phaseSharedMasterByIpn: sharedMasterContext?.masterByIpn,
           airtableMasterTable: masterTableName,
           openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-          openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+          openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
           openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
           phase6PromptCacheEnabled:
             String(stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
@@ -1657,7 +1659,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
           phase74ListingsTable: listingsTable,
           airtableMasterTable: masterTableName,
           openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-          openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+          openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
           phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
             stored.phase74TitleRulesPrompt
           ),
@@ -1673,6 +1675,7 @@ async function runPostEbayListingsAutomation(baseConfig = {}, hooks = {}) {
           ).trim(),
           phase74TestIpns: finalGaps.missingTitleDescriptionIpns.join(','),
           phase74MaxListings: 0,
+          titleOptimizationRuntimeLoadSnapshot: loadTitleOptimizationRuntimeSnapshot,
           sampleLimit: Number(stored.phase74SampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20
         }, buildPostImportProgressBridge('ebaysandbox_post_import_guard', `Batch Guard Phase 7.4 pass ${pass}`));
       }
@@ -1881,6 +1884,23 @@ const titleOptimizationOverviewService = createTitleOptimizationOverviewService(
   'System Rules': () => getTitleOptimizationSystemRules()
 });
 registerTitleOptimizationOverviewIpc(ipcMain, titleOptimizationOverviewService);
+
+const titleOptimizationRuntimeConfigService = createTitleOptimizationRuntimeConfigService({
+  sourceFields: () => titleOptimizationSourceFieldsRepository.load(),
+  sourcePriority: () => titleOptimizationSourcePriorityRepository.load(),
+  terminologyRules: () => titleOptimizationTerminologyRulesRepository.load(),
+  synonyms: () => titleOptimizationSynonymsRepository.load(),
+  prefixRules: () => titleOptimizationPrefixRulesRepository.load(),
+  restrictedTerms: () => titleOptimizationRestrictedTermsRepository.load(),
+  categoryRules: () => titleOptimizationCategoryRulesRepository.load(),
+  titleStructures: () => titleOptimizationTitleStructuresRepository.load(),
+  flagReasons: () => titleOptimizationFlagReasonsRepository.load(),
+  systemRules: () => getTitleOptimizationSystemRules()
+});
+
+function loadTitleOptimizationRuntimeSnapshot() {
+  return titleOptimizationRuntimeConfigService.loadSnapshot();
+}
 
 ipcMain.handle('save-db-config', async (_, config) => {
   try {
@@ -3334,7 +3354,7 @@ ipcMain.handle('phase2-get-config', async () => {
     testTableName: '',
     testMaxTables: 0,
     openaiApiKey: stored.openaiApiKey || '',
-    openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano',
+    openaiModel: stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1',
     phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
       stored.phase74TitleRulesPrompt
     ),
@@ -3952,7 +3972,7 @@ ipcMain.handle('phase4blite:get-config', async () => {
     testIpn: String(stored.phase4BTestIpn || process.env.PHASE4B_TEST_IPN || '').trim(),
     testMaxTables: 0,
     openaiApiKey: String(stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
     openaiBaseUrl: String(stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
     clickupListName: String(stored.phase4BClickupListName || '').trim(),
     clickupListId: String(
@@ -3995,7 +4015,7 @@ ipcMain.handle('phase4blite:run', async (event, options = {}) => {
       phase4BTestIpn: String(options.phase4BTestIpn || stored.phase4BTestIpn || process.env.PHASE4B_TEST_IPN || '').trim(),
       testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase4BClickupListName: String(
         options.phase4BClickupListName || stored.phase4BClickupListName || ''
@@ -4178,7 +4198,7 @@ ipcMain.handle('phase4d:get-config', async () => {
       DEFAULT_EBAY_LISTINGS_TABLE
     ),
     testIpn: String(stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
     authContext: 'inventory'
   };
 });
@@ -4223,7 +4243,7 @@ ipcMain.handle('phase4d:run', async (event, options = {}) => {
       testTableName: '',
       testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim()
     };
 
@@ -4428,7 +4448,7 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
         testTableName: '',
         testMaxTables: 0,
         openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
         openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
         phase4BClickupListName: String(
           options.phase4BClickupListName || stored.phase4BClickupListName || ''
@@ -4547,7 +4567,7 @@ ipcMain.handle('phase4pipeline:run', async (event, options = {}) => {
         ),
         phase4DTestIpn: String(options.phase4DTestIpn || stored.phase4DTestIpn || process.env.PHASE4D_TEST_IPN || '').trim(),
         openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+        openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
         openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
         phase4SharedMasterRows: sharedMasterContext?.masterRows,
         phase4SharedMasterByIpn: sharedMasterContext?.masterByIpn
@@ -4599,7 +4619,7 @@ ipcMain.handle('phase6:get-config', async () => {
       DEFAULT_EBAY_LISTINGS_TABLE
     ),
     masterTableName: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
     promptCacheEnabled:
       String(stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
       'false',
@@ -4628,7 +4648,7 @@ ipcMain.handle('phase6:run', async (event, options = {}) => {
         options.airtableMasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
       ).trim(),
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase6PromptCacheEnabled:
         String(options.phase6PromptCacheEnabled ?? stored.phase6PromptCacheEnabled ?? process.env.PHASE6_PROMPT_CACHE_ENABLED ?? 'true')
@@ -4759,7 +4779,7 @@ ipcMain.handle('phase74:get-config', async () => {
       DEFAULT_EBAY_LISTINGS_TABLE
     ),
     masterTableName: String(stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table').trim(),
-    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+    openaiModel: String(stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
     promptCacheEnabled:
       String(stored.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true').trim().toLowerCase() !==
       'false',
@@ -4793,7 +4813,7 @@ ipcMain.handle('phase74:run', async (event, options = {}) => {
         options.airtableMasterTable || stored.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
       ).trim(),
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
       phase74TitleRulesPrompt: resolvePhase74TitleRulesPrompt(
         options.phase74TitleRulesPrompt,
         stored.phase74TitleRulesPrompt
@@ -4816,6 +4836,7 @@ ipcMain.handle('phase74:run', async (event, options = {}) => {
       phase74MaxListings: Number(
         options.phase74MaxListings || stored.phase74MaxListings || process.env.PHASE74_MAX_LISTINGS || 0
       ) || 0,
+      titleOptimizationRuntimeLoadSnapshot: loadTitleOptimizationRuntimeSnapshot,
       sampleLimit: Number(options.sampleLimit || stored.phase74SampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20
     };
     const runOptions = await attachPhase5PublishedState(runOptionsBase, 'phase74:run');
@@ -5844,7 +5865,7 @@ ipcMain.handle('phase4combined:run', async (event, options = {}) => {
       testTableName: '',
       testMaxTables: 0,
       openaiApiKey: String(options.openaiApiKey || stored.openaiApiKey || process.env.OPENAI_API_KEY || '').trim(),
-      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.4-nano').trim(),
+      openaiModel: String(options.openaiModel || stored.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1').trim(),
       openaiBaseUrl: String(options.openaiBaseUrl || stored.openaiBaseUrl || process.env.OPENAI_BASE_URL || '').trim(),
       phase4BClickupListName: String(
         options.phase4BClickupListName || stored.phase4BClickupListName || ''

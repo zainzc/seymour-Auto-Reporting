@@ -101,12 +101,49 @@ function normalizeFitmentRewriteOutput(value) {
   return [`Fits ${applications[0]}`, ...applications.slice(1)].join('; ');
 }
 
+const PHASE74_TITLE_RESPONSE_FORMAT = Object.freeze({
+  type: 'json_schema',
+  json_schema: {
+    name: 'phase74_title_description_output',
+    strict: true,
+    schema: {
+      type: 'object',
+      additionalProperties: false,
+      required: [
+        'generatedTitle',
+        'generatedDescription',
+        'shortDescription',
+        'reasoningSummary',
+        'titleReviewStatus',
+        'titleReviewReason',
+        'titleReviewNotes'
+      ],
+      properties: {
+        generatedTitle: { type: 'string' },
+        generatedDescription: { type: 'string' },
+        shortDescription: { type: 'string' },
+        reasoningSummary: { type: 'string' },
+        titleReviewStatus: {
+          type: 'string',
+          enum: ['Completed', 'Needs Review', 'Skipped - Manual Override']
+        },
+        titleReviewReason: { type: 'string' },
+        titleReviewNotes: { type: 'string' }
+      }
+    }
+  }
+});
+
+function phase74TitleResponseFormat() {
+  return JSON.parse(JSON.stringify(PHASE74_TITLE_RESPONSE_FORMAT));
+}
+
 class Phase4AiEvaluatorService {
   static sharedFieldResolutionCache = new Map();
 
   constructor(config = {}) {
     this.apiKey = normalizeText(config.apiKey);
-    this.model = normalizeText(config.model || 'gpt-5.4-nano');
+    this.model = normalizeText(config.model || 'gpt-5.1');
     this.baseUrl = normalizeText(config.baseUrl || 'https://api.openai.com/v1');
     this.timeoutMs = Number(config.timeoutMs || 45000);
     this.webSearchTimeoutMs = Math.max(
@@ -129,7 +166,7 @@ class Phase4AiEvaluatorService {
       config.webSearchEnabled !== false &&
       String(process.env.PHASE4_WEB_SEARCH_ENABLED || 'true').trim().toLowerCase() !== 'false';
     this.webSearchModel = normalizeText(
-      config.webSearchModel || process.env.PHASE4_WEB_SEARCH_MODEL || this.model || 'gpt-5.4-nano'
+      config.webSearchModel || process.env.PHASE4_WEB_SEARCH_MODEL || this.model || 'gpt-5.1'
     );
     this.webSearchAllowedDomains = Array.isArray(config.webSearchAllowedDomains) && config.webSearchAllowedDomains.length > 0
       ? config.webSearchAllowedDomains.map(value => normalizeText(value)).filter(Boolean)
@@ -1180,7 +1217,7 @@ class Phase4AiEvaluatorService {
     const requestBody = {
       model: this.model,
       temperature: 0,
-      response_format: { type: 'json_object' },
+      response_format: phase74TitleResponseFormat(),
       messages: [
         {
           role: 'system',
@@ -1192,8 +1229,8 @@ class Phase4AiEvaluatorService {
             'Do not invent facts or compatibility claims.',
             'Do not include HTML.',
             'Use only fields included in input and follow the source hierarchy inside titleRulesPrompt exactly.',
-            'Do not use input.descriptionContext.partFitment or any fitment/interchange list to choose title year, make, model, side, or core part identity.',
-            'Fitment/interchange text may list multiple compatible vehicles and is description context only.',
+            'Part Fitment is allowed as verified title evidence when supplied in input.titleEvidence or source-resolved title evidence.',
+            'Do not invent facts or compatibility claims beyond the supplied evidence.',
             'Description must still be generated even when some optional item specifics are blank.',
             'Return exactly these top-level keys and no others: generatedTitle, generatedDescription, shortDescription, reasoningSummary, titleReviewStatus, titleReviewReason, titleReviewNotes.',
             'Treat titleRulesPrompt as title policy only; ignore any instruction that changes the required JSON keys or asks for title-only output.',
@@ -1209,9 +1246,8 @@ class Phase4AiEvaluatorService {
               'Use the UI-provided titleRulesPrompt as the sole source for title optimization rules.',
               'Use currentTitle/currentLegacyTitle, Item Specifics - All C values, itemSpecifics, donorVehicle, conditionsAndOptions, categoryContext, customLabelSku, condition, and conditionNote only as supplied input evidence.',
               'Resolve source conflicts using the source hierarchy in titleRulesPrompt.',
-              'For generatedTitle, do not use descriptionContext.partFitment or any fitment/interchange list to choose year, make, model, side, or part identity.',
               'Use titleEvidence as the title evidence bundle.',
-              'Use descriptionContext.partFitment only for generatedDescription or shortDescription when present.',
+              'Use descriptionContext.partFitment for descriptions, and use title-authorized fitment evidence only when it is present in titleEvidence/source-resolved title evidence.',
               'Keep description practical and buyer-readable.',
               'Return exact JSON keys: generatedTitle, generatedDescription, shortDescription, reasoningSummary, titleReviewStatus, titleReviewReason, titleReviewNotes.',
               'Do not rename the output keys.',
@@ -1276,6 +1312,119 @@ class Phase4AiEvaluatorService {
     const content = String(
       response?.data?.choices?.[0]?.message?.content || ''
     ).trim();
+    const parsed = extractJsonObject(content) || {};
+    const generatedTitle = readParsedText(parsed, ['generatedTitle', 'title', 'optimizedTitle']);
+    const generatedDescription = readParsedText(parsed, ['generatedDescription', 'description', 'aiDescription']);
+    const titleReviewStatus = readParsedText(parsed, ['titleReviewStatus', 'reviewStatus']);
+    const titleReviewReason = readParsedText(parsed, ['titleReviewReason', 'reviewReason']);
+    const titleReviewNotes = readParsedText(parsed, ['titleReviewNotes', 'reviewNotes']);
+    const recognizedKeys = Object.keys(parsed).filter(key =>
+      [
+        'generatedTitle',
+        'title',
+        'optimizedTitle',
+        'generatedDescription',
+        'description',
+        'aiDescription',
+        'shortDescription',
+        'reasoningSummary',
+        'titleReviewStatus',
+        'reviewStatus',
+        'titleReviewReason',
+        'reviewReason',
+        'titleReviewNotes',
+        'reviewNotes'
+      ].includes(key)
+    );
+    return {
+      generatedTitle,
+      generatedDescription,
+      shortDescription: normalizeText(parsed.shortDescription),
+      reasoningSummary: normalizeText(parsed.reasoningSummary),
+      titleReviewStatus,
+      titleReviewReason,
+      titleReviewNotes,
+      rawContent: content,
+      parsedKeys: Object.keys(parsed),
+      recognizedKeys
+    };
+  }
+
+  async generateTitleAndDescriptionFromRuntimePrompt(promptArtifact = {}) {
+    if (!promptArtifact || promptArtifact.kind === 'title-generation-bypass') {
+      return {
+        generatedTitle: '',
+        generatedDescription: '',
+        shortDescription: '',
+        reasoningSummary: 'Config-driven runtime prompt bypassed title generation.',
+        titleReviewStatus: 'Skipped - Manual Override',
+        titleReviewReason: 'manual_override',
+        titleReviewNotes: 'Manual override bypassed shadow title generation.',
+        rawContent: '',
+        parsedKeys: [],
+        recognizedKeys: []
+      };
+    }
+    const systemMessage = normalizeText(promptArtifact.systemMessage);
+    if (!systemMessage) throw new Error('Runtime prompt artifact is missing systemMessage.');
+
+    const promptKeySource = JSON.stringify({
+      systemMessage,
+      userPayload: promptArtifact.userPayload || {}
+    });
+    const promptDigest = crypto
+      .createHash('sha256')
+      .update(promptKeySource, 'utf8')
+      .digest('hex')
+      .slice(0, 16);
+
+    const requestBody = {
+      model: this.model,
+      temperature: 0,
+      response_format: phase74TitleResponseFormat(),
+      messages: [
+        { role: 'system', content: systemMessage },
+        { role: 'user', content: JSON.stringify(promptArtifact.userPayload || {}) }
+      ]
+    };
+
+    const shouldUsePromptCache = this.promptCacheEnabled && this.promptCacheKey;
+    if (shouldUsePromptCache) {
+      requestBody.prompt_cache_key = `${this.promptCacheKey}:runtime:${promptDigest}`;
+    }
+
+    if (this.logPhase74AiPayload) {
+      console.log(
+        `[Phase7.4 Shadow AI Payload] configVersion='${promptArtifact?.metadata?.configurationVersion || ''}' ` +
+          `promptDigest='${promptDigest}'\n${JSON.stringify(requestBody, null, 2)}`
+      );
+    }
+
+    let response;
+    try {
+      response = await retryWithBackoff(
+        async () => this.client.post('/chat/completions', requestBody),
+        {
+          maxAttempts: this.maxAttempts,
+          baseDelayMs: this.baseDelayMs
+        }
+      );
+    } catch (error) {
+      if (!shouldUsePromptCache || !isPromptCacheUnsupported(error)) {
+        throw error;
+      }
+      this.promptCacheEnabled = false;
+      delete requestBody.prompt_cache_key;
+      response = await retryWithBackoff(
+        async () => this.client.post('/chat/completions', requestBody),
+        {
+          maxAttempts: this.maxAttempts,
+          baseDelayMs: this.baseDelayMs
+        }
+      );
+    }
+
+    const content = String(response?.data?.choices?.[0]?.message?.content || '').trim();
     const parsed = extractJsonObject(content) || {};
     const generatedTitle = readParsedText(parsed, ['generatedTitle', 'title', 'optimizedTitle']);
     const generatedDescription = readParsedText(parsed, ['generatedDescription', 'description', 'aiDescription']);

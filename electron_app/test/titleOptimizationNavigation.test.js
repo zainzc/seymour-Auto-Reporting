@@ -65,3 +65,15 @@ test('all Milestone 1 workspaces use the shared 1280px desktop width', () => {
   const priorityCss = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-priority.css'), 'utf8');
   assert.match(priorityCss, /\.priority-workspace\s*\{\s*max-width:\s*1280px/);
 });
+
+test('Phase 7.4 renderer surfaces shadow comparison summaries for manual testing', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/milestone1/phase2-master-parts.html'), 'utf8');
+  const main = fs.readFileSync(path.join(__dirname, '../src/main/index.js'), 'utf8');
+
+  assert.match(html, /titleOptimizationRuntimeShadow/);
+  assert.match(html, /Phase7\.4 Shadow/);
+  assert.match(html, /legacyTitle/);
+  assert.match(html, /shadowFinalTitle/);
+  assert.match(main, /createTitleOptimizationRuntimeConfigService/);
+  assert.match(main, /titleOptimizationRuntimeLoadSnapshot:\s*loadTitleOptimizationRuntimeSnapshot/);
+});
