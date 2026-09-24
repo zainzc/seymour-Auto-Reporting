@@ -141,6 +141,23 @@ test('passes a clean valid title without corrections', () => {
   assert.deepEqual(result.violations, []);
 });
 
+test('accepts an AI-selected fitment range that contains the structured single year', () => {
+  const inputs = baseInputs({
+    candidateTitle: '2010-2012 Honda Accord Driver Side View Mirror ABS MPN-9 K24A BAYA VIN J 00123'
+  });
+  inputs.sourceResolution.normalized.titleAuthority = {
+    partFitment: {
+      value: 'Fits 2010-2012 Honda Accord',
+      titleAuthority: true
+    }
+  };
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.equal(result.violations.some(item => item.checkId === 'unsupported-information'), false);
+  assert.equal(result.validatedTitle.startsWith('2010-2012 Honda Accord'), true);
+});
+
 test('performs safe whitespace cleanup and rejects blank candidates', () => {
   const cleaned = validate({ candidateTitle: '  2011   Honda   Accord   Driver   Side View Mirror   ABS   MPN-9   K24A   BAYA   VIN J   00123  ' });
   assert.equal(cleaned.outcome, 'CLEANUP');
@@ -397,4 +414,28 @@ test('flags ambiguous model evidence instead of silently normalizing it', () => 
   assert.equal(result.outcome, 'FLAG');
   assert.equal(result.suggestedReviewReasons[0].reason, 'Model cannot be normalized safely');
   assert.equal(result.violations.some(item => item.checkId === 'model-ambiguity'), false);
+});
+
+test('accepts AI model normalization when all corroborated model names are preserved', () => {
+  const inputs = baseInputs({
+    candidateTitle: '2011 Honda Outback Legacy Driver Side View Mirror ABS MPN-9 K24A BAYA VIN J 00123'
+  });
+  inputs.sourceResolution.resolved.fields.model = resolvedField('OUTBAKLEG', 'itemSpecifics');
+  inputs.sourceResolution.resolved.modelAmbiguity = {
+    ambiguous: true,
+    candidates: [
+      { value: 'OUTBAKLEG', sources: ['itemSpecifics'] },
+      { value: 'OUTBACK', sources: ['currentEbay'] },
+      { value: 'LEGACY', sources: ['currentEbay', 'partFitment'] }
+    ]
+  };
+  inputs.ruleResolution.flagReasons = [
+    ...inputs.ruleResolution.flagReasons,
+    { id: 'flag-model', reason: 'Model cannot be normalized safely', enabled: true }
+  ];
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.equal(result.suggestedReviewReasons.some(item => item.reason === 'Model cannot be normalized safely'), false);
+  assert.equal(result.violations.some(item => item.checkId === 'unsupported-information'), false);
 });

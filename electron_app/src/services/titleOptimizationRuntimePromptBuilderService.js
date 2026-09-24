@@ -67,7 +67,7 @@ function sourceEvidence(listingResolution = {}, field) {
       priority: conflict.priority
     })),
     deterministicWinner: item.resolvedSource || null,
-    aiMayOverrideWinner: false
+    aiMayOverrideWinner: field === 'year' || field === 'model'
   };
 }
 
@@ -195,10 +195,16 @@ function stablePolicy() {
       'Accuracy and safety outrank enrichment, wording preferences, and title length targets.',
       'Obey the supplied canonical System Rules and applicable configuration.',
       'Part Fitment is supplied title evidence and may be used for title year, make, model, side, and part identity when it is the best verified source.',
-      'Use the deterministic resolved year or yearRange winner; lower-priority evidence may support diagnostics but must not override it.',
+      'AI has selection priority for the Year / Year Range segment and must derive it from all supplied year evidence, including the current title, structured year evidence, and titleEvidence.partFitment.',
+      'A single structured year is evidence, not a mandatory final title year.',
+      'If Part Fitment provides one unambiguous applicable range that includes the structured year, use the complete range.',
+      'If the evidence supports only one year, use that year.',
+      'If evidence contains multiple conflicting or unrelated ranges, preserve the safest existing year information and return Needs Review; do not choose arbitrarily.',
+      'Do not combine unrelated applications, expand beyond supplied evidence, shrink a supported range to one year, or invent years.',
+      'AI may normalize compressed model identifiers when the current title or Part Fitment corroborates the clear model names; preserve all corroborated model names in the generated title.',
       'Follow the selectedTitleStructure segments strictly; use its field and literal segment order for the generated title.',
       'Normalize raw fitment wording into the selectedTitleStructure fields; do not keep raw fitment wording when the structure provides separate year, make, model, or part segments.',
-      'Use deterministic source winners as authoritative; lower-priority evidence is context only.',
+      'Use deterministic source winners as authoritative except for the Year / Year Range segment and corroborated compressed-model normalization; lower-priority evidence is context only.',
       'Use deterministicTitlePart as the authoritative part when supplied; do not substitute a generic category part.',
       'Omit unavailable optional field segments instead of inventing values.',
       'A generated candidate must not degrade an already-better existing title; final enforcement happens later.',
@@ -238,7 +244,7 @@ function skuGuidance(applicableRules = {}) {
 }
 
 function authoritativeValues(listingResolution = {}, applicableRules = {}) {
-  const keys = ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'yearRange', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
+  const keys = ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
   const out = {};
   for (const key of keys) {
     const value = resolvedField(listingResolution, key);
@@ -248,7 +254,7 @@ function authoritativeValues(listingResolution = {}, applicableRules = {}) {
 }
 
 function sourceEvidenceMap(listingResolution = {}) {
-  const keys = ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'yearRange', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
+  const keys = ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
   const out = {};
   for (const key of keys) out[key] = sourceEvidence(listingResolution, key);
   return out;
@@ -309,7 +315,12 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
           'Create a title candidate using the selected structure and supplied evidence only.',
           'Part Fitment is title evidence when it is the best verified source.',
           'Follow the selectedTitleStructure segments strictly.',
-          'Use the resolved authoritative year or yearRange value; do not independently select a lower-priority year or range.',
+          'AI has priority to select the Year / Year Range segment from current title, structured year evidence, and titleEvidence.partFitment.',
+          'Treat a single structured year as evidence. When one unambiguous applicable Part Fitment range includes the structured year, use the complete range.',
+          'Use a single year only when the evidence supports only that year.',
+          'For multiple conflicting or unrelated ranges, preserve the safest existing year information and return Needs Review instead of choosing arbitrarily.',
+          'Do not combine unrelated applications, expand beyond supplied evidence, shrink a supported range to one year, or invent years.',
+          'For compressed model identifiers, AI may normalize from current title and titleEvidence.partFitment only when the clear model names are corroborated; preserve all corroborated model names.',
           'Do not keep raw fitment wording in generatedTitle when the selected structure has separate fields for that information.'
         ]
     },
@@ -317,7 +328,7 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
     resolvedListing: {
       recordId: listingResolution?.normalized?.recordId || null,
       authoritativeValues: authoritative,
-      missing: listingResolution?.resolved?.missing || [],
+      missing: (listingResolution?.resolved?.missing || []).filter(field => field !== 'year' && field !== 'yearRange'),
       supportingAndConflictingEvidence: evidence,
       titleEvidence: titleEvidencePayload
     },
@@ -340,7 +351,7 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
     'Return valid JSON only using the required output contract.',
     bypass
       ? 'Manual override is active: preserve title authority and do not create a replacement title.'
-      : 'Use the supplied authoritative resolved values and applicable rules to create a safe replacement title candidate.',
+      : 'Use the supplied authoritative non-year values, all supplied year evidence, and applicable rules to create a safe replacement title candidate.',
     'System Rules in the payload are mandatory.',
     '80 characters is the hard maximum; 65 characters is a target only, not a minimum.',
     'Part Fitment is allowed as verified title evidence.'

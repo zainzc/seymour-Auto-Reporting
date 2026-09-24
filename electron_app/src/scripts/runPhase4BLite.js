@@ -776,7 +776,7 @@ function parseArgs(argv = []) {
         'phase4blite_v1'
     ),
     openaiApiKey: normalizeText(getArg('--openai-api-key') || process.env.OPENAI_API_KEY || ''),
-    openaiModel: normalizeText(getArg('--openai-model') || process.env.OPENAI_MODEL || 'gpt-5.4-mini'),
+    openaiModel: normalizeText(getArg('--openai-model') || process.env.OPENAI_MODEL || 'gpt-5.1'),
     openaiBaseUrl: normalizeText(getArg('--openai-base-url') || process.env.OPENAI_BASE_URL || ''),
     phase4BClickupListId: normalizeText(
       getArg('--phase4b-clickup-list-id') || process.env.PHASE4B_CLICKUP_LIST_ID || ''
@@ -1927,7 +1927,7 @@ async function runPhase4BLite(options = {}, progressCallback = () => {}) {
       stored.phase4BClickupListId
   );
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
-  const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
+  const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.1');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
   const rulesTableName = resolveRulesLogicTableName(args.rulesTableName, args.rulesDriveFile);
   const currentInventorySheetConfig = resolveCurrentInventorySheetConfig(stored);
@@ -3596,7 +3596,7 @@ async function runPhase4DListing(options = {}, progressCallback = () => {}) {
       DEFAULT_EBAY_LISTINGS_TABLE
   );
   const openaiApiKey = normalizeText(args.openaiApiKey || stored.openaiApiKey || '');
-  const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.4-mini');
+  const openaiModel = normalizeText(args.openaiModel || stored.openaiModel || 'gpt-5.1');
   const openaiBaseUrl = normalizeText(args.openaiBaseUrl || stored.openaiBaseUrl || '');
   const globalDefaultsTable = resolveRulesLogicTableName(
     args.phase4GlobalDefaultsTable ||

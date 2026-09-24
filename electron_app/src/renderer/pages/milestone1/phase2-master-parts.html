@@ -1025,7 +1025,7 @@
                 </div>
                 <div class="form-group">
                   <label for="phase4-unified-openai-model">OpenAI Model</label>
-                  <input id="phase4-unified-openai-model" type="text" value="gpt-5.4-mini">
+                  <input id="phase4-unified-openai-model" type="text" value="gpt-5.1">
                 </div>
                 <div class="form-group">
                   <label for="phase72-drive-folder-id">Phase 7.2 Google Drive Folder (ID or URL)</label>
@@ -1186,7 +1186,7 @@
                 </div>
                 <div class="form-group">
                   <label for="openai-model">OpenAI Model</label>
-                  <input id="openai-model" type="text" value="gpt-5.4-mini">
+                  <input id="openai-model" type="text" value="gpt-5.1">
                 </div>
                 <div class="form-group">
                   <label for="phase4b-clickup-list-name">ClickUp List Name (VMF low confidence)</label>
@@ -1864,7 +1864,7 @@
     const DEFAULT_PHASE4D_DRY_RUN = false;
     const DEFAULT_PHASE4D_LISTINGS_TABLE = 'eBay Listings (API)';
     const DEFAULT_PHASE5_LISTINGS_TABLE = 'eBay Listings (API)';
-    const DEFAULT_OPENAI_MODEL = 'gpt-5.4-mini';
+    const DEFAULT_OPENAI_MODEL = 'gpt-5.1';
     const DEFAULT_PHASE4B_CLICKUP_OPEN_STATUS = 'To Do';
     const DEFAULT_PHASE4B_CLICKUP_LIST_ID = '';
     const DEFAULT_PHASE4C_CLICKUP_OPEN_STATUS = 'To Do';
@@ -5052,6 +5052,19 @@
         logLine(
           `Phase 7.4 completed. ListingsScanned=${summary.listingsScanned || 0}, Eligible=${summary.listingsEligible || 0}, AlreadyEnrichedSkipped=${summary.skippedAlreadyEnriched || 0}, PublishedSkipped=${summary.skippedAlreadyPublished || 0}, MasterMatched=${summary.masterMatched || 0}, MasterMissing=${summary.masterMissing || 0}, FieldsCreated=${summary.listingFieldsCreated || 0}, Titles=${summary.titleGenerated || 0}, Descriptions=${summary.descriptionGenerated || 0}, ShortDesc=${summary.shortDescriptionWritten || 0}, ManualSkipped=${summary.skippedManualOverride || 0}, SkippedNoChange=${summary.skippedNoChange || 0}, AIFailures=${summary.aiFailures || 0}, WriteFailures=${summary.writeFailures || 0}, TestIpnsCount=${summary.testIpnsCount || 0}, MaxListings=${summary.maxListings || 0}`
         );
+        if (summary.titleOptimizationRuntimeShadow) {
+          const shadow = summary.titleOptimizationRuntimeShadow;
+          logLine(
+            `Phase7.4 Shadow: Enabled=${shadow.enabled ? 'yes' : 'no'}, Attempted=${shadow.attempted || 0}, Completed=${shadow.completed || 0}, Bypassed=${shadow.bypassed || 0}, Failed=${shadow.failed || 0}.`
+          );
+          if (Array.isArray(shadow.samples) && shadow.samples.length > 0) {
+            shadow.samples.forEach(sample => {
+              logLine(
+                `Phase7.4 Shadow: ipn='${sample.ipn || ''}' status='${sample.status || ''}' risk='${sample.riskLevel || ''}' decision='${sample.decision || ''}' legacyTitle='${sample.legacyTitle || ''}' shadowFinalTitle='${sample.shadowFinalTitle || ''}'${sample.message ? ` message='${sample.message}'` : ''}`
+              );
+            });
+          }
+        }
         if (Array.isArray(summary.samples) && summary.samples.length > 0) {
           summary.samples.forEach(line => logLine(`Phase7.4: ${line}`));
         }

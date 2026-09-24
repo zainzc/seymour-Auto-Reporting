@@ -51,6 +51,8 @@ const REVIEW_REASON_PRECEDENCE = Object.freeze([
   'Missing verified year'
 ]);
 
+const { modelAmbiguityResolvedByCandidate } = require('./titleOptimizationRuntimeSourceResolutionService');
+
 function normalizeText(value) {
   if (Array.isArray(value)) return normalizeText(value[0]);
   if (value === null || value === undefined) return '';
@@ -85,37 +87,6 @@ function titleContains(title, value) {
   const text = normalizeKey(title);
   const wanted = normalizeKey(value);
   return Boolean(text && wanted && text.includes(wanted));
-}
-
-function expandTwoDigitYear(value) {
-  const number = Number.parseInt(value, 10);
-  if (!Number.isFinite(number)) return '';
-  return String(number <= 30 ? 2000 + number : 1900 + number);
-}
-
-function explicitYearRanges(value = '') {
-  const text = normalizeText(value);
-  const ranges = [];
-  for (const match of text.matchAll(/\b(?:fits?\s+)?(\d{2}|\d{4})\s*[-–]\s*(\d{2}|\d{4})\b/gi)) {
-    const start = match[1].length === 2 ? expandTwoDigitYear(match[1]) : match[1];
-    const end = match[2].length === 2 ? expandTwoDigitYear(match[2]) : match[2];
-    if (!start || !end || start === end) continue;
-    ranges.push({ raw: match[0], normalized: `${start}-${end}`, start, end });
-  }
-  return ranges;
-}
-
-function containsYearRange(title, range) {
-  if (!range?.start || !range?.end) return false;
-  const text = normalizeKey(title);
-  const start2 = range.start.slice(-2);
-  const end2 = range.end.slice(-2);
-  return (
-    text.includes(`${range.start}-${range.end}`) ||
-    text.includes(`${range.start} ${range.end}`) ||
-    text.includes(`${start2}-${end2}`) ||
-    text.includes(`${start2} ${end2}`)
-  );
 }
 
 function approvedFlagReasons(ruleResolution = {}) {
@@ -164,21 +135,6 @@ function degradationCheck({ checkId, status = 'PASS', severity = 'info', field =
 function criticalLossChecks({ sourceResolution, ruleResolution, candidateTitle, existing }) {
   const checks = [];
   const degradeReason = approvedReason(ruleResolution, 'Proposed title would degrade existing title');
-  for (const range of explicitYearRanges(existing)) {
-    if (containsYearRange(candidateTitle, range)) continue;
-    checks.push(degradationCheck({
-      checkId: 'explicit-year-range-loss',
-      status: 'FAIL',
-      severity: 'error',
-      field: 'yearRange',
-      existingValue: range.normalized,
-      candidateValue: null,
-      evidence: 'Existing authoritative title contained an explicit year range that the candidate did not preserve.',
-      relatedSystemRuleIds: ['SR-03', 'SR-14'],
-      flagReason: degradeReason,
-      message: `Candidate lost explicit title year range ${range.normalized}.`
-    }));
-  }
   for (const field of CRITICAL_FIELDS) {
     const value = resolvedValue(sourceResolution, field);
     if (!value) continue;
@@ -415,7 +371,10 @@ function decideTitleOptimizationRuntimeResult({ sourceResolution = {}, ruleResol
     return finish(result, DECISIONS.NEEDS_REVIEW, reasons);
   }
 
-  if (sourceResolution?.resolved?.modelAmbiguity?.ambiguous) {
+  if (
+    sourceResolution?.resolved?.modelAmbiguity?.ambiguous &&
+    !modelAmbiguityResolvedByCandidate(sourceResolution, candidate)
+  ) {
     const modelReason = approvedReason(ruleResolution, 'Model cannot be normalized safely');
     addReason(reasons, modelReason);
     result.degradationChecks.push(degradationCheck({

@@ -148,10 +148,10 @@ test('builds deterministic prompt artifact with output contract and no giant pro
   assert.match(text, /80 characters.*hard maximum/i);
   assert.match(text, /65 characters.*target/i);
   assert.match(text, /not.*minimum/i);
-  assert.match(text, /deterministic resolved year or yearRange winner/i);
+  assert.match(text, /AI has selection priority for the Year \/ Year Range segment/i);
   assert.match(text, /follow the selectedTitleStructure segments strictly/i);
   assert.match(text, /do not keep raw fitment wording/i);
-  assert.match(text, /do not independently select a lower-priority year or range/i);
+  assert.doesNotMatch(text, /resolved authoritative year or yearRange/i);
   assert.doesNotMatch(text, /13-15/);
 });
 
@@ -165,9 +165,37 @@ test('serializes resolved evidence, conflicts, title-authority partFitment, and 
   assert.equal(listing.supportingAndConflictingEvidence.brandMake.conflicts[0].value, 'Toyota');
   assert.equal(listing.titleEvidence.partFitment.value, 'Fits 2011 Honda Accord from donor vehicle');
   assert.equal(listing.titleEvidence.partFitment.titleIdentityAllowed, true);
+  assert.equal(listing.missing.includes('year'), false);
   assert.equal(artifact.userPayload.existingTitle.currentTitle, '2011 Honda Door Mirror 00123');
   assert.equal(artifact.userPayload.existingTitle.finalNoDegradeDecisionInThisPhase, false);
   assert.match(JSON.stringify(titlePolicy), /Part Fitment is title evidence/i);
+});
+
+test('treats a structured single year as evidence while AI selects a supported fitment range', () => {
+  const inputs = buildInputs();
+  inputs.listingResolution.resolved.fields.year = {
+    field: 'year',
+    candidates: [{ source: 'otherStructuredFields', value: '2011', priority: 7 }],
+    conflicts: [],
+    resolvedValue: '2011',
+    resolvedSource: 'otherStructuredFields',
+    missing: false
+  };
+
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  const listing = artifact.userPayload.resolvedListing;
+  const text = JSON.stringify(artifact.userPayload);
+
+  assert.equal(listing.authoritativeValues.year, undefined);
+  assert.equal(listing.supportingAndConflictingEvidence.year.deterministicWinner, 'otherStructuredFields');
+  assert.equal(listing.supportingAndConflictingEvidence.year.aiMayOverrideWinner, true);
+  assert.match(text, /single structured year is evidence/i);
+  assert.match(text, /one unambiguous applicable range/i);
+  assert.match(text, /includes the structured year/i);
+  assert.match(text, /use the complete range/i);
+  assert.match(text, /multiple conflicting or unrelated ranges/i);
+  assert.match(text, /Needs Review/i);
+  assert.match(text, /do not combine unrelated applications/i);
 });
 
 test('serializes selected structure, terminology, synonyms, prefix, categories, restricted terms, flags, and system rules only', () => {
@@ -278,7 +306,11 @@ test('uses deterministic prefix replacement as the authoritative title part', ()
   assert.equal(artifact.userPayload.resolvedListing.authoritativeValues.part.value, 'Column Switch Assembly');
   assert.equal(artifact.userPayload.resolvedListing.authoritativeValues.part.source, 'itemSpecifics');
   assert.equal(artifact.userPayload.titlePolicy.deterministicTitlePart.value, 'Wiper Turn Signal Multifunction Switch');
-  assert.equal(artifact.userPayload.resolvedListing.authoritativeValues.yearRange.value, '2010-2012');
+  assert.equal(artifact.userPayload.resolvedListing.authoritativeValues.yearRange, undefined);
+  assert.equal(
+    artifact.userPayload.resolvedListing.titleEvidence.partFitment.value,
+    'Fits 2010-2012 Subaru Legacy Column Switch Assembly Outback, with fog lamps'
+  );
 });
 
 test('keeps exact 629 model ambiguity reviewable without overriding source priority', () => {
@@ -321,7 +353,10 @@ test('keeps exact 629 model ambiguity reviewable without overriding source prior
   });
 
   assert.equal(artifact.userPayload.resolvedListing.authoritativeValues.model.value, 'OUTBAKLEG');
+  assert.equal(artifact.userPayload.resolvedListing.supportingAndConflictingEvidence.model.aiMayOverrideWinner, true);
   assert.equal(artifact.userPayload.titlePolicy.deterministicTitlePart.value, 'Wiper Turn Signal Multifunction Switch');
   assert.equal(artifact.userPayload.resolvedListing.titleEvidence.partFitment.titleIdentityAllowed, true);
+  assert.match(JSON.stringify(artifact.userPayload.titlePolicy), /compressed model identifiers/i);
+  assert.match(JSON.stringify(artifact.userPayload.titlePolicy), /preserve all corroborated model names/i);
   assert.doesNotMatch(JSON.stringify(artifact.userPayload), /derive the best title|Choose the displayed title year/);
 });

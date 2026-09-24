@@ -151,7 +151,7 @@ test('derives title-safe vehicle and part details from mapped listing evidence',
     }
   });
 
-  assert.equal(result.resolved.fields.yearRange.resolvedValue, '2011-2015');
+  assert.equal(result.resolved.fields.yearRange, undefined);
   assert.equal(result.resolved.fields.model.resolvedValue, 'ELANTRA');
   assert.equal(result.resolved.fields.side.resolvedValue, 'Passenger Right RH');
   assert.equal(result.resolved.fields.componentType.resolvedValue, 'Retractor');
@@ -194,13 +194,13 @@ test('derives donor values from mapped HTML description source', () => {
     })
   });
 
-  assert.equal(result.resolved.fields.yearRange.missing, true);
+  assert.equal(result.resolved.fields.yearRange, undefined);
   assert.equal(result.resolved.fields.year.resolvedValue, '2009');
   assert.equal(result.resolved.fields.model.resolvedValue, 'SPECTRA');
   assert.equal(result.resolved.fields.side.resolvedValue, 'Driver Left LH');
 });
 
-test('resolves two-digit partFitment ranges when title does not contain a year range', () => {
+test('keeps two-digit partFitment ranges as raw AI evidence without resolving yearRange', () => {
   const result = normalizeAndResolveListing({
     runtimeSnapshot: snapshot(),
     listingRecord: listing({
@@ -218,12 +218,12 @@ test('resolves two-digit partFitment ranges when title does not contain a year r
     }
   });
 
-  assert.equal(result.resolved.fields.yearRange.resolvedValue, '2005-2009');
+  assert.equal(result.resolved.fields.yearRange, undefined);
   assert.equal(result.normalized.titleAuthority.partFitment.value, 'SPECTRA 04 Front; 2.0L (4 cylinder), L.; SPECTRA 05-09 Front; Sdn, L.; SPECTRA 05-09 Rear; SW, L.');
   assert.equal(result.normalized.titleAuthority.partFitment.titleAuthority, true);
 });
 
-test('resolves full-year partFitment ranges and treats equivalent side labels as non-conflicting', () => {
+test('keeps full-year partFitment ranges as raw AI evidence and treats equivalent side labels as non-conflicting', () => {
   const result = normalizeAndResolveListing({
     runtimeSnapshot: snapshot(),
     listingRecord: listing({
@@ -247,7 +247,7 @@ test('resolves full-year partFitment ranges and treats equivalent side labels as
     }
   });
 
-  assert.equal(result.resolved.fields.yearRange.resolvedValue, '2005-2009');
+  assert.equal(result.resolved.fields.yearRange, undefined);
   assert.equal(result.normalized.titleAuthority.partFitment.value.includes('2005-2009 Kia Spectra'), true);
   assert.equal(result.resolved.fields.side.resolvedValue, 'Driver/Left');
   assert.equal(result.resolved.fields.side.conflict, false);
@@ -279,6 +279,27 @@ test('uses fitment and category cleanup for missing make and cleaner part names'
   assert.equal(result.resolved.fields.brandMake.resolvedValue, 'Hyundai');
   assert.equal(result.resolved.fields.brandMake.resolvedSource, 'partFitment');
   assert.equal(result.resolved.fields.part.resolvedValue, 'Seat Belt');
+});
+
+test('does not treat other compatible Part Fitment models as listing-model ambiguity', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': '2012 Chevrolet Cruze Throttle Body 1.8L 1584723',
+      SKU: '1584723',
+      IPN: '337-02220',
+      'C:Brand': 'CHEVROLET',
+      'Current eBay Fields': JSON.stringify({ donorModel: 'CRUZE', donorYear: '2012' })
+    }),
+    masterRecord: {
+      fields: {
+        'Part Fitment': 'Fits 2009-2011 Chevrolet Aveo; 2011-2016 Chevrolet Cruze; 2012-2018 Chevrolet Sonic; 2013-2014 Chevrolet Trax'
+      }
+    }
+  });
+
+  assert.equal(result.resolved.fields.model.resolvedValue, 'CRUZE');
+  assert.equal(result.resolved.modelAmbiguity.ambiguous, false);
 });
 
 test('derives common placement and feature abbreviations from donor notes', () => {

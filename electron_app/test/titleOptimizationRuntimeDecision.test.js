@@ -169,7 +169,7 @@ test('retains existing when candidate loses critical verified data preserved by 
   }
 });
 
-test('retains existing when candidate shrinks explicit title year range to a single year', () => {
+test('accepts AI year decision even when existing title contains a wider range', () => {
   const result = decide({
     sourceResolution: {
       ...baseInputs().sourceResolution,
@@ -202,10 +202,10 @@ test('retains existing when candidate shrinks explicit title year range to a sin
     }
   });
 
-  assert.equal(result.decision, 'RETAIN_EXISTING');
-  assert.equal(result.reviewRequired, true);
-  assert.equal(result.reviewReason, 'Proposed title would degrade existing title');
-  assert.equal(result.degradationChecks.some(item => item.checkId === 'explicit-year-range-loss'), true);
+  assert.equal(result.decision, 'ACCEPT_CANDIDATE');
+  assert.equal(result.reviewRequired, false);
+  assert.equal(result.finalTitle, '2013 Honda Accord Engine 2.4L VIN 1 Coupe Federal Emissions 1585847');
+  assert.equal(result.degradationChecks.some(item => item.checkId === 'explicit-year-range-loss'), false);
 });
 
 test('critical data unavailable or not preserved by existing title is not required for candidate acceptance', () => {
@@ -439,6 +439,29 @@ test('handles source conflicts conservatively without rejecting irrelevant lower
   });
   assert.equal(material.decision, 'NEEDS_REVIEW');
   assert.equal(material.reviewReason, 'Conflicting source data');
+});
+
+test('accepts AI-normalized model names corroborated by current title and Part Fitment', () => {
+  const inputs = baseInputs();
+  const title = '2011 Honda Outback Legacy Driver Side Mirror ABS K24A BAYA AWD 00123';
+  inputs.sourceResolution.normalized.fields.existingTitle = { value: title };
+  inputs.sourceResolution.resolved.fields.title = field(title, 'currentEbay');
+  inputs.sourceResolution.resolved.fields.model = field('OUTBAKLEG', 'itemSpecifics');
+  inputs.sourceResolution.resolved.modelAmbiguity = {
+    ambiguous: true,
+    candidates: [
+      { value: 'OUTBAKLEG', sources: ['itemSpecifics'] },
+      { value: 'OUTBACK', sources: ['currentEbay'] },
+      { value: 'LEGACY', sources: ['currentEbay', 'partFitment'] }
+    ]
+  };
+  inputs.ruleResolution.flagReasons.push({ id: 'flag-model', reason: 'Model cannot be normalized safely', enabled: true });
+  inputs.validationResult.validatedTitle = title;
+
+  const result = decideTitleOptimizationRuntimeResult(inputs);
+
+  assert.equal(result.decision, 'ACCEPT_CANDIDATE');
+  assert.equal(result.reviewRequired, false);
 });
 
 test('is deterministic and does not mutate Phase A/B/C/D/E inputs', () => {

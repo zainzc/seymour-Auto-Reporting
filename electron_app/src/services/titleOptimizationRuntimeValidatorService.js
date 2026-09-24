@@ -17,6 +17,8 @@ const VALIDATION_ORDER = Object.freeze([
   'final-invariant-recheck'
 ]);
 
+const { modelAmbiguityResolvedByCandidate } = require('./titleOptimizationRuntimeSourceResolutionService');
+
 function normalizeText(value) {
   if (Array.isArray(value)) return normalizeText(value[0]);
   if (value === null || value === undefined) return '';
@@ -316,8 +318,9 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
     }));
   }
 
-  for (const field of ['brandMake', 'model', 'year']) {
+  for (const field of ['brandMake', 'model']) {
     const value = resolvedValue(sourceResolution, field);
+    if (field === 'model' && modelAmbiguityResolvedByCandidate(sourceResolution, title)) continue;
     if (candidateHasDifferentIdentity(title, value)) {
       append(checkRecord({
         checkId: 'unsupported-information',
@@ -330,7 +333,10 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
     }
   }
 
-  if (sourceResolution?.resolved?.modelAmbiguity?.ambiguous) {
+  if (
+    sourceResolution?.resolved?.modelAmbiguity?.ambiguous &&
+    !modelAmbiguityResolvedByCandidate(sourceResolution, title)
+  ) {
     const flag = approvedFlag(ruleResolution, 'Model cannot be normalized safely');
     uniquePush(suggestedReviewReasons, flag);
     append(checkRecord({

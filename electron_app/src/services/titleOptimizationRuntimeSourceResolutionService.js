@@ -245,25 +245,6 @@ function deriveMakeFromFitment(value = '', model = '', year = '') {
   return matching?.make || '';
 }
 
-function deriveYearRangeFromFitment(value = '') {
-  const text = normalizeText(value);
-  const ranges = [];
-  const pattern = /\b((?:19|20)\d{2})\s*[-–]\s*((?:19|20)\d{2})\b/g;
-  let match;
-  while ((match = pattern.exec(text)) !== null) {
-    const range = `${match[1]}-${match[2]}`;
-    if (!ranges.includes(range)) ranges.push(range);
-  }
-  const shortPattern = /\b(\d{2})\s*[-–]\s*(\d{2})\b/g;
-  while ((match = shortPattern.exec(text)) !== null) {
-    const start = expandTwoDigitYear(match[1]);
-    const end = expandTwoDigitYear(match[2]);
-    const range = `${start}-${end}`;
-    if (!ranges.includes(range)) ranges.push(range);
-  }
-  return ranges[0] || '';
-}
-
 function deriveModelFromTitle(value = '') {
   const text = normalizeText(value);
   const fitMatch = text.match(/\bFits\s+\d{2}\s*-\s*\d{2}\s+([A-Z][A-Z0-9-]{2,})\b/i);
@@ -271,10 +252,11 @@ function deriveModelFromTitle(value = '') {
   return '';
 }
 
-function modelEvidenceCandidates({ itemSpecifics = {}, existingTitle = '', partFitment = '' } = {}) {
+function modelEvidenceCandidates({ itemSpecifics = {}, existingTitle = '', partFitment = '', donorModel = '' } = {}) {
   const values = [];
   const itemSpecificModel = itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.model);
   if (itemSpecificModel) values.push({ value: itemSpecificModel, source: 'itemSpecifics' });
+  if (donorModel) values.push({ value: donorModel, source: 'currentEbay' });
   const titleModels = normalizeText(existingTitle).match(/\b(OUTBACK|LEGACY|OUTBAKLEG)\b/gi) || [];
   for (const value of titleModels) values.push({ value: value.toUpperCase(), source: 'currentEbay' });
   for (const application of parseFitmentApplications(partFitment)) {
@@ -294,7 +276,22 @@ function modelAmbiguity(candidates = []) {
     const entry = unique.find(item => normalizeCompare(item.value) === normalizeCompare(candidate.value));
     if (entry && !entry.sources.includes(candidate.source)) entry.sources.push(candidate.source);
   }
-  return { ambiguous: unique.length > 1, candidates: unique };
+  const listingIdentityValues = unique.filter(item =>
+    item.sources.some(source => source === 'itemSpecifics' || source === 'currentEbay')
+  );
+  return { ambiguous: listingIdentityValues.length > 1, candidates: unique };
+}
+
+function modelAmbiguityResolvedByCandidate(sourceResolution = {}, candidateTitle = '') {
+  const ambiguity = sourceResolution?.resolved?.modelAmbiguity;
+  if (!ambiguity?.ambiguous) return true;
+  const title = normalizeCompare(candidateTitle);
+  const corroborated = (ambiguity.candidates || [])
+    .filter(candidate => (candidate.sources || []).some(source => source === 'currentEbay' || source === 'partFitment'))
+    .map(candidate => normalizeText(candidate.value))
+    .filter(Boolean);
+  const unique = [...new Set(corroborated.map(value => normalizeCompare(value)))];
+  return unique.length >= 2 && unique.every(value => title.includes(value));
 }
 
 function deriveSideFromText(value = '') {
@@ -552,13 +549,6 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
     partFitment,
     { logicalKey: 'brandMake' }
   );
-  out.derived.yearRangeFromFitment = derivedEvidence(
-    deriveYearRangeFromFitment(partFitment),
-    'partFitment',
-    'Part Fitment',
-    partFitment,
-    { logicalKey: 'yearRange' }
-  );
   out.derived.modelFromCurrentTitle = derivedEvidence(
     deriveModelFromTitle(existingTitle || legacyTitle),
     'currentEbay',
@@ -569,7 +559,12 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
   out.derived.modelFromDonor = derivedEvidence(donorModel, 'currentEbay', 'Current eBay Fields', currentEbayFields, {
     logicalKey: 'model'
   });
-  out.derived.modelAmbiguity = modelAmbiguity(modelEvidenceCandidates({ itemSpecifics, existingTitle, partFitment }));
+  out.derived.modelAmbiguity = modelAmbiguity(modelEvidenceCandidates({
+    itemSpecifics,
+    existingTitle,
+    partFitment,
+    donorModel
+  }));
   out.derived.yearFromDonor = derivedEvidence(donorYear, 'currentEbay', 'Current eBay Fields', currentEbayFields, {
     logicalKey: 'year'
   });
@@ -690,10 +685,6 @@ function candidatesForField(field, normalized, priorities) {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.year), normalized.structured.itemSpecifics);
     add(out, 'otherStructuredFields', normalized.fields.year?.value || normalized.fields.structuredYear?.value, normalized.fields.year || normalized.fields.structuredYear);
     add(out, 'currentEbay', normalized.derived.yearFromDonor?.value, normalized.derived.yearFromDonor);
-  } else if (field === 'yearRange') {
-    add(out, 'partFitment', normalized.derived.yearRangeFromFitment?.value, normalized.derived.yearRangeFromFitment);
-    add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.year), normalized.structured.itemSpecifics);
-    add(out, 'otherStructuredFields', normalized.fields.year?.value || normalized.fields.structuredYear?.value, normalized.fields.year || normalized.fields.structuredYear);
   } else if (field === 'model') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.model), normalized.structured.itemSpecifics);
     add(out, 'currentEbay', normalized.derived.modelFromDonor?.value, normalized.derived.modelFromDonor);
@@ -757,8 +748,8 @@ function resolveField(field, candidates = []) {
 function resolveSourcePriority({ runtimeSnapshot, normalizedListing, fields = [] } = {}) {
   const priorities = activePriorityRows(runtimeSnapshot);
   const requested = Array.isArray(fields) && fields.length
-    ? [...new Set([...fields, 'yearRange'])]
-    : ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'yearRange', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
+    ? [...new Set(fields.filter(field => field !== 'yearRange'))]
+    : ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
   const resolvedFields = {};
   for (const field of requested) {
     resolvedFields[field] = resolveField(field, candidatesForField(field, normalizedListing, priorities));
@@ -791,5 +782,6 @@ module.exports = {
   deriveIpnPrefix,
   normalizeListingEvidence,
   resolveSourcePriority,
-  normalizeAndResolveListing
+  normalizeAndResolveListing,
+  modelAmbiguityResolvedByCandidate
 };

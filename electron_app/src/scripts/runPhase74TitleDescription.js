@@ -18,7 +18,7 @@ function parseArgs(argv = []) {
       getArg('--master-table') || process.env.AIRTABLE_MASTER_TABLE || 'Master Parts Table'
     ),
     openaiApiKey: normalizeText(getArg('--openai-api-key') || process.env.OPENAI_API_KEY || ''),
-    openaiModel: normalizeText(getArg('--openai-model') || process.env.OPENAI_MODEL || 'gpt-4o-mini'),
+    openaiModel: normalizeText(getArg('--openai-model') || process.env.OPENAI_MODEL || 'gpt-5.1'),
     openaiBaseUrl: normalizeText(getArg('--openai-base-url') || process.env.OPENAI_BASE_URL || ''),
     phase74PromptCacheEnabled:
       normalizeText(getArg('--prompt-cache-enabled') || process.env.PHASE74_PROMPT_CACHE_ENABLED || 'true').toLowerCase() !==

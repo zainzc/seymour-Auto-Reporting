@@ -836,7 +836,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   const listingsTable = normalizeText(options.phase74ListingsTable || process.env.PHASE74_LISTINGS_TABLE || DEFAULT_LISTINGS_TABLE);
   const masterTable = normalizeText(options.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || DEFAULT_MASTER_TABLE);
   const openaiApiKey = normalizeText(options.openaiApiKey || process.env.OPENAI_API_KEY || '');
-  const openaiModel = normalizeText(options.openaiModel || process.env.OPENAI_MODEL || 'gpt-4o-mini');
+  const openaiModel = normalizeText(options.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1');
   const phase74TitleRulesPrompt = normalizeText(options.phase74TitleRulesPrompt || '');
   const openaiBaseUrl = normalizeText(options.openaiBaseUrl || process.env.OPENAI_BASE_URL || '');
   const promptCacheEnabled =
@@ -1245,6 +1245,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
             fields: ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku']
           },
           dependencies: {
+            loadSnapshot: options.titleOptimizationRuntimeLoadSnapshot,
             executeAi: ({ promptArtifact }) => aiService.generateTitleAndDescriptionFromRuntimePrompt(promptArtifact)
           }
         });
@@ -1259,7 +1260,10 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
             riskLevel: shadowResult.comparison?.riskLevel || null,
             decision: shadowResult.shadow?.decision?.decision || null,
             legacyTitle: shadowResult.legacy?.title || '',
-            shadowFinalTitle: shadowResult.shadow?.decision?.finalTitle || ''
+            shadowFinalTitle: shadowResult.shadow?.decision?.finalTitle || '',
+            message: Array.isArray(shadowResult.errors)
+              ? shadowResult.errors.map(error => error?.message).filter(Boolean).join('; ')
+              : ''
           });
         }
       } catch (error) {
