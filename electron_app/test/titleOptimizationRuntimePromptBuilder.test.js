@@ -11,7 +11,7 @@ function section(items, extras = {}) {
 
 function snapshot(overrides = {}) {
   const base = {
-    mode: 'shadow-only',
+    mode: 'authoritative',
     runtimeReady: true,
     blockingSections: [],
     metadata: { configurationVersion: 'v5' },
@@ -130,7 +130,7 @@ test('builds deterministic prompt artifact with output contract and no giant pro
   const second = buildTitleOptimizationRuntimePrompt({ ...inputs, phase74TitleRulesPrompt: 'DIFFERENT GIANT PROMPT' });
 
   assert.deepEqual(second, first);
-  assert.equal(first.runtimeMode, 'shadow-only');
+  assert.equal(first.runtimeMode, 'authoritative');
   assert.equal(first.metadata.configurationVersion, 'v5');
   assert.equal(first.metadata.selectedStructureId, 'structure-custom-mirror');
   assert.deepEqual(first.metadata.applicableTerminologyRuleIds, ['term-10']);
@@ -171,6 +171,57 @@ test('serializes resolved evidence, conflicts, title-authority partFitment, and 
   assert.match(JSON.stringify(titlePolicy), /Part Fitment is title evidence/i);
 });
 
+test('sends title-year fallback and general AI redundancy instructions', () => {
+  const inputs = buildInputs();
+  inputs.listingResolution.normalized.titleAuthority = {
+    partFitment: { value: null, titleAuthority: true },
+    titleYearFallback: { value: '2013-2015', source: 'currentEbay', fallbackOnly: true },
+    importantExistingTitleDetails: [
+      { key: 'bodyStyle', value: 'Coupe', acceptedValues: ['Coupe'] },
+      { key: 'emissions', value: 'Federal Emissions', acceptedValues: ['Federal Emissions', 'Federal'] }
+    ]
+  };
+
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  const evidence = artifact.userPayload.resolvedListing.titleEvidence;
+  const text = JSON.stringify(artifact.userPayload);
+
+  assert.equal(evidence.partFitment.value, null);
+  assert.equal(evidence.currentTitleYearFallback.value, '2013-2015');
+  assert.equal(evidence.currentTitleYearFallback.useOnlyWhenPartFitmentUnavailable, true);
+  assert.equal(evidence.importantExistingTitleDetails, undefined);
+  assert.match(text, /Keep useful verified details when the title fits within 80 characters/);
+  assert.match(text, /Do not rely on a fixed list of protected words/);
+  assert.match(text, /exact field and literal segment order/);
+  assert.match(text, /final title audit against the selected Part Fitment application/);
+  assert.match(text, /same concept more than once/);
+  assert.match(text, /recount all characters including spaces and the final SKU/);
+  assert.match(text, /redundant part wording remains while a useful distinguishing qualifier was omitted/);
+  assert.match(text, /Never wrap an evidence citation in quotation marks/);
+  assert.match(text, /remaining characters for the highest-impact useful qualifiers/);
+  assert.equal(artifact.userPayload.outputContract.requiredJsonKeys.includes('detailAssessment'), false);
+});
+
+test('sends every resolved client-critical fitment field as authoritative evidence', () => {
+  const inputs = buildInputs();
+  const values = {
+    engineDisplacement: '2.4L', engineCode: 'K24W1', transmissionCode: 'CVT2',
+    drivetrain: 'FWD', transmissionSpeedType: '6-Speed', vinIdentifier: 'VIN 1',
+    illumination: 'Illuminated', paintCode: 'NH731P', trim: 'EX-L', lightingTechnology: 'LED'
+  };
+  for (const [field, value] of Object.entries(values)) {
+    inputs.listingResolution.resolved.fields[field] = {
+      field, resolvedValue: value, resolvedSource: 'itemSpecifics', candidates: [], conflicts: [], missing: false
+    };
+  }
+
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  for (const [field, value] of Object.entries(values)) {
+    assert.equal(artifact.userPayload.resolvedListing.authoritativeValues[field].value, value);
+    assert.equal(artifact.userPayload.resolvedListing.supportingAndConflictingEvidence[field].deterministicWinner, 'itemSpecifics');
+  }
+});
+
 test('treats a structured single year as evidence while AI selects a supported fitment range', () => {
   const inputs = buildInputs();
   inputs.listingResolution.resolved.fields.year = {
@@ -196,6 +247,49 @@ test('treats a structured single year as evidence while AI selects a supported f
   assert.match(text, /multiple conflicting or unrelated ranges/i);
   assert.match(text, /Needs Review/i);
   assert.match(text, /do not combine unrelated applications/i);
+});
+
+test('preselects only title fitment applications containing the trusted listing year', () => {
+  const inputs = buildInputs();
+  inputs.listingResolution.resolved.fields.year = {
+    field: 'year', candidates: [], conflicts: [], resolvedValue: '2005',
+    resolvedSource: 'otherStructuredFields', missing: false
+  };
+  inputs.listingResolution.resolved.fields.brandMake = {
+    field: 'brandMake', candidates: [], conflicts: [], resolvedValue: 'Hyundai',
+    resolvedSource: 'itemSpecifics', missing: false
+  };
+  inputs.listingResolution.resolved.fields.model = {
+    field: 'model', candidates: [], conflicts: [], resolvedValue: 'Accent',
+    resolvedSource: 'itemSpecifics', missing: false
+  };
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    'Fits 2001-2005 Hyundai Accent throttle body 1.6L DOHC; 2006 Hyundai Accent throttle body 1.6L DOHC Canada market hatchback 3-door; 2006 Hyundai Accent throttle body 1.6L DOHC Canada market hatchback 5-door';
+
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  const selection = artifact.userPayload.resolvedListing.titleFitmentCandidates;
+
+  assert.equal(selection.status, 'FILTERED_BY_TRUSTED_DATA');
+  assert.equal(selection.candidates.length, 1);
+  assert.equal(selection.candidates[0].id, 'title-fitment-001');
+  assert.match(selection.candidates[0].evidence, /2001-2005 Hyundai Accent/);
+  assert.doesNotMatch(JSON.stringify(selection.candidates), /2006 Hyundai Accent/);
+});
+
+test('keeps separate fitment candidates when trusted data cannot safely narrow them', () => {
+  const inputs = buildInputs();
+  inputs.listingResolution.resolved.fields.year = {
+    field: 'year', candidates: [], conflicts: [], resolvedValue: null,
+    resolvedSource: null, missing: true
+  };
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    'Fits 2001-2005 Hyundai Accent throttle body; 2006 Hyundai Accent hatchback 3-door';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+
+  assert.equal(selection.status, 'UNFILTERED_INSUFFICIENT_TRUSTED_DATA');
+  assert.equal(selection.candidates.length, 2);
+  assert.notEqual(selection.candidates[0].id, selection.candidates[1].id);
 });
 
 test('serializes selected structure, terminology, synonyms, prefix, categories, restricted terms, flags, and system rules only', () => {
@@ -248,7 +342,7 @@ test('includes 257 prefix rule with SR-06 context without deterministic SKU rewr
 
 test('manual override returns title-generation bypass artifact while preserving description boundary', () => {
   const artifact = buildTitleOptimizationRuntimePrompt(buildInputs({
-    'Title Override Status': 'Manual Override',
+    'Title Override Status': 'Manually Approved',
     'Manual Override Title': 'Approved Manual Title'
   }));
 
@@ -359,4 +453,20 @@ test('keeps exact 629 model ambiguity reviewable without overriding source prior
   assert.match(JSON.stringify(artifact.userPayload.titlePolicy), /compressed model identifiers/i);
   assert.match(JSON.stringify(artifact.userPayload.titlePolicy), /preserve all corroborated model names/i);
   assert.doesNotMatch(JSON.stringify(artifact.userPayload), /derive the best title|Choose the displayed title year/);
+});
+
+test('AI payload marks category details pending and supplies auditable evidence sources', () => {
+  const inputs = buildInputs();
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  const categoryDetails = artifact.userPayload.titlePolicy.categoryRules.flatMap(rule => rule.priorityDetails);
+  const evidenceSources = artifact.userPayload.resolvedListing.categoryPriorityEvidenceSources;
+
+  assert.equal(categoryDetails.every(item => item.verificationStatus === 'pending'), true);
+  assert.equal(categoryDetails.every(item => typeof item.detail === 'string'), true);
+  assert.equal(evidenceSources.some(item => item.source === 'Part Fitment'), true);
+  assert.equal(evidenceSources.some(item => item.source.startsWith('Item Specifics:')), true);
+  assert.equal(evidenceSources.every(item => /^evidence-\d{3}$/.test(item.id)), true);
+  assert.equal(new Set(evidenceSources.map(item => item.id)).size, evidenceSources.length);
+  assert.match(JSON.stringify(artifact.userPayload.titlePolicy.instructions), /only verified Category Rule priority details/i);
+  assert.match(JSON.stringify(artifact.userPayload.outputContract), /categoryPriorityDetails/);
 });

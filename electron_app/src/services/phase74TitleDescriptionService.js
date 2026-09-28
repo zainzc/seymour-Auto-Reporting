@@ -3,7 +3,7 @@ const AirtableSchemaService = require('./airtableSchemaService');
 const Phase4AiEvaluatorService = require('./phase4AiEvaluatorService');
 const { asIdentitySet, isPublishedIdentity } = require('./phase5IdentityService');
 const { isManualOverrideForField: isManualOverrideFromGovernance } = require('./phase5GovernanceService');
-const { runTitleOptimizationRuntimeShadow } = require('./titleOptimizationRuntimeShadowService');
+const { runTitleOptimizationRuntime } = require('./titleOptimizationRuntimeService');
 
 const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API)';
 const DEFAULT_MASTER_TABLE = 'Master Parts Table';
@@ -837,12 +837,11 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   const masterTable = normalizeText(options.airtableMasterTable || process.env.AIRTABLE_MASTER_TABLE || DEFAULT_MASTER_TABLE);
   const openaiApiKey = normalizeText(options.openaiApiKey || process.env.OPENAI_API_KEY || '');
   const openaiModel = normalizeText(options.openaiModel || process.env.OPENAI_MODEL || 'gpt-5.1');
-  const phase74TitleRulesPrompt = normalizeText(options.phase74TitleRulesPrompt || '');
   const openaiBaseUrl = normalizeText(options.openaiBaseUrl || process.env.OPENAI_BASE_URL || '');
   const promptCacheEnabled =
     normalizeText(options.phase74PromptCacheEnabled ?? process.env.PHASE74_PROMPT_CACHE_ENABLED ?? 'true').toLowerCase() !==
     'false';
-  const logAiPayload = parseBoolean(options.phase74LogAiPayload ?? process.env.PHASE74_LOG_AI_PAYLOAD ?? 'false', false);
+  const logAiPayload = parseBoolean(options.phase74LogAiPayload ?? process.env.PHASE74_LOG_AI_PAYLOAD ?? 'true', true);
   const promptCacheKey = normalizeText(
     options.phase74PromptCacheKey ||
       process.env.PHASE74_PROMPT_CACHE_KEY ||
@@ -853,17 +852,10 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   const testIpnSet = new Set(testIpnList);
   const maxListings = Math.max(0, Number(options.phase74MaxListings || process.env.PHASE74_MAX_LISTINGS || 0) || 0);
   const sampleLimit = Math.max(5, Number(options.sampleLimit || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20);
-  const titleOptimizationRuntimeShadowEnabled = parseBoolean(
-    options.titleOptimizationRuntimeShadowEnabled ?? process.env.TITLE_OPTIMIZATION_RUNTIME_SHADOW_ENABLED ?? 'false',
-    false
-  );
 
   if (!airtableToken) throw new Error('Missing AIRTABLE_TOKEN.');
   if (!airtableBaseId) throw new Error('Missing AIRTABLE_BASE_ID.');
   if (!openaiApiKey) throw new Error('Missing OpenAI API key for Phase 7.4.');
-  if (!phase74TitleRulesPrompt) {
-    throw new Error('Missing Phase 7.4 title rules prompt. Paste and save the client-approved prompt in the UI before running.');
-  }
 
   const airtableService = new AirtableService({
     token: airtableToken,
@@ -912,8 +904,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     writesAttempted: 0,
     writesSucceeded: 0,
     writeFailures: 0,
-    titleOptimizationRuntimeShadow: {
-      enabled: titleOptimizationRuntimeShadowEnabled,
+    titleOptimizationRuntime: {
       attempted: 0,
       completed: 0,
       bypassed: 0,
@@ -977,15 +968,6 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     selectFields.push(`${LISTING_SHORT_DESCRIPTION_FIELD} Override`);
     selectFields.push(`${LISTING_SHORT_DESCRIPTION_FIELD} Locked`);
     selectFields.push(`${LISTING_SHORT_DESCRIPTION_FIELD} Manual`);
-  }
-
-  if (phase74TitleRulesPrompt) {
-    emitProgress(progressCallback, {
-      stage: 'phase74_prepare',
-      percent: 8,
-      counts: summary,
-      message: `Using UI-provided Phase 7.4 title rules prompt (chars=${phase74TitleRulesPrompt.length}).`
-    });
   }
 
   if (logAiPayload) {
@@ -1156,130 +1138,83 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       message: `Generating title/description for listing ${i + 1}/${rowsForGeneration.length} (IPN '${ipn}')...`
     });
 
-    let generated;
+    summary.titleOptimizationRuntime.attempted += 1;
+    let runtimeResult;
     try {
-      generated = await aiService.generateTitleAndDescription({
-        ipn,
-        categoryContext,
-        conditionsAndOptions,
-        condition: normalizeText(fields.Condition),
-        conditionNote: normalizeText(fields['Condition Note']),
-        itemSpecifics,
-        partFitment: normalizeText(master?.fields?.[MASTER_FITMENT_FIELD]),
-        currentLegacyTitle,
-        currentTitle: currentOutputTitle || currentLegacyTitle,
-        donorVehicle,
-        customLabelSku,
-        phase74TitleRulesPrompt
+      const runtimeRunner =
+        options.titleOptimizationRuntimeService && typeof options.titleOptimizationRuntimeService.run === 'function'
+          ? input => options.titleOptimizationRuntimeService.run(input)
+          : runTitleOptimizationRuntime;
+      runtimeResult = await runtimeRunner({
+        listing: {
+          recordId: row.id,
+          ipn,
+          listingRecord: row,
+          masterRecord: master
+        },
+        options: {
+          fields: [
+            'title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku',
+            'componentType', 'color', 'placement', 'keyFitmentDetail', 'engineDisplacement',
+            'engineCode', 'transmissionCode', 'drivetrain', 'transmissionSpeedType',
+            'vinIdentifier', 'illumination', 'paintCode', 'trim', 'lightingTechnology'
+          ]
+        },
+        dependencies: {
+          loadSnapshot: options.titleOptimizationRuntimeLoadSnapshot,
+          executeAi: ({ promptArtifact }) => aiService.generateTitleAndDescriptionFromRuntimePrompt(promptArtifact)
+        }
       });
     } catch (error) {
+      runtimeResult = {
+        status: 'RUNTIME_UNHANDLED_FAILURE',
+        errors: [{ message: compactText(error.message, 180) }],
+        output: null
+      };
+    }
+
+    if (runtimeResult.status === 'COMPLETED') summary.titleOptimizationRuntime.completed += 1;
+    else if (runtimeResult.status === 'BYPASSED') summary.titleOptimizationRuntime.bypassed += 1;
+    else summary.titleOptimizationRuntime.failed += 1;
+    if (summary.titleOptimizationRuntime.samples.length < sampleLimit) {
+      summary.titleOptimizationRuntime.samples.push({
+        recordId: row.id,
+        ipn,
+        status: runtimeResult.status,
+        decision: runtimeResult.decision?.decision || null,
+        proposedTitle: runtimeResult.aiResult?.generatedTitle || '',
+        finalTitle: runtimeResult.output?.title || '',
+        failedChecks: (runtimeResult.decision?.degradationChecks || [])
+          .filter(check => check?.status === 'FAIL')
+          .map(check => [check.checkId, check.field, check.message].map(normalizeText).filter(Boolean).join(':')),
+        message: Array.isArray(runtimeResult.errors)
+          ? runtimeResult.errors.map(error => error?.message).filter(Boolean).join('; ')
+          : ''
+      });
+    }
+
+    if (!runtimeResult.output) {
+      const runtimeMessage = runtimeResult.errors?.map(error => error?.message).filter(Boolean).join('; ') || runtimeResult.status;
+      const failureFields = {};
+      addFieldIfChanged(failureFields, fields, LISTING_TITLE_REVIEW_STATUS_FIELD, TITLE_REVIEW_STATUS_NEEDS_REVIEW);
+      addFieldIfChanged(failureFields, fields, LISTING_TITLE_REVIEW_REASON_FIELD, 'runtime_generation_failed');
+      addFieldIfChanged(failureFields, fields, LISTING_TITLE_REVIEW_NOTES_FIELD, `Title Optimization runtime failed: ${compactText(runtimeMessage, 220)}`);
+      if (Object.keys(failureFields).length > 0) updates.push({ id: row.id, fields: failureFields });
       summary.aiFailures += 1;
-      if (summary.errors.length < sampleLimit) {
-        summary.errors.push(`ipn='${ipn}' AI failed: ${error.message}`);
-        emitProgress(progressCallback, {
-          stage: 'phase74_ai_error',
-          percent: Math.min(92, 20 + Math.floor(((i + 1) / Math.max(1, rowsForGeneration.length)) * 72)),
-          counts: summary,
-          message: `AI failed for IPN '${ipn}': ${compactText(error.message, 220)}`
-        });
-      }
+      summary.titleReviewNeedsReview += 1;
+      if (summary.errors.length < sampleLimit) summary.errors.push(`ipn='${ipn}' runtime failed: ${runtimeMessage}`);
       continue;
     }
 
-    const aiTitle = preserveProtectedSourceTitlePhrases(
-      ensureTitleHasSku(generated?.generatedTitle, customLabelSku, ipn, categoryContext),
-      [currentOutputTitle, currentLegacyTitle],
-      customLabelSku,
-      titleMaxLength,
-      ipn,
-      categoryContext
-    );
-    let nextTitle = enforceTitleLength(aiTitle, titleMinLength, titleMaxLength, customLabelSku, ipn, categoryContext);
-    const titleGuardResult = applyClientTitleValidationGuards(nextTitle, {
-      currentLegacyTitle,
-      currentOutputTitle,
-      sourceDescription,
-      conditionsAndOptions,
-      cSpecifics,
-      itemSpecifics,
-      categoryContext,
-      customLabelSku,
-      ipn,
-      titleMinLength,
-      titleMaxLength
-    });
-    nextTitle = titleGuardResult.title;
-    const titleValidationRepairs = titleGuardResult.repairs;
-    const nextDescription = normalizeText(generated?.generatedDescription);
-    const nextShortDescription = normalizeText(generated?.shortDescription);
-    let nextReviewStatus = inferTitleReviewStatus(generated);
-    let nextReviewReason = normalizeText(generated?.titleReviewReason);
-    let nextReviewNotes =
-      normalizeText(generated?.titleReviewNotes) || normalizeText(generated?.reasoningSummary);
+    let nextTitle = normalizeText(runtimeResult.output.title);
+    const nextDescription = normalizeText(runtimeResult.output.description);
+    const nextShortDescription = normalizeText(runtimeResult.output.shortDescription);
+    let nextReviewStatus = normalizeText(runtimeResult.output.reviewStatus) || TITLE_REVIEW_STATUS_COMPLETED;
+    let nextReviewReason = normalizeText(runtimeResult.output.reviewReason);
+    let nextReviewNotes = normalizeText(runtimeResult.output.reviewNotes);
 
-    if (titleOptimizationRuntimeShadowEnabled) {
-      summary.titleOptimizationRuntimeShadow.attempted += 1;
-      try {
-        const shadowRunner =
-          options.titleOptimizationRuntimeShadowService &&
-          typeof options.titleOptimizationRuntimeShadowService.run === 'function'
-            ? (input) => options.titleOptimizationRuntimeShadowService.run(input)
-            : runTitleOptimizationRuntimeShadow;
-        const shadowResult = await shadowRunner({
-          shadowEnabled: true,
-          listing: {
-            recordId: row.id,
-            ipn,
-            listingRecord: row,
-            masterRecord: master
-          },
-          legacyResult: {
-            generatedTitle: nextTitle,
-            generatedDescription: nextDescription,
-            shortDescription: nextShortDescription,
-            titleReviewStatus: nextReviewStatus,
-            titleReviewReason: nextReviewReason,
-            titleReviewNotes: nextReviewNotes
-          },
-          options: {
-            fields: ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku']
-          },
-          dependencies: {
-            loadSnapshot: options.titleOptimizationRuntimeLoadSnapshot,
-            executeAi: ({ promptArtifact }) => aiService.generateTitleAndDescriptionFromRuntimePrompt(promptArtifact)
-          }
-        });
-        if (shadowResult.status === 'COMPLETED') summary.titleOptimizationRuntimeShadow.completed += 1;
-        else if (shadowResult.status === 'BYPASSED') summary.titleOptimizationRuntimeShadow.bypassed += 1;
-        else summary.titleOptimizationRuntimeShadow.failed += 1;
-        if (summary.titleOptimizationRuntimeShadow.samples.length < sampleLimit) {
-          summary.titleOptimizationRuntimeShadow.samples.push({
-            recordId: row.id,
-            ipn,
-            status: shadowResult.status,
-            riskLevel: shadowResult.comparison?.riskLevel || null,
-            decision: shadowResult.shadow?.decision?.decision || null,
-            legacyTitle: shadowResult.legacy?.title || '',
-            shadowFinalTitle: shadowResult.shadow?.decision?.finalTitle || '',
-            message: Array.isArray(shadowResult.errors)
-              ? shadowResult.errors.map(error => error?.message).filter(Boolean).join('; ')
-              : ''
-          });
-        }
-      } catch (error) {
-        summary.titleOptimizationRuntimeShadow.failed += 1;
-        if (summary.titleOptimizationRuntimeShadow.samples.length < sampleLimit) {
-          summary.titleOptimizationRuntimeShadow.samples.push({
-            recordId: row.id,
-            ipn,
-            status: 'SHADOW_UNHANDLED_FAILURE',
-            message: compactText(error.message, 180)
-          });
-        }
-      }
-    }
-
-    if (!nextTitle || !nextDescription) {
+    const runtimeBypassed = runtimeResult.status === 'BYPASSED';
+    if (!nextTitle || (!nextDescription && !runtimeBypassed && !descriptionManualOverride)) {
       const writeFields = {};
       addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_STATUS_FIELD, TITLE_REVIEW_STATUS_NEEDS_REVIEW);
       addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_REASON_FIELD, 'ai_blank_output');
@@ -1287,7 +1222,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         writeFields,
         fields,
         LISTING_TITLE_REVIEW_NOTES_FIELD,
-        `AI returned blank title or description. ${compactText(generated?.reasoningSummary, 180)}`
+          `Runtime returned blank title or description. ${compactText(nextReviewNotes, 180)}`
       );
       if (Object.keys(writeFields).length > 0) {
         updates.push({ id: row.id, fields: writeFields });
@@ -1297,9 +1232,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       summary.aiFailures += 1;
       if (summary.errors.length < sampleLimit) {
         const blankMessage =
-          `ipn='${ipn}' AI returned blank title/description. keys=${Array.isArray(generated?.parsedKeys) ? generated.parsedKeys.join(',') : 'none'} ` +
-            `recognized=${Array.isArray(generated?.recognizedKeys) ? generated.recognizedKeys.join(',') : 'none'} ` +
-            `reasoning='${compactText(generated?.reasoningSummary, 120)}' raw='${compactText(generated?.rawContent, 320)}'`;
+          `ipn='${ipn}' runtime returned blank title/description. decision='${runtimeResult.decision?.decision || ''}' ` +
+            `notes='${compactText(nextReviewNotes, 180)}'`;
         summary.errors.push(blankMessage);
         emitProgress(progressCallback, {
           stage: 'phase74_ai_blank',
@@ -1309,11 +1243,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         });
       }
       console.warn(
-        `[Phase7.4] AI blank output for ipn='${ipn}' ` +
-          `title='${compactText(nextTitle, 80)}' desc='${compactText(nextDescription, 80)}' ` +
-          `keys=${Array.isArray(generated?.parsedKeys) ? generated.parsedKeys.join(',') : 'none'} ` +
-          `recognized=${Array.isArray(generated?.recognizedKeys) ? generated.recognizedKeys.join(',') : 'none'} ` +
-          `raw='${compactText(generated?.rawContent, 320)}'`
+        `[Phase7.4] Runtime blank output for ipn='${ipn}' ` +
+          `title='${compactText(nextTitle, 80)}' desc='${compactText(nextDescription, 80)}'`
       );
       continue;
     }
@@ -1339,36 +1270,6 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     } else if (nextReviewStatus === TITLE_REVIEW_STATUS_NEEDS_REVIEW) {
       nextReviewReason = nextReviewReason || 'manual_review_required';
       nextReviewNotes = nextReviewNotes || 'Title rules flagged this row for manual review.';
-    }
-
-    if (!titleManualOverride && titleValidationRepairs.length > 0) {
-      nextReviewStatus = TITLE_REVIEW_STATUS_NEEDS_REVIEW;
-      nextReviewReason = titleValidationRepairs.some(item => item.includes('conflicting side'))
-        ? 'uncertain_side'
-        : 'proposed_title_degrade';
-      nextReviewNotes = appendValidationNote(
-        nextReviewNotes,
-        `Post-AI validation repaired title: ${titleValidationRepairs.join('; ')}.`
-      );
-    }
-
-    if (
-      !titleManualOverride &&
-      containsEngineAssemblyTerm(nextTitle) &&
-      !sourceEvidenceContainsEngineAssemblyTerm([currentOutputTitle, currentLegacyTitle, conditionsAndOptions])
-    ) {
-      const fallbackTitle = enforceTitleLength(
-        currentOutputTitle || currentLegacyTitle,
-        titleMinLength,
-        titleMaxLength,
-        customLabelSku,
-        ipn,
-        categoryContext
-      );
-      if (fallbackTitle) nextTitle = fallbackTitle;
-      nextReviewStatus = TITLE_REVIEW_STATUS_NEEDS_REVIEW;
-      nextReviewReason = 'prohibited_engine_assembly_term';
-      nextReviewNotes = 'Generated title introduced Long Block or Short Block without source-title support, so Phase 7.4 preserved the safest existing title.';
     }
 
     const nextTitleKey = normalizeTitleForKey(nextTitle);

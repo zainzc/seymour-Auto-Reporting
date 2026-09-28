@@ -3,7 +3,7 @@ const VALIDATION_ORDER = Object.freeze([
   'blank-and-basic-formatting',
   'restricted-unsafe-introductions',
   'source-identity-unsupported-information',
-  'critical-fitment-preservation',
+  'source-identity-preservation',
   'side-validation',
   'mpn-validation',
   'protected-term-preservation',
@@ -18,6 +18,8 @@ const VALIDATION_ORDER = Object.freeze([
 ]);
 
 const { modelAmbiguityResolvedByCandidate } = require('./titleOptimizationRuntimeSourceResolutionService');
+const { normalizeVehicleMake } = require('./titleOptimizationMakeNormalizationService');
+const { resolveVehicleDecision, vehicleSourceResolution } = require('./titleOptimizationVehicleDecisionService');
 
 function normalizeText(value) {
   if (Array.isArray(value)) return normalizeText(value[0]);
@@ -27,6 +29,15 @@ function normalizeText(value) {
 
 function normalizeKey(value) {
   return normalizeText(value).toLocaleLowerCase('en-US');
+}
+
+function normalizeCitationText(value) {
+  let citation = normalizeText(value);
+  const wrappers = { '"': '"', "'": "'", '`': '`', '\u201c': '\u201d', '\u2018': '\u2019' };
+  while (citation.length > 1 && wrappers[citation[0]] === citation[citation.length - 1]) {
+    citation = citation.slice(1, -1).trim();
+  }
+  return citation;
 }
 
 function escapeRegExp(value) {
@@ -139,10 +150,47 @@ function titleContainsValue(title, value) {
   return Boolean(wanted && text.includes(wanted));
 }
 
+function categoryEvidenceSupportsDetail(evidence, detail, ruleResolution) {
+  const comparable = value => normalizeKey(value).replace(/[^a-z0-9]+/g, ' ').trim();
+  const text = comparable(evidence);
+  const variants = new Set([comparable(detail)]);
+  // Only applicable configured equivalences may bridge different wording.
+  const equivalences = [
+    ...(ruleResolution.terminologyRules || []),
+    ...(ruleResolution.synonyms || []).flatMap(rule => (rule.synonyms || []).map(term => ({
+      ...rule, sourceTerm: rule.primaryTerm, replacementTerm: term
+    })))
+  ];
+  for (const rule of equivalences) {
+    if (rule.enabled === false || rule.action === 'remove') continue;
+    const source = comparable(rule.sourceTerm);
+    const replacement = comparable(rule.replacementTerm || rule.synonymTerm);
+    if (!source || !replacement) continue;
+    if (variants.has(replacement)) variants.add(source);
+    if (variants.has(source)) variants.add(replacement);
+  }
+  return [...variants].some(term => {
+    if (!term) return false;
+    const pattern = new RegExp(`(^| )${escapeRegExp(term)}(?= |$)`, 'g');
+    for (const match of text.matchAll(pattern)) {
+      const preceding = text.slice(0, match.index).trim();
+      if (!/\b(?:no|not|without|non)(?: \w+){0,2}$/.test(preceding)) return true;
+    }
+    return false;
+  });
+}
+
+function selectedStructureName(ruleResolution = {}) {
+  return normalizeKey(
+    ruleResolution?.titleStructure?.selected?.structureName ||
+    ruleResolution?.titleStructure?.selected?.appliesTo
+  );
+}
+
 function canonicalSide(value) {
   const text = normalizeKey(value).replace(/[\/_-]+/g, ' ');
-  const hasDriver = /\b(driver|left|lh)\b/i.test(text);
-  const hasPassenger = /\b(passenger|right|rh)\b/i.test(text);
+  const hasDriver = /\b(drivers?|left|lh)\b/i.test(text);
+  const hasPassenger = /\b(passengers?|right|rh)\b/i.test(text);
   if (hasDriver && !hasPassenger) return 'driver-left-lh';
   if (hasPassenger && !hasDriver) return 'passenger-right-rh';
   return '';
@@ -155,9 +203,16 @@ function sideLabel(canonical) {
 }
 
 function detectUnsupportedSide(title, verifiedSide) {
-  const sideTerms = ['driver', 'passenger', 'left', 'right', 'lh', 'rh'];
   const lower = normalizeKey(title);
-  const present = sideTerms.filter(term => new RegExp(`\\b${term}\\b`, 'i').test(lower));
+  const sideTerms = [
+    { label: 'driver', pattern: /\bdrivers?\b/i },
+    { label: 'passenger', pattern: /\bpassengers?\b/i },
+    { label: 'left', pattern: /\bleft\b/i },
+    { label: 'right', pattern: /\bright\b/i },
+    { label: 'lh', pattern: /\blh\b/i },
+    { label: 'rh', pattern: /\brh\b/i }
+  ];
+  const present = sideTerms.filter(term => term.pattern.test(lower)).map(term => term.label);
   if (!present.length) return null;
   const titleSide = canonicalSide(title);
   const verifiedCanonical = canonicalSide(verifiedSide);
@@ -241,7 +296,9 @@ function appendCheck(target, record, { corrections, violations, warnings }) {
   if (record.status === 'WARN' || record.status === 'CANNOT_VERIFY') warnings.push(record);
 }
 
-function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, ruleResolution = {}, promptArtifact = {}, candidateTitle = '' } = {}) {
+function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, ruleResolution = {}, promptArtifact = {}, candidateTitle = '', categoryPriorityDetails, sideDecision, vehicleDecision } = {}) {
+  const vehicleVerification = resolveVehicleDecision(vehicleDecision, promptArtifact, candidateTitle);
+  sourceResolution = vehicleSourceResolution(sourceResolution, vehicleVerification);
   const originalCandidate = candidateTitle === null || candidateTitle === undefined ? '' : String(candidateTitle);
   const checks = [];
   const corrections = [];
@@ -252,7 +309,7 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
 
   const resultBase = () => ({
     contractVersion: 1,
-    runtimeMode: 'shadow-only',
+    runtimeMode: 'authoritative',
     validationOrder: [...VALIDATION_ORDER],
     originalCandidate,
     validatedTitle: title,
@@ -264,7 +321,9 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
     corrections,
     violations,
     warnings,
-    suggestedReviewReasons
+    suggestedReviewReasons,
+    vehicleVerification,
+    categoryPriorityDetails: Array.isArray(categoryPriorityDetails) ? categoryPriorityDetails : []
   });
 
   if (promptArtifact?.kind === 'title-generation-bypass' || sourceResolution?.normalized?.manualOverride?.active) {
@@ -279,6 +338,10 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
   }
 
   const append = (record) => appendCheck({ checks }, record, { corrections, violations, warnings });
+  if (vehicleDecision && !vehicleVerification.verified) {
+    append(checkRecord({ checkId: 'vehicle-evidence', status: 'FAIL', severity: 'error',
+      message: 'Vehicle decision is unresolved or lacks a supported make/model/year application and matching title.' }));
+  }
 
   const beforeFormat = title;
   title = normalizeText(title);
@@ -319,7 +382,7 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
   }
 
   for (const field of ['brandMake', 'model']) {
-    const value = resolvedValue(sourceResolution, field);
+    const value = field === 'brandMake' ? normalizeVehicleMake(resolvedValue(sourceResolution, field), ruleResolution.terminologyRules) : resolvedValue(sourceResolution, field);
     if (field === 'model' && modelAmbiguityResolvedByCandidate(sourceResolution, title)) continue;
     if (candidateHasDifferentIdentity(title, value)) {
       append(checkRecord({
@@ -348,31 +411,165 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
     }));
   }
 
-  for (const field of ['engineCode', 'transmissionCode', 'vin']) {
-    const value = resolvedValue(sourceResolution, field) || structuredValue(sourceResolution, field);
-    if (value && !titleContainsValue(title, value)) {
-      const flag = approvedFlag(ruleResolution, 'Proposed title would degrade existing title');
-      uniquePush(suggestedReviewReasons, flag);
+  if (categoryPriorityDetails !== undefined) {
+    const configured = [...new Set((ruleResolution.categoryRules || [])
+      .flatMap(entry => entry?.rule?.priorityDetails || [])
+      .map(normalizeText)
+      .filter(Boolean))];
+    const configuredByKey = new Map(configured.map(detail => [normalizeKey(detail), detail]));
+    const decisions = Array.isArray(categoryPriorityDetails) ? categoryPriorityDetails : [];
+    const decisionByKey = new Map();
+    const evidenceSources = promptArtifact?.userPayload?.resolvedListing?.categoryPriorityEvidenceSources || [];
+    const comparable = value => normalizeKey(value).replace(/[^a-z0-9]+/g, ' ').trim();
+    const prefixAuthority = [
+      ruleResolution?.deterministicTitlePart?.value,
+      ruleResolution?.prefixRule?.rule?.specialReplacement,
+      ...(ruleResolution?.prefixRule?.rule?.approvedPartTerms || [])
+    ].map(comparable).filter(Boolean).join(' ');
+
+    for (const decision of decisions) {
+      const detail = normalizeText(decision?.detail);
+      const key = normalizeKey(detail);
+      if (!configuredByKey.has(key) || decisionByKey.has(key)) {
+        append(checkRecord({
+          checkId: 'category-priority-verification',
+          systemRuleId: systemRuleId(ruleResolution, 'SR-01'),
+          status: 'RETAIN_EXISTING_REQUIRED',
+          severity: 'error',
+          message: `AI returned an unknown or duplicate Category Rule detail '${detail || '(blank)'}'.`
+        }));
+        continue;
+      }
+      decisionByKey.set(key, decision);
+      if (decision.verified === true) {
+        const source = normalizeText(decision.source);
+        const evidence = normalizeCitationText(decision.evidence);
+        const cited = evidenceSources.filter(item => normalizeKey(item?.id) === normalizeKey(source) ||
+          normalizeKey(item?.source) === normalizeKey(source));
+        const candidates = [...cited, ...evidenceSources.filter(item => !cited.includes(item))];
+        const supportingSource = candidates.find(item => categoryEvidenceSupportsDetail(item?.evidence, detail, ruleResolution));
+        if (!evidence || !supportingSource) {
+          append(checkRecord({
+            checkId: 'category-priority-verification',
+            systemRuleId: systemRuleId(ruleResolution, 'SR-01'),
+            status: 'RETAIN_EXISTING_REQUIRED',
+            severity: 'error',
+            message: `Verified Category Rule detail '${detail}' is not supported by trusted evidence or an applicable approved equivalent.`
+          }));
+        }
+      } else {
+        if (normalizeText(decision.source) || normalizeText(decision.evidence)) {
+          append(checkRecord({
+            checkId: 'category-priority-verification',
+            systemRuleId: systemRuleId(ruleResolution, 'SR-01'),
+            status: 'RETAIN_EXISTING_REQUIRED',
+            severity: 'error',
+            message: `Unverified Category Rule detail '${detail}' must not include source or evidence citations.`
+          }));
+        }
+        const detailInTitle = titleContainsValue(title, configuredByKey.get(key));
+        const prefixAuthorizes = prefixAuthority.includes(comparable(configuredByKey.get(key)));
+        if (detailInTitle && !prefixAuthorizes) {
+          append(checkRecord({
+            checkId: 'unverified-category-priority-detail',
+            systemRuleId: systemRuleId(ruleResolution, 'SR-01'),
+            status: 'RETAIN_EXISTING_REQUIRED',
+            severity: 'error',
+            message: `Candidate introduces unverified Category Rule detail '${configuredByKey.get(key)}'.`
+          }));
+        }
+      }
+    }
+    for (const detail of configured) {
+      if (decisionByKey.has(normalizeKey(detail))) continue;
       append(checkRecord({
-        checkId: 'critical-fitment-preservation',
-        systemRuleId: systemRuleId(ruleResolution, 'SR-14'),
+        checkId: 'category-priority-verification',
+        systemRuleId: systemRuleId(ruleResolution, 'SR-01'),
         status: 'RETAIN_EXISTING_REQUIRED',
         severity: 'error',
-        message: `Candidate loses verified critical ${field}.`,
-        suggestedFlagReason: flag,
-        relatedConfigIds: (ruleResolution.categoryRules || []).map(entry => entry.rule?.id).filter(Boolean)
+        message: `AI did not return a verification decision for Category Rule detail '${detail}'.`
       }));
     }
   }
 
-  const badSide = detectUnsupportedSide(title, resolvedValue(sourceResolution, 'side'));
+  const addReviewWarning = (checkId, reason, message) => {
+    const flag = approvedFlag(ruleResolution, reason);
+    uniquePush(suggestedReviewReasons, flag);
+    append(checkRecord({
+      checkId,
+      systemRuleId: systemRuleId(ruleResolution, 'SR-15'),
+      status: 'WARN',
+      severity: 'warning',
+      message,
+      suggestedFlagReason: flag
+    }));
+  };
+  const partFitment = normalizeText(sourceResolution?.normalized?.titleAuthority?.partFitment?.value);
+  const titleYearFallback = normalizeText(sourceResolution?.normalized?.titleAuthority?.titleYearFallback?.value);
+  const hasYearEvidence = Boolean(
+    resolvedValue(sourceResolution, 'year') ||
+    titleYearFallback ||
+    /\b(?:19|20)\d{2}\b|\b\d{2}\s*-\s*\d{2}\b/.test(partFitment)
+  );
+  if (!hasYearEvidence) {
+    addReviewWarning('missing-verified-year', 'Missing verified year', 'No verified year or year range is available from approved evidence.');
+  }
+  if (!resolvedValue(sourceResolution, 'brandMake')) {
+    addReviewWarning('missing-verified-make', 'Make cannot be verified', 'Vehicle Make cannot be verified from approved evidence.');
+  }
+  const structureName = selectedStructureName(ruleResolution);
+  if (structureName.includes('engine')) {
+    const hasSize = Boolean(
+      resolvedValue(sourceResolution, 'engineDisplacement')
+    );
+    const hasCode = Boolean(resolvedValue(sourceResolution, 'engineCode'));
+    if (!hasSize || !hasCode) {
+      addReviewWarning(
+        'missing-engine-fitment',
+        'Required engine fitment missing',
+        'Required engine size or engine code cannot be verified from approved evidence.'
+      );
+    }
+  }
+  if (structureName.includes('transmission') && !resolvedValue(sourceResolution, 'transmissionCode')) {
+    addReviewWarning(
+      'missing-transmission-code',
+      'Transmission code cannot be verified',
+      'Expected transmission code cannot be verified from approved evidence.'
+    );
+  }
+
+
+  const explicitSide = resolvedValue(sourceResolution, 'side');
+  const titleSideEvidence = sourceResolution?.normalized?.derived?.sideFromTitle?.value;
+  const fitmentSide = canonicalSide(partFitment);
+  let supportedSide = canonicalSide(explicitSide) ? explicitSide : titleSideEvidence || (fitmentSide ? sideLabel(fitmentSide) : '');
+  if (sideDecision?.side) {
+    const selected = canonicalSide(sideDecision.side);
+    const citation = normalizeCitationText(sideDecision.evidence);
+    const sources = promptArtifact?.userPayload?.resolvedListing?.categoryPriorityEvidenceSources || [];
+    const citedSource = sources.find(item => (normalizeKey(item.id) === normalizeKey(sideDecision.source) || normalizeKey(item.source) === normalizeKey(sideDecision.source)) &&
+      citation && normalizeKey(item.evidence).includes(normalizeKey(citation)));
+    const structured = canonicalSide(explicitSide);
+    const evidenceSupports = selected && citedSource && canonicalSide(citation) === selected &&
+      canonicalSide(citedSource.evidence) === selected && !/\b(?:no|not|without)\s+(?:driver|passenger|left|right|lh|rh)\b/i.test(citation);
+    if (!evidenceSupports || (structured && structured !== selected)) {
+      append(checkRecord({ checkId: 'side-validation', status: 'RETAIN_EXISTING_REQUIRED', severity: 'error',
+        message: 'AI side decision lacks supporting supplied evidence or contradicts authoritative side evidence.' }));
+    } else {
+      supportedSide = sideDecision.side;
+      if (canonicalSide(title) !== selected) append(checkRecord({ checkId: 'side-validation', status: 'RETAIN_EXISTING_REQUIRED', severity: 'error',
+        message: 'Candidate omits or changes the verified AI-selected side.' }));
+    }
+  }
+  const badSide = detectUnsupportedSide(title, supportedSide);
   if (badSide) {
     append(checkRecord({
       checkId: 'side-validation',
       systemRuleId: systemRuleId(ruleResolution, 'SR-11'),
       status: 'RETAIN_EXISTING_REQUIRED',
       severity: 'error',
-      message: `Candidate uses unsupported side '${badSide}'. Description-only fitment cannot authorize side.`,
+      message: `Candidate uses unsupported side '${badSide}'. Side must agree with approved title or fitment evidence. Description-only fitment cannot authorize side.`,
       relatedConfigIds: []
     }));
   }

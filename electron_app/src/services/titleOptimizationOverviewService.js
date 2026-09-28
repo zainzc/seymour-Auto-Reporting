@@ -2,7 +2,7 @@ const SECTION_ORDER = ['Source Fields','Source Priority','Terminology Rules','Sy
 const EDITABLE_SECTIONS = SECTION_ORDER.slice(0, -1);
 const PATHS = {'Source Fields':'source-fields.html','Source Priority':'source-priority.html','Terminology Rules':'terminology-rules.html','Synonyms':'synonyms.html','Prefix Rules':'prefix-rules.html','Restricted Terms':'restricted-terms.html','Category Rules':'category-rules.html','Title Structure':'title-structure.html','Flag Reasons':'flag-reasons.html','System Rules':'system-rules.html'};
 const KEYS = {'Source Fields':'mappings','Source Priority':'rows','Terminology Rules':'rules','Synonyms':'rules','Prefix Rules':'rules','Restricted Terms':'rules','Category Rules':'rules','Title Structure':'structures','Flag Reasons':'reasons'};
-const PREVIEW_LIMITS = Object.freeze({ 'Source Fields': 8, 'Source Priority': 9, 'Terminology Rules': 5, 'Synonyms': 5, 'Prefix Rules': 5 });
+const PREVIEW_LIMITS = Object.freeze({ 'Source Fields': 9, 'Source Priority': 9, 'Terminology Rules': 9, 'Synonyms': 5, 'Prefix Rules': 5 });
 
 function itemsFor(name, value) {
   if (name === 'System Rules') return Array.isArray(value) ? value : [];

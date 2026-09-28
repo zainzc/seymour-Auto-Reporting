@@ -116,7 +116,8 @@ const PHASE74_TITLE_RESPONSE_FORMAT = Object.freeze({
         'reasoningSummary',
         'titleReviewStatus',
         'titleReviewReason',
-        'titleReviewNotes'
+        'titleReviewNotes',
+        'categoryPriorityDetails'
       ],
       properties: {
         generatedTitle: { type: 'string' },
@@ -128,7 +129,21 @@ const PHASE74_TITLE_RESPONSE_FORMAT = Object.freeze({
           enum: ['Completed', 'Needs Review', 'Skipped - Manual Override']
         },
         titleReviewReason: { type: 'string' },
-        titleReviewNotes: { type: 'string' }
+        titleReviewNotes: { type: 'string' },
+        categoryPriorityDetails: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['detail', 'verified', 'source', 'evidence'],
+            properties: {
+              detail: { type: 'string' },
+              verified: { type: 'boolean' },
+              source: { type: ['string', 'null'] },
+              evidence: { type: ['string', 'null'] }
+            }
+          }
+        }
       }
     }
   }
@@ -1333,7 +1348,8 @@ class Phase4AiEvaluatorService {
         'titleReviewReason',
         'reviewReason',
         'titleReviewNotes',
-        'reviewNotes'
+        'reviewNotes',
+        'categoryPriorityDetails'
       ].includes(key)
     );
     return {
@@ -1344,6 +1360,12 @@ class Phase4AiEvaluatorService {
       titleReviewStatus,
       titleReviewReason,
       titleReviewNotes,
+      categoryPriorityDetails: Array.isArray(parsed.categoryPriorityDetails) ? parsed.categoryPriorityDetails.map(item => ({
+        detail: normalizeText(item?.detail),
+        verified: item?.verified === true,
+        source: item?.source == null ? null : normalizeText(item.source),
+        evidence: item?.evidence == null ? null : normalizeText(item.evidence)
+      })) : [],
       rawContent: content,
       parsedKeys: Object.keys(parsed),
       recognizedKeys
@@ -1387,6 +1409,25 @@ class Phase4AiEvaluatorService {
         { role: 'user', content: JSON.stringify(promptArtifact.userPayload || {}) }
       ]
     };
+    const configuredDetails = [...new Set((promptArtifact.userPayload?.titlePolicy?.categoryRules || [])
+      .flatMap(rule => rule.priorityDetails || []).map(item => normalizeText(item.detail)).filter(Boolean))];
+    const runtimeSchema = requestBody.response_format.json_schema.schema;
+    runtimeSchema.required.push('vehicleDecision');
+    runtimeSchema.properties.vehicleDecision = {
+      type: 'object', additionalProperties: false,
+      required: ['resolved', 'make', 'model', 'yearRange', 'source', 'evidence', 'reason'],
+      properties: { resolved: { type: 'boolean' },
+        ...Object.fromEntries(['make', 'model', 'yearRange', 'source', 'evidence', 'reason'].map(key => [key, { type: ['string', 'null'] }])) }
+    };
+    runtimeSchema.required.push('sideDecision');
+    runtimeSchema.properties.sideDecision = {
+      type: 'object', additionalProperties: false,
+      required: ['side', 'placement', 'source', 'evidence'],
+      properties: Object.fromEntries(['side', 'placement', 'source', 'evidence'].map(key => [key, { type: ['string', 'null'] }]))
+    };
+    if (configuredDetails.length) {
+      requestBody.response_format.json_schema.schema.properties.categoryPriorityDetails.items.properties.detail.enum = configuredDetails;
+    }
 
     const shouldUsePromptCache = this.promptCacheEnabled && this.promptCacheKey;
     if (shouldUsePromptCache) {
@@ -1395,7 +1436,7 @@ class Phase4AiEvaluatorService {
 
     if (this.logPhase74AiPayload) {
       console.log(
-        `[Phase7.4 Shadow AI Payload] configVersion='${promptArtifact?.metadata?.configurationVersion || ''}' ` +
+        `[Phase7.4 Runtime AI Payload] configVersion='${promptArtifact?.metadata?.configurationVersion || ''}' ` +
           `promptDigest='${promptDigest}'\n${JSON.stringify(requestBody, null, 2)}`
       );
     }
@@ -1446,7 +1487,8 @@ class Phase4AiEvaluatorService {
         'titleReviewReason',
         'reviewReason',
         'titleReviewNotes',
-        'reviewNotes'
+        'reviewNotes',
+        'categoryPriorityDetails'
       ].includes(key)
     );
     return {
@@ -1457,6 +1499,14 @@ class Phase4AiEvaluatorService {
       titleReviewStatus,
       titleReviewReason,
       titleReviewNotes,
+      categoryPriorityDetails: Array.isArray(parsed.categoryPriorityDetails) ? parsed.categoryPriorityDetails.map(item => ({
+        detail: normalizeText(item?.detail),
+        verified: item?.verified === true,
+        source: item?.source == null ? null : normalizeText(item.source),
+        evidence: item?.evidence == null ? null : normalizeText(item.evidence)
+      })) : [],
+      sideDecision: parsed.sideDecision && typeof parsed.sideDecision === 'object' ? parsed.sideDecision : null,
+      vehicleDecision: parsed.vehicleDecision && typeof parsed.vehicleDecision === 'object' ? parsed.vehicleDecision : null,
       rawContent: content,
       parsedKeys: Object.keys(parsed),
       recognizedKeys

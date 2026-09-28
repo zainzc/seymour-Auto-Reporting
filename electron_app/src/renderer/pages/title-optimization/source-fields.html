@@ -98,13 +98,13 @@
           <h2 id="dialog-title">Add Source Field</h2>
           <p>Create a logical input without changing application code.</p>
         </div>
-        <button id="dialog-cancel" class="close-button" type="button" aria-label="Close dialog">Ã—</button>
+        <button id="dialog-cancel" class="close-button" type="button" aria-label="Close dialog">&times;</button>
       </div>
       <div class="dialog-content">
         <div id="form-error" class="notice error" role="alert" hidden></div>
-        <label>Display Name <span aria-hidden="true">*</span><input id="display-name" required autocomplete="off"></label>
-        <label>Logical Key <span aria-hidden="true">*</span><input id="logical-key" required pattern="[a-z][A-Za-z0-9]*" autocomplete="off" aria-describedby="logical-key-help"><small id="logical-key-help">Use a unique camelCase identifier without spaces.</small></label>
-        <label>Airtable Field <span aria-hidden="true">*</span><select id="airtable-field" required></select></label>
+        <label><span class="field-label">Display Name <span aria-hidden="true">*</span></span><input id="display-name" required autocomplete="off"></label>
+        <label><span class="field-label">Logical Key <span aria-hidden="true">*</span></span><input id="logical-key" required pattern="[a-z][A-Za-z0-9]*" autocomplete="off" aria-describedby="logical-key-help"><small id="logical-key-help">Use a unique camelCase identifier without spaces.</small></label>
+        <label><span class="field-label">Airtable Field <span aria-hidden="true">*</span></span><select id="airtable-field" required></select></label>
         <label>Description<textarea id="description" rows="3"></textarea></label>
         <div class="form-options">
           <label class="check-label"><input id="required" type="checkbox"> Required mapping</label>

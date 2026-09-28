@@ -13,18 +13,13 @@ const REVIEW_STATUS = Object.freeze({
   MANUAL_OVERRIDE_BYPASS: 'manual_override_bypass'
 });
 
-const CRITICAL_FIELDS = Object.freeze([
+const IDENTITY_FIELDS = Object.freeze([
   'sku',
   'year',
   'brandMake',
   'model',
   'side',
-  'engineDisplacement',
-  'engineCode',
-  'vin',
-  'transmissionCode',
-  'speedType',
-  'drivetrain'
+  // Other detail importance is supplied by the evidence-backed AI assessment.
 ]);
 
 const MATERIAL_CONFLICT_FIELDS = Object.freeze([
@@ -52,6 +47,7 @@ const REVIEW_REASON_PRECEDENCE = Object.freeze([
 ]);
 
 const { modelAmbiguityResolvedByCandidate } = require('./titleOptimizationRuntimeSourceResolutionService');
+const { vehicleSourceResolution } = require('./titleOptimizationVehicleDecisionService');
 
 function normalizeText(value) {
   if (Array.isArray(value)) return normalizeText(value[0]);
@@ -81,6 +77,14 @@ function manualOverrideActive(sourceResolution = {}, promptArtifact = {}, valida
     promptArtifact?.kind === 'title-generation-bypass' ||
     validationResult?.outcome === 'BYPASSED'
   );
+}
+
+function manualOverrideReviewNote(sourceResolution = {}) {
+  const status = normalizeText(sourceResolution?.normalized?.manualOverride?.canonicalStatus);
+  if (status === 'Manually Approved') {
+    return 'Title is manually approved; automated title generation was skipped.';
+  }
+  return 'Title is manually overridden; automated title generation was skipped.';
 }
 
 function titleContains(title, value) {
@@ -135,11 +139,13 @@ function degradationCheck({ checkId, status = 'PASS', severity = 'info', field =
 function criticalLossChecks({ sourceResolution, ruleResolution, candidateTitle, existing }) {
   const checks = [];
   const degradeReason = approvedReason(ruleResolution, 'Proposed title would degrade existing title');
-  for (const field of CRITICAL_FIELDS) {
+  for (const field of IDENTITY_FIELDS) {
     const value = resolvedValue(sourceResolution, field);
     if (!value) continue;
     if (!titleContains(existing, value)) continue;
     if (titleContains(candidateTitle, value)) continue;
+    if (field === 'year' && /^\d{4}$/.test(value) && [...candidateTitle.matchAll(/\b((?:19|20)\d{2})\s*-\s*((?:19|20)\d{2})\b/g)]
+      .some(match => Number(value) >= Number(match[1]) && Number(value) <= Number(match[2]))) continue;
     checks.push(degradationCheck({
       checkId: 'critical-loss',
       status: 'FAIL',
@@ -209,7 +215,8 @@ function validationFailureReasons(ruleResolution = {}, validationResult = {}) {
     'restricted-requires-authorization',
     'long-short-block-protection',
     'unsupported-information',
-    'critical-fitment-preservation',
+    'category-priority-verification',
+    'unverified-category-priority-detail',
     'protected-term-preservation'
   ].includes(item?.checkId));
   if (unsupported) addReason(reasons, approvedReason(ruleResolution, 'Proposed title would degrade existing title'));
@@ -250,7 +257,7 @@ function baseResult({ sourceResolution, validationResult }) {
   const existing = existingTitle(sourceResolution);
   return {
     contractVersion: 1,
-    runtimeMode: 'shadow-only',
+    runtimeMode: 'authoritative',
     decision: DECISIONS.BLOCKED,
     finalTitle: null,
     candidateTitle,
@@ -291,6 +298,7 @@ function finish(result, decision, reasons = []) {
 }
 
 function decideTitleOptimizationRuntimeResult({ sourceResolution = {}, ruleResolution = {}, promptArtifact = {}, validationResult = {} } = {}) {
+  sourceResolution = vehicleSourceResolution(sourceResolution, validationResult.vehicleVerification);
   const result = baseResult({ sourceResolution, validationResult });
   const reasons = [];
   const existing = result.existingTitle;
@@ -304,7 +312,10 @@ function decideTitleOptimizationRuntimeResult({ sourceResolution = {}, ruleResol
       severity: 'info',
       message: 'Manual override is active; generated candidate is not selected.'
     }));
-    return finish(result, DECISIONS.BYPASSED_MANUAL_OVERRIDE, reasons);
+    const bypassResult = finish(result, DECISIONS.BYPASSED_MANUAL_OVERRIDE, reasons);
+    bypassResult.reviewReason = 'manual_override';
+    bypassResult.reviewNotes = manualOverrideReviewNote(sourceResolution);
+    return bypassResult;
   }
 
   const phaseEOutcome = validationResult.outcome || (validationResult.valid === false ? 'BLOCK' : 'PASS');

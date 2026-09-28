@@ -19,5 +19,8 @@ test('canonical System Rules returns the exact locked SR-01 through SR-15 metada
   assert.ok(rules.every(rule => rule.source === 'client-v5' && rule.version === 'v5' && rule.locked === true));
   assert.match(rules[14].behavior, /no unsupported information invented/);
   assert.match(rules[13].behavior, /Proposed title would degrade existing title/);
+  assert.match(rules[2].behavior, /Enforced by the runtime validator/i);
+  assert.match(rules[14].behavior, /Missing verified year/i);
+  assert.match(rules[14].behavior, /Make cannot be verified/i);
   assert.notEqual(getTitleOptimizationSystemRules(), rules);
 });

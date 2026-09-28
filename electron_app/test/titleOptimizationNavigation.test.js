@@ -66,14 +66,19 @@ test('all Milestone 1 workspaces use the shared 1280px desktop width', () => {
   assert.match(priorityCss, /\.priority-workspace\s*\{\s*max-width:\s*1280px/);
 });
 
-test('Phase 7.4 renderer surfaces shadow comparison summaries for manual testing', () => {
+test('Phase 7.4 uses the authoritative config-driven runtime without shadow UI', () => {
   const html = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/milestone1/phase2-master-parts.html'), 'utf8');
   const main = fs.readFileSync(path.join(__dirname, '../src/main/index.js'), 'utf8');
+  const service = fs.readFileSync(path.join(__dirname, '../src/services/phase74TitleDescriptionService.js'), 'utf8');
 
-  assert.match(html, /titleOptimizationRuntimeShadow/);
-  assert.match(html, /Phase7\.4 Shadow/);
-  assert.match(html, /legacyTitle/);
-  assert.match(html, /shadowFinalTitle/);
+  assert.doesNotMatch(html, /titleOptimizationRuntimeShadow|Phase7\.4 Shadow|shadowFinalTitle/);
   assert.match(main, /createTitleOptimizationRuntimeConfigService/);
   assert.match(main, /titleOptimizationRuntimeLoadSnapshot:\s*loadTitleOptimizationRuntimeSnapshot/);
+  assert.match(service, /runTitleOptimizationRuntime/);
+  assert.doesNotMatch(service, /generateTitleAndDescription\(/);
+  assert.doesNotMatch(service, /TITLE_OPTIMIZATION_RUNTIME_SHADOW_ENABLED/);
+  assert.doesNotMatch(service, /phase74TitleRulesPrompt/);
+  assert.match(service, /PHASE74_LOG_AI_PAYLOAD\s*\?\?\s*'true'/);
+  assert.match(html, /<div class="form-group" hidden aria-hidden="true">\s*<label for="phase4-unified-title-rules-prompt">/);
+  assert.match(html, /<section class="card" hidden aria-hidden="true">\s*<h2 class="card-title">Phase 7\.4 \(Title & Description\)<\/h2>/);
 });

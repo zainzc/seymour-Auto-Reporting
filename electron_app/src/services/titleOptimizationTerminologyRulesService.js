@@ -23,7 +23,7 @@ const CLIENT_V5_SWAPS = [
   ['Floor Shift Assembly', 'Shifter Assembly'],
   ['Air Cleaner', 'Air Filter Box'],
   ['Info-GPS-TV Screen', 'Navigation Display Screen'],
-  ['Temperature Control AC Climate', 'Temperature Control'],
+  ['Temperature Control', 'AC Climate Temperature Control'],
   ['Fuel / Filler Door', 'Gas Fuel Door'],
   ['Spindle / Knuckle', 'Steering Knuckle Spindle'],
   ['Am-fm', 'AM FM'],
@@ -32,7 +32,7 @@ const CLIENT_V5_SWAPS = [
   ['Auto', 'Automatic'],
   ['Radio', 'Radio Stereo Receiver'],
   ['User Defined', null],
-  ['Accelerator Gas Pedal', 'Accelerator Pedal']
+  ['Accelerator', 'Gas Pedal Accelerator Pedal']
 ];
 
 const CONDITIONS = new Set(['always', 'transmission-context', 'context-verified']);

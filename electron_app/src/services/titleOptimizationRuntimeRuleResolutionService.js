@@ -88,7 +88,7 @@ function titleEvidenceText(listingResolution = {}) {
   return normalizeText(listingResolution?.normalized?.titleAuthority?.partFitment?.value);
 }
 
-function resolveDeterministicTitlePart(prefixRule, categoryRules, listingResolution) {
+function resolveDeterministicTitlePart(prefixRule, listingResolution) {
   const evidence = titleEvidenceText(listingResolution);
   const prefix = prefixRule?.rule;
   if (prefix?.specialTrigger && prefix.specialReplacement && includesWord(evidence, prefix.specialTrigger)) {
@@ -101,10 +101,6 @@ function resolveDeterministicTitlePart(prefixRule, categoryRules, listingResolut
   }
   const approvedPart = (prefix?.approvedPartTerms || []).find(term => includesWord(evidence, term));
   if (approvedPart) return { value: normalizeText(approvedPart), source: 'prefixRule.approvedPartTerm', ruleId: prefix.id };
-  const priorityDetail = categoryRules
-    .flatMap(entry => entry.rule.priorityDetails || [])
-    .find(detail => includesWord(evidence, detail));
-  if (priorityDetail) return { value: normalizeText(priorityDetail), source: 'categoryRule.priorityDetail' };
   return null;
 }
 
@@ -284,11 +280,11 @@ function resolveApplicableTitleOptimizationRules({ runtimeSnapshot, listingResol
     });
   }
   const titleStructure = selectTitleStructure(runtimeSnapshot, context);
-  const deterministicTitlePart = resolveDeterministicTitlePart(prefixRule, categoryRules, listingResolution);
+  const deterministicTitlePart = resolveDeterministicTitlePart(prefixRule, listingResolution);
 
   return {
     contractVersion: 1,
-    runtimeMode: 'shadow-only',
+    runtimeMode: 'authoritative',
     runtimeReady: true,
     listingContext: context,
     terminologyRules: selectTerminologyRules(runtimeSnapshot, context),

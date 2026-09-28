@@ -5,7 +5,10 @@ const OUTPUT_KEYS = Object.freeze([
   'reasoningSummary',
   'titleReviewStatus',
   'titleReviewReason',
-  'titleReviewNotes'
+  'titleReviewNotes',
+  'categoryPriorityDetails',
+  'sideDecision',
+  'vehicleDecision'
 ]);
 
 const PROMPT_SECTION_ORDER = Object.freeze([
@@ -24,6 +27,8 @@ const PROMPT_SECTION_ORDER = Object.freeze([
   'existingTitleNoDegradeContext',
   'descriptionBoundaryEvidence'
 ]);
+
+const { selectTitleFitmentCandidates } = require('./titleOptimizationFitmentSelectionService');
 
 function normalizeText(value) {
   if (Array.isArray(value)) return normalizeText(value[0]);
@@ -143,7 +148,11 @@ function categoryRules(applicableRules = {}) {
     id: entry.rule.id,
     categoryName: entry.rule.categoryName,
     matchedBy: [...entry.matchedBy],
-    priorityDetails: [...(entry.rule.priorityDetails || [])],
+    priorityDetails: (entry.rule.priorityDetails || []).map(detail => ({
+      detail,
+      verificationStatus: 'pending',
+      instruction: 'Verify against categoryPriorityEvidenceSources before using this detail.'
+    })),
     prefixRefs: [...(entry.rule.prefixRefs || [])],
     seriesRefs: [...(entry.rule.seriesRefs || [])],
     note: entry.rule.note || null
@@ -195,16 +204,16 @@ function stablePolicy() {
       'Accuracy and safety outrank enrichment, wording preferences, and title length targets.',
       'Obey the supplied canonical System Rules and applicable configuration.',
       'Part Fitment is supplied title evidence and may be used for title year, make, model, side, and part identity when it is the best verified source.',
-      'AI has selection priority for the Year / Year Range segment and must derive it from all supplied year evidence, including the current title, structured year evidence, and titleEvidence.partFitment.',
+      'AI has selection priority for the Year / Year Range segment, but must select from titleFitmentCandidates when candidates are supplied. Use currentTitleYearFallback only when no Part Fitment candidate is available.',
       'A single structured year is evidence, not a mandatory final title year.',
-      'If Part Fitment provides one unambiguous applicable range that includes the structured year, use the complete range.',
+      'If titleFitmentCandidates provides one unambiguous applicable range that includes the structured year, use the complete range.',
       'If the evidence supports only one year, use that year.',
       'If evidence contains multiple conflicting or unrelated ranges, preserve the safest existing year information and return Needs Review; do not choose arbitrarily.',
       'Do not combine unrelated applications, expand beyond supplied evidence, shrink a supported range to one year, or invent years.',
       'AI may normalize compressed model identifiers when the current title or Part Fitment corroborates the clear model names; preserve all corroborated model names in the generated title.',
       'Follow the selectedTitleStructure segments strictly; use its field and literal segment order for the generated title.',
       'Normalize raw fitment wording into the selectedTitleStructure fields; do not keep raw fitment wording when the structure provides separate year, make, model, or part segments.',
-      'Use deterministic source winners as authoritative except for the Year / Year Range segment and corroborated compressed-model normalization; lower-priority evidence is context only.',
+      'Resolve make, model and year together using vehicleDecision and supplied application evidence. Other deterministic source winners remain authoritative.',
       'Use deterministicTitlePart as the authoritative part when supplied; do not substitute a generic category part.',
       'Omit unavailable optional field segments instead of inventing values.',
       'A generated candidate must not degrade an already-better existing title; final enforcement happens later.',
@@ -244,7 +253,12 @@ function skuGuidance(applicableRules = {}) {
 }
 
 function authoritativeValues(listingResolution = {}, applicableRules = {}) {
-  const keys = ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
+  const keys = [
+    'title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'sku',
+    'componentType', 'color', 'placement', 'keyFitmentDetail', 'engineDisplacement',
+    'engineCode', 'transmissionCode', 'drivetrain', 'transmissionSpeedType',
+    'vinIdentifier', 'illumination', 'paintCode', 'trim', 'lightingTechnology'
+  ];
   const out = {};
   for (const key of keys) {
     const value = resolvedField(listingResolution, key);
@@ -254,7 +268,12 @@ function authoritativeValues(listingResolution = {}, applicableRules = {}) {
 }
 
 function sourceEvidenceMap(listingResolution = {}) {
-  const keys = ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
+  const keys = [
+    'title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku',
+    'componentType', 'color', 'placement', 'keyFitmentDetail', 'engineDisplacement',
+    'engineCode', 'transmissionCode', 'drivetrain', 'transmissionSpeedType',
+    'vinIdentifier', 'illumination', 'paintCode', 'trim', 'lightingTechnology'
+  ];
   const out = {};
   for (const key of keys) out[key] = sourceEvidence(listingResolution, key);
   return out;
@@ -262,13 +281,42 @@ function sourceEvidenceMap(listingResolution = {}) {
 
 function titleEvidence(listingResolution = {}) {
   const partFitment = listingResolution?.normalized?.titleAuthority?.partFitment || {};
+  const titleYearFallback = listingResolution?.normalized?.titleAuthority?.titleYearFallback || {};
   return {
     partFitment: {
       value: partFitment.value || null,
       boundary: 'TITLE EVIDENCE',
       titleIdentityAllowed: true
+    },
+    currentTitleYearFallback: {
+      value: titleYearFallback.value || null,
+      source: titleYearFallback.source || 'currentEbay',
+      useOnlyWhenPartFitmentUnavailable: true
     }
   };
+}
+
+function categoryPriorityEvidenceSources(listingResolution = {}) {
+  const sources = [];
+  const add = (source, evidence) => {
+    const text = typeof evidence === 'string' ? normalizeText(evidence) : evidence && typeof evidence === 'object' ? JSON.stringify(evidence) : '';
+    if (!text || sources.some(item => item.source === source && item.evidence === text)) return;
+    sources.push({ id: `evidence-${String(sources.length + 1).padStart(3, '0')}`, source, evidence: text });
+  };
+  for (const [field, resolved] of Object.entries(listingResolution?.resolved?.fields || {})) {
+    if (resolved?.resolvedValue) add(`Resolved:${field}`, resolved.resolvedValue);
+    for (const candidate of resolved?.candidates || []) add(`Source:${candidate.source}`, candidate.value);
+  }
+  add('Part Fitment', listingResolution?.normalized?.titleAuthority?.partFitment?.value);
+  const itemSpecifics = listingResolution?.normalized?.structured?.itemSpecifics?.value || {};
+  for (const [field, value] of Object.entries(itemSpecifics)) add(`Item Specifics:${field}`, value);
+  add('Conditions & Options', listingResolution?.normalized?.fields?.conditionsOptions?.value);
+  add('Current eBay Title', listingResolution?.normalized?.fields?.existingTitle?.value);
+  const currentFields = listingResolution?.normalized?.structured?.currentEbayFields?.value || {};
+  const compactFields = Object.fromEntries(Object.entries(currentFields).filter(([, value]) =>
+    typeof value !== 'string' || !/<(?:!doctype|html|div|table|script)\b/i.test(value)));
+  add('Current eBay Fields', compactFields);
+  return sources;
 }
 
 function manualOverrideActive(listingResolution = {}) {
@@ -288,6 +336,8 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
   const authoritative = authoritativeValues(listingResolution, applicableRules);
   const evidence = sourceEvidenceMap(listingResolution);
   const titleEvidencePayload = titleEvidence(listingResolution);
+  const evidenceSources = categoryPriorityEvidenceSources(listingResolution);
+  const titleFitmentCandidates = selectTitleFitmentCandidates(listingResolution);
   const currentTitle = fieldValue(listingResolution, 'existingTitle') || authoritative.title?.value || null;
 
   const userPayload = {
@@ -313,14 +363,35 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
         ]
         : [
           'Create a title candidate using the selected structure and supplied evidence only.',
-          'Part Fitment is title evidence when it is the best verified source.',
-          'Follow the selectedTitleStructure segments strictly.',
-          'AI has priority to select the Year / Year Range segment from current title, structured year evidence, and titleEvidence.partFitment.',
-          'Treat a single structured year as evidence. When one unambiguous applicable Part Fitment range includes the structured year, use the complete range.',
+          'Before finalizing generatedTitle, evaluate every candidate word or phrase in the context of this specific listing. Keep useful verified details when the title fits within 80 characters. Remove wording only when it is truly duplicated, redundant, filler, unnecessary for this listing, or must be removed to satisfy the 80-character maximum.',
+          'Preserve any detail whose removal could change fitment, compatible vehicle/version, product identity, configuration, function, side, placement, appearance, or a buyer\'s ability to select the correct part. Do not rely on a fixed list of protected words.',
+          'When the title would exceed 80 characters, remove the least important and most redundant wording first. Prefer repeated synonyms and duplicate concepts before any useful verified listing detail. Do not remove a useful detail merely to make the title shorter than 80 characters. If a safe title cannot fit, return Needs Review instead of silently removing an important detail.',
+          'Before returning JSON, perform a final title audit against the selected Part Fitment application and current title: identify every supplied qualifier that distinguishes compatibility, configuration, function, or product identity; confirm each useful qualifier is represented unless it is genuinely unnecessary for this listing.',
+          'During that final audit, detect part-name words or phrases that express the same concept more than once. Keep the clearest configured or verified part wording and use the recovered characters for omitted distinguishing qualifiers.',
+          'Rebuild generatedTitle after the audit, recount all characters including spaces and the final SKU, and verify the selectedTitleStructure order again. Do not return the first draft when redundant part wording remains while a useful distinguishing qualifier was omitted.',
+          'If the required structure and SKU leave available space below 80 characters, use the remaining characters for the highest-impact useful qualifiers from the selected application before optional generic descriptors.',
+          'Never wrap an evidence citation in quotation marks, apostrophes, backticks, or smart quotes. Return the exact source excerpt directly in every evidence field.',
+          'Return vehicleDecision with resolved, make, model, yearRange, source and evidence. When titleFitmentCandidates contains candidates, select exactly one candidate: put its exact id in source and its exact evidence in evidence. Never combine candidate ranges or qualifiers. If multiple candidates remain, use the supplied trusted selectionFacts and listing evidence to choose one; if they cannot distinguish the candidates, set resolved false and request Needs Review. When no title fitment candidate is available, use the supporting categoryPriorityEvidenceSources id and verbatim evidence. Explain why the application is relevant to the listing, prioritizing current advertised model and applicable fitment over donor identity. Include the selected make/model/year in generatedTitle.',
+          'Preserve every word of the authoritative Brand/Make unless a complete cited vehicle application supports a different make/model/year selection. Only clean capitalization; do not arbitrarily strip make words or infer vehicle identities from external knowledge.',
+          'Part Fitment is title evidence when it is the best verified source. Qualifiers attached to the selected fitment application take priority over overlapping synonyms and repeated part-name wording.',
+          'AI selects side and placement independently from the supplied listing evidence. Front/Rear/Upper/Lower are placement; Left/Right/Driver/Passenger/LH/RH are side. They can coexist and do not conflict across dimensions.',
+          'Return sideDecision with side, placement, source and evidence. Put the exact supporting categoryPriorityEvidenceSources id in source and cite a verbatim excerpt that explicitly supports the selected side. For no verified side return null side, source and evidence. Never infer side from part number, IPN or common automotive knowledge. Actual Left versus Right contradictions require review. Preserve a verified side in generatedTitle.',
+          'Donor vehicle year/model describe where the part came from, not every compatible application. Keep them separate from advertised fitment. Do not treat other compatible vehicles in Part Fitment as conflicting listing identities or require every application in the title. Select the application supported by the current title and approved identity fields; flag an unresolved actual identity conflict.',
+          'Follow the selectedTitleStructure segments strictly. Use its exact field and literal segment order as the required pattern for this listing, omitting only unavailable optional segments.',
+          'AI has priority to select the Year / Year Range segment only from titleFitmentCandidates when candidates are supplied. Raw titleEvidence.partFitment is audit context and must not be used to construct, extend, or merge a different title range. Otherwise use titleEvidence.currentTitleYearFallback and structured year evidence.',
+          'Treat a single structured year as evidence. When one unambiguous eligible title fitment range includes the structured year, use that candidate\'s complete range.',
           'Use a single year only when the evidence supports only that year.',
           'For multiple conflicting or unrelated ranges, preserve the safest existing year information and return Needs Review instead of choosing arbitrarily.',
-          'Do not combine unrelated applications, expand beyond supplied evidence, shrink a supported range to one year, or invent years.',
+          'Do not combine unrelated applications, expand beyond supplied evidence, shrink a supported range to one year, or invent years. Adjacent year applications may be merged only when make, model, and every meaningful application qualifier are identical; if qualifiers differ, select one complete application and keep its own year range and qualifiers together.',
           'For compressed model identifiers, AI may normalize from current title and titleEvidence.partFitment only when the clear model names are corroborated; preserve all corroborated model names.',
+          'Evaluate every Category Rule priority detail against categoryPriorityEvidenceSources and return one categoryPriorityDetails decision for each configured detail.',
+          'Mark a Category Rule detail verified only when supplied trusted evidence supports it directly or through an applicable approved terminology rule or synonym.',
+          'A citation must establish the specific detail, not merely the broad category or part identity. Generic category names do not verify specific features. Negated or absent features are not verified.',
+          'The cited evidence must contain the detail or its applicable configured terminology/synonym equivalent. If wording cannot be corroborated through those approved equivalents, mark the detail unverified. Do not treat a Prefix Rule replacement as a listing-source citation; its authority is separate.',
+          'For each verified Category Rule detail, put the exact supporting categoryPriorityEvidenceSources id in source and cite a verbatim evidence excerpt. Mark unsupported details unverified with null source and evidence.',
+          'Use only verified Category Rule priority details in generatedTitle. Never infer or invent an unverified Category Rule detail.',
+          'Category details are optional priorities: omit an unsupported optional detail without requesting review solely for its absence. Return only the exact configured detail names, each once; return an empty array when no Category Rule details are configured.',
+          'An applicable deterministic Prefix Rule replacement remains authoritative independently of Category Rule detail verification.',
           'Do not keep raw fitment wording in generatedTitle when the selected structure has separate fields for that information.'
         ]
     },
@@ -330,7 +401,9 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
       authoritativeValues: authoritative,
       missing: (listingResolution?.resolved?.missing || []).filter(field => field !== 'year' && field !== 'yearRange'),
       supportingAndConflictingEvidence: evidence,
-      titleEvidence: titleEvidencePayload
+      titleEvidence: titleEvidencePayload,
+      titleFitmentCandidates,
+      categoryPriorityEvidenceSources: evidenceSources
     },
     existingTitle: {
       currentTitle,
@@ -347,11 +420,11 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
   };
 
   const systemMessage = [
-    'You are the future shadow-only config-driven Phase 7.4 title/description assistant.',
+    'You are the authoritative config-driven Phase 7.4 title/description assistant.',
     'Return valid JSON only using the required output contract.',
     bypass
       ? 'Manual override is active: preserve title authority and do not create a replacement title.'
-      : 'Use the supplied authoritative non-year values, all supplied year evidence, and applicable rules to create a safe replacement title candidate.',
+      : 'Use an evidence-backed joint vehicleDecision for make/model/year and supplied authoritative remaining values and applicable rules to create a safe replacement title candidate.',
     'System Rules in the payload are mandatory.',
     '80 characters is the hard maximum; 65 characters is a target only, not a minimum.',
     'Part Fitment is allowed as verified title evidence.'
@@ -359,7 +432,7 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
 
   return {
     contractVersion: 1,
-    runtimeMode: 'shadow-only',
+    runtimeMode: 'authoritative',
     kind: bypass ? 'title-generation-bypass' : 'prompt',
     systemMessage,
     userPayload,

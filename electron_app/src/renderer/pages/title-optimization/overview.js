@@ -1,33 +1,72 @@
+function createPhase74Runner({ api, onChange = () => {}, confirmFullRun = () => false } = {}) {
+  if (!api) throw new Error('Phase 7.4 API is unavailable.');
+  const state = { listingsTableName: '', testIpns: '', maxListings: 5, running: false, status: 'idle', progress: 0, stage: '', message: '', summary: null, error: '' };
+  let subscribed = false;
+  const notify = () => onChange({ ...state });
+  const update = changes => { Object.assign(state, changes); notify(); };
+  const handleProgress = (_event, payload = {}) => update({
+    progress: Number.isFinite(Number(payload.percent)) ? Math.max(0, Math.min(100, Number(payload.percent))) : state.progress,
+    stage: payload.stage || state.stage,
+    message: payload.message || state.message
+  });
+
+  async function load() {
+    if (!subscribed && typeof api.onProgress === 'function') { api.onProgress(handleProgress); subscribed = true; }
+    const config = await api.getConfig();
+    update({
+      listingsTableName: config?.listingsTableName || 'eBay Listings (API)',
+      testIpns: config?.testIpns || '',
+      maxListings: Number.isFinite(Number(config?.maxListings)) ? Number(config.maxListings) : 5
+    });
+    return config;
+  }
+
+  async function run() {
+    if (state.running) return null;
+    const listingsTableName = String(state.listingsTableName || '').trim();
+    const maxListings = Number(state.maxListings);
+    if (!listingsTableName) throw new Error('Listings Table Name is required.');
+    if (!Number.isInteger(maxListings) || maxListings < 0) throw new Error('Max Listings must be a whole number of 0 or greater.');
+    update({ running: true, status: 'running', progress: 0, stage: '', message: 'Starting Phase 7.4...', summary: null, error: '' });
+    if (!String(state.testIpns || '').trim() && maxListings === 0 && !(await confirmFullRun())) {
+      update({ running: false, status: 'idle', message: 'Run cancelled.' });
+      return null;
+    }
+    try {
+      const result = await api.run({ phase74ListingsTable: listingsTableName, phase74TestIpns: String(state.testIpns || '').trim(), phase74MaxListings: maxListings });
+      if (!result?.success) throw new Error(result?.error?.message || result?.error || 'Phase 7.4 failed.');
+      update({ status: 'completed', progress: 100, message: 'Phase 7.4 completed.', summary: result.summary || {} });
+      return result;
+    } catch (error) {
+      update({ status: 'failed', message: error.message, error: error.message });
+      throw error;
+    } finally {
+      update({ running: false });
+    }
+  }
+  return { state, load, run, update, handleProgress };
+}
+
+if (typeof module !== 'undefined' && module.exports) module.exports = { createPhase74Runner };
+
 if (typeof window !== 'undefined' && typeof document !== 'undefined') document.addEventListener('DOMContentLoaded', () => {
   const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[character]));
-  const text = (id, value) => { document.getElementById(id).textContent = value; };
+  const text = (id, value) => { const element = document.getElementById(id); if (element) element.textContent = value; };
   const display = value => value == null || value === '' ? 'Not available' : String(value);
+  const formatDate = value => !value || !Number.isFinite(Date.parse(value)) ? 'Not available' : new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
   const stateBadge = enabled => `<span class="state-badge ${enabled ? 'enabled' : 'disabled'}">${enabled ? 'Enabled' : 'Disabled'}</span>`;
   const emptyState = message => `<p class="table-state">${escapeHtml(message)}</p>`;
-  const formatDate = value => {
-    if (!value || !Number.isFinite(Date.parse(value))) return 'Not available';
-    return new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  };
+  const sectionPages = { sourceFields:'source-fields.html', sourcePriority:'source-priority.html', terminologyRules:'terminology-rules.html', synonyms:'synonyms.html', prefixRules:'prefix-rules.html', restrictedTerms:'restricted-terms.html', categoryRules:'category-rules.html', titleStructure:'title-structure.html', flagReasons:'flag-reasons.html', systemRules:'system-rules.html' };
+
   const renderTable = (targetId, preview, columns, rowTemplate) => {
     const target = document.getElementById(targetId);
     if (!preview?.available) { target.innerHTML = emptyState('Unavailable'); return; }
-    if (!preview.rows.length) { target.innerHTML = emptyState('No configured rules available.'); return; }
+    if (!preview.rows?.length) { target.innerHTML = emptyState('No configured rules available.'); return; }
     target.innerHTML = `<table><thead><tr>${columns.map(column => `<th scope="col">${escapeHtml(column)}</th>`).join('')}</tr></thead><tbody>${preview.rows.map(rowTemplate).join('')}</tbody></table>${preview.totalCount > preview.rows.length ? `<p class="preview-count">Showing ${preview.rows.length} of ${preview.totalCount}</p>` : ''}`;
   };
-  const details = item => {
-    if (item?.details == null) return '';
-    const value = typeof item.details === 'string' ? item.details : JSON.stringify(item.details);
-    return `<pre>${escapeHtml(value)}</pre>`;
-  };
-  const summaryMarkup = (title, summary, lines) => {
-    if (!summary?.available) return `<span><strong>${escapeHtml(title)}</strong><small>Unavailable</small></span><span class="compact-arrow" aria-hidden="true">&rarr;</span>`;
-    return `<span><strong>${escapeHtml(title)}</strong><small>${lines.filter(Boolean).map(escapeHtml).join(' &middot; ')}</small></span><span class="compact-arrow" aria-hidden="true">&rarr;</span>`;
-  };
-
   function render(data) {
     text('workspace-health', data.status);
     document.getElementById('workspace-health').dataset.status = data.status.toLowerCase().replaceAll(' ', '-');
-    text('rail-health', data.status);
     text('configuration-version', display(data.configurationVersion));
     text('last-updated', formatDate(data.lastUpdated));
     text('maximum-title-length', data.globalProtections.maximumTitleLength == null ? 'Not available' : `${data.globalProtections.maximumTitleLength} characters`);
@@ -37,39 +76,61 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') document.a
     text('active-configuration-items', data.activeConfigurationItems == null ? 'Unavailable' : data.activeConfigurationItems.toLocaleString());
     text('configured-tabs', `${data.configuredTabs} of ${data.totalTabs}`);
     text('configuration-warnings', data.warningCount.toLocaleString());
+    text('system-rule-count', data.systemRuleCount == null ? 'Unavailable' : data.systemRuleCount.toLocaleString());
 
-    renderTable('source-fields-preview', data.previews.sourceFields, ['Logical Field', 'Mapped Source / Airtable Field'], row => `<tr><td><strong>${escapeHtml(row.displayName || row.logicalKey)}</strong></td><td>${escapeHtml(row.sourceFieldName || 'Unmapped')}</td></tr>`);
-    renderTable('source-priority-preview', data.previews.sourcePriority, ['Priority', 'Source'], row => `<tr><td>${escapeHtml(row.priority)}</td><td>${escapeHtml(row.label || row.key)}</td></tr>`);
-    renderTable('terminology-preview', data.previews.terminologyRules, ['Source Term', 'Replacement Term', 'Condition', 'Status'], row => `<tr><td>${escapeHtml(row.sourceTerm)}</td><td>${escapeHtml(row.replacementTerm || 'Remove')}</td><td>${escapeHtml(row.condition || 'Always')}</td><td>${stateBadge(row.enabled !== false)}</td></tr>`);
-    renderTable('synonyms-preview', data.previews.synonyms, ['Primary Term', 'Approved Synonyms', 'Status'], row => `<tr><td>${escapeHtml(row.primaryTerm)}</td><td>${escapeHtml(Array.isArray(row.synonyms) ? row.synonyms.join(', ') : '')}</td><td>${stateBadge(row.enabled !== false)}</td></tr>`);
-    renderTable('prefix-preview', data.previews.prefixRules, ['Prefix', 'Approved Terms', 'Status'], row => `<tr><td><strong>${escapeHtml(row.prefix)}</strong></td><td>${escapeHtml(Array.isArray(row.approvedPartTerms) ? row.approvedPartTerms.join(', ') : '')}</td><td>${stateBadge(row.enabled !== false)}</td></tr>`);
-
-    document.getElementById('restricted-summary').innerHTML = summaryMarkup('Restricted Terms', data.summaries.restrictedTerms, [`${data.summaries.restrictedTerms.activeCount} active`, `${data.summaries.restrictedTerms.lockedCount} safety locked`, `${data.summaries.restrictedTerms.warningCount} warnings`]);
-    document.getElementById('category-summary').innerHTML = summaryMarkup('Category Rules', data.summaries.categoryRules, [`${data.summaries.categoryRules.activeCount} active`, `${data.summaries.categoryRules.seededCount} required`, `${data.summaries.categoryRules.customCount} custom`]);
-    document.getElementById('structure-summary').innerHTML = summaryMarkup('Title Structure', data.summaries.titleStructure, [`${data.summaries.titleStructure.activeCount} active`, data.summaries.titleStructure.names.join(', ')]);
-    document.getElementById('flag-summary').innerHTML = summaryMarkup('Flag Reasons', data.summaries.flagReasons, [`${data.summaries.flagReasons.requiredCount} required`, `${data.summaries.flagReasons.customActiveCount} custom enabled`]);
-    document.getElementById('system-summary').innerHTML = summaryMarkup('System Rules', data.summaries.systemRules, [`${data.summaries.systemRules.lockedCount} locked`, display(data.summaries.systemRules.version), 'System managed']);
-
-    const unavailable = data.sections.filter(section => !section.available);
-    document.getElementById('availability-list').innerHTML = unavailable.length ? `<p><strong>Unavailable:</strong> ${unavailable.map(section => escapeHtml(section.name)).join(', ')}</p>` : '<p class="availability-ok"><span aria-hidden="true">&#10003;</span> All configuration services available</p>';
-    document.getElementById('warning-groups').innerHTML = data.warningGroups.length ? data.warningGroups.map(group => `<section class="warning-group"><h3>${escapeHtml(group.section)}</h3>${group.items.map(item => `<article>${item.id ? `<span class="warning-id">${escapeHtml(item.id)}</span>` : ''}<p>${escapeHtml(item.message)}</p>${details(item)}</article>`).join('')}</section>`).join('') : '<p class="positive-state"><span aria-hidden="true">&#10003;</span> No configuration warnings detected.</p>';
+    document.getElementById('coverage-rows').innerHTML = data.sections.map(section => {
+      const page = sectionPages[section.key] || section.path || section.page || '';
+      return `<tr><td><strong>${escapeHtml(section.name)}</strong></td><td><span class="availability ${section.available ? 'available' : 'unavailable'}">${section.available ? 'Available' : 'Unavailable'}</span></td><td>${escapeHtml(section.activeCount ?? section.totalCount ?? '—')}</td><td>${escapeHtml(section.warningCount ?? 0)}</td><td><button class="open-button" data-navigate="${escapeHtml(page)}" ${page ? '' : 'disabled'}>Open</button></td></tr>`;
+    }).join('');
     document.getElementById('safety-highlights').innerHTML = data.safetyHighlights.length ? data.safetyHighlights.map(item => `<li><span>${escapeHtml(item.id)}</span><strong>${escapeHtml(item.title)}</strong></li>`).join('') : '<li class="table-state">Unavailable</li>';
+    renderTable('source-fields-preview', data.previews.sourceFields, ['Logical Field', 'Airtable Field'], row => `<tr><td><strong>${escapeHtml(row.displayName || row.logicalKey)}</strong></td><td>${escapeHtml(row.sourceFieldName || 'Unmapped')}</td></tr>`);
+    renderTable('source-priority-preview', data.previews.sourcePriority, ['Priority', 'Source'], row => `<tr><td>${escapeHtml(row.priority)}</td><td>${escapeHtml(row.label || row.key)}</td></tr>`);
+    renderTable('terminology-preview', data.previews.terminologyRules, ['Source Term', 'Replacement', 'Status'], row => `<tr><td>${escapeHtml(row.sourceTerm)}</td><td>${escapeHtml(row.replacementTerm || 'Remove')}</td><td>${stateBadge(row.enabled !== false)}</td></tr>`);
   }
 
-  async function load() {
+  async function loadOverview() {
     const notice = document.getElementById('message');
     try {
       const result = await window.titleOptimizationOverviewAPI.load();
       if (!result?.success) throw Error(result?.error?.message || 'Unable to load Overview.');
-      render(result.data);
-      notice.hidden = true;
-    } catch (error) {
-      notice.textContent = error.message;
-      notice.hidden = false;
-    }
+      render(result.data); notice.hidden = true;
+    } catch (error) { notice.textContent = error.message; notice.hidden = false; }
   }
 
-  document.querySelectorAll('[data-navigate]').forEach(button => button.addEventListener('click', () => { window.location.href = button.dataset.navigate; }));
-  document.getElementById('refresh').addEventListener('click', load);
-  load();
+  const runner = createPhase74Runner({
+    api: {
+      getConfig: (...args) => window.phase74API.getConfig(...args),
+      run: (...args) => window.phase74API.run(...args),
+      onProgress: (...args) => window.phase74API.onProgress(...args)
+    },
+    confirmFullRun: () => window.confirm('This will run Phase 7.4 for every eligible listing and write results to Airtable. Continue?'),
+    onChange: state => {
+      const button = document.getElementById('run-phase74');
+      button.disabled = state.running;
+      button.textContent = state.running ? 'Running Playground...' : 'Run Playground';
+      document.getElementById('phase74-progress').value = state.progress;
+      text('phase74-progress-text', state.message || (state.status === 'idle' ? 'Ready' : state.status));
+      text('phase74-status', state.status.charAt(0).toUpperCase() + state.status.slice(1));
+      document.getElementById('phase74-status').dataset.status = state.status;
+      const summary = document.getElementById('phase74-summary');
+      if (state.summary) {
+        const labels = { listingsScanned:'Listings scanned', listingsEligible:'Eligible listings', titleGenerated:'Titles generated', descriptionGenerated:'Descriptions generated', skippedManualOverride:'Manual overrides skipped', skippedAlreadyEnriched:'Already enriched skipped', aiFailures:'AI failures', writeFailures:'Write failures' };
+        summary.innerHTML = Object.entries(labels).filter(([key]) => state.summary[key] != null).map(([key, label]) => `<div><span>${label}</span><strong>${escapeHtml(state.summary[key])}</strong></div>`).join('');
+        summary.hidden = false;
+      } else { summary.hidden = true; summary.innerHTML = ''; }
+    }
+  });
+
+  const tableInput = document.getElementById('phase74-listings-table');
+  const ipnInput = document.getElementById('phase74-test-ipns');
+  const maxInput = document.getElementById('phase74-max-listings');
+  tableInput.addEventListener('input', () => runner.update({ listingsTableName: tableInput.value }));
+  ipnInput.addEventListener('input', () => runner.update({ testIpns: ipnInput.value }));
+  maxInput.addEventListener('input', () => runner.update({ maxListings: Number(maxInput.value) }));
+  document.getElementById('run-phase74').addEventListener('click', async () => {
+    try { await runner.run(); } catch (error) { const notice = document.getElementById('message'); notice.textContent = error.message; notice.hidden = false; }
+  });
+  document.addEventListener('click', event => { const target = event.target.closest('[data-navigate]'); if (target?.dataset.navigate) window.location.href = target.dataset.navigate; });
+  loadOverview();
+  runner.load().then(() => { tableInput.value = runner.state.listingsTableName; ipnInput.value = runner.state.testIpns; maxInput.value = runner.state.maxListings; }).catch(error => { const notice = document.getElementById('message'); notice.textContent = error.message; notice.hidden = false; });
 });

@@ -21,6 +21,36 @@ function mapping(logicalKey, sourceFieldName, extras = {}) {
   };
 }
 
+test('advertised application model is not replaced by a different donor model', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({ 'Item Title': 'Starter Motor Fits 09-15 PILOT 00123', 'Current eBay Fields': JSON.stringify({ donorModel: 'TL', donorYear: '2011' }) }),
+    masterRecord: { fields: { 'Part Fitment': 'PILOT 09-15 Starter Motor' } }
+  });
+  assert.equal(result.resolved.fields.model.resolvedValue, 'PILOT');
+  assert.equal(result.resolved.fields.model.conflict, false);
+  assert.equal(result.normalized.derived.yearFromDonor.role, 'donor');
+});
+
+test('full authoritative make is preserved and shorter corroborating source does not conflict', () => {
+  const runtimeSnapshot = snapshot();
+  runtimeSnapshot.sections.terminologyRules = { available: true, items: [{ sourceTerm: 'Example Motors', replacementTerm: 'Example', action: 'replace', condition: 'always', appliesTo: 'all' }] };
+  const result = normalizeAndResolveListing({ runtimeSnapshot,
+    listingRecord: listing({ 'C:Brand': 'Example', 'Item Specifics - All C: values relevant to item': JSON.stringify({ Brand: 'Example Motors' }) }) });
+  assert.equal(result.resolved.fields.brandMake.resolvedValue, 'Example Motors');
+  assert.equal(result.resolved.fields.brandMake.conflict, false);
+});
+
+test('Front placement complements Driver Left side rather than conflicting with it', () => {
+  const result = normalizeAndResolveListing({ runtimeSnapshot: snapshot(),
+    listingRecord: listing({ 'Item Title': 'Driver Left Lower Control Arm Front Fits 13-15 CIVIC 1583061', 'Conditions & Options': '',
+      'Item Specifics - All C: values relevant to item': JSON.stringify({ 'Placement on Vehicle': 'Front' }) }),
+    masterRecord: { fields: { 'Part Fitment': '2013-2015 Honda Civic front lower control arm driver side' } } });
+  assert.equal(result.resolved.fields.side.resolvedValue, 'Driver Left LH');
+  assert.equal(result.resolved.fields.side.conflict, false);
+  assert.equal(result.resolved.fields.placement.resolvedValue, 'Front');
+});
+
 function snapshot(overrides = {}) {
   const mappings = [
     mapping('existingTitle', 'Item Title'),
@@ -53,7 +83,7 @@ function snapshot(overrides = {}) {
   ];
 
   return {
-    mode: 'shadow-only',
+    mode: 'authoritative',
     runtimeReady: true,
     blockingSections: [],
     sections: {
@@ -253,6 +283,151 @@ test('keeps full-year partFitment ranges as raw AI evidence and treats equivalen
   assert.equal(result.resolved.fields.side.conflict, false);
 });
 
+test('treats plural and possessive structured side labels as equivalent to directional title evidence', () => {
+  for (const [structuredSide, titleSide] of [
+    ['Drivers Door', 'Driver Left LH'],
+    ["Driver's Door", 'Left LH'],
+    ['Passengers Door', 'Passenger Right RH'],
+    ["Passenger's Door", 'Right RH']
+  ]) {
+    const result = normalizeAndResolveListing({
+      runtimeSnapshot: snapshot(),
+      listingRecord: listing({
+        'Item Title': `2011 Hyundai Elantra ${titleSide} Master Window Switch 1588346`,
+        SKU: '1588346',
+        IPN: '641-50922L',
+        'Conditions & Options': '',
+        'Item Specifics - All C: values relevant to item': JSON.stringify({
+          Side: structuredSide,
+          'C:Brand': 'Hyundai'
+        })
+      })
+    });
+
+    assert.equal(result.resolved.fields.side.resolvedValue, structuredSide);
+    assert.equal(result.resolved.fields.side.conflict, false, `${structuredSide} should agree with ${titleSide}`);
+    assert.deepEqual(result.resolved.fields.side.conflicts, []);
+  }
+});
+
+test('uses an existing-title year range as fallback evidence only when Part Fitment is unavailable', () => {
+  const withoutFitment = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': 'Engine 2.4L VIN 1 6th Digit Coupe Federal Emissions Fits 13-15 ACCORD 1585847',
+      SKU: '1585847',
+      IPN: '300-80094A',
+      'Structured Year': '2013'
+    }),
+    masterRecord: { fields: { 'Part Fitment': '' } }
+  });
+
+  assert.equal(withoutFitment.normalized.titleAuthority.titleYearFallback.value, '2013-2015');
+  assert.equal(withoutFitment.normalized.titleAuthority.titleYearFallback.source, 'currentEbay');
+
+  const withFitment = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': 'Engine 2.4L VIN 1 6th Digit Coupe Federal Emissions Fits 13-15 ACCORD 1585847',
+      SKU: '1585847',
+      IPN: '300-80094A',
+      'Structured Year': '2013'
+    }),
+    masterRecord: { fields: { 'Part Fitment': 'Fits 2014-2016 Honda Accord Engine' } }
+  });
+
+  assert.equal(withFitment.normalized.titleAuthority.titleYearFallback.value, null);
+
+  const singleYearWithoutFitment = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': '2013 Honda Accord Coupe Engine 2.4L 1585847',
+      SKU: '1585847',
+      IPN: '300-80094A',
+      'Structured Year': ''
+    }),
+    masterRecord: { fields: { 'Part Fitment': '' } }
+  });
+
+  assert.equal(singleYearWithoutFitment.normalized.titleAuthority.titleYearFallback.value, '2013');
+});
+
+test('retains full source title for AI without generating a hardcoded protection list', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': 'Engine 2.4L VIN 1 6th Digit Coupe Federal Emissions Fits 13-15 ACCORD 1585847',
+      SKU: '1585847',
+      IPN: '300-80094A'
+    })
+  });
+
+  assert.equal(result.normalized.titleAuthority.importantExistingTitleDetails, undefined);
+  assert.match(result.normalized.fields.existingTitle.value, /Coupe Federal Emissions/);
+});
+
+test('resolves client-required fitment details from structured Item Specifics', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Specifics - All C: values relevant to item': JSON.stringify({
+        'C:Engine Size': '2.4L',
+        'C:Engine Code': 'K24W1',
+        'C:Transmission Code': 'CVT2',
+        'C:Drivetrain': 'FWD',
+        'C:Transmission Speeds': '6-Speed',
+        'C:VIN Identifier': 'VIN 1',
+        'C:Illumination': 'Illuminated',
+        'C:Paint Code': 'NH731P',
+        'C:Trim': 'EX-L',
+        'C:Lighting Technology': 'LED'
+      })
+    }),
+    fields: [
+      'engineDisplacement', 'engineCode', 'transmissionCode', 'drivetrain',
+      'transmissionSpeedType', 'vinIdentifier', 'illumination', 'paintCode',
+      'trim', 'lightingTechnology'
+    ]
+  });
+
+  assert.equal(result.resolved.fields.engineDisplacement.resolvedValue, '2.4L');
+  assert.equal(result.resolved.fields.engineCode.resolvedValue, 'K24W1');
+  assert.equal(result.resolved.fields.transmissionCode.resolvedValue, 'CVT2');
+  assert.equal(result.resolved.fields.drivetrain.resolvedValue, 'FWD');
+  assert.equal(result.resolved.fields.transmissionSpeedType.resolvedValue, '6-Speed');
+  assert.equal(result.resolved.fields.vinIdentifier.resolvedValue, 'VIN 1');
+  assert.equal(result.resolved.fields.illumination.resolvedValue, 'Illuminated');
+  assert.equal(result.resolved.fields.paintCode.resolvedValue, 'NH731P');
+  assert.equal(result.resolved.fields.trim.resolvedValue, 'EX-L');
+  assert.equal(result.resolved.fields.lightingTechnology.resolvedValue, 'LED');
+});
+
+test('retains arbitrary title details for AI assessment', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': '2018 Honda Accord EX-L LED Illuminated Black NH731P Engine Module 1585847'
+    })
+  });
+
+  assert.equal(result.normalized.titleAuthority.importantExistingTitleDetails, undefined);
+  assert.match(result.normalized.fields.existingTitle.value, /EX-L LED Illuminated Black NH731P/);
+});
+
+test('does not automatically protect generic Assembly from the existing title', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': '2010-2012 Subaru Outback Column Switch Assembly Station Wgn LEGACY 1459826',
+      SKU: '1459826',
+      IPN: '629-50937A'
+    })
+  });
+
+  assert.equal(result.normalized.titleAuthority.importantExistingTitleDetails, undefined);
+  assert.match(result.normalized.fields.existingTitle.value, /Assembly/);
+});
+
 test('uses fitment and category cleanup for missing make and cleaner part names', () => {
   const result = normalizeAndResolveListing({
     runtimeSnapshot: snapshot(),
@@ -432,17 +607,39 @@ test('priority resolution treats identical values as non-conflicting and no cand
   assert.equal(resolved.fields.engineCode.resolvedValue, null);
 });
 
-test('manual override evidence is normalized but does not change production control flow', () => {
+test('only canonical manual override statuses activate title protection', () => {
+  const cases = [
+    { status: '', canonicalStatus: '', active: false },
+    { status: 'Automatic', canonicalStatus: 'Automatic', active: false },
+    { status: 'automatic', canonicalStatus: 'Automatic', active: false },
+    { status: 'Manually Approved', canonicalStatus: 'Manually Approved', active: true },
+    { status: 'manually overridden', canonicalStatus: 'Manually Overridden', active: true },
+    { status: 'Approved by staff', canonicalStatus: '', active: false }
+  ];
+
+  for (const item of cases) {
+    const normalized = normalizeListingEvidence({
+      runtimeSnapshot: snapshot(),
+      listingRecord: listing({ 'Title Override Status': item.status })
+    });
+
+    assert.equal(normalized.manualOverride.canonicalStatus, item.canonicalStatus, item.status || 'blank');
+    assert.equal(normalized.manualOverride.active, item.active, item.status || 'blank');
+  }
+});
+
+test('manually overridden title evidence takes priority when a manual title is supplied', () => {
   const combined = normalizeAndResolveListing({
     runtimeSnapshot: snapshot(),
     listingRecord: listing({
-      'Title Override Status': 'Manual Override',
+      'Title Override Status': 'Manually Overridden',
       'Manual Override Title': 'Approved Manual Title'
     }),
     fields: ['title']
   });
 
-  assert.equal(combined.normalized.manualOverride.status.value, 'Manual Override');
+  assert.equal(combined.normalized.manualOverride.status.value, 'Manually Overridden');
+  assert.equal(combined.normalized.manualOverride.canonicalStatus, 'Manually Overridden');
   assert.equal(combined.normalized.manualOverride.active, true);
   assert.equal(combined.resolved.fields.title.resolvedValue, 'Approved Manual Title');
   assert.equal(combined.resolved.fields.title.resolvedSource, 'manualOverride');

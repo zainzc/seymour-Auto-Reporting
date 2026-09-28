@@ -205,7 +205,7 @@ function createTitleOptimizationRuntimeConfigService(loaders = {}, options = {})
     const status = runtimeReady ? (hasWarnings ? 'ready-with-warnings' : 'ready') : 'blocked';
 
     return {
-      mode: 'shadow-only',
+      mode: 'authoritative',
       status,
       runtimeReady,
       metadata: {

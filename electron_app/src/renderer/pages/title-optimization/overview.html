@@ -23,40 +23,51 @@
   <nav class="tab-navigation" aria-label="Title Optimization sections"><button class="active" aria-current="page">Overview</button><button data-navigate="source-fields.html">Source Fields</button><button data-navigate="source-priority.html">Source Priority</button><button data-navigate="terminology-rules.html">Terminology Rules</button><button data-navigate="synonyms.html">Synonyms</button><button data-navigate="prefix-rules.html">Prefix Rules</button><button data-navigate="restricted-terms.html">Restricted Terms</button><button data-navigate="category-rules.html">Category Rules</button><button data-navigate="title-structure.html">Title Structure</button><button data-navigate="flag-reasons.html">Flag Reasons</button><button data-navigate="system-rules.html">System Rules</button></nav>
 
   <div id="message" class="notice error" role="alert" hidden></div>
-  <section class="summary-cards" aria-label="Global configuration summary">
-    <article class="summary-card"><span>Maximum Title Length</span><strong id="maximum-title-length">&mdash;</strong><small>Locked safety rule</small></article>
-    <article class="summary-card"><span>Synonym Enrichment</span><strong id="synonym-enrichment">&mdash;</strong><small>Global configuration</small></article>
-    <article class="summary-card"><span>Manual Override Protection</span><strong id="manual-override-protection">&mdash;</strong><small>Locked safety rule</small></article>
-    <article class="summary-card"><span>SKU Requirement</span><strong id="sku-requirement">&mdash;</strong><small>Locked safety rule</small></article>
-    <article class="summary-card summary-card-accent"><span>Active Configuration Items</span><strong id="active-configuration-items">&mdash;</strong><small>Across all editable sections</small></article>
+  <section class="command-status" aria-label="Configuration status">
+    <div><span>Active Configuration Items</span><strong id="active-configuration-items">&mdash;</strong></div>
+    <div><span>Configured Tabs</span><strong id="configured-tabs">&mdash;</strong></div>
+    <div><span>Configuration Warnings</span><strong id="configuration-warnings">&mdash;</strong></div>
+    <div><span>System Rules</span><strong id="system-rule-count">&mdash;</strong></div>
+    <div><span>Generation Runtime</span><strong>Config-driven</strong></div>
   </section>
 
-  <div class="dashboard-layout">
-    <section class="dashboard-main" aria-label="Configuration previews">
-      <div class="preview-pair">
-        <article class="dashboard-card preview-card"><div class="dashboard-card-header"><div><p class="card-kicker">Mappings</p><h2>Source Field Mapping</h2></div><button class="text-button" data-navigate="source-fields.html">View Source Fields <span aria-hidden="true">&rarr;</span></button></div><div id="source-fields-preview" class="preview-table"></div></article>
-        <article class="dashboard-card preview-card"><div class="dashboard-card-header"><div><p class="card-kicker">Authority</p><h2>Source Priority</h2></div><button class="text-button" data-navigate="source-priority.html">View Source Priority <span aria-hidden="true">&rarr;</span></button></div><div id="source-priority-preview" class="preview-table"></div></article>
-      </div>
-      <article class="dashboard-card preview-card wide-preview"><div class="dashboard-card-header"><div><p class="card-kicker">Normalization</p><h2>Terminology Rules</h2></div><button class="text-button" data-navigate="terminology-rules.html">View All Terminology Rules <span aria-hidden="true">&rarr;</span></button></div><div id="terminology-preview" class="preview-table"></div></article>
-      <div class="preview-pair">
-        <article class="dashboard-card preview-card"><div class="dashboard-card-header"><div><p class="card-kicker">Optional enrichment</p><h2>Synonym Enrichment</h2></div><button class="text-button" data-navigate="synonyms.html">View Synonyms <span aria-hidden="true">&rarr;</span></button></div><div id="synonyms-preview" class="preview-table"></div></article>
-        <article class="dashboard-card preview-card"><div class="dashboard-card-header"><div><p class="card-kicker">Verified mappings</p><h2>Prefix Rules</h2></div><button class="text-button" data-navigate="prefix-rules.html">View Prefix Rules <span aria-hidden="true">&rarr;</span></button></div><div id="prefix-preview" class="preview-table"></div></article>
-      </div>
-      <section class="compact-section" aria-labelledby="remaining-heading"><div class="section-heading"><div><p class="card-kicker">Configuration coverage</p><h2 id="remaining-heading">Additional Rule Sets</h2></div></div><div class="compact-grid">
-        <button id="restricted-summary" class="compact-card" data-navigate="restricted-terms.html"></button>
-        <button id="category-summary" class="compact-card" data-navigate="category-rules.html"></button>
-        <button id="structure-summary" class="compact-card" data-navigate="title-structure.html"></button>
-        <button id="flag-summary" class="compact-card" data-navigate="flag-reasons.html"></button>
-        <button id="system-summary" class="compact-card" data-navigate="system-rules.html"></button>
-      </div></section>
+  <div class="command-grid">
+    <section class="source-card coverage-panel">
+      <div class="panel-heading"><div><h2>Configuration Coverage</h2><p>Availability and activity across every Title Optimization rule set.</p></div></div>
+      <div class="table-scroll"><table class="coverage-table"><thead><tr><th>Section</th><th>Availability</th><th>Active</th><th>Warnings</th><th>Action</th></tr></thead><tbody id="coverage-rows"></tbody></table></div>
     </section>
-
-    <aside class="dashboard-rail" aria-label="Configuration operations">
-      <section class="dashboard-card rail-card"><div class="dashboard-card-header"><div><p class="card-kicker">Live service health</p><h2>Configuration Status</h2></div><button id="refresh" class="icon-button" type="button" aria-label="Refresh Overview" title="Refresh Overview">&#8635;</button></div><dl class="status-list"><div><dt>Workspace</dt><dd id="rail-health">Loading&hellip;</dd></div><div><dt>Configured Tabs</dt><dd id="configured-tabs">&mdash;</dd></div><div><dt>Warnings</dt><dd id="configuration-warnings">&mdash;</dd></div></dl><div id="availability-list" class="availability-list"></div></section>
-      <section class="dashboard-card rail-card"><div class="dashboard-card-header"><div><p class="card-kicker">Service-reported</p><h2>Configuration Warnings</h2></div></div><div id="warning-groups" class="warning-groups" aria-live="polite"></div></section>
-      <section class="dashboard-card rail-card"><div class="dashboard-card-header"><div><p class="card-kicker">Canonical controls</p><h2>System Safety Highlights</h2></div><button class="text-button" data-navigate="system-rules.html">Open <span aria-hidden="true">&rarr;</span></button></div><ul id="safety-highlights" class="safety-highlights"></ul></section>
-    </aside>
   </div>
+
+  <section class="source-card core-protections">
+    <div class="panel-heading"><div><h2>Core Protections</h2><p>System safeguards applied to generated listing titles.</p></div><button class="open-button" data-navigate="system-rules.html">Open System Rules</button></div>
+    <div class="protection-grid">
+      <div><span>Maximum Title Length</span><strong id="maximum-title-length">&mdash;</strong></div>
+      <div><span>SKU Requirement</span><strong id="sku-requirement">&mdash;</strong></div>
+      <div><span>Manual Override Protection</span><strong id="manual-override-protection">&mdash;</strong></div>
+      <div><span>Synonym Enrichment</span><strong id="synonym-enrichment">&mdash;</strong></div>
+    </div>
+    <ul id="safety-highlights" class="safety-highlights"></ul>
+  </section>
+
+  <section class="source-card phase74-runner">
+    <div class="panel-heading"><div><h2>Title Optimization Playground</h2><p>Run the active title and description configuration against selected listings.</p><p class="live-write-notice"><strong>Live write:</strong> Generated titles will be saved to the Airtable <strong>Item Title</strong> field.</p></div><span id="phase74-status" class="run-status">Idle</span></div>
+    <div class="runner-controls">
+      <label>Listings Table Name<input id="phase74-listings-table" type="text" autocomplete="off"></label>
+      <label>Max Listings (Testing)<input id="phase74-max-listings" type="number" min="0" step="1"></label>
+      <label class="ipn-control">Test IPNs (optional)<textarea id="phase74-test-ipns" rows="3" placeholder="One or more IPNs, separated by commas or new lines"></textarea></label>
+    </div>
+    <div class="runner-footer">
+      <div class="progress-wrap"><progress id="phase74-progress" max="100" value="0"></progress><span id="phase74-progress-text">Ready</span></div>
+      <button id="run-phase74" class="button primary" type="button">Run Playground</button>
+    </div>
+    <div id="phase74-summary" class="run-summary" hidden></div>
+  </section>
+
+  <section class="focused-previews" aria-label="Key configuration previews">
+    <article class="source-card preview-panel"><div class="panel-heading"><div><h2>Source Fields</h2><p>Inputs available to title generation.</p></div><button class="open-button" data-navigate="source-fields.html">Open</button></div><div id="source-fields-preview" class="preview-table"></div></article>
+    <article class="source-card preview-panel"><div class="panel-heading"><div><h2>Source Priority</h2><p>Authority order for competing evidence.</p></div><button class="open-button" data-navigate="source-priority.html">Open</button></div><div id="source-priority-preview" class="preview-table"></div></article>
+    <article class="source-card preview-panel"><div class="panel-heading"><div><h2>Terminology Rules</h2><p>Approved normalization behavior.</p></div><button class="open-button" data-navigate="terminology-rules.html">Open</button></div><div id="terminology-preview" class="preview-table"></div></article>
+  </section>
 </main>
 <script src="overview.js"></script>
 </body>

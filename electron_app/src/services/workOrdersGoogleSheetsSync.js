@@ -1375,6 +1375,20 @@ function buildDeliveryAutomationCustomFieldsFromValues(valuesByFieldName = {}, f
       continue;
     }
 
+    if (fieldType === 'DROP_DOWN') {
+      const matchingOptions = (fieldMeta.type_config?.options || []).filter(option =>
+        normalizeUpper(option?.name) === normalizeUpper(rawValue));
+      const optionId = matchingOptions.length === 1 ? normalizeCell(matchingOptions[0].id) : '';
+      if (!optionId) {
+        const message = `Delivery Automation dropdown option missing or ambiguous for ${rowKey || 'unknown'}: field='${name}', value='${rawValue}'. Field was not changed.`;
+        console.warn(`[WorkOrders] ${message}`);
+        if (Array.isArray(options.result?.errors)) options.result.errors.push(message);
+        continue;
+      }
+      customFields.push({ id: fieldMeta.id, value: optionId, fieldName: name, fieldType });
+      continue;
+    }
+
     customFields.push({
       id: fieldMeta.id,
       value: normalizeCell(value),
@@ -2400,7 +2414,7 @@ async function syncRowsToDeliveryAutomationOnce({
       const desiredStatus = normalizeClickUpStatusToken(status);
       const cleanupFields = buildDeliveryLinkCleanupCustomFields(existingTask, deliveryFieldMeta);
       const refreshedDeliveryFields = buildDeliveryAutomationCustomFields(row, deliveryFieldMeta, {
-        includeClearFields: true
+        includeClearFields: true, result
       });
       const changedDeliveryFields = refreshedDeliveryFields.filter(field => hasCustomFieldChanged(existingTask, field));
       let descriptionUpdated = false;
@@ -2447,6 +2461,7 @@ async function syncRowsToDeliveryAutomationOnce({
       status
     };
     const customFields = buildDeliveryAutomationCustomFields(row, deliveryFieldMeta, {
+      result,
       includeClearFields: false
     });
     const createCustomFields = buildClickUpCreateCustomFields(customFields);

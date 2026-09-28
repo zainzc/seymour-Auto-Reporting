@@ -2,6 +2,11 @@ const { DEFAULT_SOURCE_PRIORITY } = require('./titleOptimizationSourcePrioritySe
 
 const SOURCE_FIELD_SECTION = 'sourceFields';
 const SOURCE_PRIORITY_SECTION = 'sourcePriority';
+const TITLE_OVERRIDE_STATUSES = Object.freeze({
+  automatic: 'Automatic',
+  'manually approved': 'Manually Approved',
+  'manually overridden': 'Manually Overridden'
+});
 
 const SEMANTIC_SOURCE = Object.freeze({
   existingTitle: 'currentEbay',
@@ -33,7 +38,17 @@ const ITEM_SPECIFIC_ALIASES = Object.freeze({
   color: ['Color', 'C:Color', 'Paint Color'],
   componentType: ['Component Type', 'C:Component Type'],
   placement: ['Placement', 'Position', 'C:Placement', 'C:Position'],
-  keyFitmentDetail: ['Key Fitment Detail', 'Feature', 'Features', 'C:Features']
+  keyFitmentDetail: ['Key Fitment Detail', 'Feature', 'Features', 'C:Features'],
+  engineDisplacement: ['Engine Size', 'C:Engine Size', 'Engine Displacement', 'C:Engine Displacement', 'C:Engine (liters)'],
+  engineCode: ['Engine Code', 'C:Engine Code'],
+  transmissionCode: ['Transmission Code', 'C:Transmission Code'],
+  drivetrain: ['Drivetrain', 'Drive Type', 'C:Drivetrain', 'C:Drive Type'],
+  transmissionSpeedType: ['Transmission Speeds', 'Speed / Type', 'C:Transmission Speeds', 'C:Speed / Type'],
+  vinIdentifier: ['VIN Identifier', 'VIN', 'C:VIN Identifier', 'C:VIN'],
+  illumination: ['Illumination', 'C:Illumination'],
+  paintCode: ['Paint Code', 'C:Paint Code'],
+  trim: ['Trim', 'Trim Level', 'C:Trim', 'C:Trim Level'],
+  lightingTechnology: ['Lighting Technology', 'C:Lighting Technology', 'Bulb Type', 'C:Bulb Type']
 });
 
 class RuntimeConfigurationError extends Error {
@@ -183,6 +198,28 @@ function expandTwoDigitYear(value) {
   return String(number <= 30 ? 2000 + number : 1900 + number);
 }
 
+function canonicalTitleOverrideStatus(value) {
+  return TITLE_OVERRIDE_STATUSES[normalizeText(value).toLocaleLowerCase('en-US')] || '';
+}
+
+function deriveYearEvidenceFromTitle(value = '') {
+  const text = normalizeText(value);
+  const match = text.match(/\b(?:fits?\s+)?(\d{2}|\d{4})\s*-\s*(\d{2}|\d{4})\b/i);
+  if (match) {
+    const startYear = match[1].length === 2 ? expandTwoDigitYear(match[1]) : match[1];
+    let endYear = match[2].length === 2 ? expandTwoDigitYear(match[2]) : match[2];
+    if (match[1].length === 4 && match[2].length === 2) {
+      endYear = `${match[1].slice(0, 2)}${match[2]}`;
+    }
+    const start = Number.parseInt(startYear, 10);
+    const end = Number.parseInt(endYear, 10);
+    if (Number.isFinite(start) && Number.isFinite(end) && start <= end) {
+      return `${startYear}-${endYear}`;
+    }
+  }
+  return text.match(/\b(?:19\d{2}|20\d{2})\b/)?.[0] || '';
+}
+
 function parseFitmentApplications(value = '') {
   const text = normalizeText(value);
   if (!text) return [];
@@ -256,7 +293,7 @@ function modelEvidenceCandidates({ itemSpecifics = {}, existingTitle = '', partF
   const values = [];
   const itemSpecificModel = itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.model);
   if (itemSpecificModel) values.push({ value: itemSpecificModel, source: 'itemSpecifics' });
-  if (donorModel) values.push({ value: donorModel, source: 'currentEbay' });
+  if (donorModel && !deriveModelFromTitle(existingTitle)) values.push({ value: donorModel, source: 'currentEbay' });
   const titleModels = normalizeText(existingTitle).match(/\b(OUTBACK|LEGACY|OUTBAKLEG)\b/gi) || [];
   for (const value of titleModels) values.push({ value: value.toUpperCase(), source: 'currentEbay' });
   for (const application of parseFitmentApplications(partFitment)) {
@@ -296,17 +333,20 @@ function modelAmbiguityResolvedByCandidate(sourceResolution = {}, candidateTitle
 
 function deriveSideFromText(value = '') {
   const text = normalizeText(value).toUpperCase();
-  if (/\b(PASS|PASSENGER|RIGHT|RH)\b/.test(text)) return 'Passenger Right RH';
-  if (/\b(DRIVER|LEFT|LH)\b/.test(text)) return 'Driver Left LH';
+  if (/\b(PASS|PASSENGERS?|RIGHT|RH)\b/.test(text)) return 'Passenger Right RH';
+  if (/\b(DRIVERS?|LEFT|LH)\b/.test(text)) return 'Driver Left LH';
   return '';
 }
 
-function canonicalResolvedValue(field = '', value = '') {
+const { normalizeVehicleMake, corroboratesAuthoritativeMake } = require('./titleOptimizationMakeNormalizationService');
+
+function canonicalResolvedValue(field = '', value = '', terminologyRules = []) {
   const text = normalizeText(value);
+  if (field === 'brandMake') return normalizeCompare(normalizeVehicleMake(text, terminologyRules));
   if (field !== 'side') return normalizeCompare(text);
   const upper = text.toUpperCase().replace(/[\/_-]+/g, ' ');
-  if (/\b(DRIVER|LEFT|LH)\b/.test(upper)) return 'driver-left-lh';
-  if (/\b(PASS|PASSENGER|RIGHT|RH)\b/.test(upper)) return 'passenger-right-rh';
+  if (/\b(DRIVERS?|LEFT|LH)\b/.test(upper)) return 'driver-left-lh';
+  if (/\b(PASS|PASSENGERS?|RIGHT|RH)\b/.test(upper)) return 'passenger-right-rh';
   return normalizeCompare(text);
 }
 
@@ -480,7 +520,7 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
   const masterFields = rawRecordFields(masterRecord);
   const out = {
     contractVersion: 1,
-    runtimeMode: 'shadow-only',
+    runtimeMode: 'authoritative',
     runtimeReady: true,
     recordId: listingRecord?.id || null,
     fields: {},
@@ -488,6 +528,7 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
     manualOverride: {
       status: evidence('', 'manualOverride'),
       title: evidence('', 'manualOverride'),
+      canonicalStatus: '',
       active: false
     },
     descriptionOnly: {},
@@ -512,7 +553,9 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
 
   out.manualOverride.status = out.fields.manualOverrideStatus || evidence('', 'manualOverride');
   out.manualOverride.title = out.fields.manualOverrideTitle || evidence('', 'manualOverride');
-  out.manualOverride.active = /manual|override|approved/i.test(normalizeText(out.manualOverride.status.value));
+  out.manualOverride.canonicalStatus = canonicalTitleOverrideStatus(out.manualOverride.status.value);
+  out.manualOverride.active = out.manualOverride.canonicalStatus === 'Manually Approved' ||
+    out.manualOverride.canonicalStatus === 'Manually Overridden';
 
   const partFitment = normalizeText(masterFields['Part Fitment'] || masterFields.partFitment);
   out.titleAuthority.partFitment = evidence(partFitment, 'partFitment', null, partFitment, {
@@ -542,8 +585,16 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
     currentEbayFields['Donor Year']
   );
 
+  out.titleAuthority.titleYearFallback = derivedEvidence(
+    partFitment ? '' : deriveYearEvidenceFromTitle(existingTitle || legacyTitle),
+    'currentEbay',
+    'Item Title',
+    existingTitle || legacyTitle,
+    { logicalKey: 'yearRange', fallbackOnly: true, useOnlyWhenPartFitmentUnavailable: true }
+  );
+
   out.derived.makeFromFitment = derivedEvidence(
-    deriveMakeFromFitment(partFitment, donorModel || deriveModelFromTitle(existingTitle || legacyTitle), donorYear),
+    deriveMakeFromFitment(partFitment, deriveModelFromTitle(existingTitle || legacyTitle) || donorModel, ''),
     'partFitment',
     'Part Fitment',
     partFitment,
@@ -566,7 +617,7 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
     donorModel
   }));
   out.derived.yearFromDonor = derivedEvidence(donorYear, 'currentEbay', 'Current eBay Fields', currentEbayFields, {
-    logicalKey: 'year'
+    logicalKey: 'year', contextOnly: true, role: 'donor'
   });
   out.derived.sideFromTitle = derivedEvidence(deriveSideFromText(existingTitle), 'currentEbay', 'Item Title', existingTitle, {
     logicalKey: 'side'
@@ -649,6 +700,7 @@ function candidatesForField(field, normalized, priorities) {
   const add = (out, source, value, evidenceValue) => {
     const text = normalizeText(value);
     if (!text) return;
+    if (field === 'side' && !/\b(?:drivers?|passengers?|pass|left|right|lh|rh|center|centre)\b/i.test(text)) return;
     out.push(candidate(field, source, text, priorityBySource.get(source) || Number.MAX_SAFE_INTEGER, evidenceValue));
   };
   const out = [];
@@ -687,7 +739,7 @@ function candidatesForField(field, normalized, priorities) {
     add(out, 'currentEbay', normalized.derived.yearFromDonor?.value, normalized.derived.yearFromDonor);
   } else if (field === 'model') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.model), normalized.structured.itemSpecifics);
-    add(out, 'currentEbay', normalized.derived.modelFromDonor?.value, normalized.derived.modelFromDonor);
+    if (!normalized.derived.modelFromCurrentTitle?.value) add(out, 'currentEbay', normalized.derived.modelFromDonor?.value, normalized.derived.modelFromDonor);
     add(out, 'currentEbay', normalized.derived.modelFromCurrentTitle?.value, normalized.derived.modelFromCurrentTitle);
   } else if (field === 'componentType') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.componentType), normalized.structured.itemSpecifics);
@@ -697,10 +749,13 @@ function candidatesForField(field, normalized, priorities) {
     add(out, 'currentEbay', normalized.derived.colorFromNotes?.value, normalized.derived.colorFromNotes);
   } else if (field === 'placement') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.placement), normalized.structured.itemSpecifics);
+    add(out, 'itemSpecifics', derivePlacementFromText(itemSpecificValue(itemSpecifics, ['Placement on Vehicle', 'Side', 'C:Side'])), normalized.structured.itemSpecifics);
     add(out, 'currentEbay', normalized.derived.placementFromNotes?.value, normalized.derived.placementFromNotes);
   } else if (field === 'keyFitmentDetail') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.keyFitmentDetail), normalized.structured.itemSpecifics);
     add(out, 'currentEbay', normalized.derived.keyFitmentDetailFromNotes?.value, normalized.derived.keyFitmentDetailFromNotes);
+  } else if (ITEM_SPECIFIC_ALIASES[field]) {
+    add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES[field]), normalized.structured.itemSpecifics);
   } else if (field === 'sku') {
     add(out, 'otherStructuredFields', normalized.fields.sku?.value, normalized.fields.sku);
   } else if (normalized.fields[field]) {
@@ -711,7 +766,7 @@ function candidatesForField(field, normalized, priorities) {
   return out.sort((a, b) => a.priority - b.priority || a.source.localeCompare(b.source) || a.value.localeCompare(b.value));
 }
 
-function resolveField(field, candidates = []) {
+function resolveField(field, candidates = [], terminologyRules = []) {
   const present = candidates.filter(item => normalizeText(item.value));
   if (!present.length) {
     return {
@@ -725,11 +780,12 @@ function resolveField(field, candidates = []) {
     };
   }
   const winner = present[0];
-  const winnerKey = canonicalResolvedValue(field, winner.value);
+  const winnerKey = canonicalResolvedValue(field, winner.value, terminologyRules);
   const conflicts = [];
   const seen = new Set([winnerKey]);
   for (const item of present.slice(1)) {
-    const key = canonicalResolvedValue(field, item.value);
+    const key = canonicalResolvedValue(field, item.value, terminologyRules);
+    if (field === 'brandMake' && corroboratesAuthoritativeMake(winner.value, item.value)) continue;
     if (!key || key === winnerKey || seen.has(key)) continue;
     seen.add(key);
     conflicts.push(item);
@@ -737,7 +793,7 @@ function resolveField(field, candidates = []) {
   return {
     field,
     candidates: present,
-    resolvedValue: winner.value,
+    resolvedValue: field === 'brandMake' ? normalizeVehicleMake(winner.value, terminologyRules) : winner.value,
     resolvedSource: winner.source,
     conflict: conflicts.length > 0,
     conflicts,
@@ -749,14 +805,19 @@ function resolveSourcePriority({ runtimeSnapshot, normalizedListing, fields = []
   const priorities = activePriorityRows(runtimeSnapshot);
   const requested = Array.isArray(fields) && fields.length
     ? [...new Set(fields.filter(field => field !== 'yearRange'))]
-    : ['title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku', 'componentType', 'color', 'placement', 'keyFitmentDetail'];
+    : [
+      'title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku',
+      'componentType', 'color', 'placement', 'keyFitmentDetail', 'engineDisplacement',
+      'engineCode', 'transmissionCode', 'drivetrain', 'transmissionSpeedType',
+      'vinIdentifier', 'illumination', 'paintCode', 'trim', 'lightingTechnology'
+    ];
   const resolvedFields = {};
   for (const field of requested) {
-    resolvedFields[field] = resolveField(field, candidatesForField(field, normalizedListing, priorities));
+    resolvedFields[field] = resolveField(field, candidatesForField(field, normalizedListing, priorities), runtimeSnapshot?.sections?.terminologyRules?.items || []);
   }
   return {
     contractVersion: 1,
-    runtimeMode: 'shadow-only',
+    runtimeMode: 'authoritative',
     priorityOrder: priorities.map(row => row.key),
     fields: resolvedFields,
     conflicts: Object.values(resolvedFields).filter(item => item.conflict),
@@ -770,7 +831,7 @@ function normalizeAndResolveListing({ runtimeSnapshot, listingRecord, masterReco
   resolved.modelAmbiguity = normalized.derived.modelAmbiguity || { ambiguous: false, candidates: [] };
   return {
     contractVersion: 1,
-    mode: 'shadow-only',
+    mode: 'authoritative',
     productionIntegration: false,
     normalized,
     resolved

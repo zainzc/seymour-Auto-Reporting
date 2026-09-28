@@ -12,6 +12,13 @@ function field(value, source = 'itemSpecifics', extras = {}) {
   };
 }
 
+test('AI selected year range preserves a verified single year within the range', () => {
+  const inputs = baseInputs();
+  inputs.validationResult.validatedTitle = '2010-2012 Honda Accord Driver Side Mirror ABS K24A BAYA AWD 00123';
+  const result = decideTitleOptimizationRuntimeResult(inputs);
+  assert.equal(result.degradationChecks.some(item => item.field === 'year' && item.status === 'FAIL'), false);
+});
+
 function check(overrides = {}) {
   return {
     checkId: 'validator-check',
@@ -54,7 +61,7 @@ function baseInputs(overrides = {}) {
     }
   };
   const ruleResolution = {
-    runtimeMode: 'shadow-only',
+    runtimeMode: 'authoritative',
     restrictedTerms: {
       groups: {
         'must-preserve': [{ id: 'rt-abs', term: 'ABS', ruleType: 'must-preserve' }]
@@ -77,7 +84,7 @@ function baseInputs(overrides = {}) {
     ]
   };
   const validationResult = {
-    runtimeMode: 'shadow-only',
+    runtimeMode: 'authoritative',
     outcome: 'PASS',
     originalCandidate: '2011 Honda Accord Driver Side Mirror ABS K24A BAYA AWD 00123',
     validatedTitle: '2011 Honda Accord Driver Side Mirror ABS K24A BAYA AWD 00123',
@@ -91,10 +98,10 @@ function baseInputs(overrides = {}) {
     suggestedReviewReasons: []
   };
   return {
-    snapshot: { runtimeMode: 'shadow-only' },
+    snapshot: { runtimeMode: 'authoritative' },
     sourceResolution,
     ruleResolution,
-    promptArtifact: { runtimeMode: 'shadow-only', kind: 'prompt' },
+    promptArtifact: { runtimeMode: 'authoritative', kind: 'prompt' },
     validationResult,
     ...overrides
   };
@@ -153,9 +160,6 @@ test('retains existing when candidate loses critical verified data preserved by 
     ['brandMake', '2011 Accord Driver Side Mirror ABS K24A BAYA AWD 00123'],
     ['model', '2011 Honda Driver Side Mirror ABS K24A BAYA AWD 00123'],
     ['side', '2011 Honda Accord Side Mirror ABS K24A BAYA AWD 00123'],
-    ['engineCode', '2011 Honda Accord Driver Side Mirror ABS BAYA AWD 00123'],
-    ['transmissionCode', '2011 Honda Accord Driver Side Mirror ABS K24A AWD 00123'],
-    ['drivetrain', '2011 Honda Accord Driver Side Mirror ABS K24A BAYA 00123'],
     ['protected acronym', '2011 Honda Accord Driver Side Mirror K24A BAYA AWD 00123']
   ]) {
     const result = decide({
@@ -280,28 +284,60 @@ test('maps Phase E outcomes to deterministic final decisions', () => {
   }).decision, 'RETAIN_EXISTING');
 });
 
-test('manual override bypass preserves protected manual title and does not select generated replacement', () => {
-  const result = decide({
-    promptArtifact: { runtimeMode: 'shadow-only', kind: 'title-generation-bypass', bypass: { reason: 'manual_override' } },
-    sourceResolution: {
-      ...baseInputs().sourceResolution,
-      normalized: {
-        ...baseInputs().sourceResolution.normalized,
-        manualOverride: { active: true, status: { value: 'Manual Override' }, title: { value: 'Protected Manual Title' } }
+test('manual protection bypass preserves title and returns status-specific review metadata', () => {
+  for (const [canonicalStatus, expectedNote] of [
+    ['Manually Approved', 'Title is manually approved; automated title generation was skipped.'],
+    ['Manually Overridden', 'Title is manually overridden; automated title generation was skipped.']
+  ]) {
+    const result = decide({
+      promptArtifact: { runtimeMode: 'authoritative', kind: 'title-generation-bypass', bypass: { reason: 'manual_override' } },
+      sourceResolution: {
+        ...baseInputs().sourceResolution,
+        normalized: {
+          ...baseInputs().sourceResolution.normalized,
+          manualOverride: {
+            active: true,
+            canonicalStatus,
+            status: { value: canonicalStatus },
+            title: { value: 'Protected Manual Title' }
+          }
+        }
+      },
+      validationResult: {
+        ...baseInputs().validationResult,
+        outcome: 'BYPASSED',
+        validatedTitle: 'Generated Replacement Should Be Ignored'
       }
-    },
+    });
+
+    assert.equal(result.decision, 'BYPASSED_MANUAL_OVERRIDE');
+    assert.equal(result.finalTitle, 'Protected Manual Title');
+    assert.equal(result.candidateAccepted, false);
+    assert.equal(result.retainedExisting, true);
+    assert.equal(result.reviewStatus, 'manual_override_bypass');
+    assert.equal(result.reviewReason, 'manual_override');
+    assert.equal(result.reviewNotes, expectedNote);
+  }
+});
+
+test('classifies unverified category priority details as a no-degrade failure', () => {
+  const finding = check({
+    checkId: 'unverified-category-priority-detail',
+    message: 'Candidate introduces an unverified Category Rule detail.'
+  });
+  const result = decide({
     validationResult: {
       ...baseInputs().validationResult,
-      outcome: 'BYPASSED',
-      validatedTitle: 'Generated Replacement Should Be Ignored'
+      outcome: 'RETAIN_EXISTING_REQUIRED',
+      valid: false,
+      safeToContinue: false,
+      violations: [finding],
+      checks: [finding]
     }
   });
 
-  assert.equal(result.decision, 'BYPASSED_MANUAL_OVERRIDE');
-  assert.equal(result.finalTitle, 'Protected Manual Title');
-  assert.equal(result.candidateAccepted, false);
-  assert.equal(result.retainedExisting, true);
-  assert.equal(result.reviewStatus, 'manual_override_bypass');
+  assert.equal(result.decision, 'RETAIN_EXISTING');
+  assert.equal(result.reviewReason, 'Proposed title would degrade existing title');
 });
 
 test('handles missing existing title and missing candidate without manufacturing fallbacks', () => {

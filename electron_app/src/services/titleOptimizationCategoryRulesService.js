@@ -7,7 +7,7 @@ const SEEDS = [
   ['tail-lights', 'Tail Lights', [], [], ['Side', 'Lens Color', 'Lighting Technology'], null],
   ['sun-visors', 'Sun Visors', ['268'], [], ['Color', 'With / Without Illumination'], null],
   ['master-window-switch', 'Master Window Switch', ['641'], [], ['Master Power Window Switch'], null],
-  ['column-switch', 'Column Switch', ['629'], [], ['Wiper / Turn Signal / Multifunction'], null],
+  ['column-switch', 'Column Switch', ['629'], [], ['Wiper', 'Turn Signal', 'Multifunction'], null],
   ['clusters-speedometers', 'Clusters / Speedometers', ['257'], [], ['Speedometer / Tachometer'], 'Apply #SKU rule where required.'],
   ['fuel-doors', 'Fuel Doors', [], [], ['Color', 'Paint Code'], null],
   ['fuel-pumps', 'Fuel Pumps', ['323'], [], ['Verified Fuel Type'], null],
@@ -27,11 +27,31 @@ function normalizeText(value) {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US') : '';
 }
 
+function normalizePriorityDetails(values) {
+  if (!Array.isArray(values)) return values;
+  const normalized = [];
+  for (const value of values) {
+    const display = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value;
+    if (normalizeText(display) === 'wiper / turn signal / multifunction') {
+      normalized.push('Wiper', 'Turn Signal', 'Multifunction');
+    } else if (normalizeText(display) === 'speedometer / tachometer') {
+      normalized.push('Speedometer', 'Tachometer');
+    } else normalized.push(display);
+  }
+  const seen = new Set();
+  return normalized.filter(value => {
+    const key = normalizeText(value);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function seedRule(definition, seedOrder, at, by) {
   const [slug, categoryName, prefixRefs, seriesRefs, priorityDetails, note] = definition;
   return {
     id: `client-v5-${slug}`, categoryName, prefixRefs: [...prefixRefs], seriesRefs: [...seriesRefs],
-    priorityDetails: [...priorityDetails], enabled: true, origin: 'client-v5', seedOrder, note,
+    priorityDetails: normalizePriorityDetails(priorityDetails), enabled: true, origin: 'client-v5', seedOrder, note,
     createdAt: at, createdBy: by, updatedAt: at, updatedBy: by, deletedAt: null, deletedBy: null
   };
 }
@@ -118,7 +138,7 @@ function hydrateCategoryRulesConfiguration(raw) {
     if (item.errors.length) {
       issues.push({ id, message: `${id}: ${item.errors.map(error => error.message).join(' ')}` });
       quarantined.push(item.entry);
-    } else rules.push(item.entry);
+    } else rules.push({ ...item.entry, priorityDetails: normalizePriorityDetails(item.entry.priorityDetails) });
   }
   return { rules: rules.sort(compareCategoryRules), issues, quarantined };
 }
@@ -127,4 +147,4 @@ function enabledCategoryRules(config = {}) {
   return (Array.isArray(config.rules) ? config.rules : []).filter(rule => rule && rule.enabled && !rule.deletedAt).sort(compareCategoryRules);
 }
 
-module.exports = { seedCategoryRulesConfiguration, validateCategoryRule, hydrateCategoryRulesConfiguration, enabledCategoryRules, compareCategoryRules, normalizeText };
+module.exports = { seedCategoryRulesConfiguration, validateCategoryRule, hydrateCategoryRulesConfiguration, enabledCategoryRules, compareCategoryRules, normalizeText, normalizePriorityDetails };

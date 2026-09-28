@@ -13,7 +13,7 @@ function section(items, extras = {}) {
 
 function baseSnapshot(overrides = {}) {
   const snapshot = {
-    mode: 'shadow-only',
+    mode: 'authoritative',
     runtimeReady: true,
     blockingSections: [],
     sections: {
@@ -117,7 +117,7 @@ test('selects applicable terminology, synonyms, prefix, restricted terms, catego
   const listing = resolvedListing(snapshot);
   const result = resolveApplicableTitleOptimizationRules({ runtimeSnapshot: snapshot, listingResolution: listing });
 
-  assert.equal(result.runtimeMode, 'shadow-only');
+  assert.equal(result.runtimeMode, 'authoritative');
   assert.equal(result.runtimeReady, true);
   assert.equal(result.listingContext.recordId, 'rec-1');
   assert.equal(result.listingContext.ipnPrefix, '0641');

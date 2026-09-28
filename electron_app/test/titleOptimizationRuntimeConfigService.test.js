@@ -107,7 +107,7 @@ test('runtime snapshot aggregates sections in deterministic order with runtime-r
     'restrictedTerms', 'categoryRules', 'titleStructures', 'flagReasons', 'systemRules'
   ]);
   assert.deepEqual(EDITABLE_SECTION_ORDER, SECTION_ORDER.slice(0, -1));
-  assert.equal(snapshot.mode, 'shadow-only');
+  assert.equal(snapshot.mode, 'authoritative');
   assert.equal(snapshot.runtimeReady, true);
   assert.equal(snapshot.metadata.loadedAt, '2026-09-23T00:00:00.000Z');
   assert.equal(snapshot.metadata.configurationVersion, 'v5');

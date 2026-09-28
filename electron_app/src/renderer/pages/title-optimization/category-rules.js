@@ -1,6 +1,23 @@
 (function initCategoryRules(globalScope) {
   const blankForm = () => ({ categoryName: '', prefixRefs: [], seriesRefs: [], priorityDetails: [], note: '', enabled: true });
   const normalize = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  function normalizePriorityDetails(values) {
+    if (!Array.isArray(values)) return [];
+    const normalized = [];
+    for (const value of values) {
+      const display = String(value ?? '').trim().replace(/\s+/g, ' ');
+      if (normalize(display) === 'wiper / turn signal / multifunction') normalized.push('Wiper', 'Turn Signal', 'Multifunction');
+      else if (normalize(display) === 'speedometer / tachometer') normalized.push('Speedometer', 'Tachometer');
+      else if (display) normalized.push(display);
+    }
+    const seen = new Set();
+    return normalized.filter(value => {
+      const key = normalize(value);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
 
   function createCategoryRulesController(options = {}) {
     const api = options.api || {}, confirmDiscard = options.confirmDiscard || (async () => true), confirmDelete = options.confirmDelete || (async () => true), onChange = options.onChange || (() => {});
@@ -22,7 +39,7 @@
       state.loading = true; state.error = ''; notify();
       try {
         const result = await api.load(); if (!result?.success) throw new Error(result?.error?.message || 'Unable to load Category Rules.');
-        state.rules = [...(result.data.rules || [])]; sortRules(); state.issues = [...(result.data.issues || [])]; state.updatedAt = result.data.updatedAt || null; resetForm(); return result.data;
+        state.rules = [...(result.data.rules || [])].map(rule => ({ ...rule, priorityDetails: normalizePriorityDetails(rule.priorityDetails) })); sortRules(); state.issues = [...(result.data.issues || [])]; state.updatedAt = result.data.updatedAt || null; resetForm(); return result.data;
       } catch (error) { state.error = error.message; notify(); throw error; }
       finally { state.loading = false; notify(); }
     }
@@ -33,7 +50,7 @@
     async function beginEdit(id) {
       if (state.saving || (state.dirty && !await confirmDiscard())) return false;
       const rule = state.rules.find(item => item.id === id); if (!rule) return false;
-      state.form = { categoryName: rule.categoryName, prefixRefs: [...rule.prefixRefs], seriesRefs: [...rule.seriesRefs], priorityDetails: [...rule.priorityDetails], note: rule.note || '', enabled: rule.enabled === true };
+      state.form = { categoryName: rule.categoryName, prefixRefs: [...rule.prefixRefs], seriesRefs: [...rule.seriesRefs], priorityDetails: normalizePriorityDetails(rule.priorityDetails), note: rule.note || '', enabled: rule.enabled === true };
       state.chipDrafts = { prefixRefs: '', seriesRefs: '', priorityDetails: '' };
       state.editingId = id; state.identityLocked = false; state.formErrors = {}; state.dirty = false; state.error = ''; state.success = ''; state.formRevision++; notify(); return true;
     }
@@ -77,7 +94,7 @@
           }
         }
         const input = { ...(state.editingId ? { id: state.editingId } : {}), ...state.form,
-          categoryName: String(state.form.categoryName || '').trim(), prefixRefs: lists.prefixRefs, seriesRefs: lists.seriesRefs, priorityDetails: lists.priorityDetails,
+          categoryName: String(state.form.categoryName || '').trim(), prefixRefs: lists.prefixRefs, seriesRefs: lists.seriesRefs, priorityDetails: normalizePriorityDetails(lists.priorityDetails),
           note: state.form.note === '' ? null : state.form.note, enabled: Boolean(state.form.enabled), ...(existing ? { seedOrder: existing.seedOrder } : {}) };
         if (!input.categoryName) { state.formErrors.categoryName = 'Enter a Category Name.'; throw new Error('Enter a Category Name before saving.'); }
         if (!input.priorityDetails.length) { state.formErrors.priorityDetails = 'Add at least one important verified detail.'; throw new Error('Add at least one important verified detail before saving.'); }

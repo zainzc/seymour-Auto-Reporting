@@ -39,9 +39,9 @@ test('authoritative seeds preserve exact ordered details references and multilin
   assert.deepEqual(byName['Master Window Switch'].prefixRefs, ['641']);
   assert.deepEqual(byName['Master Window Switch'].priorityDetails, ['Master Power Window Switch']);
   assert.deepEqual(byName['Column Switch'].prefixRefs, ['629']);
-  assert.deepEqual(byName['Column Switch'].priorityDetails, ['Wiper / Turn Signal / Multifunction']);
+  assert.deepEqual(byName['Column Switch'].priorityDetails, ['Wiper', 'Turn Signal', 'Multifunction']);
   assert.deepEqual(byName['Clusters / Speedometers'].prefixRefs, ['257']);
-  assert.deepEqual(byName['Clusters / Speedometers'].priorityDetails, ['Speedometer / Tachometer']);
+  assert.deepEqual(byName['Clusters / Speedometers'].priorityDetails, ['Speedometer', 'Tachometer']);
   assert.match(byName['Clusters / Speedometers'].note, /#SKU/);
   assert.deepEqual(byName['Fuel Doors'].priorityDetails, ['Color', 'Paint Code']);
   assert.deepEqual(byName['Fuel Pumps'].prefixRefs, ['323']);

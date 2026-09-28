@@ -43,9 +43,9 @@ test('Overview composes actual previews in owner order with approved determinist
   assert.equal(result.totalTabs, 10);
   assert.equal(result.configurationVersion, 'v5');
   assert.equal(result.lastUpdated, at(9));
-  assert.deepEqual(result.previews.sourceFields.rows.map(row => row.displayName), Array.from({ length: 8 }, (_, index) => `Logical ${index + 1}`));
+  assert.deepEqual(result.previews.sourceFields.rows.map(row => row.displayName), Array.from({ length: 9 }, (_, index) => `Logical ${index + 1}`));
   assert.deepEqual(result.previews.sourcePriority.rows.map(row => row.priority), [1,2,3,4,5,6,7,8,9]);
-  assert.equal(result.previews.terminologyRules.rows.length, 5);
+  assert.equal(result.previews.terminologyRules.rows.length, 7);
   assert.equal(result.previews.synonyms.rows.length, 5);
   assert.equal(result.previews.prefixRules.rows.length, 5);
   assert.deepEqual(result.summaries.titleStructure.names, ['General', 'Engines', 'Transmissions']);

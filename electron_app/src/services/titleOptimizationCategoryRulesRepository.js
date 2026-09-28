@@ -1,5 +1,5 @@
 const { randomUUID } = require('node:crypto');
-const { seedCategoryRulesConfiguration, validateCategoryRule, hydrateCategoryRulesConfiguration, enabledCategoryRules } = require('./titleOptimizationCategoryRulesService');
+const { seedCategoryRulesConfiguration, validateCategoryRule, hydrateCategoryRulesConfiguration, enabledCategoryRules, normalizePriorityDetails } = require('./titleOptimizationCategoryRulesService');
 
 function failure(code, message, details = null) {
   const error = new Error(message); error.code = code; error.details = details; return error;
@@ -42,7 +42,7 @@ function createTitleOptimizationCategoryRulesRepository(dependencies = {}) {
   }
   async function load() { return display(await ensureRaw()); }
   function validRecord(raw, id) { return hydrateCategoryRulesConfiguration(raw).rules.find(rule => rule.id === id && !rule.deletedAt) || null; }
-  function findIndex(raw, id) { const valid = validRecord(raw, id); return valid ? raw.rules.indexOf(valid) : -1; }
+  function findIndex(raw, id) { return validRecord(raw, id) ? raw.rules.findIndex(rule => rule?.id === id) : -1; }
   function peers(raw, id) { return raw.rules.filter(rule => rule && rule.id !== id && !rule.deletedAt); }
   function validateCandidate(candidate, raw) {
     const issues = validateCategoryRule(candidate, peers(raw, candidate.id));
@@ -58,7 +58,7 @@ function createTitleOptimizationCategoryRulesRepository(dependencies = {}) {
     const at = now(), by = await actor();
     const candidate = {
       id, categoryName: typeof input?.categoryName === 'string' ? input.categoryName.trim() : input?.categoryName,
-      prefixRefs: cleanedList(input?.prefixRefs), seriesRefs: cleanedList(input?.seriesRefs), priorityDetails: cleanedList(input?.priorityDetails),
+      prefixRefs: cleanedList(input?.prefixRefs), seriesRefs: cleanedList(input?.seriesRefs), priorityDetails: normalizePriorityDetails(cleanedList(input?.priorityDetails)),
       enabled: input?.enabled, origin: old?.origin || 'custom', seedOrder: old?.seedOrder ?? null,
       note: input?.note == null || input.note === '' ? null : input.note,
       createdAt: old?.createdAt || at, createdBy: old?.createdBy || by, updatedAt: at, updatedBy: by,

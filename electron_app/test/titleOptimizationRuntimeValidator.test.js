@@ -56,7 +56,7 @@ function baseInputs(overrides = {}) {
     }
   };
   const ruleResolution = {
-    runtimeMode: 'shadow-only',
+    runtimeMode: 'authoritative',
     listingContext: { sku: '00123', ipnPrefix: '0641', make: 'Honda', part: 'Side View Mirror' },
     prefixRule: { normalizedPrefix: '0641', rule: { id: 'prefix-0641', prefix: '0641' }, systemRule: null },
     restrictedTerms: {
@@ -94,6 +94,9 @@ function baseInputs(overrides = {}) {
     },
     flagReasons: [
       { id: 'flag-year', reason: 'Missing verified year', enabled: true },
+      { id: 'flag-make', reason: 'Make cannot be verified', enabled: true },
+      { id: 'flag-engine', reason: 'Required engine fitment missing', enabled: true },
+      { id: 'flag-transmission', reason: 'Transmission code cannot be verified', enabled: true },
       { id: 'flag-conflict', reason: 'Conflicting source data', enabled: true },
       { id: 'flag-fitment', reason: 'Cannot preserve essential fitment within 80 characters', enabled: true },
       { id: 'flag-degrade', reason: 'Proposed title would degrade existing title', enabled: true }
@@ -111,12 +114,12 @@ function baseInputs(overrides = {}) {
     warnings: []
   };
   const promptArtifact = {
-    runtimeMode: 'shadow-only',
+    runtimeMode: 'authoritative',
     kind: 'prompt',
     metadata: { selectedStructureId: 'structure-general' }
   };
   return {
-    snapshot: { runtimeMode: 'shadow-only' },
+    snapshot: { runtimeMode: 'authoritative' },
     sourceResolution,
     ruleResolution,
     promptArtifact,
@@ -156,6 +159,67 @@ test('accepts an AI-selected fitment range that contains the structured single y
 
   assert.equal(result.violations.some(item => item.checkId === 'unsupported-information'), false);
   assert.equal(result.validatedTitle.startsWith('2010-2012 Honda Accord'), true);
+});
+
+test('does not use a hardcoded existing-title detail protection list', () => {
+  const inputs = baseInputs({
+    candidateTitle: '2013-2015 Honda Accord Engine 2.4L VIN 1 1585847'
+  });
+  inputs.sourceResolution.normalized.fields.existingTitle = {
+    value: 'Engine 2.4L VIN 1 6th Digit Coupe Federal Emissions Fits 13-15 ACCORD 1585847'
+  };
+  inputs.sourceResolution.resolved.fields.title = resolvedField(
+    'Engine 2.4L VIN 1 6th Digit Coupe Federal Emissions Fits 13-15 ACCORD 1585847',
+    'currentEbay'
+  );
+  inputs.sourceResolution.resolved.fields.sku = resolvedField('1585847', 'otherStructuredFields');
+  inputs.sourceResolution.normalized.fields.sku = { value: '1585847' };
+  inputs.sourceResolution.normalized.titleAuthority = {
+    importantExistingTitleDetails: [
+      { key: 'bodyStyle', value: 'Coupe', acceptedValues: ['Coupe'] },
+      { key: 'engineDisplacement', value: '2.4L', acceptedValues: ['2.4L'] },
+      { key: 'vinIdentifier', value: 'VIN 1', acceptedValues: ['VIN 1'] },
+      { key: 'vinPosition', value: '6th Digit', acceptedValues: ['6th Digit', '6th'] },
+      { key: 'emissions', value: 'Federal Emissions', acceptedValues: ['Federal Emissions', 'Federal'] }
+    ]
+  };
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.equal(result.violations.some(item => item.checkId === 'detail-assessment'), false);
+});
+
+test('flags missing required year and make evidence with approved client reasons', () => {
+  const inputs = baseInputs({ candidateTitle: 'Accord Side View Mirror ABS 00123' });
+  inputs.sourceResolution.resolved.fields.year = resolvedField(null);
+  inputs.sourceResolution.resolved.fields.brandMake = resolvedField(null);
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.notEqual(result.outcome, 'PASS');
+  assert.equal(result.warnings.some(item => item.checkId === 'missing-verified-year'), true);
+  assert.equal(result.warnings.some(item => item.checkId === 'missing-verified-make'), true);
+  assert.equal(result.suggestedReviewReasons.some(item => item.reason === 'Missing verified year'), true);
+  assert.equal(result.suggestedReviewReasons.some(item => item.reason === 'Make cannot be verified'), true);
+});
+
+test('flags missing category-required engine and transmission evidence', () => {
+  const engineInputs = baseInputs({ candidateTitle: '2013 Honda Accord Engine 00123' });
+  engineInputs.ruleResolution.titleStructure.selected.structureName = 'Engines';
+  engineInputs.ruleResolution.titleStructure.selected.appliesTo = 'Engines';
+  engineInputs.sourceResolution.resolved.fields.engineDisplacement = resolvedField(null);
+  engineInputs.sourceResolution.resolved.fields.engineCode = resolvedField(null);
+  const engine = validateTitleOptimizationRuntimeCandidate(engineInputs);
+  assert.equal(engine.warnings.some(item => item.checkId === 'missing-engine-fitment'), true);
+  assert.equal(engine.suggestedReviewReasons.some(item => item.reason === 'Required engine fitment missing'), true);
+
+  const transmissionInputs = baseInputs({ candidateTitle: '2013 Honda Accord Automatic Transmission FWD 00123' });
+  transmissionInputs.ruleResolution.titleStructure.selected.structureName = 'Transmissions';
+  transmissionInputs.ruleResolution.titleStructure.selected.appliesTo = 'Transmissions';
+  transmissionInputs.sourceResolution.resolved.fields.transmissionCode = resolvedField(null);
+  const transmission = validateTitleOptimizationRuntimeCandidate(transmissionInputs);
+  assert.equal(transmission.warnings.some(item => item.checkId === 'missing-transmission-code'), true);
+  assert.equal(transmission.suggestedReviewReasons.some(item => item.reason === 'Transmission code cannot be verified'), true);
 });
 
 test('performs safe whitespace cleanup and rejects blank candidates', () => {
@@ -271,6 +335,40 @@ test('validates side from verified evidence and never from description-only fitm
   assert.equal(onlyDescriptionSide.violations.some(item => item.checkId === 'side-validation'), true);
 });
 
+test('accepts structured driver and passenger door wording across common side variants', () => {
+  for (const [verifiedSide, candidateSide] of [
+    ['Drivers Door', 'Driver'],
+    ["Driver's Door", 'Left'],
+    ['Driver Side Front Door', 'LH'],
+    ['Passengers Door', 'Passenger'],
+    ["Passenger's Door", 'Right'],
+    ['Passenger Side Front Door', 'RH']
+  ]) {
+    const inputs = baseInputs();
+    inputs.sourceResolution.resolved.fields.side = resolvedField(verifiedSide);
+    inputs.candidateTitle = `2011 Honda Accord ${candidateSide} Side View Mirror ABS MPN-9 K24A BAYA VIN J 00123`;
+    const result = validateTitleOptimizationRuntimeCandidate(inputs);
+    assert.equal(result.violations.some(item => item.checkId === 'side-validation'), false, `${verifiedSide} should support ${candidateSide}`);
+  }
+});
+
+test('accepts verified Drivers Door and removes optional MPN from an over-limit candidate', () => {
+  const inputs = baseInputs();
+  inputs.sourceResolution.resolved.fields.side = resolvedField('Drivers Door');
+  inputs.sourceResolution.resolved.fields.manufacturerPartNumber = resolvedField('935703X030YDA');
+  inputs.sourceResolution.resolved.fields.sku = resolvedField('1588346', 'otherStructuredFields');
+  inputs.sourceResolution.normalized.fields.sku = { value: '1588346' };
+  inputs.candidateTitle = '2011-2013 Hyundai Elantra Front Driver Master Window Switch 935703X030YDA 1588346';
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.equal(result.violations.some(item => item.checkId === 'side-validation'), false);
+  assert.equal(result.validatedTitle.length <= 80, true);
+  assert.doesNotMatch(result.validatedTitle, /935703X030YDA/);
+  assert.equal(result.validatedTitle.endsWith('1588346'), true);
+  assert.equal(result.corrections.some(item => item.checkId === 'length-80'), true);
+});
+
 test('handles restricted terms including never-introduce, authorization, noise, protected terms, and Long/Short Block', () => {
   const longBlock = validate({ candidateTitle: '2011 Honda Accord Long Block Side View Mirror ABS 00123' });
   assert.equal(longBlock.outcome, 'RETAIN_EXISTING_REQUIRED');
@@ -326,15 +424,7 @@ test('validates MPN support and does not treat Hollander numbers as MPN', () => 
   assert.equal(hollanderOnly.violations.some(item => item.checkId === 'mpn-validation'), true);
 });
 
-test('detects critical fitment loss and unsupported identity changes without broad hallucination checks', () => {
-  const engineLoss = validate({ candidateTitle: '2011 Honda Accord Driver Side View Mirror ABS MPN-9 BAYA VIN J 00123' });
-  assert.equal(engineLoss.valid, false);
-  assert.equal(engineLoss.violations.some(item => item.checkId === 'critical-fitment-preservation'), true);
-
-  const transmissionLoss = validate({ candidateTitle: '2011 Honda Accord Driver Side View Mirror ABS MPN-9 K24A VIN J 00123' });
-  assert.equal(transmissionLoss.valid, false);
-  assert.equal(transmissionLoss.violations.some(item => item.message.includes('transmissionCode')), true);
-
+test('detects unsupported identity changes without broad hardcoded detail checks', () => {
   const changedMake = validate({ candidateTitle: '2011 Toyota Accord Driver Side View Mirror ABS MPN-9 K24A BAYA VIN J 00123' });
   assert.equal(changedMake.valid, false);
   assert.equal(changedMake.violations.some(item => item.checkId === 'unsupported-information'), true);
@@ -354,7 +444,7 @@ test('warns on obvious title structure mismatch without destructive rewrite', ()
 
 test('bypasses validation for manual override artifacts', () => {
   const result = validate({
-    promptArtifact: { runtimeMode: 'shadow-only', kind: 'title-generation-bypass', bypass: { reason: 'manual_override' } },
+    promptArtifact: { runtimeMode: 'authoritative', kind: 'title-generation-bypass', bypass: { reason: 'manual_override' } },
     sourceResolution: {
       ...baseInputs().sourceResolution,
       normalized: {
@@ -438,4 +528,203 @@ test('accepts AI model normalization when all corroborated model names are prese
 
   assert.equal(result.suggestedReviewReasons.some(item => item.reason === 'Model cannot be normalized safely'), false);
   assert.equal(result.violations.some(item => item.checkId === 'unsupported-information'), false);
+});
+
+test('enforces AI category priority verification while preserving Prefix Rule authority', () => {
+  const build = ({ title, details, decisions, evidence = 'Wiper Multifunction switch', prefix = false }) => {
+    const inputs = baseInputs({ candidateTitle: title });
+    inputs.ruleResolution.categoryRules = [{ rule: { id: 'cat-switch', categoryName: 'Switch', priorityDetails: details }, matchedBy: ['category'] }];
+    inputs.ruleResolution.deterministicTitlePart = prefix ? { value: 'Wiper Turn Signal Multifunction Switch', source: 'prefixRule.specialReplacement', ruleId: 'prefix-629' } : null;
+    inputs.ruleResolution.prefixRule = prefix ? { rule: { id: 'prefix-629', specialReplacement: 'Wiper Turn Signal Multifunction Switch', approvedPartTerms: [] } } : null;
+    inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Part Fitment', evidence }] } };
+    inputs.categoryPriorityDetails = decisions;
+    return validateTitleOptimizationRuntimeCandidate(inputs);
+  };
+
+  const all = build({
+    title: '2011 Honda Accord Wiper Turn Signal Multifunction Switch ABS 00123',
+    details: ['Wiper', 'Turn Signal', 'Multifunction'],
+    evidence: 'Wiper Turn Signal Multifunction Switch',
+    decisions: ['Wiper', 'Turn Signal', 'Multifunction'].map(detail => ({ detail, verified: true, source: 'Part Fitment', evidence: 'Wiper Turn Signal Multifunction Switch' }))
+  });
+  assert.equal(all.violations.some(item => item.checkId.startsWith('category-priority') || item.checkId === 'unverified-category-priority-detail'), false);
+
+  const some = build({
+    title: '2011 Honda Accord Wiper Multifunction Switch ABS 00123',
+    details: ['Wiper', 'Turn Signal', 'Multifunction'],
+    decisions: [
+      { detail: 'Wiper', verified: true, source: 'Part Fitment', evidence: 'Wiper Multifunction switch' },
+      { detail: 'Turn Signal', verified: false, source: null, evidence: null },
+      { detail: 'Multifunction', verified: true, source: 'Part Fitment', evidence: 'Wiper Multifunction switch' }
+    ]
+  });
+  assert.equal(some.violations.some(item => item.checkId === 'unverified-category-priority-detail'), false);
+
+  const none = build({
+    title: '2011 Honda Accord Column Switch ABS 00123',
+    details: ['Wiper', 'Turn Signal', 'Multifunction'],
+    decisions: ['Wiper', 'Turn Signal', 'Multifunction'].map(detail => ({ detail, verified: false, source: null, evidence: null }))
+  });
+  assert.equal(none.violations.some(item => item.checkId === 'unverified-category-priority-detail'), false);
+
+  const unsupported = build({
+    title: '2011 Honda Accord Turn Signal Column Switch ABS 00123',
+    details: ['Turn Signal'],
+    decisions: [{ detail: 'Turn Signal', verified: false, source: null, evidence: null }]
+  });
+  assert.equal(unsupported.violations.some(item => item.checkId === 'unverified-category-priority-detail'), true);
+
+  const prefixAuthorized = build({
+    title: '2011 Honda Accord Wiper Turn Signal Multifunction Switch ABS 00123',
+    details: ['Wiper', 'Turn Signal', 'Multifunction'],
+    decisions: ['Wiper', 'Turn Signal', 'Multifunction'].map(detail => ({ detail, verified: false, source: null, evidence: null })),
+    prefix: true
+  });
+  assert.equal(prefixAuthorized.violations.some(item => item.checkId === 'unverified-category-priority-detail'), false);
+});
+
+test('accepts category detail verification backed by approved equivalent terminology evidence', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Side View Mirror ABS 00123' });
+  inputs.ruleResolution.categoryRules = [{ rule: { id: 'cat-mirror', priorityDetails: ['Side View Mirror'] }, matchedBy: ['category'] }];
+  inputs.ruleResolution.terminologyRules = [{ id: 'term-mirror', sourceTerm: 'Door Mirror', replacementTerm: 'Side View Mirror', action: 'replace' }];
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Item Specifics', evidence: 'Door Mirror' }] } };
+  inputs.categoryPriorityDetails = [{ detail: 'Side View Mirror', verified: true, source: 'Item Specifics', evidence: 'Door Mirror' }];
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+  assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), false);
+});
+
+test('repairs a shortened category citation from the full cited trusted source', () => {
+  const inputs = baseInputs({ candidateTitle: '2017-2020 BMW 430i Speedometer Base MPH 00123' });
+  inputs.ruleResolution.categoryRules = [{ rule: { id: 'cat-cluster', priorityDetails: ['Speedometer'] }, matchedBy: ['category'] }];
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{
+    id: 'evidence-020',
+    source: 'Part Fitment',
+    evidence: '2017-2020 BMW 430i speedometer cluster, Base trim, MPH, without head-up display'
+  }] } };
+  inputs.categoryPriorityDetails = [{
+    detail: 'Speedometer',
+    verified: true,
+    source: 'evidence-020',
+    evidence: '2017-2020 BMW 430i cluster, Base trim, MPH, without head-up display'
+  }];
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), false);
+});
+
+test('repairs category evidence attribution from another trusted source', () => {
+  const inputs = baseInputs({ candidateTitle: '2017-2020 BMW 430i Speedometer Base MPH 00123' });
+  inputs.ruleResolution.categoryRules = [{ rule: { id: 'cat-cluster', priorityDetails: ['Speedometer'] }, matchedBy: ['category'] }];
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [
+    { id: 'evidence-020', source: 'Part Fitment', evidence: '2017-2020 BMW 430i cluster, Base trim, MPH' },
+    { id: 'evidence-004', source: 'Existing Title', evidence: 'Speedometer Cluster Base MPH Fits 17-20 BMW 430i' }
+  ] } };
+  inputs.categoryPriorityDetails = [{ detail: 'Speedometer', verified: true, source: 'evidence-020', evidence: 'BMW 430i cluster' }];
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), false);
+});
+
+test('rejects category verification citing real but unrelated evidence across categories', () => {
+  for (const [detail, evidence] of [
+    ['Wiper', 'Column Switch Assembly with fog lamps'],
+    ['Turn Signal', 'Switches & Controls'],
+    ['LED', 'Headlight Assembly'],
+    ['Retractor', 'Seat Belt'],
+    ['Heated', 'Unheated mirror']
+  ]) {
+    const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Part ABS 00123' });
+    inputs.ruleResolution.categoryRules = [{ rule: { priorityDetails: [detail] } }];
+    inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Item Specifics', evidence }] } };
+    inputs.categoryPriorityDetails = [{ detail, verified: true, source: 'Item Specifics', evidence }];
+    const result = validateTitleOptimizationRuntimeCandidate(inputs);
+    assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), true, detail);
+  }
+});
+
+test('rejects category verification when the cited detail is explicitly absent', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Mirror ABS 00123' });
+  inputs.ruleResolution.categoryRules = [{ rule: { priorityDetails: ['Heated'] } }];
+  const evidence = 'Mirror without heated glass';
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Part Fitment', evidence }] } };
+  inputs.categoryPriorityDetails = [{ detail: 'Heated', verified: true, source: 'Part Fitment', evidence }];
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'category-priority-verification'), true);
+});
+
+test('rejects citations attached to an unverified category priority detail', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Column Switch ABS 00123' });
+  inputs.ruleResolution.categoryRules = [{ rule: { id: 'cat-switch', priorityDetails: ['Turn Signal'] }, matchedBy: ['category'] }];
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Item Specifics', evidence: 'Column Switch' }] } };
+  inputs.categoryPriorityDetails = [{ detail: 'Turn Signal', verified: false, source: 'Item Specifics', evidence: 'Column Switch' }];
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+  assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), true);
+});
+
+test('accepts configured synonym evidence for category details', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Headlight ABS 00123' });
+  inputs.ruleResolution.categoryRules = [{ rule: { priorityDetails: ['Headlight'] } }];
+  inputs.ruleResolution.synonyms = [{ primaryTerm: 'Headlight', synonyms: ['Headlamp'], enabled: true }];
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Item Specifics', evidence: 'Headlamp' }] } };
+  inputs.categoryPriorityDetails = [{ detail: 'Headlight', verified: true, source: 'Item Specifics', evidence: 'Headlamp' }];
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'category-priority-verification'), false);
+});
+
+test('explicit Part Fitment supports side while a conflicting structured side remains authoritative', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Driver Left Mirror ABS 00123' });
+  inputs.sourceResolution.resolved.fields.side = { resolvedValue: null };
+  inputs.sourceResolution.normalized.titleAuthority = { partFitment: { value: '2011 Honda Accord left mirror' } };
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'side-validation'), false);
+  inputs.sourceResolution.resolved.fields.side.resolvedValue = 'Right';
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'side-validation'), true);
+});
+
+test('component importance is left to AI instead of a hardcoded validator list', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Seat Belt ABS 00123' });
+  inputs.sourceResolution.resolved.fields.componentType = resolvedField('Retractor');
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'detail-assessment'), false);
+});
+
+test('make validation requires all authoritative brand words and rejects shortened or unrelated makes', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Chevrolet Truck Accord Mirror ABS 00123' });
+  inputs.sourceResolution.resolved.fields.brandMake.resolvedValue = 'CHEVROLET TRUCK';
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => /change verified brandMake/.test(item.message)), false);
+  inputs.candidateTitle = '2011 Chevrolet Accord Mirror ABS 00123';
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => /change verified brandMake/.test(item.message)), true);
+  inputs.candidateTitle = '2011 Honda Accord Mirror ABS 00123';
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => /change verified brandMake/.test(item.message)), true);
+});
+
+test('AI can select cited side independently of Front placement while opposite side is rejected', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Front Driver Left Mirror ABS 00123' });
+  inputs.sourceResolution.resolved.fields.side.resolvedValue = 'Front';
+  const evidence = 'Honda Accord front mirror driver side';
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Part Fitment', evidence }] } };
+  inputs.sideDecision = { side: 'Driver Left LH', placement: 'Front', source: 'Part Fitment', evidence };
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'side-validation'), false);
+  inputs.sourceResolution.resolved.fields.side.resolvedValue = 'Right';
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'side-validation'), true);
+});
+
+test('side evidence accepts harmless citation wrappers consistently', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Driver Left Mirror ABS 00123' });
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [
+    { id: 'side-source', source: 'Current title', evidence: 'Driver Left LH' }
+  ] } };
+  inputs.sideDecision = { side: 'Driver Left', placement: null, source: 'side-source', evidence: '"Driver Left LH"' };
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'side-validation'), false);
+});
+
+test('AI side decision cannot invent citations or drop its verified side', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Mirror ABS 00123' });
+  inputs.sourceResolution.resolved.fields.side.resolvedValue = null;
+  const evidence = 'Honda Accord left mirror';
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Part Fitment', evidence }] } };
+  inputs.sideDecision = { side: 'Left', placement: null, source: 'Part Fitment', evidence };
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => /omits or changes/.test(item.message)), true);
+  inputs.sideDecision.evidence = 'Honda Accord right mirror';
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => /lacks supporting/.test(item.message)), true);
 });

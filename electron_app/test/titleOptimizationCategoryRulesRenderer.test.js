@@ -135,3 +135,15 @@ test('pending chip text is protected as draft, flushed on save, and cleared afte
   await controller.beginAdd(); controller.setChipDraft('prefixRefs', 'stale'); discard = true; assert.equal(await controller.cancel(), true);
   assert.deepEqual(controller.state.chipDrafts, { prefixRefs: '', seriesRefs: '', priorityDetails: '' });
 });
+
+test('column switch combined priority detail is split before save', async () => {
+  const saves = [];
+  const controller = createCategoryRulesController({ api: {
+    load: async () => response({ rules: [rule({ id: 'client-v5-column-switch', categoryName: 'Column Switch', prefixRefs: ['629'], priorityDetails: ['Wiper / Turn Signal / Multifunction'], seedOrder: 9 })], issues: [] }),
+    save: async input => { saves.push(input); return response({ ...input, origin: 'client-v5', updatedAt: '2026-09-28T00:00:00.000Z' }); }
+  } });
+  await controller.load();
+  await controller.beginEdit('client-v5-column-switch');
+  await controller.save();
+  assert.deepEqual(saves[0].priorityDetails, ['Wiper', 'Turn Signal', 'Multifunction']);
+});

@@ -179,3 +179,33 @@ test('workspace navigation uses an in-app discard dialog and Source Field dialog
   assert.match(script, /elements\.displayName\.focus\(\)/);
   assert.doesNotMatch(script, /mapping\.isCustom\s*\?/);
 });
+
+test('Source Field dialog uses an encoding-safe accessible close icon', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-fields.html'), 'utf8');
+
+  assert.match(html, /id="dialog-cancel"[^>]*aria-label="Close dialog"[^>]*>&times;<\/button>/);
+  assert.doesNotMatch(html, /id="dialog-cancel"[^>]*>[^<]*Ã[^<]*<\/button>/);
+});
+
+test('required markers stay inline with Source Field labels', () => {
+  const html = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-fields.html'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-fields.css'), 'utf8');
+
+  for (const label of ['Display Name', 'Logical Key', 'Airtable Field']) {
+    assert.match(html, new RegExp(`<span class="field-label">${label} <span aria-hidden="true">\\*</span></span>`));
+  }
+  assert.match(css, /\.field-label\s*\{[^}]*display:\s*inline-flex;[^}]*align-items:\s*baseline;/s);
+});
+
+test('workspace navigation does not change color on hover', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-fields.css'), 'utf8');
+
+  assert.doesNotMatch(css, /\.workspace-links\s+button:hover\s*\{/);
+});
+
+test('Source Fields header actions stay in one desktop row and stack on mobile', () => {
+  const css = fs.readFileSync(path.join(__dirname, '../src/renderer/pages/title-optimization/source-fields.css'), 'utf8');
+
+  assert.match(css, /\.card-actions\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*flex-shrink:\s*0;/s);
+  assert.match(css, /@media\s*\(max-width:\s*680px\)[\s\S]*?\.card-actions\s*\{[^}]*flex-direction:\s*column;/s);
+});

@@ -2,14 +2,15 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const Module = require('node:module');
 
-function loadDeliverySync(tasks) {
+function loadDeliverySync(tasks, fields = []) {
   const originalLoad = Module._load;
   let nextId = 100;
   const created = [];
+  const fieldWrites = [];
 
   class FakeClickUpService {
-    async getList() { return { fields: [] }; }
-    async getListCustomFields() { return { fields: [] }; }
+    async getList() { return { fields }; }
+    async getListCustomFields() { return { fields }; }
     async fetchTasksByStatuses() { return tasks.map(entry => ({ ...entry })); }
     async getTask(id) { return tasks.find(task => task.id === id); }
     async updateTask(id, patch) {
@@ -19,9 +20,13 @@ function loadDeliverySync(tasks) {
       tasks.find(task => task.id === id).status = { status };
     }
     async request(method, path, options) {
+      if (/\/field\//.test(path)) {
+        fieldWrites.push({ method, path, data: options?.data });
+        return {};
+      }
       assert.equal(method, 'POST');
       assert.match(path, /\/task$/);
-      const task = { id: String(nextId++), ...options.data, custom_fields: [] };
+      const task = { id: String(nextId++), ...options.data, custom_fields: (options.data.custom_fields || []).map(field => ({ ...fields.find(item => item.id === field.id), ...field })) };
       tasks.push(task);
       created.push(task);
       return task;
@@ -40,7 +45,7 @@ function loadDeliverySync(tasks) {
     };
     const servicePath = require.resolve('../src/services/workOrdersGoogleSheetsSync');
     delete require.cache[servicePath];
-    return { sync: require(servicePath).syncRowsToDeliveryAutomation, created };
+    return { sync: require(servicePath).syncRowsToDeliveryAutomation, created, fieldWrites };
   } finally {
     Module._load = originalLoad;
   }
@@ -135,4 +140,43 @@ test('separate line items at one delivery address retain their own record keys',
   assert.equal(created.length, 2);
   assert.match(tasks[0].description, /Record Key: Line Item-448286/);
   assert.match(tasks[1].description, /Record Key: Line Item-448999/);
+});
+
+function shipViaDropdown() {
+  return { id: 'ship-field', name: 'Ship Via', type: 'drop_down', type_config: {
+    options: ['CDC', 'RCD', 'DELIVER', 'PICKUP', 'PRP'].map((name, orderindex) => ({ name, id: `option-${name}`, orderindex }))
+  } };
+}
+
+test('delivery creation uses dropdown option IDs with whitespace and case normalized', async () => {
+  for (const label of ['CDC', 'RCD', 'DELIVER']) {
+    const { sync, created } = loadDeliverySync([], [shipViaDropdown()]);
+    await sync({ clickupToken: 'test', mainClickupListId: 'main', deliveryClickupListId: 'delivery',
+      latestRows: [{ ...row(label), 'Ship Via': ` ${label.toLowerCase()} ` }] });
+    assert.equal(created.length, 1);
+    assert.equal(created[0].custom_fields.find(field => field.id === 'ship-field').value, `option-${label}`);
+  }
+});
+
+test('existing delivery task updates dropdown by option ID', async () => {
+  const existing = task('existing', '448286');
+  existing.custom_fields = [{ ...shipViaDropdown(), value: 'option-CDC' }];
+  const { sync, fieldWrites } = loadDeliverySync([existing], [shipViaDropdown()]);
+  await sync({ clickupToken: 'test', mainClickupListId: 'main', deliveryClickupListId: 'delivery', latestRows: [row('448286')] });
+  assert.ok(fieldWrites.some(write => write.path.endsWith('/field/ship-field') && write.data?.value === 'option-RCD'));
+});
+
+test('unmatched delivery Ship Via is reported without using PRP or writing text to dropdown', async () => {
+  const { sync, created, fieldWrites } = loadDeliverySync([], [shipViaDropdown()]);
+  const result = await sync({ clickupToken: 'test', mainClickupListId: 'main', deliveryClickupListId: 'delivery',
+    latestRows: [{ ...row('448286'), 'Ship Via': 'HUB' }] });
+  assert.ok(result.errors.some(message => /dropdown option missing.*HUB/.test(message)));
+  assert.equal(created[0].custom_fields.some(field => field.id === 'ship-field'), false);
+  assert.equal(fieldWrites.some(write => write.path.endsWith('/field/ship-field')), false);
+});
+
+test('delivery text Ship Via remains compatible during dropdown migration', async () => {
+  const { sync, created } = loadDeliverySync([], [{ id: 'ship-field', name: 'Ship Via', type: 'short_text' }]);
+  await sync({ clickupToken: 'test', mainClickupListId: 'main', deliveryClickupListId: 'delivery', latestRows: [row('448286')] });
+  assert.equal(created[0].custom_fields.find(field => field.id === 'ship-field').value, 'RCD');
 });
