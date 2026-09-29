@@ -61,15 +61,20 @@ function fail(result, status, error) {
 
 function writableOutput(aiResult = {}, decision = {}, proposedTitle = '') {
   const bypassed = decision.decision === 'BYPASSED_MANUAL_OVERRIDE';
-  const needsReview = Boolean(decision.reviewRequired) || decision.decision === 'NEEDS_REVIEW' || decision.decision === 'RETAIN_EXISTING';
+  const accepted = decision.decision === 'ACCEPT_CANDIDATE' && decision.reviewRequired !== true;
+  const proposal = normalizeText(proposedTitle || aiResult.generatedTitle);
+  const deterministicNotes = normalizeText(decision.reviewNotes) || failedCheckSummary(decision);
   return {
-    title: !bypassed && needsReview && normalizeText(proposedTitle) ? normalizeText(proposedTitle) : normalizeText(decision.finalTitle),
+    title: accepted ? normalizeText(decision.finalTitle) : '',
+    proposedTitle: proposal,
     description: normalizeText(aiResult.generatedDescription),
     shortDescription: normalizeText(aiResult.shortDescription),
-    reviewStatus: bypassed ? 'Skipped - Manual Override' : needsReview ? 'Needs Review' : normalizeText(aiResult.titleReviewStatus) || 'Completed',
-    reviewReason: normalizeText(decision.reviewReason || aiResult.titleReviewReason) || (needsReview ? 'manual_review_required' : 'completed'),
-    reviewNotes: [normalizeText(decision.reviewNotes || aiResult.titleReviewNotes || aiResult.reasoningSummary),
-      !bypassed && needsReview && normalizeText(proposedTitle) ? 'Generated proposal saved to Item Title for review; validation did not approve it for publication.' : ''].filter(Boolean).join(' ')
+    reviewStatus: bypassed ? 'Skipped - Manual Override' : accepted ? 'Completed' : 'Needs Review',
+    reviewReason: bypassed ? normalizeText(decision.reviewReason) || 'manual_override' :
+      accepted ? 'completed' : normalizeText(decision.reviewReason) || 'manual_review_required',
+    reviewNotes: bypassed ? normalizeText(decision.reviewNotes) || 'Automated title generation was skipped.' :
+      accepted ? 'Title accepted by deterministic validation.' :
+        [deterministicNotes, proposal ? `Proposed title: ${proposal}` : ''].filter(Boolean).join(' ')
   };
 }
 
@@ -251,11 +256,16 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   const reviewProposal = [...result.attempts].reverse().find(attempt =>
     normalizeText(attempt.proposedTitle) && normalizeText(attempt.proposedTitle) !== existingTitle)?.proposedTitle || aiResult.generatedTitle;
   result.output = writableOutput(aiResult, decision, reviewProposal);
+  const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates || {};
+  const titleWriteAction = result.output.title ? 'WRITE_ITEM_TITLE' : 'PRESERVE_ITEM_TITLE';
   logger.info?.(
     `[Phase7.4 Runtime] recordId='${result.listing.recordId || ''}' ipn='${result.listing.ipn || ''}' ` +
       `config='${result.configuration.version || ''}' status='${result.status}' ` +
       `overrideStatus='${normalizeText(sourceResolution?.normalized?.manualOverride?.canonicalStatus)}' ` +
-      `proposedTitle='${normalizeText(aiResult.generatedTitle)}' finalTitle='${result.output.title}' ` +
+      `existingTitle='${existingTitle}' proposedTitle='${normalizeText(aiResult.generatedTitle)}' ` +
+      `acceptedTitle='${result.output.title}' titleWriteAction='${titleWriteAction}' ` +
+      `fitmentResolution='${normalizeText(fitmentSelection.resolution)}' ` +
+      `fitmentApplications=${JSON.stringify(fitmentSelection.distinctApplications || [])} ` +
       `decision='${decision?.decision || ''}' reviewReason='${result.output.reviewReason}' ` +
       `failedChecks='${failedCheckSummary(decision)}' ` +
       `generationCalls=${generationCalls} ` +

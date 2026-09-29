@@ -111,8 +111,10 @@ test('failed correction preserves the original safe decision and stops after two
     decide: () => ({ decision: 'RETAIN_EXISTING', finalTitle: 'Existing safe title', reviewRequired: true, degradationChecks: [{ status: 'FAIL', message: 'Missing detail' }] })
   }) });
   assert.equal(aiCalls, 2);
-  assert.equal(result.output.title, 'Initial title');
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.proposedTitle, 'Initial title');
   assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.match(result.output.reviewNotes, /Proposed title: Initial title/);
 });
 
 test('malformed first response gets one retry within the same two-call budget', async () => {
@@ -122,7 +124,53 @@ test('malformed first response gets one retry within the same two-call budget', 
     decide: () => ({ decision: 'RETAIN_EXISTING', finalTitle: 'Safe title', reviewRequired: true, degradationChecks: [{ status: 'FAIL', message: 'Unresolved' }] })
   }) });
   assert.equal(calls, 2);
-  assert.equal(result.output.title, 'Corrected title');
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.proposedTitle, 'Corrected title');
+  assert.match(result.output.reviewNotes, /Proposed title: Corrected title/);
+});
+
+test('needs review never exposes a writable title or inherits contradictory AI review text', async () => {
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    executeAi: async () => ({
+      generatedTitle: 'Risky proposal 00123',
+      titleReviewStatus: 'Completed',
+      titleReviewReason: 'No issues identified',
+      titleReviewNotes: 'Runtime accepted'
+    }),
+    decide: () => ({
+      decision: 'NEEDS_REVIEW',
+      finalTitle: 'Risky proposal 00123',
+      reviewRequired: true,
+      reviewReason: 'Multiple year ranges require review',
+      reviewNotes: '2010-2012 Honda Accord | 2013 Honda Crosstour',
+      degradationChecks: []
+    })
+  }) });
+
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.proposedTitle, 'Risky proposal 00123');
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.equal(result.output.reviewReason, 'Multiple year ranges require review');
+  assert.doesNotMatch(result.output.reviewNotes, /Runtime accepted|No issues identified/);
+});
+
+test('accepted output clears stale model review text', async () => {
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    executeAi: async () => ({
+      generatedTitle: 'Accepted title 00123',
+      titleReviewStatus: 'Needs Review',
+      titleReviewReason: 'Conflicting source data',
+      titleReviewNotes: 'Old warning'
+    }),
+    validate: () => ({ outcome: 'PASS', validatedTitle: 'Accepted title 00123', violations: [], warnings: [] }),
+    decide: () => ({ decision: 'ACCEPT_CANDIDATE', finalTitle: 'Accepted title 00123', reviewRequired: false,
+      reviewReason: null, reviewNotes: '', degradationChecks: [] })
+  }) });
+
+  assert.equal(result.output.title, 'Accepted title 00123');
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.output.reviewReason, 'completed');
+  assert.equal(result.output.reviewNotes, 'Title accepted by deterministic validation.');
 });
 
 test('authoritative runtime executes the configured pipeline and returns writable output', async () => {
@@ -177,7 +225,8 @@ test('runtime log exposes the proposed title and failed no-degrade checks', asyn
 
   assert.equal(result.decision.decision, 'RETAIN_EXISTING');
   assert.match(messages[0], /proposedTitle='2010-2012 Subaru Outback Legacy Column Switch 00123'/);
-  assert.match(messages[0], /finalTitle='2010-2012 Subaru Outback Legacy Column Switch 00123'/);
+  assert.match(messages[0], /acceptedTitle=''/);
+  assert.match(messages[0], /titleWriteAction='PRESERVE_ITEM_TITLE'/);
   assert.match(messages[0], /failedChecks='critical-data-loss:model:Candidate lost verified model\.'/);
 });
 
@@ -248,6 +297,7 @@ test('runtime log identifies the canonical title override status', async () => {
   });
 
   assert.equal(result.status, 'BYPASSED');
+  assert.equal(result.output.title, '');
   assert.equal(result.output.reviewStatus, 'Skipped - Manual Override');
   assert.equal(result.output.reviewReason, 'manual_override');
   assert.equal(result.output.reviewNotes, 'Title is manually approved; automated title generation was skipped.');
