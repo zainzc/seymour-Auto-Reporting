@@ -249,7 +249,7 @@ test('treats a structured single year as evidence while AI selects a supported f
   assert.match(text, /do not combine unrelated applications/i);
 });
 
-test('preselects only title fitment applications containing the trusted listing year', () => {
+test('keeps distinct fitment applications ambiguous even when donor facts match one candidate', () => {
   const inputs = buildInputs();
   inputs.listingResolution.resolved.fields.year = {
     field: 'year', candidates: [], conflicts: [], resolvedValue: '2005',
@@ -269,11 +269,14 @@ test('preselects only title fitment applications containing the trusted listing 
   const artifact = buildTitleOptimizationRuntimePrompt(inputs);
   const selection = artifact.userPayload.resolvedListing.titleFitmentCandidates;
 
-  assert.equal(selection.status, 'FILTERED_BY_TRUSTED_DATA');
-  assert.equal(selection.candidates.length, 1);
+  assert.equal(selection.status, 'MULTIPLE_DISTINCT_APPLICATIONS');
+  assert.equal(selection.resolution, 'AMBIGUOUS');
+  assert.equal(selection.candidates.length, 3);
+  assert.equal(selection.distinctApplications.length, 3);
   assert.equal(selection.candidates[0].id, 'title-fitment-001');
   assert.match(selection.candidates[0].evidence, /2001-2005 Hyundai Accent/);
-  assert.doesNotMatch(JSON.stringify(selection.candidates), /2006 Hyundai Accent/);
+  assert.match(JSON.stringify(selection.candidates), /2006 Hyundai Accent/);
+  assert.deepEqual(selection.selectionFacts.appliedFilters, []);
 });
 
 test('keeps separate fitment candidates when trusted data cannot safely narrow them', () => {
@@ -287,9 +290,24 @@ test('keeps separate fitment candidates when trusted data cannot safely narrow t
 
   const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
 
-  assert.equal(selection.status, 'UNFILTERED_INSUFFICIENT_TRUSTED_DATA');
+  assert.equal(selection.status, 'MULTIPLE_DISTINCT_APPLICATIONS');
+  assert.equal(selection.resolution, 'AMBIGUOUS');
   assert.equal(selection.candidates.length, 2);
   assert.notEqual(selection.candidates[0].id, selection.candidates[1].id);
+});
+
+test('collapses equivalent duplicate fitment clauses into one unambiguous application', () => {
+  const inputs = buildInputs();
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    'Fits 2011-2014 Hyundai Sonata Sedan; 2011 - 2014 HYUNDAI SONATA sedan.';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+
+  assert.equal(selection.status, 'ONE_DISTINCT_APPLICATION');
+  assert.equal(selection.resolution, 'UNAMBIGUOUS');
+  assert.equal(selection.candidates.length, 1);
+  assert.equal(selection.distinctApplications.length, 1);
+  assert.match(selection.candidates[0].evidence, /2011-2014 Hyundai Sonata Sedan/);
 });
 
 test('serializes selected structure, terminology, synonyms, prefix, categories, restricted terms, flags, and system rules only', () => {

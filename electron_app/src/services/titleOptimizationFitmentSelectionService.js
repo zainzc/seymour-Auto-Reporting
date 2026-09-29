@@ -13,6 +13,12 @@ function containsPhrase(value, phrase) {
   return Boolean(needle && haystack.includes(` ${needle} `));
 }
 
+function applicationKey(value) {
+  return comparable(value)
+    .replace(/\b((?:19|20)\d{2})\s+(?:to\s+)?((?:19|20)\d{2})\b/g, '$1 $2')
+    .trim();
+}
+
 function parseApplicationClauses(partFitment) {
   return text(partFitment).split(/;|\n/).map((raw, index) => {
     const evidence = text(raw).replace(/^Fits\s+/i, '');
@@ -22,7 +28,8 @@ function parseApplicationClauses(partFitment) {
       id: `title-fitment-${String(index + 1).padStart(3, '0')}`,
       startYear: Number(years[1]),
       endYear: Number(years[2] || years[1]),
-      evidence
+      evidence,
+      canonicalKey: applicationKey(evidence)
     };
   }).filter(Boolean);
 }
@@ -40,30 +47,19 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
   const exactYear = /^((?:19|20)\d{2})$/.test(yearValue) ? Number(yearValue) : null;
   const make = resolvedValue(listingResolution, 'brandMake');
   const model = resolvedValue(listingResolution, 'model');
-  let candidates = parsed;
-  const appliedFilters = [];
-
-  if (exactYear) {
-    const matchingYear = candidates.filter(item => item.startYear <= exactYear && item.endYear >= exactYear);
-    if (matchingYear.length) {
-      candidates = matchingYear;
-      appliedFilters.push('year');
-    }
+  const byApplication = new Map();
+  for (const candidate of parsed) {
+    if (!byApplication.has(candidate.canonicalKey)) byApplication.set(candidate.canonicalKey, candidate);
   }
-
-  for (const [field, value] of [['make', make], ['model', model]]) {
-    if (!value) continue;
-    const matchingIdentity = candidates.filter(item => containsPhrase(item.evidence, value));
-    if (matchingIdentity.length) {
-      candidates = matchingIdentity;
-      appliedFilters.push(field);
-    }
-  }
+  const candidates = [...byApplication.values()];
+  const resolution = candidates.length === 1 ? 'UNAMBIGUOUS' : 'AMBIGUOUS';
 
   return {
-    status: appliedFilters.length ? 'FILTERED_BY_TRUSTED_DATA' : 'UNFILTERED_INSUFFICIENT_TRUSTED_DATA',
-    selectionFacts: { year: exactYear || null, make: make || null, model: model || null, appliedFilters },
-    candidates
+    status: resolution === 'UNAMBIGUOUS' ? 'ONE_DISTINCT_APPLICATION' : 'MULTIPLE_DISTINCT_APPLICATIONS',
+    resolution,
+    selectionFacts: { year: exactYear || null, make: make || null, model: model || null, appliedFilters: [] },
+    candidates,
+    distinctApplications: candidates
   };
 }
 
