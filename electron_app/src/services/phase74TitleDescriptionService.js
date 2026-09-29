@@ -797,6 +797,13 @@ function addFieldIfChanged(writeFields = {}, existingFields = {}, fieldName = ''
   return true;
 }
 
+function applyAcceptedRuntimeTitle(writeFields = {}, existingFields = {}, runtimeResult = {}) {
+  if (runtimeResult?.decision?.decision !== 'ACCEPT_CANDIDATE') return false;
+  const title = normalizeText(runtimeResult?.output?.title);
+  if (!title || title.length > 80) return false;
+  return addFieldIfChanged(writeFields, existingFields, LISTING_OUTPUT_TITLE_FIELD, title);
+}
+
 function isManualOverrideForField(listingFields = {}, fieldName = '') {
   return isManualOverrideFromGovernance(listingFields, fieldName);
 }
@@ -1284,8 +1291,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       nextReviewNotes = nextReviewNotes || 'Generated title matches another listing; client rules allow duplicates only when no truthful differentiator exists.';
     }
 
-    if (!titleManualOverride && nextTitle && nextTitle !== existingTitleNew) {
-      writeFields[LISTING_OUTPUT_TITLE_FIELD] = nextTitle;
+    if (!titleManualOverride && applyAcceptedRuntimeTitle(writeFields, fields, runtimeResult)) {
       summary.titleGenerated += 1;
       if (nextTitleKey) usedTitleKeys.add(nextTitleKey);
       usedTitles.push(nextTitle);
@@ -1404,6 +1410,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
 }
 
 module.exports = {
-  runPhase74TitleDescription
+  runPhase74TitleDescription,
+  applyAcceptedRuntimeTitle
 };
 
