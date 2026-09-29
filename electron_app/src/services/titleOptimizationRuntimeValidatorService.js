@@ -338,6 +338,18 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
   }
 
   const append = (record) => appendCheck({ checks }, record, { corrections, violations, warnings });
+  const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates;
+  if (fitmentSelection?.resolution === 'AMBIGUOUS') {
+    const flag = approvedFlag(ruleResolution, 'Multiple year ranges require review');
+    uniquePush(suggestedReviewReasons, flag);
+    append(checkRecord({
+      checkId: 'multiple-fitment-applications',
+      status: 'WARN',
+      severity: 'warning',
+      message: 'Multiple distinct fitment applications remain and cannot be selected or merged automatically.',
+      suggestedFlagReason: flag
+    }));
+  }
   if (vehicleDecision && !vehicleVerification.verified) {
     append(checkRecord({ checkId: 'vehicle-evidence', status: 'FAIL', severity: 'error',
       message: 'Vehicle decision is unresolved or lacks a supported make/model/year application and matching title.' }));

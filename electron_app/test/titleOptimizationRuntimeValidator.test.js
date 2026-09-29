@@ -99,7 +99,8 @@ function baseInputs(overrides = {}) {
       { id: 'flag-transmission', reason: 'Transmission code cannot be verified', enabled: true },
       { id: 'flag-conflict', reason: 'Conflicting source data', enabled: true },
       { id: 'flag-fitment', reason: 'Cannot preserve essential fitment within 80 characters', enabled: true },
-      { id: 'flag-degrade', reason: 'Proposed title would degrade existing title', enabled: true }
+      { id: 'flag-degrade', reason: 'Proposed title would degrade existing title', enabled: true },
+      { id: 'flag-multiple-ranges', reason: 'Multiple year ranges require review', enabled: true }
     ],
     systemRules: [
       { id: 'SR-03', title: 'Preserve verified acronyms' },
@@ -142,6 +143,25 @@ test('passes a clean valid title without corrections', () => {
   assert.equal(result.validatedTitle, '2011 Honda Accord Driver Side View Mirror ABS MPN-9 K24A BAYA VIN J 00123');
   assert.deepEqual(result.corrections, []);
   assert.deepEqual(result.violations, []);
+});
+
+test('flags multiple distinct fitment applications with the configured review reason', () => {
+  const inputs = baseInputs();
+  inputs.promptArtifact.userPayload = { resolvedListing: { titleFitmentCandidates: {
+    resolution: 'AMBIGUOUS',
+    distinctApplications: [
+      { id: 'title-fitment-001', evidence: '2010-2012 Honda Accord mirror' },
+      { id: 'title-fitment-002', evidence: '2013 Honda Crosstour mirror' }
+    ],
+    candidates: []
+  } } };
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.equal(result.outcome, 'FLAG');
+  assert.equal(result.safeToContinue, true);
+  assert.ok(result.checks.some(check => check.checkId === 'multiple-fitment-applications'));
+  assert.ok(result.suggestedReviewReasons.some(item => item.reason === 'Multiple year ranges require review'));
 });
 
 test('accepts an AI-selected fitment range that contains the structured single year', () => {

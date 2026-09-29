@@ -310,6 +310,20 @@ test('collapses equivalent duplicate fitment clauses into one unambiguous applic
   assert.match(selection.candidates[0].evidence, /2011-2014 Hyundai Sonata Sedan/);
 });
 
+test('marks malformed fitment unavailable and prohibits AI application selection', () => {
+  const inputs = buildInputs();
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value = 'Fits Hyundai Sonata, years unknown';
+
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  const selection = artifact.userPayload.resolvedListing.titleFitmentCandidates;
+  const instructions = JSON.stringify(artifact.userPayload.titlePolicy.instructions);
+
+  assert.equal(selection.resolution, 'UNAVAILABLE');
+  assert.deepEqual(selection.distinctApplications, []);
+  assert.match(instructions, /must not choose or merge/i);
+  assert.doesNotMatch(instructions, /select exactly one candidate/i);
+});
+
 test('serializes selected structure, terminology, synonyms, prefix, categories, restricted terms, flags, and system rules only', () => {
   const artifact = buildTitleOptimizationRuntimePrompt(buildInputs());
   const policy = artifact.userPayload.titlePolicy;

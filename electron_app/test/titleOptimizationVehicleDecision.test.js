@@ -62,7 +62,8 @@ test('validates a selected application against the full cited source when the AI
 test('vehicle decision must select one eligible title fitment candidate without merging candidates', () => {
   const artifact = { userPayload: { resolvedListing: {
     titleFitmentCandidates: {
-      status: 'FILTERED_BY_TRUSTED_DATA',
+      status: 'ONE_DISTINCT_APPLICATION',
+      resolution: 'UNAMBIGUOUS',
       candidates: [
         { id: 'title-fitment-001', evidence: '2001-2005 Hyundai Accent throttle body 1.6L DOHC' }
       ]
@@ -79,6 +80,24 @@ test('vehicle decision must select one eligible title fitment candidate without 
     '2001-2005 Hyundai Accent Throttle Body 1584124').verified, true);
   assert.equal(resolveVehicleDecision({ ...base, yearRange: '2001-2006' }, artifact,
     '2001-2006 Hyundai Accent Throttle Body 1584124').verified, false);
+});
+
+test('vehicle decision cannot select one application when fitment remains ambiguous', () => {
+  const artifact = { userPayload: { resolvedListing: {
+    titleFitmentCandidates: {
+      status: 'MULTIPLE_DISTINCT_APPLICATIONS',
+      resolution: 'AMBIGUOUS',
+      candidates: [
+        { id: 'title-fitment-001', evidence: '2001-2005 Hyundai Accent throttle body' },
+        { id: 'title-fitment-002', evidence: '2006 Hyundai Accent hatchback 3-door throttle body' }
+      ]
+    }
+  } } };
+  const selected = { resolved: true, make: 'Hyundai', model: 'Accent', yearRange: '2001-2005',
+    source: 'title-fitment-001', evidence: '2001-2005 Hyundai Accent throttle body', reason: 'Selected by the model.' };
+
+  assert.equal(resolveVehicleDecision(selected, artifact,
+    '2001-2005 Hyundai Accent Throttle Body 1584124').verified, false);
 });
 
 test('validated AI application reaches no-degrade decision without suppressing unrelated conflicts', () => {

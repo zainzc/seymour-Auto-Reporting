@@ -56,7 +56,9 @@ function resolveVehicleDecision(decision, promptArtifact, title) {
   const citation = citationText(evidence);
   if (![make, model, yearRange, source, evidence, decision.reason].every(value => text(value))) return rejected;
   const supplied = promptArtifact?.userPayload?.resolvedListing?.categoryPriorityEvidenceSources || [];
-  const titleCandidates = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates?.candidates || [];
+  const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates;
+  if (fitmentSelection && fitmentSelection.resolution !== 'UNAMBIGUOUS') return rejected;
+  const titleCandidates = fitmentSelection?.candidates || [];
   const trustedApplications = titleCandidates.length
     ? titleCandidates.map(item => ({ id: item.id, source: 'Title Fitment Candidate', evidence: item.evidence }))
     : supplied;
