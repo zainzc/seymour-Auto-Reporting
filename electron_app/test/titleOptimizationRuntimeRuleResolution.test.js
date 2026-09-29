@@ -230,6 +230,21 @@ test('engine and transmission structures are selected only from verified context
   assert.equal(fitmentOnly.titleStructure.selected.id, 'structure-general');
 });
 
+test('wiper parts keep the general structure even when unrelated evidence mentions transmission', () => {
+  const snapshot = baseSnapshot();
+  const result = resolveApplicableTitleOptimizationRules({
+    runtimeSnapshot: snapshot,
+    listingResolution: resolvedListing(snapshot, {
+      'Category Name': 'Wiper Motor',
+      'Item Specifics': JSON.stringify({ 'C:Part': 'Wiper Motor' }),
+      'Conditions & Options': 'Mounted near transmission tunnel'
+    })
+  });
+
+  assert.equal(result.titleStructure.selected.id, 'structure-general');
+  assert.equal(result.terminologyRules.some(rule => rule.appliesTo === 'transmission'), false);
+});
+
 test('missing valid General title structure is blocking and repeated execution is deterministic', () => {
   const snapshot = baseSnapshot({
     sections: {

@@ -41,7 +41,13 @@ function resolvedValue(listingResolution, field) {
 function selectTitleFitmentCandidates(listingResolution = {}) {
   const partFitment = text(listingResolution?.normalized?.titleAuthority?.partFitment?.value);
   const parsed = parseApplicationClauses(partFitment);
-  if (!parsed.length) return { status: 'NO_PARSEABLE_PART_FITMENT', selectionFacts: {}, candidates: [] };
+  if (!parsed.length) return {
+    status: 'NO_PARSEABLE_PART_FITMENT',
+    resolution: 'UNAVAILABLE',
+    selectionFacts: {},
+    candidates: [],
+    distinctApplications: []
+  };
 
   const yearValue = resolvedValue(listingResolution, 'year');
   const exactYear = /^((?:19|20)\d{2})$/.test(yearValue) ? Number(yearValue) : null;

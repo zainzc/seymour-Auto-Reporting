@@ -693,6 +693,28 @@ test('accepts configured synonym evidence for category details', () => {
   assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'category-priority-verification'), false);
 });
 
+test('accepts actual Item Specific value as evidence for a configured field concept', () => {
+  for (const [detail, value] of [['Color', 'Beige'], ['Material', 'Aluminum']]) {
+    const inputs = baseInputs({ candidateTitle: `2011 Honda Accord Mirror ${value} ABS 00123` });
+    inputs.ruleResolution.categoryRules = [{ rule: { priorityDetails: [detail] } }];
+    inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{
+      id: `specific-${detail.toLowerCase()}`,
+      source: `Item Specifics:${detail}`,
+      evidence: value
+    }] } };
+    inputs.categoryPriorityDetails = [{
+      detail,
+      verified: true,
+      source: `specific-${detail.toLowerCase()}`,
+      evidence: value
+    }];
+
+    const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+    assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), false, detail);
+  }
+});
+
 test('explicit Part Fitment supports side while a conflicting structured side remains authoritative', () => {
   const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Driver Left Mirror ABS 00123' });
   inputs.sourceResolution.resolved.fields.side = { resolvedValue: null };

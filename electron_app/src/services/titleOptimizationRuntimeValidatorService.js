@@ -150,9 +150,14 @@ function titleContainsValue(title, value) {
   return Boolean(wanted && text.includes(wanted));
 }
 
-function categoryEvidenceSupportsDetail(evidence, detail, ruleResolution) {
+function categoryEvidenceSupportsDetail(evidence, detail, ruleResolution, source = '') {
   const comparable = value => normalizeKey(value).replace(/[^a-z0-9]+/g, ' ').trim();
   const text = comparable(evidence);
+  const itemSpecificField = normalizeText(source).match(/^Item Specifics\s*:\s*(.+)$/i)?.[1];
+  if (itemSpecificField && comparable(itemSpecificField) === comparable(detail) && text &&
+    !/^(?:no|not|without|none|n\/a|unknown|unspecified)$/i.test(normalizeText(evidence))) {
+    return true;
+  }
   const variants = new Set([comparable(detail)]);
   // Only applicable configured equivalences may bridge different wording.
   const equivalences = [
@@ -459,7 +464,9 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
         const cited = evidenceSources.filter(item => normalizeKey(item?.id) === normalizeKey(source) ||
           normalizeKey(item?.source) === normalizeKey(source));
         const candidates = [...cited, ...evidenceSources.filter(item => !cited.includes(item))];
-        const supportingSource = candidates.find(item => categoryEvidenceSupportsDetail(item?.evidence, detail, ruleResolution));
+        const supportingSource = candidates.find(item => categoryEvidenceSupportsDetail(
+          item?.evidence, detail, ruleResolution, item?.source
+        ));
         if (!evidence || !supportingSource) {
           append(checkRecord({
             checkId: 'category-priority-verification',

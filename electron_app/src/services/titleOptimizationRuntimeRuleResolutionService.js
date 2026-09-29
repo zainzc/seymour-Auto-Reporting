@@ -84,6 +84,13 @@ function contextText(context = {}) {
   ].map(normalizeText).filter(Boolean).join(' ');
 }
 
+function partIdentityText(context = {}) {
+  return [context.categoryPart, context.part, context.itemSpecificPart]
+    .map(normalizeText)
+    .filter(Boolean)
+    .join(' ');
+}
+
 function titleEvidenceText(listingResolution = {}) {
   return normalizeText(listingResolution?.normalized?.titleAuthority?.partFitment?.value);
 }
@@ -111,11 +118,11 @@ function includesWord(text, word) {
 }
 
 function isEngineContext(context) {
-  return /\bengine|engines\b/i.test(contextText(context));
+  return /\bengine|engines\b/i.test(partIdentityText(context));
 }
 
 function isTransmissionContext(context) {
-  return /\btransmission|transmissions\b/i.test(contextText(context));
+  return /\btransmission|transmissions\b/i.test(partIdentityText(context));
 }
 
 function buildListingContext(listingResolution = {}) {
