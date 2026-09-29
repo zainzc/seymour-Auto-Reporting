@@ -55,7 +55,18 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
   const model = resolvedValue(listingResolution, 'model');
   const byApplication = new Map();
   for (const candidate of parsed) {
-    if (!byApplication.has(candidate.canonicalKey)) byApplication.set(candidate.canonicalKey, candidate);
+    const hasResolvedVehicle = make && model &&
+      containsPhrase(candidate.evidence, make) && containsPhrase(candidate.evidence, model);
+    const key = hasResolvedVehicle
+      ? `${candidate.startYear}-${candidate.endYear}|${comparable(make)}|${comparable(model)}`
+      : candidate.canonicalKey;
+    const existing = byApplication.get(key);
+    if (!existing) {
+      byApplication.set(key, { ...candidate, variantEvidence: [candidate.evidence] });
+      continue;
+    }
+    existing.variantEvidence.push(candidate.evidence);
+    existing.evidence = existing.variantEvidence.join('; ');
   }
   const candidates = [...byApplication.values()];
   const resolution = candidates.length === 1 ? 'UNAMBIGUOUS' : 'AMBIGUOUS';

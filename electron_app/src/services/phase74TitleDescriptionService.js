@@ -72,6 +72,18 @@ function normalizeKey(value) {
   return normalizeText(value).toLowerCase();
 }
 
+function runtimeOutputFailure(runtimeResult = {}, descriptionManualOverride = false) {
+  const output = runtimeResult.output || {};
+  const accepted = runtimeResult.decision?.decision === 'ACCEPT_CANDIDATE';
+  if (accepted && !normalizeText(output.title)) return 'accepted_title_missing';
+  if (
+    runtimeResult.status !== 'BYPASSED' &&
+    !descriptionManualOverride &&
+    !normalizeText(output.description)
+  ) return 'description_missing';
+  return null;
+}
+
 function decodeHtmlEntities(value = '') {
   return normalizeText(value)
     .replace(/&nbsp;/gi, ' ')
@@ -1220,8 +1232,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     let nextReviewReason = normalizeText(runtimeResult.output.reviewReason);
     let nextReviewNotes = normalizeText(runtimeResult.output.reviewNotes);
 
-    const runtimeBypassed = runtimeResult.status === 'BYPASSED';
-    if (!nextTitle || (!nextDescription && !runtimeBypassed && !descriptionManualOverride)) {
+    const outputFailure = runtimeOutputFailure(runtimeResult, descriptionManualOverride);
+    if (outputFailure) {
       const writeFields = {};
       addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_STATUS_FIELD, TITLE_REVIEW_STATUS_NEEDS_REVIEW);
       addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_REASON_FIELD, 'ai_blank_output');
@@ -1229,7 +1241,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         writeFields,
         fields,
         LISTING_TITLE_REVIEW_NOTES_FIELD,
-          `Runtime returned blank title or description. ${compactText(nextReviewNotes, 180)}`
+          `Runtime output is incomplete (${outputFailure}). ${compactText(nextReviewNotes, 180)}`
       );
       if (Object.keys(writeFields).length > 0) {
         updates.push({ id: row.id, fields: writeFields });
@@ -1239,7 +1251,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       summary.aiFailures += 1;
       if (summary.errors.length < sampleLimit) {
         const blankMessage =
-          `ipn='${ipn}' runtime returned blank title/description. decision='${runtimeResult.decision?.decision || ''}' ` +
+          `ipn='${ipn}' runtime output incomplete (${outputFailure}). decision='${runtimeResult.decision?.decision || ''}' ` +
             `notes='${compactText(nextReviewNotes, 180)}'`;
         summary.errors.push(blankMessage);
         emitProgress(progressCallback, {
@@ -1250,7 +1262,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         });
       }
       console.warn(
-        `[Phase7.4] Runtime blank output for ipn='${ipn}' ` +
+        `[Phase7.4] Runtime incomplete output for ipn='${ipn}' reason='${outputFailure}' ` +
           `title='${compactText(nextTitle, 80)}' desc='${compactText(nextDescription, 80)}'`
       );
       continue;
@@ -1411,6 +1423,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
 
 module.exports = {
   runPhase74TitleDescription,
-  applyAcceptedRuntimeTitle
+  applyAcceptedRuntimeTitle,
+  runtimeOutputFailure
 };
 

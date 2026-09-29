@@ -271,11 +271,13 @@ test('keeps distinct fitment applications ambiguous even when donor facts match 
 
   assert.equal(selection.status, 'MULTIPLE_DISTINCT_APPLICATIONS');
   assert.equal(selection.resolution, 'AMBIGUOUS');
-  assert.equal(selection.candidates.length, 3);
-  assert.equal(selection.distinctApplications.length, 3);
+  assert.equal(selection.candidates.length, 2);
+  assert.equal(selection.distinctApplications.length, 2);
   assert.equal(selection.candidates[0].id, 'title-fitment-001');
   assert.match(selection.candidates[0].evidence, /2001-2005 Hyundai Accent/);
   assert.match(JSON.stringify(selection.candidates), /2006 Hyundai Accent/);
+  assert.match(selection.candidates[1].evidence, /hatchback 3-door/);
+  assert.match(selection.candidates[1].evidence, /hatchback 5-door/);
   assert.deepEqual(selection.selectionFacts.appliedFilters, []);
 });
 
@@ -308,6 +310,38 @@ test('collapses equivalent duplicate fitment clauses into one unambiguous applic
   assert.equal(selection.candidates.length, 1);
   assert.equal(selection.distinctApplications.length, 1);
   assert.match(selection.candidates[0].evidence, /2011-2014 Hyundai Sonata Sedan/);
+});
+
+test('collapses same vehicle and year fitment variants into one title application', () => {
+  const inputs = buildInputs();
+  inputs.listingResolution.resolved.fields.year = {
+    field: 'year', candidates: [], conflicts: [], resolvedValue: '2009',
+    resolvedSource: 'otherStructuredFields', missing: false
+  };
+  inputs.listingResolution.resolved.fields.brandMake = {
+    field: 'brandMake', candidates: [], conflicts: [], resolvedValue: 'Nissan',
+    resolvedSource: 'itemSpecifics', missing: false
+  };
+  inputs.listingResolution.resolved.fields.model = {
+    field: 'model', candidates: [], conflicts: [], resolvedValue: 'Altima',
+    resolvedSource: 'itemSpecifics', missing: false
+  };
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    'Fits 2009 Nissan Altima Air Bag front center console Sedan Base; ' +
+    '2009 Nissan Altima Air Bag front center console Sedan S; ' +
+    '2009 Nissan Altima Air Bag front center console Sedan SE; ' +
+    '2009 Nissan Altima Air Bag front center console Sedan SL';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+
+  assert.equal(selection.status, 'ONE_DISTINCT_APPLICATION');
+  assert.equal(selection.resolution, 'UNAMBIGUOUS');
+  assert.equal(selection.candidates.length, 1);
+  assert.equal(selection.candidates[0].startYear, 2009);
+  assert.equal(selection.candidates[0].endYear, 2009);
+  assert.equal(selection.candidates[0].variantEvidence.length, 4);
+  assert.match(selection.candidates[0].evidence, /Sedan Base/);
+  assert.match(selection.candidates[0].evidence, /Sedan SL/);
 });
 
 test('marks malformed fitment unavailable and prohibits AI application selection', () => {
