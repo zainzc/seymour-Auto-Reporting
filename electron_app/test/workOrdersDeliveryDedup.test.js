@@ -142,6 +142,46 @@ test('separate line items at one delivery address retain their own record keys',
   assert.match(tasks[1].description, /Record Key: Line Item-448999/);
 });
 
+test('existing delivery tasks in any manual status are preserved and not recreated', async () => {
+  for (const status of ['Gjon', 'Steve', 'Truck 3', 'Sean', 'Future Driver']) {
+    const existing = task(`task-${status}`, '448286');
+    existing.status = { status };
+    const tasks = [existing];
+    const { sync, created } = loadDeliverySync(tasks);
+
+    const result = await sync({
+      clickupToken: 'test',
+      mainClickupListId: 'main',
+      deliveryClickupListId: 'delivery',
+      latestRows: [row('448286')]
+    });
+
+    assert.equal(created.length, 0, status);
+    assert.equal(tasks.length, 1, status);
+    assert.equal(tasks[0].status.status, status, status);
+    assert.equal(result.created, 0, status);
+  }
+});
+
+test('existing blank or weekday delivery statuses still follow the calculated weekday', async () => {
+  for (const status of ['', 'Monday', 'Tuesday', 'Wednesday', 'Thursday']) {
+    const existing = task(`task-${status || 'blank'}`, '448286');
+    existing.status = { status };
+    const tasks = [existing];
+    const { sync, created } = loadDeliverySync(tasks);
+
+    await sync({
+      clickupToken: 'test',
+      mainClickupListId: 'main',
+      deliveryClickupListId: 'delivery',
+      latestRows: [row('448286')]
+    });
+
+    assert.equal(created.length, 0, status || 'blank');
+    assert.equal(tasks[0].status.status, 'Friday', status || 'blank');
+  }
+});
+
 function shipViaDropdown() {
   return { id: 'ship-field', name: 'Ship Via', type: 'drop_down', type_config: {
     options: ['CDC', 'RCD', 'DELIVER', 'PICKUP', 'PRP'].map((name, orderindex) => ({ name, id: `option-${name}`, orderindex }))

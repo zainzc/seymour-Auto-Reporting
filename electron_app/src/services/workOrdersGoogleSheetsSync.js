@@ -45,6 +45,14 @@ const PRIORITY_SHIP_VIA = new Set(['DELIVERY', 'PICK-UP', 'CHECK PART', 'RCD', '
 const PRIORITY_DUE_DATE_SHIP_VIA = new Set([...PRIORITY_SHIP_VIA, '']);
 const DELIVERY_AUTOMATION_LIST_ID = process.env.WORK_ORDERS_DELIVERY_AUTOMATION_LIST_ID || '901114138163';
 const DELIVERY_AUTOMATION_SHIP_VIA = new Set(['DELIVER', 'HUB', 'CDC', 'RCD', 'RTV', 'PUDO']);
+const DELIVERY_AUTOMATION_MANAGED_STATUSES = new Set([
+  'TO DO',
+  'MONDAY',
+  'TUESDAY',
+  'WEDNESDAY',
+  'THURSDAY',
+  'FRIDAY'
+]);
 const DELIVERY_AUTOMATION_CUSTOM_FIELD_NAMES = [
   'RNumber',
   'Billing Name',
@@ -2410,7 +2418,10 @@ async function syncRowsToDeliveryAutomationOnce({
       if (existingTaskId) deliveryTaskIdsSyncedFromRows.add(existingTaskId);
       const desiredDescription = buildDeliveryTaskDescription(row);
       const currentDescription = normalizeMultilineTextForCompare(existingTask?.description || existingTask?.text_content || '');
-      const existingStatus = normalizeClickUpStatusToken(existingTask?.status?.status || existingTask?.status || '');
+      const existingStatusValue = existingTask?.status && typeof existingTask.status === 'object'
+        ? existingTask.status.status
+        : existingTask?.status;
+      const existingStatus = normalizeClickUpStatusToken(existingStatusValue || '');
       const desiredStatus = normalizeClickUpStatusToken(status);
       const cleanupFields = buildDeliveryLinkCleanupCustomFields(existingTask, deliveryFieldMeta);
       const refreshedDeliveryFields = buildDeliveryAutomationCustomFields(row, deliveryFieldMeta, {
@@ -2428,7 +2439,8 @@ async function syncRowsToDeliveryAutomationOnce({
           });
           descriptionUpdated = true;
         }
-        if (desiredStatus && existingStatus !== desiredStatus) {
+        const statusIsAutomationManaged = !existingStatus || DELIVERY_AUTOMATION_MANAGED_STATUSES.has(existingStatus);
+        if (statusIsAutomationManaged && desiredStatus && existingStatus !== desiredStatus) {
           await deliveryClickup.updateTaskStatus(existingTask.id, status);
           statusUpdated = true;
         }
