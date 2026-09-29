@@ -100,6 +100,23 @@ test('vehicle decision cannot select one application when fitment remains ambigu
     '2001-2005 Hyundai Accent Throttle Body 1584124').verified, false);
 });
 
+test('vehicle decision may use another trusted source when Part Fitment is unavailable', () => {
+  const sourceEvidence = '2011 Honda Accord mirror';
+  const artifact = { userPayload: { resolvedListing: {
+    titleFitmentCandidates: {
+      status: 'NO_PARSEABLE_PART_FITMENT',
+      resolution: 'UNAVAILABLE',
+      candidates: [],
+      distinctApplications: []
+    },
+    categoryPriorityEvidenceSources: [{ id: 'evidence-title', source: 'Current eBay Title', evidence: sourceEvidence }]
+  } } };
+  const selected = { resolved: true, make: 'Honda', model: 'Accord', yearRange: '2011',
+    source: 'evidence-title', evidence: sourceEvidence, reason: 'Current title is one unambiguous application.' };
+
+  assert.equal(resolveVehicleDecision(selected, artifact, '2011 Honda Accord Mirror 00123').verified, true);
+});
+
 test('validated AI application reaches no-degrade decision without suppressing unrelated conflicts', () => {
   const sourceResolution = { normalized: { fields: { existingTitle: { value: '2010 Ford Fusion Control 123' } },
     titleAuthority: { partFitment: { value: evidence } } }, resolved: { fields: {
