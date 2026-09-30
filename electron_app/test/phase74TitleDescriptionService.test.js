@@ -79,3 +79,16 @@ test('reports missing required output only for accepted title or generated descr
     output: { title: '', description: '' }
   }, false), 'description_missing');
 });
+
+test('does not replace a pre-generation source review with ai blank output', () => {
+  assert.equal(runtimeOutputFailure({
+    decision: { decision: 'NEEDS_REVIEW' },
+    output: {
+      title: '',
+      description: '',
+      generationSkipped: true,
+      reviewStatus: 'Needs Review',
+      reviewReason: 'Invalid Part Fitment date'
+    }
+  }, false), null);
+});

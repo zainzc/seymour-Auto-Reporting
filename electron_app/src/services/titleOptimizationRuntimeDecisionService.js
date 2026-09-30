@@ -47,7 +47,7 @@ const REVIEW_REASON_PRECEDENCE = Object.freeze([
 ]);
 
 const { modelAmbiguityResolvedByCandidate } = require('./titleOptimizationRuntimeSourceResolutionService');
-const { vehicleSourceResolution } = require('./titleOptimizationVehicleDecisionService');
+const { vehicleSourceResolution, applicationsCoverRange } = require('./titleOptimizationVehicleDecisionService');
 
 function normalizeText(value) {
   if (Array.isArray(value)) return normalizeText(value[0]);
@@ -91,6 +91,22 @@ function titleContains(title, value) {
   const text = normalizeKey(title);
   const wanted = normalizeKey(value);
   return Boolean(text && wanted && text.includes(wanted));
+}
+
+function explicitYearRanges(title) {
+  const ranges = [];
+  for (const match of normalizeText(title).matchAll(/\b((?:19|20)?\d{2})\s*-\s*((?:19|20)?\d{2})\b/g)) {
+    let start = Number(match[1]);
+    let end = Number(match[2]);
+    if (match[1].length === 2) start += start <= 30 ? 2000 : 1900;
+    if (match[2].length === 2) end += end <= 30 ? 2000 : 1900;
+    if (start <= end) ranges.push({ start, end, value: `${start}-${end}` });
+  }
+  return ranges;
+}
+
+function titleHasYearRange(title, range) {
+  return explicitYearRanges(title).some(item => item.start === range.start && item.end === range.end);
 }
 
 function approvedFlagReasons(ruleResolution = {}) {
@@ -175,6 +191,26 @@ function criticalLossChecks({ sourceResolution, ruleResolution, candidateTitle, 
       relatedConfigIds: term.relatedConfigIds,
       flagReason: degradeReason,
       message: `Candidate lost protected term ${term.value}.`
+    }));
+  }
+
+  const partFitment = normalizeText(sourceResolution?.normalized?.titleAuthority?.partFitment?.value);
+  const make = resolvedValue(sourceResolution, 'brandMake');
+  const model = resolvedValue(sourceResolution, 'model');
+  for (const range of explicitYearRanges(existing)) {
+    if (!partFitment || !make || !model || titleHasYearRange(candidateTitle, range)) continue;
+    if (!applicationsCoverRange(partFitment, make, model, range.start, range.end)) continue;
+    checks.push(degradationCheck({
+      checkId: 'explicit-year-range-loss',
+      status: 'FAIL',
+      severity: 'error',
+      field: 'year',
+      existingValue: range.value,
+      candidateValue: explicitYearRanges(candidateTitle)[0]?.value || resolvedValue(sourceResolution, 'year') || null,
+      evidence: 'Part Fitment continuously supports the complete year range advertised by the existing title.',
+      relatedSystemRuleIds: ['SR-14'],
+      flagReason: degradeReason,
+      message: `Candidate narrowed verified fitment range ${range.value}.`
     }));
   }
   return checks;
@@ -357,7 +393,22 @@ function decideTitleOptimizationRuntimeResult({ sourceResolution = {}, ruleResol
     return finish(result, DECISIONS.BLOCKED, reasons);
   }
 
-  const comparisonChecks = existing
+  const semanticSafety = validationResult.semanticSafety || {};
+  if (semanticSafety.supplied && semanticSafety.safeToPublish === false) {
+    result.degradationChecks.push(degradationCheck({
+      checkId: 'ai-semantic-safety',
+      status: 'FAIL',
+      severity: 'error',
+      candidateValue: candidate,
+      evidence: semanticSafety.concerns || [],
+      message: semanticSafety.reason || 'AI semantic safety review found a material title risk.'
+    }));
+    result.finalTitle = candidate;
+    return finish(result, DECISIONS.NEEDS_REVIEW, reasons);
+  }
+
+  const aiOwnsSemantics = semanticSafety.supplied && semanticSafety.safeToPublish === true;
+  const comparisonChecks = existing && !aiOwnsSemantics
     ? criticalLossChecks({ sourceResolution, ruleResolution, candidateTitle: candidate, existing })
     : [];
   result.degradationChecks.push(...comparisonChecks);
@@ -367,7 +418,7 @@ function decideTitleOptimizationRuntimeResult({ sourceResolution = {}, ruleResol
     return finish(result, DECISIONS.RETAIN_EXISTING, reasons);
   }
 
-  const conflictChecks = materialConflictChecks(sourceResolution, ruleResolution);
+  const conflictChecks = aiOwnsSemantics ? [] : materialConflictChecks(sourceResolution, ruleResolution);
   result.degradationChecks.push(...conflictChecks);
   if (conflictChecks.length) addReason(reasons, approvedReason(ruleResolution, 'Conflicting source data'));
 
@@ -383,7 +434,7 @@ function decideTitleOptimizationRuntimeResult({ sourceResolution = {}, ruleResol
   }
 
   if (
-    sourceResolution?.resolved?.modelAmbiguity?.ambiguous &&
+    !aiOwnsSemantics && sourceResolution?.resolved?.modelAmbiguity?.ambiguous &&
     !modelAmbiguityResolvedByCandidate(sourceResolution, candidate)
   ) {
     const modelReason = approvedReason(ruleResolution, 'Model cannot be normalized safely');

@@ -301,7 +301,7 @@ function appendCheck(target, record, { corrections, violations, warnings }) {
   if (record.status === 'WARN' || record.status === 'CANNOT_VERIFY') warnings.push(record);
 }
 
-function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, ruleResolution = {}, promptArtifact = {}, candidateTitle = '', categoryPriorityDetails, sideDecision, vehicleDecision } = {}) {
+function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, ruleResolution = {}, promptArtifact = {}, candidateTitle = '', categoryPriorityDetails, sideDecision, vehicleDecision, safetyDecision } = {}) {
   const vehicleVerification = resolveVehicleDecision(vehicleDecision, promptArtifact, candidateTitle);
   sourceResolution = vehicleSourceResolution(sourceResolution, vehicleVerification);
   const originalCandidate = candidateTitle === null || candidateTitle === undefined ? '' : String(candidateTitle);
@@ -311,6 +311,19 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
   const warnings = [];
   const suggestedReviewReasons = [];
   let title = originalCandidate;
+  const semanticSafety = {
+    supplied: Boolean(safetyDecision && typeof safetyDecision.safeToPublish === 'boolean'),
+    safeToPublish: safetyDecision?.safeToPublish === true,
+    reason: normalizeText(safetyDecision?.reason),
+    concerns: Array.isArray(safetyDecision?.concerns) ? safetyDecision.concerns.map(normalizeText).filter(Boolean) : [],
+    claims: Array.isArray(safetyDecision?.claims) ? safetyDecision.claims.map(claim => ({
+      titleClaim: normalizeText(claim?.titleClaim),
+      dimension: normalizeText(claim?.dimension),
+      status: normalizeText(claim?.status),
+      evidence: claim?.evidence == null ? null : normalizeText(claim.evidence),
+      material: claim?.material === true
+    })) : []
+  };
 
   const resultBase = () => ({
     contractVersion: 1,
@@ -328,7 +341,8 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
     warnings,
     suggestedReviewReasons,
     vehicleVerification,
-    categoryPriorityDetails: Array.isArray(categoryPriorityDetails) ? categoryPriorityDetails : []
+    categoryPriorityDetails: Array.isArray(categoryPriorityDetails) ? categoryPriorityDetails : [],
+    semanticSafety
   });
 
   if (promptArtifact?.kind === 'title-generation-bypass' || sourceResolution?.normalized?.manualOverride?.active) {
@@ -343,18 +357,6 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
   }
 
   const append = (record) => appendCheck({ checks }, record, { corrections, violations, warnings });
-  const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates;
-  if (fitmentSelection?.resolution === 'AMBIGUOUS') {
-    const flag = approvedFlag(ruleResolution, 'Multiple year ranges require review');
-    uniquePush(suggestedReviewReasons, flag);
-    append(checkRecord({
-      checkId: 'multiple-fitment-applications',
-      status: 'WARN',
-      severity: 'warning',
-      message: 'Multiple distinct fitment applications remain and cannot be selected or merged automatically.',
-      suggestedFlagReason: flag
-    }));
-  }
   if (vehicleDecision && !vehicleVerification.verified) {
     append(checkRecord({ checkId: 'vehicle-evidence', status: 'FAIL', severity: 'error',
       message: 'Vehicle decision is unresolved or lacks a supported make/model/year application and matching title.' }));
@@ -464,7 +466,15 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
         const cited = evidenceSources.filter(item => normalizeKey(item?.id) === normalizeKey(source) ||
           normalizeKey(item?.source) === normalizeKey(source));
         const candidates = [...cited, ...evidenceSources.filter(item => !cited.includes(item))];
-        const supportingSource = candidates.find(item => categoryEvidenceSupportsDetail(
+        const citationKey = comparable(evidence);
+        const detailTokens = new Set(comparable(detail).split(' ').filter(token => token.length > 2));
+        const citationTokens = new Set(citationKey.split(' ').filter(token => token.length > 2));
+        const citationHasDetailLanguage = [...detailTokens].some(token => citationTokens.has(token));
+        const citationExplicitlyNegatesDetail = [...detailTokens].some(token =>
+          new RegExp(`\\b(?:no|not|without)\\b(?:\\s+\\w+){0,3}\\s+${token}\\b`, 'i').test(evidence));
+        const exactCitedEvidence = cited.find(item =>
+          comparable(item?.evidence).includes(citationKey) && citationHasDetailLanguage && !citationExplicitlyNegatesDetail);
+        const supportingSource = exactCitedEvidence || candidates.find(item => categoryEvidenceSupportsDetail(
           item?.evidence, detail, ruleResolution, item?.source
         ));
         if (!evidence || !supportingSource) {
@@ -567,11 +577,18 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
     const selected = canonicalSide(sideDecision.side);
     const citation = normalizeCitationText(sideDecision.evidence);
     const sources = promptArtifact?.userPayload?.resolvedListing?.categoryPriorityEvidenceSources || [];
-    const citedSource = sources.find(item => (normalizeKey(item.id) === normalizeKey(sideDecision.source) || normalizeKey(item.source) === normalizeKey(sideDecision.source)) &&
-      citation && normalizeKey(item.evidence).includes(normalizeKey(citation)));
+    const sourceRefs = normalizeText(sideDecision.source).split(';').map(normalizeText).filter(Boolean);
+    const citationSegments = citation.split(';').map(normalizeCitationText).filter(Boolean);
+    const citedSources = sources.filter(item => sourceRefs.some(ref =>
+      normalizeKey(item.id) === normalizeKey(ref) || normalizeKey(item.source) === normalizeKey(ref)));
+    const allSourcesExist = sourceRefs.length > 0 && sourceRefs.every(ref => citedSources.some(item =>
+      normalizeKey(item.id) === normalizeKey(ref) || normalizeKey(item.source) === normalizeKey(ref)));
+    const allCitationsExist = citationSegments.length > 0 && citationSegments.every(segment => citedSources.some(item =>
+      normalizeKey(item.evidence).includes(normalizeKey(segment))));
+    const citedSides = citedSources.map(item => canonicalSide(item.evidence)).filter(Boolean);
     const structured = canonicalSide(explicitSide);
-    const evidenceSupports = selected && citedSource && canonicalSide(citation) === selected &&
-      canonicalSide(citedSource.evidence) === selected && !/\b(?:no|not|without)\s+(?:driver|passenger|left|right|lh|rh)\b/i.test(citation);
+    const evidenceSupports = selected && allSourcesExist && allCitationsExist && citedSides.includes(selected) &&
+      citedSides.every(side => side === selected) && !/\b(?:no|not|without)\s+(?:driver|passenger|left|right|lh|rh)\b/i.test(citation);
     if (!evidenceSupports || (structured && structured !== selected)) {
       append(checkRecord({ checkId: 'side-validation', status: 'RETAIN_EXISTING_REQUIRED', severity: 'error',
         message: 'AI side decision lacks supporting supplied evidence or contradicts authoritative side evidence.' }));
@@ -595,14 +612,31 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
 
   const badMpn = detectMpnTokens(title, sourceResolution);
   if (badMpn.length) {
-    append(checkRecord({
-      checkId: 'mpn-validation',
-      systemRuleId: systemRuleId(ruleResolution, 'SR-04'),
-      status: 'RETAIN_EXISTING_REQUIRED',
-      severity: 'error',
-      message: `Candidate contains unsupported MPN/interchange-like value: ${badMpn.join(', ')}.`,
-      relatedConfigIds: []
-    }));
+    const mpnConflict = (sourceResolution?.resolved?.conflicts || [])
+      .some(conflict => conflict?.field === 'manufacturerPartNumber');
+    if (mpnConflict) {
+      append(checkRecord({
+        checkId: 'mpn-validation',
+        systemRuleId: systemRuleId(ruleResolution, 'SR-04'),
+        status: 'RETAIN_EXISTING_REQUIRED',
+        severity: 'error',
+        message: `Candidate contains an MPN while authoritative MPN evidence conflicts: ${badMpn.join(', ')}.`,
+        relatedConfigIds: []
+      }));
+    } else {
+      const before = title;
+      for (const token of badMpn) title = removeTerm(title, token);
+      append(checkRecord({
+        checkId: 'mpn-validation',
+        systemRuleId: systemRuleId(ruleResolution, 'SR-04'),
+        status: 'CLEANUP',
+        message: `Removed unsupported optional MPN/interchange-like value: ${badMpn.join(', ')}.`,
+        corrected: true,
+        before,
+        after: title,
+        relatedConfigIds: []
+      }));
+    }
   }
 
   for (const rule of restrictedByType(ruleResolution, 'must-preserve')) {
@@ -799,6 +833,48 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
     }));
   }
 
+  const contradictoryAuditClaims = semanticSafety.claims.filter(claim =>
+    claim.material && ['contradictory', 'invented'].includes(claim.status));
+  if (semanticSafety.supplied && semanticSafety.safeToPublish && contradictoryAuditClaims.length) {
+    append(checkRecord({
+      checkId: 'semantic-audit-consistency',
+      status: 'FAIL',
+      severity: 'error',
+      message: `AI semantic audit approved a title despite material ${contradictoryAuditClaims.map(claim => claim.status).join(', ')} claim findings.`
+    }));
+  }
+
+  if (semanticSafety.supplied && semanticSafety.safeToPublish && !contradictoryAuditClaims.length) {
+    const objectiveChecks = new Set([
+      'blank-title',
+      'restricted-never-introduce',
+      'long-short-block-protection',
+      'side-validation',
+      'mpn-validation',
+      'restricted-requires-authorization',
+      'length-80',
+      'final-invariant-recheck',
+      'semantic-audit-consistency'
+    ]);
+    for (let index = violations.length - 1; index >= 0; index -= 1) {
+      const violation = violations[index];
+      if (objectiveChecks.has(violation.checkId)) continue;
+      violations.splice(index, 1);
+      warnings.push({
+        ...violation,
+        status: 'AI_ACCEPTED',
+        severity: 'info',
+        message: `${violation.message} AI semantic safety review accepted the generated title: ${semanticSafety.reason}`
+      });
+    }
+    for (const warning of warnings) {
+      if (warning.status === 'AI_ACCEPTED' || warning.checkId === 'sku-missing-source') continue;
+      warning.status = 'AI_ACCEPTED';
+      warning.severity = 'info';
+      warning.message = `${warning.message} AI semantic safety review accepted the generated title: ${semanticSafety.reason}`;
+    }
+  }
+
   const out = resultBase();
   out.validatedTitle = title;
   out.changed = title !== originalCandidate;
@@ -808,7 +884,7 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
     out.outcome = violations.some(item => item.status === 'BLOCK') ? 'BLOCK' : 'RETAIN_EXISTING_REQUIRED';
   } else if (corrections.length) {
     out.outcome = 'CLEANUP';
-  } else if (warnings.length) {
+  } else if (warnings.some(item => item.status !== 'AI_ACCEPTED')) {
     out.outcome = 'FLAG';
   }
   return out;

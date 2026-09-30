@@ -1425,6 +1425,30 @@ class Phase4AiEvaluatorService {
       required: ['side', 'placement', 'source', 'evidence'],
       properties: Object.fromEntries(['side', 'placement', 'source', 'evidence'].map(key => [key, { type: ['string', 'null'] }]))
     };
+    runtimeSchema.required.push('safetyDecision');
+    runtimeSchema.properties.safetyDecision = {
+      type: 'object', additionalProperties: false,
+      required: ['safeToPublish', 'reason', 'concerns', 'claims'],
+      properties: {
+        safeToPublish: { type: 'boolean' },
+        reason: { type: 'string' },
+        concerns: { type: 'array', items: { type: 'string' } },
+        claims: {
+          type: 'array',
+          items: {
+            type: 'object', additionalProperties: false,
+            required: ['titleClaim', 'dimension', 'status', 'evidence', 'material'],
+            properties: {
+              titleClaim: { type: 'string' },
+              dimension: { type: 'string' },
+              status: { type: 'string', enum: ['supported', 'equivalent', 'optional_omission', 'contradictory', 'invented'] },
+              evidence: { type: ['string', 'null'] },
+              material: { type: 'boolean' }
+            }
+          }
+        }
+      }
+    };
     if (configuredDetails.length) {
       requestBody.response_format.json_schema.schema.properties.categoryPriorityDetails.items.properties.detail.enum = configuredDetails;
     }
@@ -1488,7 +1512,8 @@ class Phase4AiEvaluatorService {
         'reviewReason',
         'titleReviewNotes',
         'reviewNotes',
-        'categoryPriorityDetails'
+        'categoryPriorityDetails',
+        'safetyDecision'
       ].includes(key)
     );
     return {
@@ -1507,6 +1532,20 @@ class Phase4AiEvaluatorService {
       })) : [],
       sideDecision: parsed.sideDecision && typeof parsed.sideDecision === 'object' ? parsed.sideDecision : null,
       vehicleDecision: parsed.vehicleDecision && typeof parsed.vehicleDecision === 'object' ? parsed.vehicleDecision : null,
+      safetyDecision: parsed.safetyDecision && typeof parsed.safetyDecision === 'object' ? {
+        safeToPublish: parsed.safetyDecision.safeToPublish === true,
+        reason: normalizeText(parsed.safetyDecision.reason),
+        concerns: Array.isArray(parsed.safetyDecision.concerns)
+          ? parsed.safetyDecision.concerns.map(normalizeText).filter(Boolean)
+          : [],
+        claims: Array.isArray(parsed.safetyDecision.claims) ? parsed.safetyDecision.claims.map(claim => ({
+          titleClaim: normalizeText(claim?.titleClaim),
+          dimension: normalizeText(claim?.dimension),
+          status: normalizeText(claim?.status),
+          evidence: claim?.evidence == null ? null : normalizeText(claim.evidence),
+          material: claim?.material === true
+        })) : []
+      } : null,
       rawContent: content,
       parsedKeys: Object.keys(parsed),
       recognizedKeys

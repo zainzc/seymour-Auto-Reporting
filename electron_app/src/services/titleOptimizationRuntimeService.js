@@ -73,9 +73,32 @@ function writableOutput(aiResult = {}, decision = {}, proposedTitle = '') {
     reviewReason: bypassed ? normalizeText(decision.reviewReason) || 'manual_override' :
       accepted ? 'completed' : normalizeText(decision.reviewReason) || 'manual_review_required',
     reviewNotes: bypassed ? normalizeText(decision.reviewNotes) || 'Automated title generation was skipped.' :
-      accepted ? 'Title accepted by deterministic validation.' :
+      accepted ? acceptedReviewNotes(aiResult, decision) :
         [deterministicNotes, proposal ? `Proposed title: ${proposal}` : ''].filter(Boolean).join(' ')
   };
+}
+
+function acceptedReviewNotes(aiResult = {}, decision = {}) {
+  const notes = [];
+  const vehicle = aiResult.vehicleDecision || {};
+  const vehicleIdentity = [vehicle.yearRange, vehicle.make, vehicle.model].map(normalizeText).filter(Boolean).join(' ');
+  if (vehicle.resolved === true && vehicleIdentity) {
+    notes.push(`Verified vehicle application: ${vehicleIdentity}.`);
+    const citedRows = normalizeText(vehicle.source).split(';').filter(Boolean).length;
+    if (citedRows > 1) notes.push(`Combined ${citedRows} cited fitment rows into one supported range.`);
+  }
+  const side = aiResult.sideDecision || {};
+  const placement = [side.placement, side.side].map(normalizeText).filter(Boolean).join(' ');
+  if (placement) notes.push(`Verified placement: ${placement}.`);
+  const details = (Array.isArray(aiResult.categoryPriorityDetails) ? aiResult.categoryPriorityDetails : [])
+    .filter(item => item?.verified === true)
+    .map(item => normalizeText(item.detail))
+    .filter(Boolean);
+  if (details.length) notes.push(`Applied verified category detail${details.length > 1 ? 's' : ''}: ${details.join(', ')}.`);
+  if (!notes.length) notes.push('Generated title accepted after evidence and safety validation.');
+  const finalTitle = normalizeText(decision.finalTitle);
+  if (finalTitle) notes.push(`Final title: ${finalTitle}.`);
+  return notes.join(' ');
 }
 
 function failedCheckSummary(decision = {}) {
@@ -83,6 +106,14 @@ function failedCheckSummary(decision = {}) {
     .filter(check => check?.status === 'FAIL')
     .map(check => [check.checkId, check.field, check.message].map(normalizeText).filter(Boolean).join(':'))
     .join(' | ');
+}
+
+function onlyLengthFailures(decision = {}) {
+  const failures = (decision?.degradationChecks || []).filter(check => ['FAIL', 'BLOCK'].includes(check?.status));
+  return failures.length > 0 && failures.every(check =>
+    check?.checkId === 'phase-e:length-80' ||
+    (check?.checkId === 'phase-e:final-invariant-recheck' && /80.?character/i.test(normalizeText(check.message)))
+  );
 }
 
 function categoryPriorityDetailsSummary(aiResult = {}) {
@@ -152,6 +183,42 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     return fail(result, RUNTIME_STATUSES.PROMPT_BUILD_FAILURE, error);
   }
 
+  const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates || {};
+  const blockingFitmentIssue = (fitmentSelection.sourceIssues || []).find(issue =>
+    issue?.code === 'INVALID_FITMENT_DATE');
+  if (blockingFitmentIssue) {
+    const issueValue = normalizeText(blockingFitmentIssue.value);
+    const issueEvidence = normalizeText(blockingFitmentIssue.evidence);
+    const reviewNotes = `${normalizeText(blockingFitmentIssue.message)} Correct the source data before generating a title` +
+      `${issueEvidence ? `; source evidence: ${issueEvidence}` : ''}.`;
+    result.status = RUNTIME_STATUSES.COMPLETED;
+    result.validation = {
+      outcome: 'BLOCK',
+      validatedTitle: '',
+      violations: [{ checkId: 'invalid-fitment-date', message: reviewNotes }],
+      warnings: []
+    };
+    result.decision = {
+      decision: 'NEEDS_REVIEW',
+      finalTitle: '',
+      reviewRequired: true,
+      reviewReason: 'Invalid Part Fitment date',
+      reviewNotes,
+      degradationChecks: [{ checkId: 'invalid-fitment-date', status: 'BLOCK', message: reviewNotes }]
+    };
+    result.output = writableOutput({}, result.decision, '');
+    result.output.generationSkipped = true;
+    logger.info?.(
+      `[Phase7.4 Runtime] recordId='${result.listing.recordId || ''}' ipn='${result.listing.ipn || ''}' ` +
+      `config='${result.configuration.version || ''}' status='${result.status}' ` +
+      `acceptedTitle='' titleWriteAction='PRESERVE_ITEM_TITLE' ` +
+      `fitmentResolution='${normalizeText(fitmentSelection.resolution)}' ` +
+      `decision='NEEDS_REVIEW' reviewReason='Invalid Part Fitment date' ` +
+      `failedChecks='invalid-fitment-date:${reviewNotes}' generationCalls=0 invalidValue='${issueValue}'`
+    );
+    return result;
+  }
+
   if (promptArtifact?.kind !== 'title-generation-bypass') {
     try {
       if (typeof dependencies.executeAi !== 'function') throw new Error('Runtime AI executor is not configured.');
@@ -187,7 +254,8 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
       candidateTitle: aiResult.generatedTitle || '',
       categoryPriorityDetails: aiResult.categoryPriorityDetails || [],
       sideDecision: aiResult.sideDecision,
-      vehicleDecision: aiResult.vehicleDecision
+      vehicleDecision: aiResult.vehicleDecision,
+      safetyDecision: aiResult.safetyDecision
     });
     result.validation = validation;
   } catch (error) {
@@ -224,7 +292,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
           previousTitle: normalizeText(aiResult.generatedTitle),
           verifiedVehicleDecision: validation?.vehicleVerification?.verified ? validation.vehicleVerification.decision : null,
           failures: failures.map(check => ({ checkId: check.checkId, field: check.field, message: check.message })),
-          instruction: 'Correct every listed failure using the original supplied evidence and rules. Audit the previous title against the selected Part Fitment application and current title. Identify useful distinguishing qualifiers that were omitted, remove overlapping or repeated part-name wording first, then rebuild the title in the exact selectedTitleStructure order. Keep useful verified details whenever the result fits within 80 characters; remove details only when truly unnecessary or required by the hard limit. Recount all characters including spaces and final SKU. Preserve a verifiedVehicleDecision and its citation when supplied. Check all failures again before returning; do not repeat the failed title unchanged. Return the complete original output contract. Do not invent facts. Mark unresolved uncertainty Needs Review.'
+          instruction: 'Correct every listed failure using the original supplied evidence and rules. Audit the previous title against the selected Part Fitment application and current title. For an invented citation, return an exact supplied citation. For an unsupported year or year gap, select only continuously covered cited years. For a changed make or model, restore the advertised supported make and model. Add any missing selected vehicle identity. For a side failure, use only the authoritative cited side. Remove an unsupported optional MPN; do not choose between conflicting authoritative MPN values. Identify useful distinguishing qualifiers that were omitted, remove overlapping or repeated part-name wording first, then rebuild the title in the exact selectedTitleStructure order. Keep useful verified details whenever the result fits within 80 characters; remove optional redundant details only as needed to remain within 80 characters. Recount all characters including spaces and place the verified SKU exactly once at the end. Preserve a verifiedVehicleDecision and its citation when supplied. Check all failures again before returning; do not repeat the failed title unchanged. Return the complete original output contract. Do not invent facts. Mark only unresolved material uncertainty Needs Review.'
         }
       }
     };
@@ -234,7 +302,8 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
       const correctedValidation = (dependencies.validate || validateTitleOptimizationRuntimeCandidate)({
         snapshot, sourceResolution, ruleResolution, promptArtifact: correctionPrompt,
         candidateTitle: correctedAi.generatedTitle, categoryPriorityDetails: correctedAi.categoryPriorityDetails || [],
-        sideDecision: correctedAi.sideDecision, vehicleDecision: correctedAi.vehicleDecision
+        sideDecision: correctedAi.sideDecision, vehicleDecision: correctedAi.vehicleDecision,
+        safetyDecision: correctedAi.safetyDecision
       });
       const correctedDecision = (dependencies.decide || decideTitleOptimizationRuntimeResult)({
         snapshot, sourceResolution, ruleResolution, promptArtifact: correctionPrompt, validationResult: correctedValidation
@@ -251,12 +320,54 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     }
   }
 
+  if (generationCalls < 3 && promptArtifact?.kind !== 'title-generation-bypass' && onlyLengthFailures(decision)) {
+    const overLimitTitle = normalizeText(aiResult.generatedTitle);
+    const compressionPrompt = {
+      ...promptArtifact,
+      userPayload: {
+        ...promptArtifact.userPayload,
+        correction: {
+          previousTitle: overLimitTitle,
+          verifiedVehicleDecision: validation?.vehicleVerification?.verified ? validation.vehicleVerification.decision : null,
+          failures: (decision.degradationChecks || [])
+            .filter(check => ['FAIL', 'BLOCK'].includes(check?.status))
+            .map(check => ({ checkId: check.checkId, field: check.field, message: check.message })),
+          instruction: `Compression-only correction. The previous title is ${overLimitTitle.length} characters and must be 80 characters or fewer including spaces and the final SKU. Return a different, shorter title. Preserve supported year/make/model, product identity, material fitment, side when verified, and SKU exactly once at the end. Remove only the least important redundant wording, duplicate concepts, optional generic descriptors, or optional MPN. Prefer concise equivalents such as removing a redundant Front when Driver Door already identifies placement, or removing Power when Master Window Switch remains accurate. Recount the complete title before returning JSON. Do not truncate words or invent facts.`
+        }
+      }
+    };
+    try {
+      const compressedAi = await executeAi(compressionPrompt);
+      if (!normalizeText(compressedAi?.generatedTitle)) throw new Error('Compression response missing generatedTitle.');
+      const compressedValidation = (dependencies.validate || validateTitleOptimizationRuntimeCandidate)({
+        snapshot, sourceResolution, ruleResolution, promptArtifact: compressionPrompt,
+        candidateTitle: compressedAi.generatedTitle,
+        categoryPriorityDetails: compressedAi.categoryPriorityDetails || [],
+        sideDecision: compressedAi.sideDecision,
+        vehicleDecision: compressedAi.vehicleDecision,
+        safetyDecision: compressedAi.safetyDecision
+      });
+      const compressedDecision = (dependencies.decide || decideTitleOptimizationRuntimeResult)({
+        snapshot, sourceResolution, ruleResolution, promptArtifact: compressionPrompt,
+        validationResult: compressedValidation
+      });
+      aiResult = compressedAi;
+      validation = compressedValidation;
+      decision = compressedDecision;
+      result.aiResult = aiResult;
+      result.validation = validation;
+      result.decision = decision;
+      result.attempts.push(recordAttempt());
+    } catch (error) {
+      result.errors.push({ stage: 'COMPRESSION_FAILURE', message: sanitizeError(error) });
+    }
+  }
+
   result.status = decision?.decision === 'BYPASSED_MANUAL_OVERRIDE' ? RUNTIME_STATUSES.BYPASSED : RUNTIME_STATUSES.COMPLETED;
   const existingTitle = normalizeText(sourceResolution?.resolved?.fields?.title?.resolvedValue || sourceResolution?.normalized?.fields?.existingTitle?.value);
   const reviewProposal = [...result.attempts].reverse().find(attempt =>
     normalizeText(attempt.proposedTitle) && normalizeText(attempt.proposedTitle) !== existingTitle)?.proposedTitle || aiResult.generatedTitle;
   result.output = writableOutput(aiResult, decision, reviewProposal);
-  const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates || {};
   const titleWriteAction = result.output.title ? 'WRITE_ITEM_TITLE' : 'PRESERVE_ITEM_TITLE';
   logger.info?.(
     `[Phase7.4 Runtime] recordId='${result.listing.recordId || ''}' ipn='${result.listing.ipn || ''}' ` +
@@ -271,6 +382,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
       `generationCalls=${generationCalls} ` +
       `sideDecision=${JSON.stringify(aiResult.sideDecision || null)} ` +
       `vehicleDecision=${JSON.stringify(validation.vehicleVerification || null)} ` +
+      `safetyDecision=${JSON.stringify(validation.semanticSafety || null)} ` +
       `attempts=${JSON.stringify(result.attempts)} ` +
       `categoryPriorityDetails=${categoryPriorityDetailsSummary(aiResult)}`
   );

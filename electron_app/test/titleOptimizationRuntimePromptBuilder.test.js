@@ -241,12 +241,22 @@ test('treats a structured single year as evidence while AI selects a supported f
   assert.equal(listing.supportingAndConflictingEvidence.year.deterministicWinner, 'otherStructuredFields');
   assert.equal(listing.supportingAndConflictingEvidence.year.aiMayOverrideWinner, true);
   assert.match(text, /single structured year is evidence/i);
-  assert.match(text, /one unambiguous applicable range/i);
-  assert.match(text, /includes the structured year/i);
-  assert.match(text, /use the complete range/i);
-  assert.match(text, /multiple conflicting or unrelated ranges/i);
-  assert.match(text, /Needs Review/i);
-  assert.match(text, /do not combine unrelated applications/i);
+  assert.match(text, /advertised application/i);
+  assert.match(text, /cite.*supporting/i);
+  assert.match(text, /adjacent/i);
+  assert.match(text, /evaluate every supplied Part Fitment row/i);
+  assert.match(text, /do not select a narrower subset merely because it matches the donor year/i);
+  assert.match(text, /restriction applies to only part of a combined range/i);
+  assert.match(text, /build dates, VIN splits, engine or transmission variants, body styles, trims, cab types, door counts/i);
+  assert.match(text, /malformed, impossible, or internally inconsistent/i);
+  assert.match(text, /cannot be represented accurately within 80 characters/i);
+  assert.equal(listing.titleFitmentCandidates.decisionPolicy.owner, 'AI');
+  assert.deepEqual(listing.titleFitmentCandidates.decisionPolicy.allowedOutcomes, [
+    'COMBINE_COMPATIBLE_CONTINUOUS_ROWS',
+    'UNRESOLVED_MATERIAL_QUALIFIER_CONFLICT'
+  ]);
+  assert.match(text, /ordinary compatibility rows/i);
+  assert.match(text, /genuine contradiction/i);
 });
 
 test('keeps distinct fitment applications ambiguous even when donor facts match one candidate', () => {
@@ -344,7 +354,7 @@ test('collapses same vehicle and year fitment variants into one title applicatio
   assert.match(selection.candidates[0].evidence, /Sedan SL/);
 });
 
-test('marks malformed fitment unavailable and prohibits AI application selection', () => {
+test('marks malformed fitment unavailable and requires another supplied source', () => {
   const inputs = buildInputs();
   inputs.listingResolution.normalized.titleAuthority.partFitment.value = 'Fits Hyundai Sonata, years unknown';
 
@@ -354,8 +364,24 @@ test('marks malformed fitment unavailable and prohibits AI application selection
 
   assert.equal(selection.resolution, 'UNAVAILABLE');
   assert.deepEqual(selection.distinctApplications, []);
-  assert.match(instructions, /must not choose or merge/i);
-  assert.doesNotMatch(instructions, /select exactly one candidate/i);
+  assert.match(instructions, /no supplied evidence supports/i);
+});
+
+test('reports impossible calendar dates as material fitment source issues', () => {
+  const inputs = buildInputs();
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    'Fits 2000-2003 Toyota Tundra master switch; ' +
+    '2005 Toyota Tundra master switch, built through 09/31/04';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs)
+    .userPayload.resolvedListing.titleFitmentCandidates;
+
+  assert.deepEqual(selection.sourceIssues, [{
+    code: 'INVALID_FITMENT_DATE',
+    value: '09/31/04',
+    evidence: '2005 Toyota Tundra master switch, built through 09/31/04',
+    message: 'Part Fitment contains an invalid calendar date (09/31/04).'
+  }]);
 });
 
 test('serializes selected structure, terminology, synonyms, prefix, categories, restricted terms, flags, and system rules only', () => {
@@ -376,6 +402,12 @@ test('serializes selected structure, terminology, synonyms, prefix, categories, 
   assert.deepEqual(policy.flagReasons.map(reason => reason.reason), ['Missing verified year', 'Conflicting source data', 'Custom QA Reason']);
   assert.deepEqual(policy.systemRules.map(rule => rule.id), ['SR-01', 'SR-05', 'SR-06', 'SR-07', 'SR-14']);
   assert.doesNotMatch(JSON.stringify(policy), /Disabled|term-disabled/);
+  assert.equal(artifact.userPayload.outputContract.requiredJsonKeys.includes('safetyDecision'), true);
+  assert.match(JSON.stringify(policy.instructions), /safeToPublish/i);
+  assert.match(JSON.stringify(policy.instructions), /semantic/i);
+  assert.match(JSON.stringify(policy.instructions), /every material claim/i);
+  assert.match(JSON.stringify(policy.instructions), /supported, equivalent, optional_omission, contradictory, or invented/i);
+  assert.match(JSON.stringify(policy.instructions), /do not approve your own draft until/i);
 });
 
 test('omits synonym and prefix instructions when unavailable or unmatched without inventing fallback rules', () => {
@@ -535,4 +567,20 @@ test('AI payload marks category details pending and supplies auditable evidence 
   assert.equal(new Set(evidenceSources.map(item => item.id)).size, evidenceSources.length);
   assert.match(JSON.stringify(artifact.userPayload.titlePolicy.instructions), /only verified Category Rule priority details/i);
   assert.match(JSON.stringify(artifact.userPayload.outputContract), /categoryPriorityDetails/);
+});
+
+test('exposes donor notes as optional material-detail evidence without making them mandatory', () => {
+  const inputs = buildInputs();
+  inputs.listingResolution.normalized.structured.currentEbayFields = {
+    value: { donorNotes: 'W/ OUT STEERING SHAFT', donorStockNumber: '06947', donorYear: '2007' }
+  };
+
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  const listing = artifact.userPayload.resolvedListing;
+  const text = JSON.stringify(artifact.userPayload.titlePolicy.instructions);
+
+  assert.deepEqual(listing.listingNoteEvidence.map(item => item.evidence), ['W/ OUT STEERING SHAFT']);
+  assert.equal(listing.listingNoteEvidence.some(item => /06947|2007/.test(item.evidence)), false);
+  assert.match(text, /materially changes fitment, configuration, function, or what is included/i);
+  assert.match(text, /Do not automatically include every note/i);
 });

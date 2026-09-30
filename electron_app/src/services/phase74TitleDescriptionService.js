@@ -78,6 +78,7 @@ function runtimeOutputFailure(runtimeResult = {}, descriptionManualOverride = fa
   if (accepted && !normalizeText(output.title)) return 'accepted_title_missing';
   if (
     runtimeResult.status !== 'BYPASSED' &&
+    output.generationSkipped !== true &&
     !descriptionManualOverride &&
     !normalizeText(output.description)
   ) return 'description_missing';

@@ -145,7 +145,7 @@ test('passes a clean valid title without corrections', () => {
   assert.deepEqual(result.violations, []);
 });
 
-test('flags multiple distinct fitment applications with the configured review reason', () => {
+test('does not flag multiple compatibility rows without an unresolved vehicle decision', () => {
   const inputs = baseInputs();
   inputs.promptArtifact.userPayload = { resolvedListing: { titleFitmentCandidates: {
     resolution: 'AMBIGUOUS',
@@ -158,10 +158,121 @@ test('flags multiple distinct fitment applications with the configured review re
 
   const result = validateTitleOptimizationRuntimeCandidate(inputs);
 
-  assert.equal(result.outcome, 'FLAG');
+  assert.equal(result.outcome, 'PASS');
   assert.equal(result.safeToContinue, true);
-  assert.ok(result.checks.some(check => check.checkId === 'multiple-fitment-applications'));
-  assert.ok(result.suggestedReviewReasons.some(item => item.reason === 'Multiple year ranges require review'));
+  assert.equal(result.checks.some(check => check.checkId === 'multiple-fitment-applications'), false);
+  assert.equal(result.suggestedReviewReasons.some(item => item.reason === 'Multiple year ranges require review'), false);
+});
+
+test('accepts AI semantic category verification when its citation exists in trusted evidence', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Master Power Window Switch 00123' });
+  inputs.ruleResolution.categoryRules = [{ rule: {
+    id: 'cat-window-switch', categoryName: 'Window Switch', priorityDetails: ['Master Power Window Switch']
+  }, matchedBy: ['category'] }];
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{
+    id: 'fitment', source: 'Part Fitment', evidence: "ALTIMA 07 Driver's; lock and window master"
+  }] } };
+  inputs.categoryPriorityDetails = [{
+    detail: 'Master Power Window Switch', verified: true, source: 'fitment', evidence: "Driver's; lock and window master"
+  }];
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), false);
+});
+
+test('AI safety approval converts semantic-only findings to non-blocking diagnostics', () => {
+  const inputs = baseInputs({
+    candidateTitle: '2011 Honda Accord Illuminated Sun Visor Driver 00123',
+    safetyDecision: {
+      safeToPublish: true,
+      reason: 'Illuminated is directly supported by the supplied listing evidence.',
+      concerns: []
+    }
+  });
+  inputs.ruleResolution.categoryRules = [{ rule: {
+    id: 'cat-visor', categoryName: 'Sun Visor', priorityDetails: ['With / Without Illumination']
+  }, matchedBy: ['category'] }];
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{
+    id: 'fitment', source: 'Part Fitment', evidence: 'Jetta illuminated driver sun visor'
+  }] } };
+  inputs.categoryPriorityDetails = [{
+    detail: 'With / Without Illumination', verified: true, source: 'fitment', evidence: 'illuminated'
+  }];
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.equal(result.safeToContinue, true);
+  assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), false);
+  assert.equal(result.semanticSafety.safeToPublish, true);
+  assert.equal(result.warnings.some(item => item.checkId === 'category-priority-verification'), true);
+});
+
+test('AI safety approval prevents semantic warnings from forcing review', () => {
+  const inputs = baseInputs({
+    safetyDecision: {
+      safeToPublish: true,
+      reason: 'The supplied evidence supports the normalized model and title.',
+      concerns: []
+    }
+  });
+  inputs.sourceResolution.resolved.modelAmbiguity = {
+    ambiguous: true,
+    candidates: ['OUTBAKLEG', 'Outback Legacy']
+  };
+
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+
+  assert.equal(result.outcome, 'PASS');
+  assert.equal(result.safeToContinue, true);
+  assert.equal(result.warnings.find(item => item.checkId === 'model-ambiguity')?.status, 'AI_ACCEPTED');
+});
+
+test('rejects an internally inconsistent semantic audit that approves a material contradiction', () => {
+  const result = validate({
+    safetyDecision: {
+      safeToPublish: true,
+      reason: 'Approved.',
+      concerns: [],
+      claims: [{
+        titleClaim: 'Passenger side',
+        dimension: 'placement',
+        status: 'contradictory',
+        evidence: 'Driver side',
+        material: true
+      }]
+    }
+  });
+
+  assert.equal(result.safeToContinue, false);
+  assert.equal(result.violations.some(item => item.checkId === 'semantic-audit-consistency'), true);
+});
+
+test('accepts supported equivalents and nonmaterial optional omissions in semantic audit', () => {
+  const result = validate({
+    safetyDecision: {
+      safeToPublish: true,
+      reason: 'All material claims are supported.',
+      concerns: [],
+      claims: [
+        { titleClaim: 'Side View Mirror', dimension: 'product_identity', status: 'equivalent', evidence: 'Door Mirror', material: true },
+        { titleClaim: 'Color omitted', dimension: 'configuration', status: 'optional_omission', evidence: 'Gray', material: false }
+      ]
+    }
+  });
+
+  assert.equal(result.safeToContinue, true);
+  assert.equal(result.semanticSafety.claims.length, 2);
+});
+
+test('AI safety approval cannot waive objective title length enforcement', () => {
+  const result = validate({
+    candidateTitle: `${'A'.repeat(81)} 00123`,
+    safetyDecision: { safeToPublish: true, reason: 'Semantically accurate.', concerns: [] }
+  });
+
+  assert.equal(result.safeToContinue, false);
+  assert.equal(result.violations.some(item => item.checkId === 'length-80' || item.checkId === 'final-invariant-recheck'), true);
 });
 
 test('accepts an AI-selected fitment range that contains the structured single year', () => {
@@ -422,13 +533,14 @@ test('handles restricted terms including never-introduce, authorization, noise, 
   assert.equal(missingProtected.violations.some(item => item.checkId === 'protected-term-preservation'), true);
 });
 
-test('validates MPN support and does not treat Hollander numbers as MPN', () => {
+test('preserves supported MPNs and removes unsupported optional MPN-like tokens', () => {
   const supported = validate({ candidateTitle: '2011 Honda Accord Side View Mirror MPN-9 ABS K24A BAYA VIN J 00123' });
   assert.equal(supported.valid, true);
 
   const unsupported = validate({ candidateTitle: '2011 Honda Accord Side View Mirror MPN-999 ABS 00123' });
-  assert.equal(unsupported.valid, false);
-  assert.equal(unsupported.violations.some(item => item.checkId === 'mpn-validation'), true);
+  assert.equal(unsupported.valid, true);
+  assert.doesNotMatch(unsupported.validatedTitle, /MPN-999/);
+  assert.equal(unsupported.corrections.some(item => item.checkId === 'mpn-validation'), true);
 
   const hollanderOnly = validate({
     sourceResolution: {
@@ -440,8 +552,22 @@ test('validates MPN support and does not treat Hollander numbers as MPN', () => 
     },
     candidateTitle: '2011 Honda Accord Side View Mirror 641-00641L ABS 00123'
   });
-  assert.equal(hollanderOnly.valid, false);
-  assert.equal(hollanderOnly.violations.some(item => item.checkId === 'mpn-validation'), true);
+  assert.equal(hollanderOnly.valid, true);
+  assert.doesNotMatch(hollanderOnly.validatedTitle, /641-00641L/);
+  assert.equal(hollanderOnly.corrections.some(item => item.checkId === 'mpn-validation'), true);
+
+  const authoritativeConflict = validate({
+    sourceResolution: {
+      ...baseInputs().sourceResolution,
+      resolved: {
+        ...baseInputs().sourceResolution.resolved,
+        conflicts: [{ field: 'manufacturerPartNumber', values: ['MPN-9', 'MPN-10'] }]
+      }
+    },
+    candidateTitle: '2011 Honda Accord Side View Mirror MPN-999 ABS 00123'
+  });
+  assert.equal(authoritativeConflict.valid, false);
+  assert.equal(authoritativeConflict.violations.some(item => item.checkId === 'mpn-validation'), true);
 });
 
 test('detects unsupported identity changes without broad hardcoded detail checks', () => {
@@ -757,6 +883,22 @@ test('side evidence accepts harmless citation wrappers consistently', () => {
     { id: 'side-source', source: 'Current title', evidence: 'Driver Left LH' }
   ] } };
   inputs.sideDecision = { side: 'Driver Left', placement: null, source: 'side-source', evidence: '"Driver Left LH"' };
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'side-validation'), false);
+});
+
+test('side decision accepts multiple trusted citations for side and placement', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Front Driver Mirror ABS 00123' });
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [
+    { id: 'evidence-side', source: 'Item Specifics', evidence: 'Drivers Door' },
+    { id: 'evidence-placement', source: 'Current title', evidence: 'Front' }
+  ] } };
+  inputs.sideDecision = {
+    side: 'Driver',
+    placement: 'Front',
+    source: 'evidence-side;evidence-placement',
+    evidence: 'Drivers Door; Front'
+  };
+
   assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'side-validation'), false);
 });
 

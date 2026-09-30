@@ -12,16 +12,16 @@ test('vehicle decision accepts a supported application and rejects mixed vehicle
   for (const changes of [{ make: 'Mercury' }, { yearRange: '2010-2013' }, { resolved: false }]) {
     assert.equal(resolveVehicleDecision({ ...decision, ...changes }, prompt, '2010-2012 Ford Fusion Control 123').verified, false);
   }
-  assert.equal(resolveVehicleDecision({ ...decision, evidence: 'Ford Fusion 2010-2012' }, prompt, '2010-2012 Ford Fusion Control 123').verified, true);
+  assert.equal(resolveVehicleDecision({ ...decision, yearRange: '2011' }, prompt, '2011 Ford Fusion Control 123').verified, false);
+  assert.equal(resolveVehicleDecision({ ...decision, evidence: 'Ford Fusion 2010-2012' }, prompt, '2010-2012 Ford Fusion Control 123').verified, false);
 });
 test('citation cannot bridge different applications or omit the selected identity from the title', () => {
   assert.equal(resolveVehicleDecision({ ...decision, make: 'Mercury', evidence }, prompt, '2010-2012 Mercury Fusion Control 123').verified, false);
   assert.equal(resolveVehicleDecision(decision, prompt, '2010-2012 Mercury Fusion Control 123').verified, false);
 });
 
-test('adjacent fitment ranges merge only when their application qualifiers are identical', () => {
+test('AI may merge adjacent cited rows for the same advertised vehicle', () => {
   const same = 'Fits 2011-2014 Hyundai Sonata Seat Belt Driver Buckle; 2015 Hyundai Sonata Seat Belt Driver Buckle';
-  const different = `${same} VIN C 5th Digit Hybrid`;
   const makePrompt = value => ({ userPayload: { resolvedListing: { categoryPriorityEvidenceSources: [
     { id: 'fitment', source: 'Part Fitment', evidence: value }
   ] } } });
@@ -30,18 +30,38 @@ test('adjacent fitment ranges merge only when their application qualifiers are i
   const title = '2011-2015 Hyundai Sonata Seat Belt Driver Buckle 1570412';
 
   assert.equal(resolveVehicleDecision(selected(same), makePrompt(same), title).verified, true);
-  assert.equal(resolveVehicleDecision(selected(different), makePrompt(different), title).verified, false);
+  assert.equal(resolveVehicleDecision(selected('2011-2014 Hyundai Sonata Seat Belt Driver Buckle; 2015 Hyundai Sonata Seat Belt Driver Buckle'), makePrompt(same), title).verified, true);
+  assert.equal(resolveVehicleDecision(selected('2011-2014 Hyundai Sonata; 2016 Hyundai Sonata'), makePrompt(same), title).verified, false);
 });
 
-test('citation formatting and inaccurate excerpts do not override full trusted evidence', () => {
+test('vehicle decision accepts multiple trusted source IDs for one continuous application', () => {
+  const artifact = { userPayload: { resolvedListing: { titleFitmentCandidates: { candidates: [
+    { id: 'title-fitment-001', evidence: '2007 Nissan Altima driver front door switch' },
+    { id: 'title-fitment-002', evidence: '2008-2012 Nissan Altima driver front door switch' }
+  ] } } } };
+  const selected = {
+    resolved: true,
+    make: 'Nissan',
+    model: 'Altima',
+    yearRange: '2007-2012',
+    source: 'title-fitment-001;title-fitment-002',
+    evidence: '2007 Nissan Altima driver front door switch; 2008-2012 Nissan Altima driver front door switch',
+    reason: 'The cited rows form one continuous application.'
+  };
+
+  assert.equal(resolveVehicleDecision(selected, artifact,
+    '2007-2012 Nissan Altima Master Window Switch Driver 1375500').verified, true);
+});
+
+test('citation formatting is tolerated but invented or inaccurate excerpts are rejected', () => {
   const title = '2010-2012 Ford Fusion Control 123';
   for (const [open, close] of [['"', '"'], ["'", "'"], ['\u201c', '\u201d'], ['`', '`']]) {
     assert.equal(resolveVehicleDecision({ ...decision, evidence: open + decision.evidence + close }, prompt, title).verified, true);
-    assert.equal(resolveVehicleDecision({ ...decision, evidence: open + 'Fits 2010-2013 Ford Fusion' + close }, prompt, title).verified, true);
+    assert.equal(resolveVehicleDecision({ ...decision, evidence: open + 'Fits 2010-2013 Ford Fusion' + close }, prompt, title).verified, false);
   }
 });
 
-test('validates a selected application against the full cited source when the AI shortens its quotation', () => {
+test('rejects a paraphrased vehicle citation instead of silently widening its authority', () => {
   const fullEvidence = 'Fits 2017-2020 BMW 430i speedometer cluster, Base trim, MPH, without head-up display, without multifunction display';
   const artifact = { userPayload: { resolvedListing: { categoryPriorityEvidenceSources: [{
     id: 'evidence-020', source: 'Part Fitment', evidence: fullEvidence
@@ -56,7 +76,7 @@ test('validates a selected application against the full cited source when the AI
     reason: 'The selected fitment matches the advertised vehicle.'
   };
 
-  assert.equal(resolveVehicleDecision(selected, artifact, '2017-2020 BMW 430i Speedometer Base MPH 1586101').verified, true);
+  assert.equal(resolveVehicleDecision(selected, artifact, '2017-2020 BMW 430i Speedometer Base MPH 1586101').verified, false);
 });
 
 test('vehicle decision must select one eligible title fitment candidate without merging candidates', () => {
@@ -82,7 +102,7 @@ test('vehicle decision must select one eligible title fitment candidate without 
     '2001-2006 Hyundai Accent Throttle Body 1584124').verified, false);
 });
 
-test('vehicle decision cannot select one application when fitment remains ambiguous', () => {
+test('vehicle decision may select a cited advertised application from an ambiguous compatibility list', () => {
   const artifact = { userPayload: { resolvedListing: {
     titleFitmentCandidates: {
       status: 'MULTIPLE_DISTINCT_APPLICATIONS',
@@ -97,7 +117,28 @@ test('vehicle decision cannot select one application when fitment remains ambigu
     source: 'title-fitment-001', evidence: '2001-2005 Hyundai Accent throttle body', reason: 'Selected by the model.' };
 
   assert.equal(resolveVehicleDecision(selected, artifact,
-    '2001-2005 Hyundai Accent Throttle Body 1584124').verified, false);
+    '2001-2005 Hyundai Accent Throttle Body 1584124').verified, true);
+  assert.equal(resolveVehicleDecision({ ...selected, evidence: '2007 Hyundai Accent throttle body' }, artifact,
+    '2007 Hyundai Accent Throttle Body 1584124').verified, false);
+});
+
+test('vehicle evidence supports multiword makes and models without positional parsing', () => {
+  const sourceEvidence = 'Fits 2009-2016 Ford Truck E350 Van window master; 2008-2011 Ford Truck Ranger window master';
+  const artifact = { userPayload: { resolvedListing: { categoryPriorityEvidenceSources: [{
+    id: 'fitment', source: 'Part Fitment', evidence: sourceEvidence
+  }] } } };
+  const selected = {
+    resolved: true,
+    make: 'Ford Truck',
+    model: 'E350 Van',
+    yearRange: '2009-2016',
+    source: 'fitment',
+    evidence: 'Fits 2009-2016 Ford Truck E350 Van window master',
+    reason: 'The existing title advertises the E350 Van application.'
+  };
+
+  assert.equal(resolveVehicleDecision(selected, artifact,
+    '2009-2016 Ford Truck E350 Van Master Window Switch 1590577').verified, true);
 });
 
 test('vehicle decision may use another trusted source when Part Fitment is unavailable', () => {

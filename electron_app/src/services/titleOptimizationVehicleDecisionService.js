@@ -16,37 +16,61 @@ function contains(value, term) {
   return Boolean(escaped && new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'i').test(value));
 }
 
-function parseApplications(value) {
+function parseApplicationRanges(value) {
   return citationText(value).split(/;|\n/).map(clause => {
-    const match = clause.trim().match(/^(?:Fits\s+)?((?:19|20)\d{2})(?:\s*-\s*((?:19|20)\d{2}))?\s+([A-Za-z][A-Za-z0-9-]*)\s+([A-Za-z0-9][A-Za-z0-9-]*)\s*(.*)$/i);
+    const evidence = text(clause).replace(/^Fits\s+/i, '');
+    const match = evidence.match(/^((?:19|20)\d{2})(?:\s*-\s*((?:19|20)\d{2}))?\b/i);
     if (!match) return null;
     return {
       start: Number(match[1]),
       end: Number(match[2] || match[1]),
-      make: text(match[3]).toLowerCase(),
-      model: text(match[4]).toLowerCase(),
-      qualifiers: text(match[5]).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+      evidence
     };
   }).filter(Boolean);
 }
 
-function applicationsSupportRange(citation, make, model, start, end) {
-  const matches = parseApplications(citation)
-    .filter(item => item.make === text(make).toLowerCase() && item.model === text(model).toLowerCase())
+function applicationsCoverRange(citation, make, model, start, end) {
+  const matches = parseApplicationRanges(citation)
+    .filter(item => contains(item.evidence, make) && contains(item.evidence, model))
     .sort((a, b) => a.start - b.start || a.end - b.end);
-  for (let index = 0; index < matches.length; index += 1) {
-    const first = matches[index];
-    if (first.start > start || first.end < start) continue;
-    let coveredThrough = first.end;
-    const qualifiers = first.qualifiers;
-    for (let next = index + 1; coveredThrough < end && next < matches.length; next += 1) {
-      const application = matches[next];
-      if (application.start > coveredThrough + 1 || application.qualifiers !== qualifiers) break;
+  let coveredThrough = null;
+  for (const application of matches) {
+    if (application.end < start || application.start > end) continue;
+    if (coveredThrough === null) {
+      if (application.start > start) return false;
+      coveredThrough = application.end;
+    } else if (application.start <= coveredThrough + 1) {
       coveredThrough = Math.max(coveredThrough, application.end);
     }
     if (coveredThrough >= end) return true;
   }
   return false;
+}
+
+function completeApplicationRange(citation, make, model, selectedStart, selectedEnd) {
+  const matches = parseApplicationRanges(citation)
+    .filter(item => contains(item.evidence, make) && contains(item.evidence, model))
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  const groups = [];
+  for (const application of matches) {
+    const current = groups[groups.length - 1];
+    if (!current || application.start > current.end + 1) {
+      groups.push({ start: application.start, end: application.end });
+    } else {
+      current.end = Math.max(current.end, application.end);
+    }
+  }
+  return groups.find(group => group.start <= selectedStart && group.end >= selectedEnd) || null;
+}
+
+function sourceContainsCitation(sourceEvidence, citation) {
+  const source = text(sourceEvidence).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const selected = text(citation).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return Boolean(source && selected && source.includes(selected));
+}
+
+function semicolonValues(value) {
+  return citationText(value).split(';').map(text).filter(Boolean);
 }
 
 function resolveVehicleDecision(decision, promptArtifact, title) {
@@ -57,26 +81,30 @@ function resolveVehicleDecision(decision, promptArtifact, title) {
   if (![make, model, yearRange, source, evidence, decision.reason].every(value => text(value))) return rejected;
   const supplied = promptArtifact?.userPayload?.resolvedListing?.categoryPriorityEvidenceSources || [];
   const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates;
-  if (fitmentSelection?.resolution === 'AMBIGUOUS') return rejected;
   const titleCandidates = fitmentSelection?.candidates || [];
-  const trustedApplications = titleCandidates.length
-    ? titleCandidates.map(item => ({ id: item.id, source: 'Title Fitment Candidate', evidence: item.evidence }))
-    : supplied;
+  const trustedApplications = [
+    ...titleCandidates.map(item => ({ id: item.id, source: 'Title Fitment Candidate', evidence: item.evidence })),
+    ...supplied
+  ];
   if (!citation || trustedApplications.length === 0) return rejected;
   const years = text(yearRange).match(/^((?:19|20)\d{2})(?:-((?:19|20)\d{2}))?$/);
   if (!years || Number(years[1]) > Number(years[2] || years[1])) return rejected;
-  // The model's quotation is advisory. Validate against complete trusted records so
-  // harmless omissions or rewording in the quotation cannot invalidate real evidence.
-  const cited = trustedApplications.filter(item => item.id === source || item.source === source);
-  const candidates = [...cited, ...trustedApplications.filter(item => !cited.includes(item))];
-  // Adjacent applications may form one range only when all qualifiers are identical.
-  const supportingSource = candidates.find(item => applicationsSupportRange(
-    item.evidence, make, model, Number(years[1]), Number(years[2] || years[1])
-  ));
-  const supported = Boolean(supportingSource);
+  const sourceRefs = semicolonValues(source);
+  const citationSegments = semicolonValues(citation);
+  const cited = trustedApplications.filter(item => sourceRefs.includes(item.id) || sourceRefs.includes(item.source));
+  const allSourcesExist = sourceRefs.length > 0 && sourceRefs.every(ref =>
+    cited.some(item => item.id === ref || item.source === ref));
+  const allCitationsExist = citationSegments.length > 0 && citationSegments.every(segment =>
+    cited.some(item => sourceContainsCitation(item.evidence, segment)));
+  const selectedStart = Number(years[1]);
+  const selectedEnd = Number(years[2] || years[1]);
+  const complete = completeApplicationRange(citation, make, model, selectedStart, selectedEnd);
+  const supported = allSourcesExist && allCitationsExist &&
+    applicationsCoverRange(citation, make, model, selectedStart, selectedEnd) &&
+    complete?.start === selectedStart && complete?.end === selectedEnd;
   if (!supported || !contains(title, `${text(make)} ${text(model)}`) || !contains(title, yearRange)) return rejected;
   return { verified: true, decision: { ...decision, make: text(make), model: text(model), yearRange: text(yearRange),
-    source: supportingSource.id || supportingSource.source, evidence: text(supportingSource.evidence) } };
+    source: sourceRefs.join(';'), evidence: citationSegments.join('; ') } };
 }
 
 function vehicleSourceResolution(sourceResolution, verification) {
@@ -90,4 +118,4 @@ function vehicleSourceResolution(sourceResolution, verification) {
     conflicts: (sourceResolution.resolved?.conflicts || []).filter(item => !['brandMake', 'model', 'year'].includes(item.field)) } };
 }
 
-module.exports = { resolveVehicleDecision, vehicleSourceResolution };
+module.exports = { resolveVehicleDecision, vehicleSourceResolution, applicationsCoverRange, completeApplicationRange };

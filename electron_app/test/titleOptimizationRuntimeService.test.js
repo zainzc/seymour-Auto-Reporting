@@ -93,6 +93,10 @@ test('correction tells AI to remove only redundant wording and preserves verifie
         assert.deepEqual(promptArtifact.userPayload.correction.verifiedVehicleDecision, vehicleVerification.decision);
         assert.match(promptArtifact.userPayload.correction.instruction, /selected Part Fitment application/);
         assert.match(promptArtifact.userPayload.correction.instruction, /overlapping or repeated part-name wording first/);
+        assert.match(promptArtifact.userPayload.correction.instruction, /unsupported year/i);
+        assert.match(promptArtifact.userPayload.correction.instruction, /make or model/i);
+        assert.match(promptArtifact.userPayload.correction.instruction, /side/i);
+        assert.match(promptArtifact.userPayload.correction.instruction, /80 characters/i);
       }
       return { generatedTitle: calls === 1 ? 'Ford Fusion VIN 3 123' : 'Ford Fusion VIN 3 8th Digit 123' };
     },
@@ -127,6 +131,79 @@ test('malformed first response gets one retry within the same two-call budget', 
   assert.equal(result.output.title, '');
   assert.equal(result.output.proposedTitle, 'Corrected title');
   assert.match(result.output.reviewNotes, /Proposed title: Corrected title/);
+});
+
+test('invalid material fitment date stops before AI and returns a specific review reason', async () => {
+  let aiCalls = 0;
+  const messages = [];
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    buildPrompt: () => ({
+      kind: 'prompt',
+      metadata: {},
+      userPayload: { resolvedListing: { titleFitmentCandidates: {
+        resolution: 'AMBIGUOUS',
+        distinctApplications: [],
+        sourceIssues: [{
+          code: 'INVALID_FITMENT_DATE',
+          value: '09/31/04',
+          evidence: '2005 Toyota Tundra master switch, built through 09/31/04',
+          message: 'Part Fitment contains an invalid calendar date (09/31/04).'
+        }]
+      } } }
+    }),
+    executeAi: async () => { aiCalls += 1; return { generatedTitle: 'Unsafe title' }; },
+    logger: { info: message => messages.push(message) }
+  }) });
+
+  assert.equal(aiCalls, 0);
+  assert.equal(result.status, 'COMPLETED');
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.proposedTitle, '');
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.equal(result.output.reviewReason, 'Invalid Part Fitment date');
+  assert.equal(result.output.generationSkipped, true);
+  assert.match(result.output.reviewNotes, /09\/31\/04/);
+  assert.match(result.output.reviewNotes, /correct the source data/i);
+  assert.equal(result.attempts.length, 0);
+  assert.match(messages[0], /generationCalls=0/);
+  assert.match(messages[0], /invalid-fitment-date/);
+});
+
+test('uses one focused compression call when the normal correction remains over 80 characters', async () => {
+  let aiCalls = 0;
+  const overLimit = '2003-2004 Honda Accord Master Power Window Switch Driver Front Door EX Coupe 1590671';
+  const compressed = '2003-2004 Honda Accord Master Window Switch Driver Door EX Coupe 1590671';
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    buildPrompt: () => ({ kind: 'prompt', userPayload: {} }),
+    executeAi: async ({ promptArtifact }) => {
+      aiCalls += 1;
+      if (aiCalls === 3) {
+        assert.match(promptArtifact.userPayload.correction.instruction, /compression-only/i);
+        assert.match(promptArtifact.userPayload.correction.instruction, /84 characters/i);
+        assert.match(promptArtifact.userPayload.correction.instruction, /80 characters or fewer/i);
+        return { generatedTitle: compressed, generatedDescription: 'Description' };
+      }
+      return { generatedTitle: overLimit, generatedDescription: 'Description' };
+    },
+    validate: ({ candidateTitle }) => ({
+      validatedTitle: candidateTitle,
+      safeToContinue: candidateTitle.length <= 80,
+      outcome: candidateTitle.length <= 80 ? 'PASS' : 'RETAIN_EXISTING_REQUIRED',
+      violations: candidateTitle.length <= 80 ? [] : [{ checkId: 'length-80', status: 'RETAIN_EXISTING_REQUIRED', message: 'Candidate exceeds 80 characters.' }],
+      warnings: []
+    }),
+    decide: ({ validationResult }) => ({
+      decision: validationResult.safeToContinue ? 'ACCEPT_CANDIDATE' : 'RETAIN_EXISTING',
+      finalTitle: validationResult.safeToContinue ? validationResult.validatedTitle : 'Existing title',
+      reviewRequired: !validationResult.safeToContinue,
+      degradationChecks: validationResult.safeToContinue ? [] : [{ checkId: 'phase-e:length-80', status: 'FAIL', message: 'Candidate exceeds 80 characters.' }]
+    })
+  }) });
+
+  assert.equal(aiCalls, 3);
+  assert.equal(result.output.title, compressed);
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.attempts.length, 3);
 });
 
 test('needs review never exposes a writable title or inherits contradictory AI review text', async () => {
@@ -170,7 +247,27 @@ test('accepted output clears stale model review text', async () => {
   assert.equal(result.output.title, 'Accepted title 00123');
   assert.equal(result.output.reviewStatus, 'Completed');
   assert.equal(result.output.reviewReason, 'completed');
-  assert.equal(result.output.reviewNotes, 'Title accepted by deterministic validation.');
+  assert.equal(result.output.reviewNotes,
+    'Generated title accepted after evidence and safety validation. Final title: Accepted title 00123.');
+});
+
+test('accepted output explains verified vehicle, side, and category decisions', async () => {
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    executeAi: async () => ({
+      generatedTitle: '2007-2013 Suzuki SX4 Steering Column No Shaft 1448110',
+      vehicleDecision: { resolved: true, make: 'Suzuki', model: 'SX4', yearRange: '2007-2013', source: 'fitment-1;fitment-2' },
+      sideDecision: { side: 'Driver', placement: 'Front' },
+      categoryPriorityDetails: [{ detail: 'Steering Column', verified: true }]
+    }),
+    validate: () => ({ outcome: 'PASS', validatedTitle: '2007-2013 Suzuki SX4 Steering Column No Shaft 1448110', violations: [], warnings: [] }),
+    decide: () => ({ decision: 'ACCEPT_CANDIDATE', finalTitle: '2007-2013 Suzuki SX4 Steering Column No Shaft 1448110', reviewRequired: false,
+      reviewReason: null, reviewNotes: '', degradationChecks: [] })
+  }) });
+
+  assert.match(result.output.reviewNotes, /Verified vehicle application: 2007-2013 Suzuki SX4/);
+  assert.match(result.output.reviewNotes, /combined 2 cited fitment rows/i);
+  assert.match(result.output.reviewNotes, /Verified placement: Front Driver/);
+  assert.match(result.output.reviewNotes, /Applied verified category detail: Steering Column/);
 });
 
 test('authoritative runtime executes the configured pipeline and returns writable output', async () => {
@@ -266,6 +363,84 @@ test('runtime log exposes category priority verification decisions and evidence'
   assert.match(messages[0], /categoryPriorityDetails=/);
   assert.match(messages[0], /"detail":"Turn Signal","verified":true,"source":"Part Fitment","evidence":"Hyundai Accent turn signal"/);
   assert.match(messages[0], /"detail":"Multifunction","verified":false,"source":null,"evidence":null/);
+});
+
+test('runtime passes and logs the AI semantic safety decision', async () => {
+  const messages = [];
+  let receivedSafetyDecision = null;
+  const safetyDecision = {
+    safeToPublish: true,
+    reason: 'Equivalent brand wording preserves the supported vehicle identity.',
+    concerns: []
+  };
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    executeAi: async () => ({ generatedTitle: '2011 Ford E350 Window Switch 00123', safetyDecision }),
+    validate: inputs => {
+      receivedSafetyDecision = inputs.safetyDecision;
+      return {
+        outcome: 'PASS',
+        validatedTitle: inputs.candidateTitle,
+        safeToContinue: true,
+        violations: [],
+        warnings: [],
+        semanticSafety: { supplied: true, ...inputs.safetyDecision }
+      };
+    },
+    decide: ({ validationResult }) => ({
+      decision: 'ACCEPT_CANDIDATE', finalTitle: validationResult.validatedTitle,
+      reviewRequired: false, degradationChecks: []
+    }),
+    logger: { info: message => messages.push(message) }
+  }) });
+
+  assert.deepEqual(receivedSafetyDecision, safetyDecision);
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.match(messages[0], /safetyDecision=/);
+  assert.match(messages[0], /Equivalent brand wording/);
+});
+
+test('AI semantic audit failure uses the existing correction path and accepts the repaired title', async () => {
+  let aiCalls = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    executeAi: async () => {
+      aiCalls += 1;
+      return aiCalls === 1 ? {
+        generatedTitle: 'Wrong semantic title 00123',
+        generatedDescription: 'Description',
+        safetyDecision: {
+          safeToPublish: false,
+          reason: 'A material title claim contradicts supplied evidence.',
+          concerns: ['Vehicle identity contradiction'],
+          claims: [{ titleClaim: 'Wrong vehicle', dimension: 'vehicle_identity', status: 'contradictory', evidence: 'Correct vehicle', material: true }]
+        }
+      } : {
+        generatedTitle: 'Correct semantic title 00123',
+        generatedDescription: 'Description',
+        safetyDecision: {
+          safeToPublish: true,
+          reason: 'All material claims are supported.',
+          concerns: [],
+          claims: [{ titleClaim: 'Correct vehicle', dimension: 'vehicle_identity', status: 'supported', evidence: 'Correct vehicle', material: true }]
+        }
+      };
+    },
+    validate: ({ candidateTitle, safetyDecision }) => ({
+      outcome: 'PASS', validatedTitle: candidateTitle, safeToContinue: true,
+      violations: [], warnings: [], semanticSafety: { supplied: true, ...safetyDecision }
+    }),
+    decide: ({ validationResult }) => validationResult.semanticSafety.safeToPublish ? {
+      decision: 'ACCEPT_CANDIDATE', finalTitle: validationResult.validatedTitle,
+      reviewRequired: false, degradationChecks: []
+    } : {
+      decision: 'NEEDS_REVIEW', finalTitle: validationResult.validatedTitle,
+      reviewRequired: true,
+      degradationChecks: [{ checkId: 'ai-semantic-safety', status: 'FAIL', message: validationResult.semanticSafety.reason }]
+    }
+  }) });
+
+  assert.equal(aiCalls, 2);
+  assert.equal(result.output.title, 'Correct semantic title 00123');
+  assert.equal(result.output.reviewStatus, 'Completed');
 });
 
 test('runtime log identifies the canonical title override status', async () => {

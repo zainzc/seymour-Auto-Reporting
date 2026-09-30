@@ -34,19 +34,54 @@ function parseApplicationClauses(partFitment) {
   }).filter(Boolean);
 }
 
+function validCalendarDate(month, day, year) {
+  const fullYear = year < 100 ? (year >= 70 ? 1900 + year : 2000 + year) : year;
+  const date = new Date(Date.UTC(fullYear, month - 1, day));
+  return date.getUTCFullYear() === fullYear && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+function detectMaterialFitmentIssues(partFitment) {
+  const issues = [];
+  for (const rawClause of text(partFitment).split(/;|\n/)) {
+    const evidence = text(rawClause).replace(/^Fits\s+/i, '');
+    for (const match of evidence.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})\b/g)) {
+      const value = match[0];
+      if (validCalendarDate(Number(match[1]), Number(match[2]), Number(match[3]))) continue;
+      issues.push({
+        code: 'INVALID_FITMENT_DATE',
+        value,
+        evidence,
+        message: `Part Fitment contains an invalid calendar date (${value}).`
+      });
+    }
+  }
+  return issues;
+}
+
 function resolvedValue(listingResolution, field) {
   return text(listingResolution?.resolved?.fields?.[field]?.resolvedValue);
 }
 
 function selectTitleFitmentCandidates(listingResolution = {}) {
+  const decisionPolicy = {
+    owner: 'AI',
+    instruction: 'Evaluate every supplied Part Fitment row for the selected make/model. Combine all continuous rows whose qualifiers are compatible. If a material qualifier conflict prevents one safe application, return unresolved for review. Do not select a narrower subset merely because it matches the donor year or existing title year.',
+    allowedOutcomes: [
+      'COMBINE_COMPATIBLE_CONTINUOUS_ROWS',
+      'UNRESOLVED_MATERIAL_QUALIFIER_CONFLICT'
+    ]
+  };
   const partFitment = text(listingResolution?.normalized?.titleAuthority?.partFitment?.value);
+  const sourceIssues = detectMaterialFitmentIssues(partFitment);
   const parsed = parseApplicationClauses(partFitment);
   if (!parsed.length) return {
     status: 'NO_PARSEABLE_PART_FITMENT',
     resolution: 'UNAVAILABLE',
+    decisionPolicy,
     selectionFacts: {},
     candidates: [],
-    distinctApplications: []
+    distinctApplications: [],
+    sourceIssues
   };
 
   const yearValue = resolvedValue(listingResolution, 'year');
@@ -74,10 +109,12 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
   return {
     status: resolution === 'UNAMBIGUOUS' ? 'ONE_DISTINCT_APPLICATION' : 'MULTIPLE_DISTINCT_APPLICATIONS',
     resolution,
+    decisionPolicy,
     selectionFacts: { year: exactYear || null, make: make || null, model: model || null, appliedFilters: [] },
     candidates,
-    distinctApplications: candidates
+    distinctApplications: candidates,
+    sourceIssues
   };
 }
 
-module.exports = { parseApplicationClauses, selectTitleFitmentCandidates };
+module.exports = { detectMaterialFitmentIssues, parseApplicationClauses, selectTitleFitmentCandidates };

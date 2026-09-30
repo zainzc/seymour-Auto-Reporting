@@ -153,6 +153,42 @@ test('accepts safe candidates, different wording, verified enrichment, and optio
   assert.equal(optionalReduction.decision, 'ACCEPT_CANDIDATE');
 });
 
+test('AI semantic approval owns no-degrade and source-conflict decisions', () => {
+  const inputs = baseInputs();
+  inputs.validationResult.validatedTitle = '2011 Honda Accord Driver Mirror 00123';
+  inputs.validationResult.semanticSafety = {
+    supplied: true,
+    safeToPublish: true,
+    reason: 'The shorter wording preserves the supported listing identity.',
+    concerns: []
+  };
+  inputs.sourceResolution.resolved.conflicts = [{ field: 'brandMake', value: 'HONDA TRUCK' }];
+
+  const result = decideTitleOptimizationRuntimeResult(inputs);
+
+  assert.equal(result.decision, 'ACCEPT_CANDIDATE');
+  assert.equal(result.reviewRequired, false);
+  assert.equal(result.degradationChecks.some(item => item.checkId === 'critical-loss'), false);
+  assert.equal(result.degradationChecks.some(item => item.checkId === 'material-source-conflict'), false);
+});
+
+test('AI semantic rejection requires review even when deterministic invariants pass', () => {
+  const inputs = baseInputs();
+  inputs.validationResult.semanticSafety = {
+    supplied: true,
+    safeToPublish: false,
+    reason: 'The proposed title changes the advertised vehicle model.',
+    concerns: ['Model mismatch']
+  };
+
+  const result = decideTitleOptimizationRuntimeResult(inputs);
+
+  assert.equal(result.decision, 'NEEDS_REVIEW');
+  assert.equal(result.reviewRequired, true);
+  assert.match(result.reviewNotes, /changes the advertised vehicle model/i);
+  assert.equal(result.degradationChecks.find(item => item.checkId === 'ai-semantic-safety').status, 'FAIL');
+});
+
 test('retains existing when candidate loses critical verified data preserved by existing title', () => {
   for (const [fieldName, candidate] of [
     ['sku', '2011 Honda Accord Driver Side Mirror ABS K24A BAYA AWD'],
@@ -173,12 +209,15 @@ test('retains existing when candidate loses critical verified data preserved by 
   }
 });
 
-test('accepts AI year decision even when existing title contains a wider range', () => {
+test('rejects narrowing a continuously supported existing fitment range to the donor year', () => {
   const result = decide({
     sourceResolution: {
       ...baseInputs().sourceResolution,
       normalized: {
         ...baseInputs().sourceResolution.normalized,
+        titleAuthority: {
+          partFitment: { value: '2013-2015 Honda Accord Engine 2.4L VIN 1 Coupe Federal Emissions' }
+        },
         fields: {
           ...baseInputs().sourceResolution.normalized.fields,
           existingTitle: { value: 'Engine 2.4L VIN 1 6th Digit Coupe Federal Emissions Fits 13-15 ACCORD 1585847' },
@@ -206,10 +245,10 @@ test('accepts AI year decision even when existing title contains a wider range',
     }
   });
 
-  assert.equal(result.decision, 'ACCEPT_CANDIDATE');
-  assert.equal(result.reviewRequired, false);
-  assert.equal(result.finalTitle, '2013 Honda Accord Engine 2.4L VIN 1 Coupe Federal Emissions 1585847');
-  assert.equal(result.degradationChecks.some(item => item.checkId === 'explicit-year-range-loss'), false);
+  assert.equal(result.decision, 'RETAIN_EXISTING');
+  assert.equal(result.reviewRequired, true);
+  assert.equal(result.finalTitle, 'Engine 2.4L VIN 1 6th Digit Coupe Federal Emissions Fits 13-15 ACCORD 1585847');
+  assert.equal(result.degradationChecks.some(item => item.checkId === 'explicit-year-range-loss' && item.status === 'FAIL'), true);
 });
 
 test('critical data unavailable or not preserved by existing title is not required for candidate acceptance', () => {
