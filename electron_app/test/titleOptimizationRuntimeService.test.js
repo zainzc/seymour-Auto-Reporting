@@ -399,6 +399,65 @@ test('runtime passes and logs the AI semantic safety decision', async () => {
   assert.match(messages[0], /Equivalent brand wording/);
 });
 
+test('runtime carries selected facts and removal audit into accepted review notes', async () => {
+  const selectedTitleFacts = {
+    yearRange: '2007-2012',
+    make: 'Nissan',
+    model: 'Altima',
+    part: 'Door Switch',
+    side: 'Driver',
+    placement: 'Front',
+    keyDetails: ['Lock And Window'],
+    evidenceSummary: 'Selected facts are supported by title and fitment evidence.'
+  };
+  const removedTitleDetails = [
+    { detail: 'Fits', reason: 'Raw fitment connector word is not part of the title structure.', safeToRemove: true }
+  ];
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    executeAi: async () => ({
+      generatedTitle: '2007-2012 Nissan Altima Driver Front Door Switch Lock Window 1375500',
+      generatedDescription: 'Description',
+      selectedTitleFacts,
+      removedTitleDetails,
+      vehicleDecision: {
+        resolved: true,
+        make: 'Nissan',
+        model: 'Altima',
+        yearRange: '2007-2012',
+        source: 'title-fitment-001;title-fitment-002',
+        evidence: '2007 Nissan Altima driver front door switch; 2008-2012 Nissan Altima driver front door switch',
+        reason: 'Continuous application.'
+      },
+      safetyDecision: {
+        safeToPublish: true,
+        reason: 'All material title claims are supported.',
+        concerns: [],
+        claims: [{ titleClaim: 'Driver Front Door Switch', dimension: 'product_identity', status: 'supported', evidence: 'Driver Front Door Switch', material: true }]
+      }
+    }),
+    validate: inputs => ({
+      outcome: 'PASS',
+      validatedTitle: inputs.candidateTitle,
+      safeToContinue: true,
+      violations: [],
+      warnings: [],
+      semanticSafety: { supplied: true, ...inputs.safetyDecision }
+    }),
+    decide: ({ validationResult }) => ({
+      decision: 'ACCEPT_CANDIDATE',
+      finalTitle: validationResult.validatedTitle,
+      reviewRequired: false,
+      degradationChecks: []
+    })
+  }) });
+
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.match(result.output.reviewNotes, /Selected facts: 2007-2012 Nissan Altima Driver Front Door Switch/);
+  assert.match(result.output.reviewNotes, /Kept key detail: Lock And Window/);
+  assert.match(result.output.reviewNotes, /Safely omitted: Fits/);
+  assert.doesNotMatch(result.output.reviewNotes, /deterministic validation/i);
+});
+
 test('AI semantic audit failure uses the existing correction path and accepts the repaired title', async () => {
   let aiCalls = 0;
   const result = await runTitleOptimizationRuntime({ dependencies: dependencies({

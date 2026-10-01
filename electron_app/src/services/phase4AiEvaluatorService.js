@@ -117,6 +117,8 @@ const PHASE74_TITLE_RESPONSE_FORMAT = Object.freeze({
         'titleReviewStatus',
         'titleReviewReason',
         'titleReviewNotes',
+        'selectedTitleFacts',
+        'removedTitleDetails',
         'categoryPriorityDetails'
       ],
       properties: {
@@ -130,6 +132,34 @@ const PHASE74_TITLE_RESPONSE_FORMAT = Object.freeze({
         },
         titleReviewReason: { type: 'string' },
         titleReviewNotes: { type: 'string' },
+        selectedTitleFacts: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['yearRange', 'make', 'model', 'part', 'side', 'placement', 'keyDetails', 'evidenceSummary'],
+          properties: {
+            yearRange: { type: ['string', 'null'] },
+            make: { type: ['string', 'null'] },
+            model: { type: ['string', 'null'] },
+            part: { type: ['string', 'null'] },
+            side: { type: ['string', 'null'] },
+            placement: { type: ['string', 'null'] },
+            keyDetails: { type: 'array', items: { type: 'string' } },
+            evidenceSummary: { type: 'string' }
+          }
+        },
+        removedTitleDetails: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['detail', 'reason', 'safeToRemove'],
+            properties: {
+              detail: { type: 'string' },
+              reason: { type: 'string' },
+              safeToRemove: { type: 'boolean' }
+            }
+          }
+        },
         categoryPriorityDetails: {
           type: 'array',
           items: {
@@ -1512,6 +1542,8 @@ class Phase4AiEvaluatorService {
         'reviewReason',
         'titleReviewNotes',
         'reviewNotes',
+        'selectedTitleFacts',
+        'removedTitleDetails',
         'categoryPriorityDetails',
         'safetyDecision'
       ].includes(key)
@@ -1524,6 +1556,23 @@ class Phase4AiEvaluatorService {
       titleReviewStatus,
       titleReviewReason,
       titleReviewNotes,
+      selectedTitleFacts: parsed.selectedTitleFacts && typeof parsed.selectedTitleFacts === 'object' ? {
+        yearRange: parsed.selectedTitleFacts.yearRange == null ? null : normalizeText(parsed.selectedTitleFacts.yearRange),
+        make: parsed.selectedTitleFacts.make == null ? null : normalizeText(parsed.selectedTitleFacts.make),
+        model: parsed.selectedTitleFacts.model == null ? null : normalizeText(parsed.selectedTitleFacts.model),
+        part: parsed.selectedTitleFacts.part == null ? null : normalizeText(parsed.selectedTitleFacts.part),
+        side: parsed.selectedTitleFacts.side == null ? null : normalizeText(parsed.selectedTitleFacts.side),
+        placement: parsed.selectedTitleFacts.placement == null ? null : normalizeText(parsed.selectedTitleFacts.placement),
+        keyDetails: Array.isArray(parsed.selectedTitleFacts.keyDetails)
+          ? parsed.selectedTitleFacts.keyDetails.map(normalizeText).filter(Boolean)
+          : [],
+        evidenceSummary: normalizeText(parsed.selectedTitleFacts.evidenceSummary)
+      } : null,
+      removedTitleDetails: Array.isArray(parsed.removedTitleDetails) ? parsed.removedTitleDetails.map(item => ({
+        detail: normalizeText(item?.detail),
+        reason: normalizeText(item?.reason),
+        safeToRemove: item?.safeToRemove === true
+      })).filter(item => item.detail) : [],
       categoryPriorityDetails: Array.isArray(parsed.categoryPriorityDetails) ? parsed.categoryPriorityDetails.map(item => ({
         detail: normalizeText(item?.detail),
         verified: item?.verified === true,

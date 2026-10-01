@@ -80,6 +80,27 @@ function writableOutput(aiResult = {}, decision = {}, proposedTitle = '') {
 
 function acceptedReviewNotes(aiResult = {}, decision = {}) {
   const notes = [];
+  const selected = aiResult.selectedTitleFacts && typeof aiResult.selectedTitleFacts === 'object'
+    ? aiResult.selectedTitleFacts
+    : null;
+  if (selected) {
+    const selectedFacts = [
+      selected.yearRange,
+      selected.make,
+      selected.model,
+      selected.side,
+      selected.placement,
+      selected.part
+    ].map(normalizeText).filter(Boolean).join(' ');
+    if (selectedFacts) notes.push(`Selected facts: ${selectedFacts}.`);
+    const keyDetails = Array.isArray(selected.keyDetails)
+      ? selected.keyDetails.map(normalizeText).filter(Boolean)
+      : [];
+    if (keyDetails.length) notes.push(`Kept key detail${keyDetails.length > 1 ? 's' : ''}: ${keyDetails.join(', ')}.`);
+    if (normalizeText(selected.evidenceSummary)) notes.push(selected.evidenceSummary.endsWith('.')
+      ? selected.evidenceSummary
+      : `${selected.evidenceSummary}.`);
+  }
   const vehicle = aiResult.vehicleDecision || {};
   const vehicleIdentity = [vehicle.yearRange, vehicle.make, vehicle.model].map(normalizeText).filter(Boolean).join(' ');
   if (vehicle.resolved === true && vehicleIdentity) {
@@ -93,8 +114,13 @@ function acceptedReviewNotes(aiResult = {}, decision = {}) {
   const details = (Array.isArray(aiResult.categoryPriorityDetails) ? aiResult.categoryPriorityDetails : [])
     .filter(item => item?.verified === true)
     .map(item => normalizeText(item.detail))
-    .filter(Boolean);
+    .filter(detail => detail && !/missing|cannot|conflict|degrade|uncertain|review|too long/i.test(detail));
   if (details.length) notes.push(`Applied verified category detail${details.length > 1 ? 's' : ''}: ${details.join(', ')}.`);
+  const removed = (Array.isArray(aiResult.removedTitleDetails) ? aiResult.removedTitleDetails : [])
+    .filter(item => item?.safeToRemove === true)
+    .map(item => normalizeText(item.detail))
+    .filter(Boolean);
+  if (removed.length) notes.push(`Safely omitted: ${removed.join(', ')}.`);
   if (!notes.length) notes.push('Generated title accepted after evidence and safety validation.');
   const finalTitle = normalizeText(decision.finalTitle);
   if (finalTitle) notes.push(`Final title: ${finalTitle}.`);
