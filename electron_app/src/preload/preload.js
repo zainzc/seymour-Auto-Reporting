@@ -259,6 +259,7 @@ contextBridge.exposeInMainWorld('phase5API', {
   publishApproved: (options) => ipcRenderer.invoke('phase5:publishApproved', options),
   dryRunPublishApproved: (options) => ipcRenderer.invoke('phase5:dryRunPublishApproved', options),
   testEbayCredentials: (options) => ipcRenderer.invoke('phase5:testEbayCredentials', options),
+  resyncEbayCredentials: () => ipcRenderer.invoke('phase5:resyncEbayCredentials'),
   startAutoPush: (options) => ipcRenderer.invoke('phase5:startAutoPush', options),
   stopAutoPush: () => ipcRenderer.invoke('phase5:stopAutoPush'),
   getAutoPushStatus: () => ipcRenderer.invoke('phase5:getAutoPushStatus'),

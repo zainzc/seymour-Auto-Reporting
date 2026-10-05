@@ -71,6 +71,9 @@ const { runEbayBrandPropagation } = require('../services/ebayBrandPropagationSer
 const { runPhase5PublishApproved } = require('../services/phase5Service');
 const { Phase5PublishLogService } = require('../services/phase5PublishLogService');
 const {
+  resyncProductionEbayCredentialsFromAirtable
+} = require('../services/ebayCredentialResyncService');
+const {
   validateBatchGovernanceSchema,
   getBatchSummaries,
   setBatchStatus: setPhase5BatchStatus,
@@ -5688,6 +5691,29 @@ ipcMain.handle('phase5:testEbayCredentials', async (_, options = {}) => {
     return {
       success: false,
       message: formatDetailedErrorMessage(error)
+    };
+  }
+});
+
+ipcMain.handle('phase5:resyncEbayCredentials', async () => {
+  try {
+    const stored = getInventoryConfig('phase2Config') || {};
+    return await resyncProductionEbayCredentialsFromAirtable({
+      currentConfig: stored,
+      saveConfig: nextConfig => {
+        saveInventoryConfig('phase2Config', stripPhase5LocalPublishedCache(nextConfig));
+      }
+    });
+  } catch (error) {
+    const message =
+      error?.response?.data?.error?.message ||
+      error?.response?.data?.error ||
+      error?.message ||
+      'Failed to resync eBay credentials.';
+    return {
+      success: false,
+      updated: false,
+      message: `Failed to resync eBay credentials: ${message}`
     };
   }
 });

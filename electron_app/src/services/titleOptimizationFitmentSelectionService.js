@@ -19,6 +19,36 @@ function applicationKey(value) {
     .trim();
 }
 
+function expandTitleYear(value) {
+  const year = Number(value);
+  if (String(value).length === 4) return year;
+  return year >= 70 ? 1900 + year : 2000 + year;
+}
+
+function advertisedApplicationHint(existingTitle) {
+  const match = text(existingTitle).match(/\bFits\s+(\d{2}|(?:19|20)\d{2})(?:\s*-\s*(\d{2}|(?:19|20)\d{2}))?\s+(.+)$/i);
+  if (!match) return null;
+  const rawTokens = text(match[3]).split(' ');
+  const modelTokens = [];
+  for (const token of rawTokens) {
+    const clean = token.replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9-]+$/g, '');
+    if (!clean) continue;
+    if (/^\d{2,4}A$/i.test(clean) || /^\d+(?:\.\d+)?L$/i.test(clean) ||
+      /^(?:VIN|ID|AT|MT|CVT|AWD|FWD|RWD)$/i.test(clean) ||
+      /^\d{5,}$/.test(clean) || (/\d/.test(clean) && clean.length >= 7)) break;
+    if (!/[A-Za-z]/.test(clean)) break;
+    modelTokens.push(clean);
+  }
+  if (!modelTokens.length) return null;
+  const startYear = expandTitleYear(match[1]);
+  const endYear = expandTitleYear(match[2] || match[1]);
+  return {
+    raw: text(match[0]),
+    yearRange: startYear === endYear ? String(startYear) : `${startYear}-${endYear}`,
+    modelText: modelTokens.join(' ')
+  };
+}
+
 function parseApplicationClauses(partFitment) {
   return text(partFitment).split(/;|\n/).map((raw, index) => {
     const evidence = text(raw).replace(/^Fits\s+/i, '');
@@ -72,6 +102,12 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
     ]
   };
   const partFitment = text(listingResolution?.normalized?.titleAuthority?.partFitment?.value);
+  const existingTitle = text(
+    listingResolution?.normalized?.fields?.existingTitle?.value ||
+    listingResolution?.normalized?.fields?.legacyTitle?.value ||
+    listingResolution?.resolved?.fields?.title?.resolvedValue
+  );
+  const advertisedHint = advertisedApplicationHint(existingTitle);
   const sourceIssues = detectMaterialFitmentIssues(partFitment);
   const parsed = parseApplicationClauses(partFitment);
   if (!parsed.length) return {
@@ -81,6 +117,9 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
     selectionFacts: {},
     candidates: [],
     distinctApplications: [],
+    eligibleCandidates: [],
+    advertisedApplicationHint: advertisedHint,
+    selectionBasis: advertisedHint ? 'EXISTING_TITLE_FITS_APPLICATION_UNMATCHED' : 'NO_PART_FITMENT',
     sourceIssues
   };
 
@@ -104,17 +143,39 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
     existing.evidence = existing.variantEvidence.join('; ');
   }
   const candidates = [...byApplication.values()];
-  const resolution = candidates.length === 1 ? 'UNAMBIGUOUS' : 'AMBIGUOUS';
+  const hintedModel = advertisedHint?.modelText || '';
+  const matchedCandidates = hintedModel
+    ? candidates.filter(item => containsPhrase(item.evidence, hintedModel))
+    : [];
+  const eligibleCandidates = advertisedHint
+    ? matchedCandidates
+    : candidates;
+  const selectionBasis = matchedCandidates.length
+    ? 'EXISTING_TITLE_FITS_APPLICATION'
+    : advertisedHint
+      ? 'EXISTING_TITLE_FITS_APPLICATION_UNMATCHED'
+      : candidates.length === 1
+        ? 'ONLY_COMPATIBILITY_APPLICATION'
+        : 'AI_APPLICATION_SELECTION';
+  const advertisedApplicationUnmatched = Boolean(advertisedHint && !matchedCandidates.length);
+  const resolution = advertisedApplicationUnmatched
+    ? 'UNRESOLVED'
+    : eligibleCandidates.length === 1 ? 'UNAMBIGUOUS' : 'AMBIGUOUS';
 
   return {
-    status: resolution === 'UNAMBIGUOUS' ? 'ONE_DISTINCT_APPLICATION' : 'MULTIPLE_DISTINCT_APPLICATIONS',
+    status: advertisedApplicationUnmatched
+      ? 'ADVERTISED_APPLICATION_UNMATCHED'
+      : resolution === 'UNAMBIGUOUS' ? 'ONE_DISTINCT_APPLICATION' : 'MULTIPLE_DISTINCT_APPLICATIONS',
     resolution,
     decisionPolicy,
     selectionFacts: { year: exactYear || null, make: make || null, model: model || null, appliedFilters: [] },
     candidates,
     distinctApplications: candidates,
+    eligibleCandidates,
+    advertisedApplicationHint: advertisedHint,
+    selectionBasis,
     sourceIssues
   };
 }
 
-module.exports = { detectMaterialFitmentIssues, parseApplicationClauses, selectTitleFitmentCandidates };
+module.exports = { advertisedApplicationHint, detectMaterialFitmentIssues, parseApplicationClauses, selectTitleFitmentCandidates };

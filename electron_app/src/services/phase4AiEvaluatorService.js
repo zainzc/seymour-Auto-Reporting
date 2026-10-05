@@ -117,8 +117,6 @@ const PHASE74_TITLE_RESPONSE_FORMAT = Object.freeze({
         'titleReviewStatus',
         'titleReviewReason',
         'titleReviewNotes',
-        'selectedTitleFacts',
-        'removedTitleDetails',
         'categoryPriorityDetails'
       ],
       properties: {
@@ -132,34 +130,6 @@ const PHASE74_TITLE_RESPONSE_FORMAT = Object.freeze({
         },
         titleReviewReason: { type: 'string' },
         titleReviewNotes: { type: 'string' },
-        selectedTitleFacts: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['yearRange', 'make', 'model', 'part', 'side', 'placement', 'keyDetails', 'evidenceSummary'],
-          properties: {
-            yearRange: { type: ['string', 'null'] },
-            make: { type: ['string', 'null'] },
-            model: { type: ['string', 'null'] },
-            part: { type: ['string', 'null'] },
-            side: { type: ['string', 'null'] },
-            placement: { type: ['string', 'null'] },
-            keyDetails: { type: 'array', items: { type: 'string' } },
-            evidenceSummary: { type: 'string' }
-          }
-        },
-        removedTitleDetails: {
-          type: 'array',
-          items: {
-            type: 'object',
-            additionalProperties: false,
-            required: ['detail', 'reason', 'safeToRemove'],
-            properties: {
-              detail: { type: 'string' },
-              reason: { type: 'string' },
-              safeToRemove: { type: 'boolean' }
-            }
-          }
-        },
         categoryPriorityDetails: {
           type: 'array',
           items: {
@@ -1402,6 +1372,80 @@ class Phase4AiEvaluatorService {
     };
   }
 
+  async reviewTitleFitment(input = {}) {
+    const systemMessage = [
+      'You independently review an automotive listing title against supplied fitment evidence.',
+      'Judge the exact final title, not the generator reasoning or its review status. Use only supplied evidence.',
+      'Check the advertised vehicle, complete year coverage, and every material fitment condition.',
+      'Pay particular attention when a condition applies to only some years or variants. A title must not apply that condition to other years, or omit it so restricted years appear unrestricted.',
+      'Conditions can include VIN, build origin or date, engine, transmission, trim, body style, drivetrain, side, placement, and included or excluded features. These are examples, not an exhaustive list.',
+      'Do not assume that a row without a restriction establishes unrestricted compatibility for another row. Do not accept a title that is made to look safe by simply removing a material condition.',
+      'Inspect additional eligible rows for missing years or material conditions, but do not treat an alternate trim or compatible variant as an automatic conflict.',
+        'Other trusted listing evidence may support a product qualifier absent from the fitment rows. Do not use it to broaden fitment years or override a row-specific restriction.',
+      'Return PASS only if the exact title truthfully represents all selected rows and the advertised application without broadening or contradicting a material restriction. Cite every selected row ID for PASS.',
+      'Return REVIEW with a specific explanation and relevant row IDs when a material claim is wrong, unsupported, missing, or cannot be expressed safely. Uncertainty is REVIEW.',
+      'You are a reviewer only. Do not rewrite the title or use external knowledge.'
+    ].join(' ');
+    const reviewInput = {
+      finalTitle: normalizeText(input.title),
+      currentTitle: normalizeText(input.existingTitle),
+      advertisedApplication: input.advertisedApplication || null,
+      selectedFitmentRows: Array.isArray(input.selectedRows) ? input.selectedRows.map(row => ({
+        id: normalizeText(row.id), evidence: normalizeText(row.evidence)
+      })) : [],
+      additionalEligibleRows: Array.isArray(input.additionalEligibleRows) ? input.additionalEligibleRows.map(row => ({
+        id: normalizeText(row.id), evidence: normalizeText(row.evidence)
+      })) : [],
+        otherTrustedEvidence: Array.isArray(input.otherTrustedEvidence) ? input.otherTrustedEvidence.map(row => ({
+          id: normalizeText(row.id), source: normalizeText(row.source), evidence: normalizeText(row.evidence)
+        })) : [],
+      fallbackTitleEvidence: input.fallbackTitleEvidence || null
+    };
+    if (!reviewInput.finalTitle) throw new Error('Fitment review requires a final title.');
+    const requestBody = {
+      model: this.model,
+      temperature: 0,
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'phase74_final_fitment_review',
+          strict: true,
+          schema: {
+            type: 'object', additionalProperties: false,
+            required: ['verdict', 'reason', 'citedRowIds'],
+            properties: {
+              verdict: { type: 'string', enum: ['PASS', 'REVIEW'] },
+              reason: { type: 'string' },
+              citedRowIds: { type: 'array', items: { type: 'string' } }
+            }
+          }
+        }
+      },
+      messages: [
+        { role: 'system', content: systemMessage },
+        { role: 'user', content: JSON.stringify(reviewInput) }
+      ]
+    };
+    if (this.logPhase74AiPayload) {
+      console.log(`[Phase7.4 Fitment Review AI Payload]\n${JSON.stringify(requestBody, null, 2)}`);
+    }
+    const response = await retryWithBackoff(
+      async () => this.client.post('/chat/completions', requestBody),
+      { maxAttempts: this.maxAttempts, baseDelayMs: this.baseDelayMs }
+    );
+    const content = String(response?.data?.choices?.[0]?.message?.content || '').trim();
+    const parsed = extractJsonObject(content);
+    if (!parsed || !['PASS', 'REVIEW'].includes(parsed.verdict) ||
+        !normalizeText(parsed.reason) || !Array.isArray(parsed.citedRowIds)) {
+      throw new Error('Fitment review returned an invalid response.');
+    }
+    return {
+      verdict: parsed.verdict,
+      reason: normalizeText(parsed.reason),
+      citedRowIds: parsed.citedRowIds
+    };
+  }
+
   async generateTitleAndDescriptionFromRuntimePrompt(promptArtifact = {}) {
     if (!promptArtifact || promptArtifact.kind === 'title-generation-bypass') {
       return {
@@ -1454,30 +1498,6 @@ class Phase4AiEvaluatorService {
       type: 'object', additionalProperties: false,
       required: ['side', 'placement', 'source', 'evidence'],
       properties: Object.fromEntries(['side', 'placement', 'source', 'evidence'].map(key => [key, { type: ['string', 'null'] }]))
-    };
-    runtimeSchema.required.push('safetyDecision');
-    runtimeSchema.properties.safetyDecision = {
-      type: 'object', additionalProperties: false,
-      required: ['safeToPublish', 'reason', 'concerns', 'claims'],
-      properties: {
-        safeToPublish: { type: 'boolean' },
-        reason: { type: 'string' },
-        concerns: { type: 'array', items: { type: 'string' } },
-        claims: {
-          type: 'array',
-          items: {
-            type: 'object', additionalProperties: false,
-            required: ['titleClaim', 'dimension', 'status', 'evidence', 'material'],
-            properties: {
-              titleClaim: { type: 'string' },
-              dimension: { type: 'string' },
-              status: { type: 'string', enum: ['supported', 'equivalent', 'optional_omission', 'contradictory', 'invented'] },
-              evidence: { type: ['string', 'null'] },
-              material: { type: 'boolean' }
-            }
-          }
-        }
-      }
     };
     if (configuredDetails.length) {
       requestBody.response_format.json_schema.schema.properties.categoryPriorityDetails.items.properties.detail.enum = configuredDetails;
@@ -1542,10 +1562,7 @@ class Phase4AiEvaluatorService {
         'reviewReason',
         'titleReviewNotes',
         'reviewNotes',
-        'selectedTitleFacts',
-        'removedTitleDetails',
-        'categoryPriorityDetails',
-        'safetyDecision'
+        'categoryPriorityDetails'
       ].includes(key)
     );
     return {
@@ -1556,23 +1573,6 @@ class Phase4AiEvaluatorService {
       titleReviewStatus,
       titleReviewReason,
       titleReviewNotes,
-      selectedTitleFacts: parsed.selectedTitleFacts && typeof parsed.selectedTitleFacts === 'object' ? {
-        yearRange: parsed.selectedTitleFacts.yearRange == null ? null : normalizeText(parsed.selectedTitleFacts.yearRange),
-        make: parsed.selectedTitleFacts.make == null ? null : normalizeText(parsed.selectedTitleFacts.make),
-        model: parsed.selectedTitleFacts.model == null ? null : normalizeText(parsed.selectedTitleFacts.model),
-        part: parsed.selectedTitleFacts.part == null ? null : normalizeText(parsed.selectedTitleFacts.part),
-        side: parsed.selectedTitleFacts.side == null ? null : normalizeText(parsed.selectedTitleFacts.side),
-        placement: parsed.selectedTitleFacts.placement == null ? null : normalizeText(parsed.selectedTitleFacts.placement),
-        keyDetails: Array.isArray(parsed.selectedTitleFacts.keyDetails)
-          ? parsed.selectedTitleFacts.keyDetails.map(normalizeText).filter(Boolean)
-          : [],
-        evidenceSummary: normalizeText(parsed.selectedTitleFacts.evidenceSummary)
-      } : null,
-      removedTitleDetails: Array.isArray(parsed.removedTitleDetails) ? parsed.removedTitleDetails.map(item => ({
-        detail: normalizeText(item?.detail),
-        reason: normalizeText(item?.reason),
-        safeToRemove: item?.safeToRemove === true
-      })).filter(item => item.detail) : [],
       categoryPriorityDetails: Array.isArray(parsed.categoryPriorityDetails) ? parsed.categoryPriorityDetails.map(item => ({
         detail: normalizeText(item?.detail),
         verified: item?.verified === true,
@@ -1581,20 +1581,6 @@ class Phase4AiEvaluatorService {
       })) : [],
       sideDecision: parsed.sideDecision && typeof parsed.sideDecision === 'object' ? parsed.sideDecision : null,
       vehicleDecision: parsed.vehicleDecision && typeof parsed.vehicleDecision === 'object' ? parsed.vehicleDecision : null,
-      safetyDecision: parsed.safetyDecision && typeof parsed.safetyDecision === 'object' ? {
-        safeToPublish: parsed.safetyDecision.safeToPublish === true,
-        reason: normalizeText(parsed.safetyDecision.reason),
-        concerns: Array.isArray(parsed.safetyDecision.concerns)
-          ? parsed.safetyDecision.concerns.map(normalizeText).filter(Boolean)
-          : [],
-        claims: Array.isArray(parsed.safetyDecision.claims) ? parsed.safetyDecision.claims.map(claim => ({
-          titleClaim: normalizeText(claim?.titleClaim),
-          dimension: normalizeText(claim?.dimension),
-          status: normalizeText(claim?.status),
-          evidence: claim?.evidence == null ? null : normalizeText(claim.evidence),
-          material: claim?.material === true
-        })) : []
-      } : null,
       rawContent: content,
       parsedKeys: Object.keys(parsed),
       recognizedKeys

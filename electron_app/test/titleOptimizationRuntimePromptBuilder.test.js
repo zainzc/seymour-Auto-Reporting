@@ -308,6 +308,99 @@ test('keeps separate fitment candidates when trusted data cannot safely narrow t
   assert.notEqual(selection.candidates[0].id, selection.candidates[1].id);
 });
 
+test('restricts eligible fitment candidates to the application advertised after Fits', () => {
+  const inputs = buildInputs({
+    'Item Title': '2008 Jeep Liberty Starter Motor Fits 07-09 NITRO 04801292AC 1589513'
+  });
+  inputs.listingResolution.resolved.fields.year = {
+    field: 'year', candidates: [], conflicts: [], resolvedValue: '2008',
+    resolvedSource: 'otherStructuredFields', missing: false
+  };
+  inputs.listingResolution.resolved.fields.brandMake = {
+    field: 'brandMake', candidates: [], conflicts: [], resolvedValue: 'Jeep',
+    resolvedSource: 'itemSpecifics', missing: false
+  };
+  inputs.listingResolution.resolved.fields.model = {
+    field: 'model', candidates: [], conflicts: [], resolvedValue: 'Liberty',
+    resolvedSource: 'currentEbay', missing: false
+  };
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '2008 Jeep Liberty Starter Motor Fits 07-09 NITRO 04801292AC 1589513';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '2007-2009 Dodge Nitro Starter Motor 3.7L; 2008-2012 Jeep Liberty Starter Motor 3.7L';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+
+  assert.equal(selection.advertisedApplicationHint.modelText, 'NITRO');
+  assert.equal(selection.selectionBasis, 'EXISTING_TITLE_FITS_APPLICATION');
+  assert.equal(selection.eligibleCandidates.length, 1);
+  assert.match(selection.eligibleCandidates[0].evidence, /Dodge Nitro/i);
+  assert.doesNotMatch(selection.eligibleCandidates[0].evidence, /Jeep Liberty/i);
+});
+
+test('advertised application selection supports alphanumeric and multiword models', () => {
+  const inputs = buildInputs({
+    'Item Title': '2011 Lexus IS250 Starter Motor Fits 06-17 LEXUS IS350 2810031071 1591344'
+  });
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '2011 Lexus IS250 Starter Motor Fits 06-17 LEXUS IS350 2810031071 1591344';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '2006-2017 Lexus IS350 Starter Motor; 2006-2015 Lexus IS250 Starter Motor';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+
+  assert.equal(selection.advertisedApplicationHint.modelText, 'LEXUS IS350');
+  assert.deepEqual(selection.eligibleCandidates.map(item => item.evidence), [
+    '2006-2017 Lexus IS350 Starter Motor'
+  ]);
+});
+
+test('advertised multiword model does not match a different model sharing its last word', () => {
+  const inputs = buildInputs({ 'Item Title': '2008 Ford Starter Fits 08-10 TAURUS X 1234567' });
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '2008 Ford Starter Fits 08-10 TAURUS X 1234567';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '2008-2010 Ford Taurus X Starter; 2008-2010 Ford Model X Starter';
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+  assert.deepEqual(selection.eligibleCandidates.map(item => item.evidence), [
+    '2008-2010 Ford Taurus X Starter'
+  ]);
+});
+
+test('advertised application matching ignores trailing product qualifiers', () => {
+  const inputs = buildInputs({
+    'Item Title': '2011 Hyundai Alternator Fits 11-13 SONATA 110A 373002G150 1589899'
+  });
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '2011 Hyundai Alternator Fits 11-13 SONATA 110A 373002G150 1589899';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '2011-2013 Hyundai Sonata Alternator VIN C; 2011-2013 Hyundai Elantra Alternator';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+
+  assert.equal(selection.advertisedApplicationHint.modelText, 'SONATA');
+  assert.deepEqual(selection.eligibleCandidates.map(item => item.evidence), [
+    '2011-2013 Hyundai Sonata Alternator VIN C'
+  ]);
+});
+
+test('does not fall back to donor candidates when advertised application has no fitment match', () => {
+  const inputs = buildInputs({
+    'Item Title': '2008 Jeep Liberty Starter Motor Fits 07-09 NITRO 1589513'
+  });
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '2008 Jeep Liberty Starter Motor Fits 07-09 NITRO 1589513';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '2008-2012 Jeep Liberty Starter Motor 3.7L';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+
+  assert.equal(selection.selectionBasis, 'EXISTING_TITLE_FITS_APPLICATION_UNMATCHED');
+  assert.equal(selection.status, 'ADVERTISED_APPLICATION_UNMATCHED');
+  assert.equal(selection.resolution, 'UNRESOLVED');
+  assert.deepEqual(selection.eligibleCandidates, []);
+});
+
 test('collapses equivalent duplicate fitment clauses into one unambiguous application', () => {
   const inputs = buildInputs();
   inputs.listingResolution.normalized.titleAuthority.partFitment.value =
@@ -402,12 +495,13 @@ test('serializes selected structure, terminology, synonyms, prefix, categories, 
   assert.deepEqual(policy.flagReasons.map(reason => reason.reason), ['Missing verified year', 'Conflicting source data', 'Custom QA Reason']);
   assert.deepEqual(policy.systemRules.map(rule => rule.id), ['SR-01', 'SR-05', 'SR-06', 'SR-07', 'SR-14']);
   assert.doesNotMatch(JSON.stringify(policy), /Disabled|term-disabled/);
-  assert.equal(artifact.userPayload.outputContract.requiredJsonKeys.includes('safetyDecision'), true);
-  assert.match(JSON.stringify(policy.instructions), /safeToPublish/i);
-  assert.match(JSON.stringify(policy.instructions), /semantic/i);
-  assert.match(JSON.stringify(policy.instructions), /every material claim/i);
-  assert.match(JSON.stringify(policy.instructions), /supported, equivalent, optional_omission, contradictory, or invented/i);
-  assert.match(JSON.stringify(policy.instructions), /do not approve your own draft until/i);
+  assert.equal(artifact.userPayload.outputContract.requiredJsonKeys.includes('safetyDecision'), false);
+  assert.equal(artifact.userPayload.outputContract.requiredJsonKeys.includes('selectedTitleFacts'), false);
+  assert.equal(artifact.userPayload.outputContract.requiredJsonKeys.includes('removedTitleDetails'), false);
+  assert.match(JSON.stringify(policy.instructions), /internally review the complete final title/i);
+  assert.match(JSON.stringify(policy.instructions), /rebuild the title before returning it/i);
+  assert.match(JSON.stringify(policy.instructions), /Needs Review only when/i);
+  assert.doesNotMatch(JSON.stringify(policy.instructions), /optional_omission|claims array|safeToPublish/i);
 });
 
 test('omits synonym and prefix instructions when unavailable or unmatched without inventing fallback rules', () => {

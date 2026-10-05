@@ -153,7 +153,7 @@ test('accepts safe candidates, different wording, verified enrichment, and optio
   assert.equal(optionalReduction.decision, 'ACCEPT_CANDIDATE');
 });
 
-test('AI semantic approval owns no-degrade and source-conflict decisions', () => {
+test('legacy semantic approval cannot bypass no-degrade and source-conflict decisions', () => {
   const inputs = baseInputs();
   inputs.validationResult.validatedTitle = '2011 Honda Accord Driver Mirror 00123';
   inputs.validationResult.semanticSafety = {
@@ -166,13 +166,12 @@ test('AI semantic approval owns no-degrade and source-conflict decisions', () =>
 
   const result = decideTitleOptimizationRuntimeResult(inputs);
 
-  assert.equal(result.decision, 'ACCEPT_CANDIDATE');
-  assert.equal(result.reviewRequired, false);
-  assert.equal(result.degradationChecks.some(item => item.checkId === 'critical-loss'), false);
-  assert.equal(result.degradationChecks.some(item => item.checkId === 'material-source-conflict'), false);
+  assert.notEqual(result.decision, 'ACCEPT_CANDIDATE');
+  assert.equal(result.reviewRequired, true);
+  assert.equal(result.degradationChecks.some(item => item.checkId === 'ai-semantic-safety'), false);
 });
 
-test('AI semantic rejection requires review even when deterministic invariants pass', () => {
+test('legacy semantic rejection does not independently force review', () => {
   const inputs = baseInputs();
   inputs.validationResult.semanticSafety = {
     supplied: true,
@@ -183,10 +182,9 @@ test('AI semantic rejection requires review even when deterministic invariants p
 
   const result = decideTitleOptimizationRuntimeResult(inputs);
 
-  assert.equal(result.decision, 'NEEDS_REVIEW');
-  assert.equal(result.reviewRequired, true);
-  assert.match(result.reviewNotes, /changes the advertised vehicle model/i);
-  assert.equal(result.degradationChecks.find(item => item.checkId === 'ai-semantic-safety').status, 'FAIL');
+  assert.equal(result.decision, 'ACCEPT_CANDIDATE');
+  assert.equal(result.reviewRequired, false);
+  assert.equal(result.degradationChecks.some(item => item.checkId === 'ai-semantic-safety'), false);
 });
 
 test('retains existing when candidate loses critical verified data preserved by existing title', () => {

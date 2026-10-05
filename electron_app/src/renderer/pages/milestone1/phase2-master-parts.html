@@ -1410,7 +1410,7 @@
             <div class="phase5-grid">
               <div class="form-group">
                 <label for="phase5-ebay-environment">eBay Environment</label>
-                <select id="phase5-ebay-environment" onchange="switchEnvironmentEbayCredentials(this.value); updateRunButtonState();">
+                <select id="phase5-ebay-environment" onchange="switchEnvironmentEbayCredentials(this.value); updateRunButtonState(); updateEbayProductionCredentialActionsVisibility();">
                   <option value="sandbox" selected>Sandbox</option>
                   <option value="production">Production</option>
                 </select>
@@ -1469,18 +1469,16 @@
                   </div>
                   <div class="form-group full-width">
                     <label for="phase5-ebay-refresh-token">eBay Refresh Token (Auto-Renew)</label>
-                    <textarea id="phase5-ebay-refresh-token" placeholder="Paste eBay refresh token for auto access-token renewal"></textarea>
+                    <input id="phase5-ebay-refresh-token" type="password" placeholder="Paste eBay refresh token for auto access-token renewal">
                     <div class="hint">With Refresh Token + Client ID + Cert ID, the app can renew access automatically after token expiry.</div>
-                  </div>
-                  <div class="form-group full-width" style="display:none;">
-                    <label for="phase5-ebay-user-access-token">eBay User Access Token (IAF Token)</label>
-                    <textarea id="phase5-ebay-user-access-token" placeholder="hidden"></textarea>
                   </div>
                 </div>
               </div>
             </div>
 
             <div class="phase5-inline-actions">
+              <button id="phase5-ebay-authorize-btn" class="btn btn-secondary" style="display:none;" onclick="authorizeProductionEbayCredentials()">Authorize/Reauthorize eBay</button>
+              <button id="phase5-ebay-resync-btn" class="btn btn-secondary" style="display:none;" onclick="resyncProductionEbayCredentials()">Resync Credentials</button>
               <button id="run-phase5-btn" class="btn btn-primary" style="display:none;" onclick="document.getElementById('phase5-mode').value='A'; runPhase5();">Publish Approved</button>
               <button id="run-ebay-sandbox-import-phase5-btn" class="btn btn-primary" style="display:none;" onclick="runEbaySandboxImport()">Fetch eBay Listings</button>
               <button id="phase5-start-autopush-btn" class="btn btn-primary" style="display:none;" onclick="document.getElementById('phase5-mode').value='B'; document.getElementById('phase5-autopush-enabled').value='true'; startPhase5AutoPush();">Start Auto-Push</button>
@@ -1895,8 +1893,7 @@
       'phase5-ebay-dev-id',
       'phase5-ebay-client-secret',
       'phase5-ebay-runame',
-      'phase5-ebay-refresh-token',
-      'phase5-ebay-user-access-token'
+      'phase5-ebay-refresh-token'
     ];
     const PHASE5_EBAY_ENVIRONMENT_UI_FIELD_IDS = [
       'phase5-ebay-listings-source-api',
@@ -2066,7 +2063,7 @@
         phase5EbayClientSecret: document.getElementById('phase5-ebay-client-secret').value.trim(),
         phase5EbayRuName: document.getElementById('phase5-ebay-runame').value.trim(),
         phase5EbayRefreshToken: document.getElementById('phase5-ebay-refresh-token').value.trim(),
-        phase5EbayUserAccessToken: ''
+        phase5EbayUserAccessToken: phase5EbayCredentialSets[normalizeEbayEnvironmentValue(activePhase5EbayEnvironment)]?.phase5EbayUserAccessToken || ''
       });
     }
 
@@ -2077,8 +2074,6 @@
       document.getElementById('phase5-ebay-client-secret').value = normalized.phase5EbayClientSecret;
       document.getElementById('phase5-ebay-runame').value = normalized.phase5EbayRuName;
       document.getElementById('phase5-ebay-refresh-token').value = normalized.phase5EbayRefreshToken;
-      const userAccessTokenEl = document.getElementById('phase5-ebay-user-access-token');
-      if (userAccessTokenEl) userAccessTokenEl.value = '';
     }
 
     function saveCurrentEnvironmentEbayCredentials(environment = activePhase5EbayEnvironment) {
@@ -2099,6 +2094,7 @@
       const envEl = document.getElementById('phase5-ebay-environment');
       if (envEl) envEl.value = env;
       activePhase5EbayEnvironment = env;
+      updateEbayProductionCredentialActionsVisibility();
     }
 
     function switchEnvironmentEbayCredentials(nextEnvironment = 'sandbox') {
@@ -2145,6 +2141,64 @@
       );
 
       applyEnvironmentEbayCredentials(configEnvironment);
+      updateEbayProductionCredentialActionsVisibility();
+    }
+
+    function updateEbayProductionCredentialActionsVisibility() {
+      const env = normalizeEbayEnvironmentValue(
+        document.getElementById('phase5-ebay-environment')?.value || activePhase5EbayEnvironment
+      );
+      const display = env === 'production' ? '' : 'none';
+      const authorizeBtn = document.getElementById('phase5-ebay-authorize-btn');
+      const resyncBtn = document.getElementById('phase5-ebay-resync-btn');
+      if (authorizeBtn) authorizeBtn.style.display = display;
+      if (resyncBtn) resyncBtn.style.display = display;
+    }
+
+    async function authorizeProductionEbayCredentials() {
+      if (normalizeEbayEnvironmentValue(document.getElementById('phase5-ebay-environment')?.value) !== 'production') {
+        return;
+      }
+      if (!window.phase5API || typeof window.phase5API.openExternal !== 'function') {
+        showStatus('run-status', 'error', 'External link API is unavailable.');
+        return;
+      }
+      await window.phase5API.openExternal('https://seymourauto.app.n8n.cloud/webhook/ebay-auth');
+    }
+
+    async function resyncProductionEbayCredentials() {
+      if (normalizeEbayEnvironmentValue(document.getElementById('phase5-ebay-environment')?.value) !== 'production') {
+        return;
+      }
+      if (!window.phase5API || typeof window.phase5API.resyncEbayCredentials !== 'function') {
+        showStatus('run-status', 'error', 'eBay credential resync API is unavailable.');
+        return;
+      }
+
+      const resyncBtn = document.getElementById('phase5-ebay-resync-btn');
+      if (resyncBtn) resyncBtn.disabled = true;
+      try {
+        showStatus('run-status', 'info', 'Resyncing eBay credentials...');
+        const result = await window.phase5API.resyncEbayCredentials();
+        if (!result?.success) {
+          throw new Error(result?.message || 'Unable to resync eBay credentials.');
+        }
+        if (result.updated && result.credentials) {
+          saveCurrentEnvironmentEbayCredentials(activePhase5EbayEnvironment);
+          phase5EbayCredentialSets.production = {
+            ...phase5EbayCredentialSets.production,
+            phase5EbayRefreshToken: result.credentials.phase5EbayRefreshToken || ''
+          };
+          applyEnvironmentEbayCredentials('production');
+        }
+        showStatus('run-status', result.updated ? 'success' : 'info', result.message);
+        logLine(result.message);
+      } catch (err) {
+        showStatus('run-status', 'error', err.message);
+        logLine(`eBay credential resync failed: ${err.message}`, 'error');
+      } finally {
+        if (resyncBtn) resyncBtn.disabled = false;
+      }
     }
     const REQUIRED_FIELDS = [
       ['sheet-id', 'Google Sheet ID'],
@@ -2906,7 +2960,6 @@
         'phase5-ebay-client-secret',
         'phase5-ebay-runame',
         'phase5-ebay-refresh-token',
-        'phase5-ebay-user-access-token',
         'phase5-ebay-sandbox-table-name',
         'phase5-ebay-sandbox-fetch-limit',
         'phase5-ebay-sandbox-dry-run',

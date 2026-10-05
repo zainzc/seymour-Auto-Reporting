@@ -73,6 +73,10 @@ function semicolonValues(value) {
   return citationText(value).split(';').map(text).filter(Boolean);
 }
 
+function sourceReferences(value) {
+  return citationText(value).split(/\s*(?:;|\s+\+\s+)\s*/).map(text).filter(Boolean);
+}
+
 function resolveVehicleDecision(decision, promptArtifact, title) {
   const rejected = { verified: false, decision: decision || null };
   if (decision?.resolved !== true) return rejected;
@@ -81,15 +85,20 @@ function resolveVehicleDecision(decision, promptArtifact, title) {
   if (![make, model, yearRange, source, evidence, decision.reason].every(value => text(value))) return rejected;
   const supplied = promptArtifact?.userPayload?.resolvedListing?.categoryPriorityEvidenceSources || [];
   const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates;
-  const titleCandidates = fitmentSelection?.candidates || [];
-  const trustedApplications = [
-    ...titleCandidates.map(item => ({ id: item.id, source: 'Title Fitment Candidate', evidence: item.evidence })),
-    ...supplied
-  ];
+  const titleCandidates = Array.isArray(fitmentSelection?.eligibleCandidates)
+    ? fitmentSelection.eligibleCandidates
+    : fitmentSelection?.candidates || [];
+  const hasParsedFitmentCandidates = Array.isArray(fitmentSelection?.candidates) && fitmentSelection.candidates.length > 0;
+  const trustedApplications = hasParsedFitmentCandidates
+    ? titleCandidates.map(item => ({ id: item.id, source: 'Title Fitment Candidate', evidence: item.evidence }))
+    : [
+        ...titleCandidates.map(item => ({ id: item.id, source: 'Title Fitment Candidate', evidence: item.evidence })),
+        ...supplied
+      ];
   if (!citation || trustedApplications.length === 0) return rejected;
   const years = text(yearRange).match(/^((?:19|20)\d{2})(?:-((?:19|20)\d{2}))?$/);
   if (!years || Number(years[1]) > Number(years[2] || years[1])) return rejected;
-  const sourceRefs = semicolonValues(source);
+  const sourceRefs = sourceReferences(source);
   const citationSegments = semicolonValues(citation);
   const cited = trustedApplications.filter(item => sourceRefs.includes(item.id) || sourceRefs.includes(item.source));
   const allSourcesExist = sourceRefs.length > 0 && sourceRefs.every(ref =>

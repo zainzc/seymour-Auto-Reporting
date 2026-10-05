@@ -4,6 +4,7 @@ const { Phase5ApprovalService, DEFAULT_LISTINGS_TABLE, normalizeText } = require
 const { Phase5EbayPublishService } = require('./phase5EbayPublishService');
 const { Phase5PublishLogService } = require('./phase5PublishLogService');
 const { validateBatchGovernanceSchema } = require('./phase5BatchGovernanceService');
+const { isTitleApprovedForPublish } = require('./titleReviewPublishGate');
 const {
   parseBoolean,
   parseCsvList,
@@ -381,6 +382,7 @@ function buildLogRow(record = {}, schema = {}, publishState = {}) {
 }
 
 function passesRequiredFieldGate(fields = {}, schema = {}, options = {}) {
+  if (!isTitleApprovedForPublish(fields)) return { ok: false, reason: 'title_needs_review' };
   const categoryIdField = normalizeText(options.phase5RequiredCategoryIdFieldName || schema.categoryIdField || '');
   const titleField = normalizeText(options.phase5RequiredTitleFieldName || schema.titleField || '');
   const descriptionField = normalizeText(options.phase5RequiredDescriptionFieldName || schema.descriptionField || '');

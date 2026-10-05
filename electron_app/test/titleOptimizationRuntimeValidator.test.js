@@ -181,7 +181,7 @@ test('accepts AI semantic category verification when its citation exists in trus
   assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), false);
 });
 
-test('AI safety approval converts semantic-only findings to non-blocking diagnostics', () => {
+test('legacy safety approval cannot override category evidence validation', () => {
   const inputs = baseInputs({
     candidateTitle: '2011 Honda Accord Illuminated Sun Visor Driver 00123',
     safetyDecision: {
@@ -202,13 +202,12 @@ test('AI safety approval converts semantic-only findings to non-blocking diagnos
 
   const result = validateTitleOptimizationRuntimeCandidate(inputs);
 
-  assert.equal(result.safeToContinue, true);
-  assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), false);
-  assert.equal(result.semanticSafety.safeToPublish, true);
-  assert.equal(result.warnings.some(item => item.checkId === 'category-priority-verification'), true);
+  assert.equal(result.safeToContinue, false);
+  assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), true);
+  assert.equal(result.semanticSafety, undefined);
 });
 
-test('AI safety approval prevents semantic warnings from forcing review', () => {
+test('legacy safety approval cannot suppress model ambiguity', () => {
   const inputs = baseInputs({
     safetyDecision: {
       safeToPublish: true,
@@ -223,12 +222,11 @@ test('AI safety approval prevents semantic warnings from forcing review', () => 
 
   const result = validateTitleOptimizationRuntimeCandidate(inputs);
 
-  assert.equal(result.outcome, 'PASS');
-  assert.equal(result.safeToContinue, true);
-  assert.equal(result.warnings.find(item => item.checkId === 'model-ambiguity')?.status, 'AI_ACCEPTED');
+  assert.equal(result.outcome, 'FLAG');
+  assert.equal(result.warnings.find(item => item.checkId === 'model-ambiguity')?.status, 'WARN');
 });
 
-test('rejects an internally inconsistent semantic audit that approves a material contradiction', () => {
+test('ignores removed semantic audit metadata', () => {
   const result = validate({
     safetyDecision: {
       safeToPublish: true,
@@ -244,11 +242,11 @@ test('rejects an internally inconsistent semantic audit that approves a material
     }
   });
 
-  assert.equal(result.safeToContinue, false);
-  assert.equal(result.violations.some(item => item.checkId === 'semantic-audit-consistency'), true);
+  assert.equal(result.safeToContinue, true);
+  assert.equal(result.violations.some(item => item.checkId === 'semantic-audit-consistency'), false);
 });
 
-test('accepts supported equivalents and nonmaterial optional omissions in semantic audit', () => {
+test('does not expose removed semantic audit results', () => {
   const result = validate({
     safetyDecision: {
       safeToPublish: true,
@@ -262,7 +260,69 @@ test('accepts supported equivalents and nonmaterial optional omissions in semant
   });
 
   assert.equal(result.safeToContinue, true);
-  assert.equal(result.semanticSafety.claims.length, 2);
+  assert.equal(result.semanticSafety, undefined);
+});
+
+test('does not validate the removed selected-facts and omission audit metadata', () => {
+  const result = validate({
+    selectedTitleFacts: {
+      keyDetails: ['With Illumination']
+    },
+    removedTitleDetails: [],
+    safetyDecision: {
+      safeToPublish: true,
+      reason: 'All material claims are supported.',
+      concerns: [],
+      claims: []
+    }
+  });
+
+  assert.equal(result.safeToContinue, true);
+  assert.equal(result.violations.some(item => item.checkId === 'title-fact-audit-consistency'), false);
+});
+
+test('accepts a selected key detail when its meaningful words are represented in the title', () => {
+  const result = validate({
+    candidateTitle: '2011 Honda Accord Driver Side View Mirror Lock Window ABS MPN-9 K24A BAYA VIN J 00123',
+    selectedTitleFacts: {
+      keyDetails: ['Lock And Window']
+    },
+    removedTitleDetails: [],
+    safetyDecision: {
+      safeToPublish: true,
+      reason: 'All material claims are supported.',
+      concerns: [],
+      claims: []
+    }
+  });
+
+  assert.equal(result.violations.some(item => item.checkId === 'title-fact-audit-consistency'), false);
+});
+
+test('does not reject legacy omission audit metadata', () => {
+  const result = validate({
+    selectedTitleFacts: { keyDetails: [] },
+    removedTitleDetails: [{
+      detail: 'From 02/17/08',
+      reason: 'Removed for space.',
+      safeToRemove: true
+    }],
+    safetyDecision: {
+      safeToPublish: true,
+      reason: 'All material claims are supported.',
+      concerns: [],
+      claims: [{
+        titleClaim: 'From 02/17/08',
+        dimension: 'fitment',
+        status: 'optional_omission',
+        evidence: 'From 02/17/08',
+        material: true
+      }]
+    }
+  });
+
+  assert.equal(result.safeToContinue, true);
+  assert.equal(result.violations.some(item => item.checkId === 'title-fact-audit-consistency'), false);
 });
 
 test('AI safety approval cannot waive objective title length enforcement', () => {
@@ -897,6 +957,22 @@ test('side decision accepts multiple trusted citations for side and placement', 
     placement: 'Front',
     source: 'evidence-side;evidence-placement',
     evidence: 'Drivers Door; Front'
+  };
+
+  assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'side-validation'), false);
+});
+
+test('placement-only side labels do not create false side conflicts', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Roof Center Console ABS 00123' });
+  inputs.sourceResolution.resolved.fields.side.resolvedValue = null;
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [
+    { id: 'placement-source', source: 'Current title', evidence: 'Roof Console Center' }
+  ] } };
+  inputs.sideDecision = {
+    side: 'Center',
+    placement: 'Roof Center',
+    source: 'placement-source',
+    evidence: 'Roof Console Center'
   };
 
   assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'side-validation'), false);

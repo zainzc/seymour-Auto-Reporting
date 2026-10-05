@@ -3,6 +3,7 @@ const { resolveApplicableTitleOptimizationRules } = require('./titleOptimization
 const { buildTitleOptimizationRuntimePrompt } = require('./titleOptimizationRuntimePromptBuilderService');
 const { validateTitleOptimizationRuntimeCandidate } = require('./titleOptimizationRuntimeValidatorService');
 const { decideTitleOptimizationRuntimeResult } = require('./titleOptimizationRuntimeDecisionService');
+const { buildFitmentReviewInput, checkedFitmentReview } = require('./titleOptimizationFitmentReviewService');
 
 const RUNTIME_STATUSES = Object.freeze({
   COMPLETED: 'COMPLETED',
@@ -49,6 +50,7 @@ function baseResult(listing = {}) {
     validation: null,
     decision: null,
     attempts: [],
+    fitmentReview: null,
     errors: []
   };
 }
@@ -80,27 +82,6 @@ function writableOutput(aiResult = {}, decision = {}, proposedTitle = '') {
 
 function acceptedReviewNotes(aiResult = {}, decision = {}) {
   const notes = [];
-  const selected = aiResult.selectedTitleFacts && typeof aiResult.selectedTitleFacts === 'object'
-    ? aiResult.selectedTitleFacts
-    : null;
-  if (selected) {
-    const selectedFacts = [
-      selected.yearRange,
-      selected.make,
-      selected.model,
-      selected.side,
-      selected.placement,
-      selected.part
-    ].map(normalizeText).filter(Boolean).join(' ');
-    if (selectedFacts) notes.push(`Selected facts: ${selectedFacts}.`);
-    const keyDetails = Array.isArray(selected.keyDetails)
-      ? selected.keyDetails.map(normalizeText).filter(Boolean)
-      : [];
-    if (keyDetails.length) notes.push(`Kept key detail${keyDetails.length > 1 ? 's' : ''}: ${keyDetails.join(', ')}.`);
-    if (normalizeText(selected.evidenceSummary)) notes.push(selected.evidenceSummary.endsWith('.')
-      ? selected.evidenceSummary
-      : `${selected.evidenceSummary}.`);
-  }
   const vehicle = aiResult.vehicleDecision || {};
   const vehicleIdentity = [vehicle.yearRange, vehicle.make, vehicle.model].map(normalizeText).filter(Boolean).join(' ');
   if (vehicle.resolved === true && vehicleIdentity) {
@@ -116,11 +97,6 @@ function acceptedReviewNotes(aiResult = {}, decision = {}) {
     .map(item => normalizeText(item.detail))
     .filter(detail => detail && !/missing|cannot|conflict|degrade|uncertain|review|too long/i.test(detail));
   if (details.length) notes.push(`Applied verified category detail${details.length > 1 ? 's' : ''}: ${details.join(', ')}.`);
-  const removed = (Array.isArray(aiResult.removedTitleDetails) ? aiResult.removedTitleDetails : [])
-    .filter(item => item?.safeToRemove === true)
-    .map(item => normalizeText(item.detail))
-    .filter(Boolean);
-  if (removed.length) notes.push(`Safely omitted: ${removed.join(', ')}.`);
   if (!notes.length) notes.push('Generated title accepted after evidence and safety validation.');
   const finalTitle = normalizeText(decision.finalTitle);
   if (finalTitle) notes.push(`Final title: ${finalTitle}.`);
@@ -280,8 +256,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
       candidateTitle: aiResult.generatedTitle || '',
       categoryPriorityDetails: aiResult.categoryPriorityDetails || [],
       sideDecision: aiResult.sideDecision,
-      vehicleDecision: aiResult.vehicleDecision,
-      safetyDecision: aiResult.safetyDecision
+      vehicleDecision: aiResult.vehicleDecision
     });
     result.validation = validation;
   } catch (error) {
@@ -328,8 +303,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
       const correctedValidation = (dependencies.validate || validateTitleOptimizationRuntimeCandidate)({
         snapshot, sourceResolution, ruleResolution, promptArtifact: correctionPrompt,
         candidateTitle: correctedAi.generatedTitle, categoryPriorityDetails: correctedAi.categoryPriorityDetails || [],
-        sideDecision: correctedAi.sideDecision, vehicleDecision: correctedAi.vehicleDecision,
-        safetyDecision: correctedAi.safetyDecision
+        sideDecision: correctedAi.sideDecision, vehicleDecision: correctedAi.vehicleDecision
       });
       const correctedDecision = (dependencies.decide || decideTitleOptimizationRuntimeResult)({
         snapshot, sourceResolution, ruleResolution, promptArtifact: correctionPrompt, validationResult: correctedValidation
@@ -370,8 +344,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
         candidateTitle: compressedAi.generatedTitle,
         categoryPriorityDetails: compressedAi.categoryPriorityDetails || [],
         sideDecision: compressedAi.sideDecision,
-        vehicleDecision: compressedAi.vehicleDecision,
-        safetyDecision: compressedAi.safetyDecision
+        vehicleDecision: compressedAi.vehicleDecision
       });
       const compressedDecision = (dependencies.decide || decideTitleOptimizationRuntimeResult)({
         snapshot, sourceResolution, ruleResolution, promptArtifact: compressionPrompt,
@@ -386,6 +359,81 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
       result.attempts.push(recordAttempt());
     } catch (error) {
       result.errors.push({ stage: 'COMPRESSION_FAILURE', message: sanitizeError(error) });
+    }
+  }
+
+  const accepted = () => decision?.decision === 'ACCEPT_CANDIDATE' && decision.reviewRequired !== true;
+  const withFitmentReview = async () => {
+    if (typeof dependencies.reviewTitleFitment !== 'function') throw new Error('Fitment review service is unavailable.');
+    const input = buildFitmentReviewInput({
+      title: decision.finalTitle, promptArtifact, vehicleDecision: aiResult.vehicleDecision
+    });
+    const response = await dependencies.reviewTitleFitment({ ...input, listing, options });
+    return checkedFitmentReview(response, input);
+  };
+  const requireFitmentReview = (reason, citedRowIds = []) => {
+    const detail = normalizeText(reason) || 'Fitment review could not confirm the final title.';
+    result.fitmentReview = { verdict: 'REVIEW', reason: detail, citedRowIds };
+    decision = {
+      ...decision,
+      decision: 'NEEDS_REVIEW',
+      reviewRequired: true,
+      reviewReason: 'Fitment claim requires review',
+      reviewNotes: detail,
+      degradationChecks: [...(decision?.degradationChecks || []), {
+        checkId: 'ai-fitment-review', status: 'FAIL', message: detail
+      }]
+    };
+    result.decision = decision;
+  };
+  if (accepted() && promptArtifact?.kind !== 'title-generation-bypass') {
+    let review;
+    try {
+      review = await withFitmentReview();
+      result.fitmentReview = review;
+    } catch (error) {
+      requireFitmentReview(`Independent fitment review failed: ${sanitizeError(error)}`);
+    }
+    if (review?.verdict === 'REVIEW') {
+      const reviewReason = review.reason;
+      try {
+        const correctedAi = await executeAi({
+          ...promptArtifact,
+          userPayload: { ...promptArtifact.userPayload, correction: {
+            previousTitle: normalizeText(decision.finalTitle),
+            fitmentReview: review,
+            instruction: 'An independent review found a material fitment problem in the final title. Correct the cited problem using the original listing evidence and configured title structure. A condition that applies only to some years must not be applied to every year or omitted so that restricted years appear unrestricted. Keep the advertised application and all required restrictions truthful. If no accurate title fits within 80 characters, return Needs Review with a precise explanation. Do not remove a material restriction merely to pass review. Return the complete original output contract.'
+          } }
+        });
+        if (!normalizeText(correctedAi?.generatedTitle)) throw new Error('Fitment correction returned no title.');
+        const correctedValidation = (dependencies.validate || validateTitleOptimizationRuntimeCandidate)({
+          snapshot, sourceResolution, ruleResolution, promptArtifact,
+          candidateTitle: correctedAi.generatedTitle,
+          categoryPriorityDetails: correctedAi.categoryPriorityDetails || [],
+          sideDecision: correctedAi.sideDecision, vehicleDecision: correctedAi.vehicleDecision
+        });
+        const correctedDecision = (dependencies.decide || decideTitleOptimizationRuntimeResult)({
+          snapshot, sourceResolution, ruleResolution, promptArtifact, validationResult: correctedValidation
+        });
+        aiResult = correctedAi;
+        validation = correctedValidation;
+        decision = correctedDecision;
+        result.aiResult = aiResult;
+        result.validation = validation;
+        result.decision = decision;
+        result.attempts.push(recordAttempt());
+        if (accepted()) {
+          const secondReview = await withFitmentReview();
+          result.fitmentReview = secondReview;
+          if (secondReview.verdict === 'REVIEW') requireFitmentReview(secondReview.reason, secondReview.citedRowIds);
+        }
+      } catch (error) {
+        result.errors.push({ stage: 'FITMENT_REVIEW_CORRECTION_FAILURE', message: sanitizeError(error) });
+        requireFitmentReview(`Independent fitment review could not accept the title: ${sanitizeError(error)}`);
+      }
+      if (!accepted() && result.fitmentReview === review) {
+        requireFitmentReview([reviewReason, normalizeText(decision.reviewNotes)].filter(Boolean).join(' '), review.citedRowIds);
+      }
     }
   }
 
@@ -406,9 +454,9 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
       `decision='${decision?.decision || ''}' reviewReason='${result.output.reviewReason}' ` +
       `failedChecks='${failedCheckSummary(decision)}' ` +
       `generationCalls=${generationCalls} ` +
+      `fitmentReview=${JSON.stringify(result.fitmentReview)} ` +
       `sideDecision=${JSON.stringify(aiResult.sideDecision || null)} ` +
       `vehicleDecision=${JSON.stringify(validation.vehicleVerification || null)} ` +
-      `safetyDecision=${JSON.stringify(validation.semanticSafety || null)} ` +
       `attempts=${JSON.stringify(result.attempts)} ` +
       `categoryPriorityDetails=${categoryPriorityDetailsSummary(aiResult)}`
   );

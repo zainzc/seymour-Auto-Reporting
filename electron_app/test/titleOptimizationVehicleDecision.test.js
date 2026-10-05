@@ -53,6 +53,36 @@ test('vehicle decision accepts multiple trusted source IDs for one continuous ap
     '2007-2012 Nissan Altima Master Window Switch Driver 1375500').verified, true);
 });
 
+test('vehicle decision accepts plus-separated cited candidate IDs', () => {
+  const candidates = [
+    { id: 'title-fitment-001', evidence: '2008-2013 Nissan Rogue Starter Motor' },
+    { id: 'title-fitment-002', evidence: '2014-2015 Nissan Rogue Starter Motor VIN J Japan-built' }
+  ];
+  const artifact = { userPayload: { resolvedListing: { titleFitmentCandidates: { candidates, eligibleCandidates: candidates } } } };
+  const decision = {
+    resolved: true, make: 'Nissan', model: 'Rogue', yearRange: '2008-2015',
+    source: 'title-fitment-001 + title-fitment-002',
+    evidence: candidates.map(item => item.evidence).join('; '), reason: 'Continuous fitment.'
+  };
+  assert.equal(resolveVehicleDecision(decision, artifact,
+    '2008-2015 Nissan Rogue Starter Motor 1591087').verified, true);
+});
+
+test('vehicle decision leaves year-scoped VIN meaning to independent fitment review', () => {
+  const candidates = [
+    { id: 'title-fitment-001', evidence: '2008-2013 Nissan Rogue Starter Motor' },
+    { id: 'title-fitment-002', evidence: '2014-2015 Nissan Rogue Starter Motor VIN J Japan-built' }
+  ];
+  const artifact = { userPayload: { resolvedListing: { titleFitmentCandidates: { candidates, eligibleCandidates: candidates } } } };
+  const decision = {
+    resolved: true, make: 'Nissan', model: 'Rogue', yearRange: '2008-2015',
+    source: 'title-fitment-001;title-fitment-002',
+    evidence: candidates.map(item => item.evidence).join('; '), reason: 'Continuous fitment.'
+  };
+  assert.equal(resolveVehicleDecision(decision, artifact,
+    '2008-2015 Nissan Rogue Starter Motor VIN J Japan Built 1591087').verified, true);
+});
+
 test('citation formatting is tolerated but invented or inaccurate excerpts are rejected', () => {
   const title = '2010-2012 Ford Fusion Control 123';
   for (const [open, close] of [['"', '"'], ["'", "'"], ['\u201c', '\u201d'], ['`', '`']]) {
@@ -120,6 +150,55 @@ test('vehicle decision may select a cited advertised application from an ambiguo
     '2001-2005 Hyundai Accent Throttle Body 1584124').verified, true);
   assert.equal(resolveVehicleDecision({ ...selected, evidence: '2007 Hyundai Accent throttle body' }, artifact,
     '2007 Hyundai Accent Throttle Body 1584124').verified, false);
+});
+
+test('vehicle decision rejects a donor candidate excluded by the advertised Fits application', () => {
+  const artifact = { userPayload: { resolvedListing: {
+    titleFitmentCandidates: {
+      candidates: [
+        { id: 'title-fitment-001', evidence: '2007-2009 Dodge Nitro Starter Motor 3.7L' },
+        { id: 'title-fitment-002', evidence: '2008-2012 Jeep Liberty Starter Motor 3.7L' }
+      ],
+      eligibleCandidates: [
+        { id: 'title-fitment-001', evidence: '2007-2009 Dodge Nitro Starter Motor 3.7L' }
+      ],
+      selectionBasis: 'EXISTING_TITLE_FITS_APPLICATION'
+    }
+  } } };
+  const donor = {
+    resolved: true, make: 'Jeep', model: 'Liberty', yearRange: '2008-2012',
+    source: 'title-fitment-002', evidence: '2008-2012 Jeep Liberty Starter Motor 3.7L',
+    reason: 'Donor vehicle.'
+  };
+  const advertised = {
+    resolved: true, make: 'Dodge', model: 'Nitro', yearRange: '2007-2009',
+    source: 'title-fitment-001', evidence: '2007-2009 Dodge Nitro Starter Motor 3.7L',
+    reason: 'Application advertised after Fits.'
+  };
+
+  assert.equal(resolveVehicleDecision(donor, artifact,
+    '2008-2012 Jeep Liberty Starter Motor 1589513').verified, false);
+  assert.equal(resolveVehicleDecision(advertised, artifact,
+    '2007-2009 Dodge Nitro Starter Motor 1589513').verified, true);
+});
+
+test('vehicle decision cannot bypass an unmatched advertised application through broad Part Fitment evidence', () => {
+  const sourceEvidence = '2008-2012 Jeep Liberty Starter Motor 3.7L';
+  const artifact = { userPayload: { resolvedListing: {
+    titleFitmentCandidates: {
+      candidates: [{ id: 'title-fitment-001', evidence: sourceEvidence }],
+      eligibleCandidates: [],
+      selectionBasis: 'EXISTING_TITLE_FITS_APPLICATION_UNMATCHED'
+    },
+    categoryPriorityEvidenceSources: [{ id: 'fitment', source: 'Part Fitment', evidence: sourceEvidence }]
+  } } };
+  const donor = {
+    resolved: true, make: 'Jeep', model: 'Liberty', yearRange: '2008-2012',
+    source: 'fitment', evidence: sourceEvidence, reason: 'Only donor application available.'
+  };
+
+  assert.equal(resolveVehicleDecision(donor, artifact,
+    '2008-2012 Jeep Liberty Starter Motor 1589513').verified, false);
 });
 
 test('vehicle evidence supports multiword makes and models without positional parsing', () => {

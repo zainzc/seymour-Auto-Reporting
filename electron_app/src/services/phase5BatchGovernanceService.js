@@ -1,5 +1,6 @@
 const AirtableService = require('./airtableService');
 const AirtableSchemaService = require('./airtableSchemaService');
+const { isTitleApprovedForPublish } = require('./titleReviewPublishGate');
 const { Phase5ApprovalService, DEFAULT_LISTINGS_TABLE, normalizeText } = require('./phase5ApprovalService');
 const {
   parseBoolean,
@@ -117,6 +118,7 @@ function passCoreGate(fields = {}, schema = {}, options = {}) {
   const hasException = exceptionField ? !isExceptionResolved(fields[exceptionField], resolvedExceptionValues) : false;
 
   const eligible =
+    isTitleApprovedForPublish(fields) &&
     hasSku &&
     hasCategory &&
     hasTitle &&

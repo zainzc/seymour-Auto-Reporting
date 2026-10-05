@@ -33,6 +33,7 @@ function dependencies(overrides = {}) {
         titleReviewNotes: 'Runtime accepted'
       };
     },
+    reviewTitleFitment: async () => ({ verdict: 'PASS', reason: 'Final title preserves the cited application.', citedRowIds: [] }),
     validate: () => {
       calls.push('validate');
       return {
@@ -81,6 +82,75 @@ test('runtime corrects a rejected proposal once and revalidates before accepting
   assert.equal(validations, 2);
   assert.equal(result.output.title, 'Corrected Sedan title');
   assert.equal(result.attempts.length, 2);
+});
+
+test('independent fitment review checks the final title and blocks a failed review', async () => {
+  const seen = [];
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    reviewTitleFitment: async input => {
+      seen.push(input.title);
+      return { verdict: 'REVIEW', reason: '2014-2015 requires VIN J; the title claims unrestricted fitment.', citedRowIds: ['title-fitment-002'] };
+    },
+    buildPrompt: () => ({ kind: 'prompt', userPayload: { resolvedListing: { titleFitmentCandidates: {
+      eligibleCandidates: [{ id: 'title-fitment-002', evidence: '2014-2015 Nissan Rogue VIN J' }]
+    } } } }),
+    executeAi: async ({ promptArtifact }) => ({ generatedTitle: promptArtifact.userPayload.correction
+      ? '2008-2015 Nissan Rogue Starter Motor 1591087'
+      : '2008-2015 Nissan Rogue Starter Motor VIN J 1591087' }),
+    validate: ({ candidateTitle }) => ({ outcome: 'PASS', validatedTitle: candidateTitle, violations: [], warnings: [] }),
+    decide: ({ validationResult }) => ({ decision: 'ACCEPT_CANDIDATE', finalTitle: validationResult.validatedTitle,
+      reviewRequired: false, degradationChecks: [] })
+  }) });
+  assert.equal(seen.length, 2);
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.match(result.output.reviewNotes, /2014-2015 requires VIN J/);
+});
+
+test('independent fitment review accepts a corrected title only after reviewing that exact title', async () => {
+  const seen = [];
+  let generationCalls = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    executeAi: async () => ({ generatedTitle: ++generationCalls === 1 ? 'Unsafe title 123' : 'Corrected title 123' }),
+    reviewTitleFitment: async input => {
+      seen.push(input.title);
+      return { verdict: seen.length === 1 ? 'REVIEW' : 'PASS',
+        reason: seen.length === 1 ? 'A material condition is missing.' : 'Condition is preserved.', citedRowIds: [] };
+    },
+    validate: ({ candidateTitle }) => ({ outcome: 'PASS', validatedTitle: candidateTitle, violations: [], warnings: [] }),
+    decide: ({ validationResult }) => ({ decision: 'ACCEPT_CANDIDATE', finalTitle: validationResult.validatedTitle,
+      reviewRequired: false, degradationChecks: [] })
+  }) });
+  assert.deepEqual(seen, ['Unsafe title 123', 'Corrected title 123']);
+  assert.equal(result.output.title, 'Corrected title 123');
+  assert.equal(result.output.reviewStatus, 'Completed');
+});
+
+test('fitment reviewer failure cannot write an accepted title', async () => {
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    reviewTitleFitment: async () => { throw new Error('review unavailable'); }
+  }) });
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.match(result.output.reviewNotes, /review unavailable/i);
+});
+
+test('a rejected fitment correction retains the review finding in Airtable notes', async () => {
+  let generationCalls = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    executeAi: async () => ({ generatedTitle: ++generationCalls === 1 ? 'Initial title 123' : 'Still unsafe 123' }),
+    reviewTitleFitment: async () => ({ verdict: 'REVIEW', reason: 'Later years require a build restriction.', citedRowIds: [] }),
+    validate: ({ candidateTitle }) => ({ outcome: 'PASS', validatedTitle: candidateTitle, violations: [] }),
+    decide: ({ validationResult }) => ({
+      decision: generationCalls === 1 ? 'ACCEPT_CANDIDATE' : 'RETAIN_EXISTING',
+      finalTitle: validationResult.validatedTitle,
+      reviewRequired: generationCalls !== 1,
+      reviewNotes: 'Correction did not meet title requirements.',
+      degradationChecks: []
+    })
+  }) });
+  assert.equal(result.output.title, '');
+  assert.match(result.output.reviewNotes, /Later years require a build restriction/);
 });
 
 test('correction tells AI to remove only redundant wording and preserves verified vehicle application', async () => {
@@ -365,7 +435,7 @@ test('runtime log exposes category priority verification decisions and evidence'
   assert.match(messages[0], /"detail":"Multifunction","verified":false,"source":null,"evidence":null/);
 });
 
-test('runtime passes and logs the AI semantic safety decision', async () => {
+test('runtime does not pass or log removed semantic audit metadata', async () => {
   const messages = [];
   let receivedSafetyDecision = null;
   const safetyDecision = {
@@ -393,13 +463,13 @@ test('runtime passes and logs the AI semantic safety decision', async () => {
     logger: { info: message => messages.push(message) }
   }) });
 
-  assert.deepEqual(receivedSafetyDecision, safetyDecision);
+  assert.equal(receivedSafetyDecision, undefined);
   assert.equal(result.output.reviewStatus, 'Completed');
-  assert.match(messages[0], /safetyDecision=/);
-  assert.match(messages[0], /Equivalent brand wording/);
+  assert.doesNotMatch(messages[0], /safetyDecision=/);
+  assert.doesNotMatch(messages[0], /Equivalent brand wording/);
 });
 
-test('runtime carries selected facts and removal audit into accepted review notes', async () => {
+test('runtime review notes use retained vehicle decisions without removed audit metadata', async () => {
   const selectedTitleFacts = {
     yearRange: '2007-2012',
     make: 'Nissan',
@@ -452,13 +522,12 @@ test('runtime carries selected facts and removal audit into accepted review note
   }) });
 
   assert.equal(result.output.reviewStatus, 'Completed');
-  assert.match(result.output.reviewNotes, /Selected facts: 2007-2012 Nissan Altima Driver Front Door Switch/);
-  assert.match(result.output.reviewNotes, /Kept key detail: Lock And Window/);
-  assert.match(result.output.reviewNotes, /Safely omitted: Fits/);
+  assert.match(result.output.reviewNotes, /Verified vehicle application: 2007-2012 Nissan Altima/);
+  assert.doesNotMatch(result.output.reviewNotes, /Selected facts|Kept key detail|Safely omitted/);
   assert.doesNotMatch(result.output.reviewNotes, /deterministic validation/i);
 });
 
-test('AI semantic audit failure uses the existing correction path and accepts the repaired title', async () => {
+test('legacy semantic audit metadata does not trigger a correction call', async () => {
   let aiCalls = 0;
   const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
     executeAi: async () => {
@@ -483,22 +552,18 @@ test('AI semantic audit failure uses the existing correction path and accepts th
         }
       };
     },
-    validate: ({ candidateTitle, safetyDecision }) => ({
+    validate: ({ candidateTitle }) => ({
       outcome: 'PASS', validatedTitle: candidateTitle, safeToContinue: true,
-      violations: [], warnings: [], semanticSafety: { supplied: true, ...safetyDecision }
+      violations: [], warnings: []
     }),
-    decide: ({ validationResult }) => validationResult.semanticSafety.safeToPublish ? {
+    decide: ({ validationResult }) => ({
       decision: 'ACCEPT_CANDIDATE', finalTitle: validationResult.validatedTitle,
       reviewRequired: false, degradationChecks: []
-    } : {
-      decision: 'NEEDS_REVIEW', finalTitle: validationResult.validatedTitle,
-      reviewRequired: true,
-      degradationChecks: [{ checkId: 'ai-semantic-safety', status: 'FAIL', message: validationResult.semanticSafety.reason }]
-    }
+    })
   }) });
 
-  assert.equal(aiCalls, 2);
-  assert.equal(result.output.title, 'Correct semantic title 00123');
+  assert.equal(aiCalls, 1);
+  assert.equal(result.output.title, 'Wrong semantic title 00123');
   assert.equal(result.output.reviewStatus, 'Completed');
 });
 

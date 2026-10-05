@@ -301,7 +301,7 @@ function appendCheck(target, record, { corrections, violations, warnings }) {
   if (record.status === 'WARN' || record.status === 'CANNOT_VERIFY') warnings.push(record);
 }
 
-function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, ruleResolution = {}, promptArtifact = {}, candidateTitle = '', categoryPriorityDetails, sideDecision, vehicleDecision, safetyDecision } = {}) {
+function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, ruleResolution = {}, promptArtifact = {}, candidateTitle = '', categoryPriorityDetails, sideDecision, vehicleDecision } = {}) {
   const vehicleVerification = resolveVehicleDecision(vehicleDecision, promptArtifact, candidateTitle);
   sourceResolution = vehicleSourceResolution(sourceResolution, vehicleVerification);
   const originalCandidate = candidateTitle === null || candidateTitle === undefined ? '' : String(candidateTitle);
@@ -311,20 +311,6 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
   const warnings = [];
   const suggestedReviewReasons = [];
   let title = originalCandidate;
-  const semanticSafety = {
-    supplied: Boolean(safetyDecision && typeof safetyDecision.safeToPublish === 'boolean'),
-    safeToPublish: safetyDecision?.safeToPublish === true,
-    reason: normalizeText(safetyDecision?.reason),
-    concerns: Array.isArray(safetyDecision?.concerns) ? safetyDecision.concerns.map(normalizeText).filter(Boolean) : [],
-    claims: Array.isArray(safetyDecision?.claims) ? safetyDecision.claims.map(claim => ({
-      titleClaim: normalizeText(claim?.titleClaim),
-      dimension: normalizeText(claim?.dimension),
-      status: normalizeText(claim?.status),
-      evidence: claim?.evidence == null ? null : normalizeText(claim.evidence),
-      material: claim?.material === true
-    })) : []
-  };
-
   const resultBase = () => ({
     contractVersion: 1,
     runtimeMode: 'authoritative',
@@ -341,8 +327,7 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
     warnings,
     suggestedReviewReasons,
     vehicleVerification,
-    categoryPriorityDetails: Array.isArray(categoryPriorityDetails) ? categoryPriorityDetails : [],
-    semanticSafety
+    categoryPriorityDetails: Array.isArray(categoryPriorityDetails) ? categoryPriorityDetails : []
   });
 
   if (promptArtifact?.kind === 'title-generation-bypass' || sourceResolution?.normalized?.manualOverride?.active) {
@@ -573,8 +558,11 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
   const titleSideEvidence = sourceResolution?.normalized?.derived?.sideFromTitle?.value;
   const fitmentSide = canonicalSide(partFitment);
   let supportedSide = canonicalSide(explicitSide) ? explicitSide : titleSideEvidence || (fitmentSide ? sideLabel(fitmentSide) : '');
-  if (sideDecision?.side) {
-    const selected = canonicalSide(sideDecision.side);
+  const selectedSide = canonicalSide(sideDecision?.side);
+  const placementOnlySideLabel = Boolean(sideDecision?.side) && !selectedSide &&
+    /^(?:front|rear|upper|lower|center|centre|roof|dash|decklid|interior|exterior)(?:\s+(?:front|rear|upper|lower|center|centre|roof|dash|decklid|interior|exterior))*$/i.test(normalizeText(sideDecision.side));
+  if (sideDecision?.side && !placementOnlySideLabel) {
+    const selected = selectedSide;
     const citation = normalizeCitationText(sideDecision.evidence);
     const sources = promptArtifact?.userPayload?.resolvedListing?.categoryPriorityEvidenceSources || [];
     const sourceRefs = normalizeText(sideDecision.source).split(';').map(normalizeText).filter(Boolean);
@@ -831,48 +819,6 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
       severity: 'error',
       message: 'Final candidate failed 80-character invariant recheck.'
     }));
-  }
-
-  const contradictoryAuditClaims = semanticSafety.claims.filter(claim =>
-    claim.material && ['contradictory', 'invented'].includes(claim.status));
-  if (semanticSafety.supplied && semanticSafety.safeToPublish && contradictoryAuditClaims.length) {
-    append(checkRecord({
-      checkId: 'semantic-audit-consistency',
-      status: 'FAIL',
-      severity: 'error',
-      message: `AI semantic audit approved a title despite material ${contradictoryAuditClaims.map(claim => claim.status).join(', ')} claim findings.`
-    }));
-  }
-
-  if (semanticSafety.supplied && semanticSafety.safeToPublish && !contradictoryAuditClaims.length) {
-    const objectiveChecks = new Set([
-      'blank-title',
-      'restricted-never-introduce',
-      'long-short-block-protection',
-      'side-validation',
-      'mpn-validation',
-      'restricted-requires-authorization',
-      'length-80',
-      'final-invariant-recheck',
-      'semantic-audit-consistency'
-    ]);
-    for (let index = violations.length - 1; index >= 0; index -= 1) {
-      const violation = violations[index];
-      if (objectiveChecks.has(violation.checkId)) continue;
-      violations.splice(index, 1);
-      warnings.push({
-        ...violation,
-        status: 'AI_ACCEPTED',
-        severity: 'info',
-        message: `${violation.message} AI semantic safety review accepted the generated title: ${semanticSafety.reason}`
-      });
-    }
-    for (const warning of warnings) {
-      if (warning.status === 'AI_ACCEPTED' || warning.checkId === 'sku-missing-source') continue;
-      warning.status = 'AI_ACCEPTED';
-      warning.severity = 'info';
-      warning.message = `${warning.message} AI semantic safety review accepted the generated title: ${semanticSafety.reason}`;
-    }
   }
 
   const out = resultBase();

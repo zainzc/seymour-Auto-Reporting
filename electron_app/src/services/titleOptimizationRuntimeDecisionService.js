@@ -393,22 +393,7 @@ function decideTitleOptimizationRuntimeResult({ sourceResolution = {}, ruleResol
     return finish(result, DECISIONS.BLOCKED, reasons);
   }
 
-  const semanticSafety = validationResult.semanticSafety || {};
-  if (semanticSafety.supplied && semanticSafety.safeToPublish === false) {
-    result.degradationChecks.push(degradationCheck({
-      checkId: 'ai-semantic-safety',
-      status: 'FAIL',
-      severity: 'error',
-      candidateValue: candidate,
-      evidence: semanticSafety.concerns || [],
-      message: semanticSafety.reason || 'AI semantic safety review found a material title risk.'
-    }));
-    result.finalTitle = candidate;
-    return finish(result, DECISIONS.NEEDS_REVIEW, reasons);
-  }
-
-  const aiOwnsSemantics = semanticSafety.supplied && semanticSafety.safeToPublish === true;
-  const comparisonChecks = existing && !aiOwnsSemantics
+  const comparisonChecks = existing
     ? criticalLossChecks({ sourceResolution, ruleResolution, candidateTitle: candidate, existing })
     : [];
   result.degradationChecks.push(...comparisonChecks);
@@ -418,7 +403,7 @@ function decideTitleOptimizationRuntimeResult({ sourceResolution = {}, ruleResol
     return finish(result, DECISIONS.RETAIN_EXISTING, reasons);
   }
 
-  const conflictChecks = aiOwnsSemantics ? [] : materialConflictChecks(sourceResolution, ruleResolution);
+  const conflictChecks = materialConflictChecks(sourceResolution, ruleResolution);
   result.degradationChecks.push(...conflictChecks);
   if (conflictChecks.length) addReason(reasons, approvedReason(ruleResolution, 'Conflicting source data'));
 
@@ -434,7 +419,7 @@ function decideTitleOptimizationRuntimeResult({ sourceResolution = {}, ruleResol
   }
 
   if (
-    !aiOwnsSemantics && sourceResolution?.resolved?.modelAmbiguity?.ambiguous &&
+    sourceResolution?.resolved?.modelAmbiguity?.ambiguous &&
     !modelAmbiguityResolvedByCandidate(sourceResolution, candidate)
   ) {
     const modelReason = approvedReason(ruleResolution, 'Model cannot be normalized safely');

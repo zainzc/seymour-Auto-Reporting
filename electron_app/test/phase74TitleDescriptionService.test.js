@@ -3,8 +3,19 @@ const assert = require('node:assert/strict');
 
 const {
   applyAcceptedRuntimeTitle,
-  runtimeOutputFailure
+  runtimeOutputFailure,
+  shouldSkipEnrichedListing
 } = require('../src/services/phase74TitleDescriptionService');
+
+test('explicit IPN runs retry Needs Review rows without reprocessing completed rows', () => {
+  const fields = {
+    'Item Title': 'Previous title', 'Item Description': 'Previous description',
+    'Title Review Status': 'Needs Review'
+  };
+  assert.equal(shouldSkipEnrichedListing(fields, false), true);
+  assert.equal(shouldSkipEnrichedListing(fields, true), false);
+  assert.equal(shouldSkipEnrichedListing({ ...fields, 'Title Review Status': 'Completed' }, true), true);
+});
 
 function runtime(decision, title) {
   return {

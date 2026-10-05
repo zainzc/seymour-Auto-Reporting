@@ -817,6 +817,14 @@ function applyAcceptedRuntimeTitle(writeFields = {}, existingFields = {}, runtim
   return addFieldIfChanged(writeFields, existingFields, LISTING_OUTPUT_TITLE_FIELD, title);
 }
 
+function shouldSkipEnrichedListing(fields = {}, explicitIpnRun = false) {
+  const title = normalizeText(fields[LISTING_OUTPUT_TITLE_FIELD]);
+  const description = normalizeText(fields[LISTING_OUTPUT_DESCRIPTION_FIELD]);
+  const status = normalizeText(fields[LISTING_TITLE_REVIEW_STATUS_FIELD]);
+  return Boolean(title && description && status &&
+    !(explicitIpnRun && status.toLowerCase() === TITLE_REVIEW_STATUS_NEEDS_REVIEW.toLowerCase()));
+}
+
 function isManualOverrideForField(listingFields = {}, fieldName = '') {
   return isManualOverrideFromGovernance(listingFields, fieldName);
 }
@@ -1042,10 +1050,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       continue;
     }
 
-    const existingTitle = normalizeText(fields[LISTING_OUTPUT_TITLE_FIELD]);
-    const existingDescription = normalizeText(fields[LISTING_OUTPUT_DESCRIPTION_FIELD]);
-    const existingReviewStatus = normalizeText(fields[LISTING_TITLE_REVIEW_STATUS_FIELD]);
-    if (existingTitle && existingDescription && existingReviewStatus) {
+    if (shouldSkipEnrichedListing(fields, testIpnSet.size > 0)) {
       summary.skippedAlreadyEnriched += 1;
       continue;
     }
@@ -1182,7 +1187,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         },
         dependencies: {
           loadSnapshot: options.titleOptimizationRuntimeLoadSnapshot,
-          executeAi: ({ promptArtifact }) => aiService.generateTitleAndDescriptionFromRuntimePrompt(promptArtifact)
+          executeAi: ({ promptArtifact }) => aiService.generateTitleAndDescriptionFromRuntimePrompt(promptArtifact),
+          reviewTitleFitment: input => aiService.reviewTitleFitment(input)
         }
       });
     } catch (error) {
@@ -1425,6 +1431,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
 module.exports = {
   runPhase74TitleDescription,
   applyAcceptedRuntimeTitle,
-  runtimeOutputFailure
+  runtimeOutputFailure,
+  shouldSkipEnrichedListing
 };
 
