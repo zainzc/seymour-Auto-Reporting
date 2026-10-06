@@ -247,9 +247,12 @@ test('treats a structured single year as evidence while AI selects a supported f
   assert.match(text, /evaluate every supplied Part Fitment row/i);
   assert.match(text, /do not select a narrower subset merely because it matches the donor year/i);
   assert.match(text, /restriction applies to only part of a combined range/i);
+  assert.match(text, /eligible titleFitmentCandidate ID in source.*trusted row evidence/i);
   assert.match(text, /build dates, VIN splits, engine or transmission variants, body styles, trims, cab types, door counts/i);
   assert.match(text, /malformed, impossible, or internally inconsistent/i);
   assert.match(text, /cannot be represented accurately within 80 characters/i);
+  assert.match(text, /before drafting generatedTitle.*material restrictions/i);
+  assert.match(text, /optional.*part number.*before.*fitment restriction/i);
   assert.equal(listing.titleFitmentCandidates.decisionPolicy.owner, 'AI');
   assert.deepEqual(listing.titleFitmentCandidates.decisionPolicy.allowedOutcomes, [
     'COMBINE_COMPATIBLE_CONTINUOUS_ROWS',
@@ -308,6 +311,18 @@ test('keeps separate fitment candidates when trusted data cannot safely narrow t
   assert.notEqual(selection.candidates[0].id, selection.candidates[1].id);
 });
 
+test('newline-delimited fitment rows keep independent year-scoped evidence', () => {
+  const inputs = buildInputs({ 'Item Title': '2014 Nissan Starter Fits 08-15 ROGUE 1234567' });
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '2014 Nissan Starter Fits 08-15 ROGUE 1234567';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '2008-2013 Nissan Rogue Starter\n2014-2015 Nissan Rogue Starter VIN J';
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+  assert.deepEqual(selection.eligibleCandidates.map(row => [row.startYear, row.endYear]), [
+    [2008, 2013], [2014, 2015]
+  ]);
+});
+
 test('restricts eligible fitment candidates to the application advertised after Fits', () => {
   const inputs = buildInputs({
     'Item Title': '2008 Jeep Liberty Starter Motor Fits 07-09 NITRO 04801292AC 1589513'
@@ -338,6 +353,65 @@ test('restricts eligible fitment candidates to the application advertised after 
   assert.doesNotMatch(selection.eligibleCandidates[0].evidence, /Jeep Liberty/i);
 });
 
+test('a title without Fits keeps its advertised model instead of switching to another compatible model', () => {
+  const inputs = buildInputs({ 'Item Title': '1998-2005 Lexus GS300 Right Tail Light 1056292' });
+  inputs.listingResolution.resolved.fields.model = {
+    field: 'model', resolvedValue: 'GS300', resolvedSource: 'currentEbay', conflicts: [], missing: false
+  };
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '1998-2005 Lexus GS300 Right Tail Light 1056292';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '1998-2005 Lexus GS300 right decklid tail light; 1998-2000 Lexus GS400 right decklid tail light';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+  assert.equal(selection.selectionBasis, 'EXISTING_TITLE_MODEL_APPLICATION');
+  assert.deepEqual(selection.eligibleCandidates.map(row => row.evidence), [
+    '1998-2005 Lexus GS300 right decklid tail light'
+  ]);
+});
+
+test('a no-Fits title identifies its unique advertised model even without a mapped model field', () => {
+  const inputs = buildInputs({ 'Item Title': '1998-2005 Lexus GS300 Right Tail Light 1056292' });
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '1998-2005 Lexus GS300 Right Tail Light 1056292';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '1998-2005 Lexus GS300 right decklid tail light; 1998-2000 Lexus GS400 right decklid tail light';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+  assert.equal(selection.selectionBasis, 'EXISTING_TITLE_MODEL_APPLICATION');
+  assert.deepEqual(selection.eligibleCandidates.map(row => row.evidence), [
+    '1998-2005 Lexus GS300 right decklid tail light'
+  ]);
+});
+
+test('a short model name does not automatically select a longer distinct model', () => {
+  const inputs = buildInputs({ 'Item Title': '2002 Ford Explorer Left Tail Light 382223' });
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '2002 Ford Explorer Left Tail Light 382223';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '2001-2005 Ford Explorer Sport Trac left tail light; 2001-2005 Ford Taurus left tail light';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+  assert.equal(selection.selectionBasis, 'AI_APPLICATION_SELECTION');
+  assert.equal(selection.eligibleCandidates.length, 2);
+});
+
+test('a no-Fits advertised model without a matching fitment row remains unresolved', () => {
+  const inputs = buildInputs({ 'Item Title': '1998-2005 Lexus GS300 Right Tail Light 1056292' });
+  inputs.listingResolution.resolved.fields.model = {
+    field: 'model', resolvedValue: 'GS300', resolvedSource: 'currentEbay', conflicts: [], missing: false
+  };
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '1998-2005 Lexus GS300 Right Tail Light 1056292';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '1998-2000 Lexus GS400 right decklid tail light';
+
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+  assert.equal(selection.selectionBasis, 'EXISTING_TITLE_MODEL_APPLICATION_UNMATCHED');
+  assert.equal(selection.resolution, 'UNRESOLVED');
+  assert.deepEqual(selection.eligibleCandidates, []);
+});
+
 test('advertised application selection supports alphanumeric and multiword models', () => {
   const inputs = buildInputs({
     'Item Title': '2011 Lexus IS250 Starter Motor Fits 06-17 LEXUS IS350 2810031071 1591344'
@@ -364,6 +438,18 @@ test('advertised multiword model does not match a different model sharing its la
   const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
   assert.deepEqual(selection.eligibleCandidates.map(item => item.evidence), [
     '2008-2010 Ford Taurus X Starter'
+  ]);
+});
+
+test('advertised model matches equivalent letter-number spacing without matching other models', () => {
+  const inputs = buildInputs({ 'Item Title': '2011 Mazda Cluster Fits 10-11 MAZDA3 1234567' });
+  inputs.listingResolution.normalized.fields.existingTitle.value =
+    '2011 Mazda Cluster Fits 10-11 MAZDA3 1234567';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    '2010-2011 Mazda 3 Instrument Cluster; 2010-2011 Mazda 6 Instrument Cluster';
+  const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
+  assert.deepEqual(selection.eligibleCandidates.map(row => row.evidence), [
+    '2010-2011 Mazda 3 Instrument Cluster'
   ]);
 });
 

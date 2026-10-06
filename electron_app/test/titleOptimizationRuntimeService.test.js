@@ -3,6 +3,120 @@ const assert = require('node:assert/strict');
 
 const { runTitleOptimizationRuntime } = require('../src/services/titleOptimizationRuntimeService');
 
+function aiLedDependencies(aiResult, overrides = {}) {
+  return {
+    loadSnapshot: async () => ({ metadata: { configurationVersion: 'v5' } }),
+    resolveSource: () => ({ normalized: { recordId: 'rec-ai' }, resolved: { fields: {
+      sku: { resolvedValue: '12345' }, title: { resolvedValue: 'Existing title 12345' }
+    }, conflicts: [], missing: [] } }),
+    resolveRules: () => ({ listingContext: { ipnPrefix: '641' }, flagReasons: [], systemRules: [] }),
+    buildPrompt: () => ({ kind: 'prompt', userPayload: { resolvedListing: {
+      titleFitmentCandidates: { eligibleCandidates: [] }
+    } } }),
+    executeAi: async () => aiResult,
+    reviewTitleFitment: async () => ({ verdict: 'PASS', reason: 'The title matches the supplied application.', citedRowIds: [] }),
+    logger: { info: () => {} },
+    ...overrides
+  };
+}
+
+test('AI Completed survives semantic code uncertainty after independent AI review', async () => {
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({
+    generatedTitle: '2010-2012 Ford Fusion Starter Motor 12345', generatedDescription: 'Description',
+    titleReviewStatus: 'Completed', vehicleDecision: { resolved: false }
+  }) });
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.output.title, '2010-2012 Ford Fusion Starter Motor 12345');
+  assert.doesNotMatch(result.output.reviewNotes, /Verified vehicle application/);
+});
+
+test('AI-led runtime log exposes the generator vehicle decision', async () => {
+  let log = '';
+  await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({
+    generatedTitle: '2010-2012 Ford Fusion Starter Motor 12345', titleReviewStatus: 'Completed',
+    vehicleDecision: { resolved: true, make: 'Ford', model: 'Fusion', yearRange: '2010-2012',
+      source: 'title-fitment-001' }
+  }, { logger: { info: message => { log = message; } } }) });
+  assert.match(log, /vehicleDecision=\{"resolved":true,"make":"Ford"/);
+  assert.match(log, /fitmentReview=.*PASS/);
+});
+
+test('AI Needs Review is preserved without calling the independent reviewer', async () => {
+  let reviews = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({
+    generatedTitle: '2010-2012 Ford Fusion Starter Motor 12345', generatedDescription: 'Description',
+    titleReviewStatus: 'Needs Review', titleReviewReason: 'Conflicting source data',
+    titleReviewNotes: 'The supplied applications disagree.'
+  }, { reviewTitleFitment: async () => { reviews += 1; return { verdict: 'PASS', reason: 'Safe', citedRowIds: [] }; } }) });
+  assert.equal(reviews, 0);
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.match(result.output.reviewNotes, /applications disagree/);
+});
+
+test('mechanical SKU check normalizes the verified SKU exactly once at the end', async () => {
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({
+    generatedTitle: '12345 2010-2012 Ford Fusion Starter Motor 12345',
+    titleReviewStatus: 'Completed'
+  }) });
+  assert.equal(result.output.title, '2010-2012 Ford Fusion Starter Motor 12345');
+});
+
+test('the 80-character limit still prevents an AI-Completed title from being written', async () => {
+  const longTitle = `${'Long descriptive automotive part name '.repeat(4)}12345`;
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({
+    generatedTitle: longTitle, titleReviewStatus: 'Completed'
+  }) });
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+});
+
+test('mechanical correction does not ask AI to satisfy removed semantic code checks', async () => {
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({}, {
+    executeAi: async ({ promptArtifact }) => {
+      calls += 1;
+      if (calls === 2) {
+        assert.match(promptArtifact.userPayload.correction.instruction, /80 characters/);
+        assert.doesNotMatch(promptArtifact.userPayload.correction.instruction, /invented citation/i);
+        return { generatedTitle: '2010 Ford Fusion Starter 12345', titleReviewStatus: 'Completed' };
+      }
+      return { generatedTitle: `${'Long descriptive automotive part name '.repeat(4)}12345`,
+        titleReviewStatus: 'Completed' };
+    }
+  }) });
+  assert.equal(calls, 2);
+  assert.equal(result.output.reviewStatus, 'Completed');
+});
+
+test('independent AI review can still veto a generator-Completed title', async () => {
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({
+    generatedTitle: '2010-2012 Ford Fusion Starter Motor 12345', titleReviewStatus: 'Completed'
+  }, { reviewTitleFitment: async () => ({ verdict: 'REVIEW',
+    reason: 'The selected years omit a required VIN restriction.', citedRowIds: [] }) }) });
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.match(result.output.reviewNotes, /VIN restriction/);
+});
+
+test('manual title override still bypasses generation and writes no replacement', async () => {
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({}, {
+    buildPrompt: () => ({ kind: 'title-generation-bypass', userPayload: {} }),
+    executeAi: async () => { calls += 1; return {}; }
+  }) });
+  assert.equal(calls, 0);
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.reviewStatus, 'Skipped - Manual Override');
+});
+
+test('Prefix 257 keeps the verified SKU once with a hash suffix', async () => {
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({
+    generatedTitle: '2010 Ford Cluster 12345', titleReviewStatus: 'Completed'
+  }, { resolveRules: () => ({ listingContext: { ipnPrefix: '257' }, flagReasons: [], systemRules: [] }) }) });
+  assert.equal(result.output.title, '2010 Ford Cluster #12345');
+});
+
 function dependencies(overrides = {}) {
   const calls = [];
   return {
@@ -89,7 +203,10 @@ test('independent fitment review checks the final title and blocks a failed revi
   const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
     reviewTitleFitment: async input => {
       seen.push(input.title);
-      return { verdict: 'REVIEW', reason: '2014-2015 requires VIN J; the title claims unrestricted fitment.', citedRowIds: ['title-fitment-002'] };
+      return { verdict: 'REVIEW', reason: '2014-2015 requires VIN J; the title claims unrestricted fitment.',
+        citedRowIds: ['title-fitment-002'], rowAssessments: [{ rowId: 'title-fitment-002',
+          yearScope: '2014-2015', conditions: 'VIN J', titleCoverage: 'UNCLEAR',
+          explanation: 'The restriction is not scoped to 2014-2015.' }] };
     },
     buildPrompt: () => ({ kind: 'prompt', userPayload: { resolvedListing: { titleFitmentCandidates: {
       eligibleCandidates: [{ id: 'title-fitment-002', evidence: '2014-2015 Nissan Rogue VIN J' }]
@@ -135,6 +252,26 @@ test('fitment reviewer failure cannot write an accepted title', async () => {
   assert.match(result.output.reviewNotes, /review unavailable/i);
 });
 
+test('invalid reviewer structure gets one focused retry before requesting user review', async () => {
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    reviewTitleFitment: async input => {
+      calls += 1;
+      if (calls === 1) return { verdict: 'PASS', reason: 'Looks safe.', citedRowIds: ['row-1'] };
+      assert.match(input.reviewFeedback, /every selected row/);
+      return { verdict: 'PASS', reason: 'The selected row is accurately represented.',
+        citedRowIds: ['row-1'], rowAssessments: [{ rowId: 'row-1', yearScope: '2010-2012',
+          conditions: 'none', titleCoverage: 'ACCURATE', explanation: 'Title covers the row.' }] };
+    },
+    buildPrompt: () => ({ kind: 'prompt', userPayload: { resolvedListing: { titleFitmentCandidates: {
+      eligibleCandidates: [{ id: 'row-1', startYear: 2010, endYear: 2012,
+        evidence: '2010-2012 Subaru Outback Legacy Column Switch' }]
+    } } } })
+  }) });
+  assert.equal(calls, 2);
+  assert.equal(result.output.reviewStatus, 'Completed');
+});
+
 test('a rejected fitment correction retains the review finding in Airtable notes', async () => {
   let generationCalls = 0;
   const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
@@ -176,6 +313,37 @@ test('correction tells AI to remove only redundant wording and preserves verifie
       degradationChecks: calls === 1 ? [{ status: 'FAIL', message: 'Missing 8th Digit' }] : [] })
   }) });
   assert.equal(result.output.title, 'Ford Fusion VIN 3 8th Digit 123');
+});
+
+test('fitment correction reuses an already verified vehicle decision if the model omits it', async () => {
+  const verifiedVehicle = { resolved: true, make: 'Chevrolet', model: 'Equinox',
+    yearRange: '2010-2017', source: 'title-fitment-001',
+    evidence: '2010-2017 Chevrolet Equinox 2.4L', reason: 'Cited fitment row.' };
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    buildPrompt: () => ({ kind: 'prompt', userPayload: { resolvedListing: {
+      titleFitmentCandidates: { eligibleCandidates: [{ id: 'title-fitment-001',
+        startYear: 2010, endYear: 2017, evidence: verifiedVehicle.evidence }] }
+    } } }),
+    executeAi: async ({ promptArtifact }) => {
+      calls += 1;
+      if (calls === 2) assert.deepEqual(promptArtifact.userPayload.correction.verifiedVehicleDecision, verifiedVehicle);
+      return { generatedTitle: calls === 1 ? '2010-2017 Chevrolet Equinox Starter 123' :
+        '2010-2017 Chevrolet Equinox Starter 2.4L 123',
+      vehicleDecision: calls === 1 ? verifiedVehicle : null };
+    },
+    validate: ({ candidateTitle, vehicleDecision }) => ({ outcome: 'PASS', validatedTitle: candidateTitle,
+      vehicleVerification: { verified: vehicleDecision === verifiedVehicle, decision: vehicleDecision },
+      violations: [], warnings: [] }),
+    decide: ({ validationResult }) => ({ decision: 'ACCEPT_CANDIDATE',
+      finalTitle: validationResult.validatedTitle, reviewRequired: false, degradationChecks: [] }),
+    reviewTitleFitment: async input => ({ verdict: calls === 1 ? 'REVIEW' : 'PASS',
+      reason: calls === 1 ? '2.4L is missing.' : '2.4L is present.', citedRowIds: ['title-fitment-001'],
+      rowAssessments: [{ rowId: 'title-fitment-001', yearScope: '2010-2017', conditions: '2.4L',
+        titleCoverage: calls === 1 ? 'OMITTED' : 'ACCURATE', explanation: 'Checked against fitment.' }] })
+  }) });
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.match(result.output.title, /2\.4L/);
 });
 
 test('failed correction preserves the original safe decision and stops after two calls', async () => {

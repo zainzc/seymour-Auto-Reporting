@@ -13,6 +13,16 @@ function containsPhrase(value, phrase) {
   return Boolean(needle && haystack.includes(` ${needle} `));
 }
 
+function modelComparable(value) {
+  return comparable(text(value).replace(/([a-z])(?=\d)|([0-9])(?=[a-z])/gi, '$1$2 '));
+}
+
+function containsModel(value, model) {
+  const haystack = ` ${modelComparable(value)} `;
+  const needle = modelComparable(model);
+  return Boolean(needle && haystack.includes(` ${needle} `));
+}
+
 function applicationKey(value) {
   return comparable(value)
     .replace(/\b((?:19|20)\d{2})\s+(?:to\s+)?((?:19|20)\d{2})\b/g, '$1 $2')
@@ -50,7 +60,7 @@ function advertisedApplicationHint(existingTitle) {
 }
 
 function parseApplicationClauses(partFitment) {
-  return text(partFitment).split(/;|\n/).map((raw, index) => {
+  return String(partFitment || '').split(/;|\r?\n/).map((raw, index) => {
     const evidence = text(raw).replace(/^Fits\s+/i, '');
     const years = evidence.match(/\b((?:19|20)\d{2})(?:\s*-\s*((?:19|20)\d{2}))?\b/);
     if (!evidence || !years) return null;
@@ -64,6 +74,18 @@ function parseApplicationClauses(partFitment) {
   }).filter(Boolean);
 }
 
+function candidateIdentityPrefix(evidence) {
+  const match = text(evidence).match(/^(?:19|20)\d{2}(?:\s*-\s*(?:19|20)\d{2})?\s+([A-Za-z][A-Za-z-]*)\s+([A-Za-z0-9][A-Za-z0-9-]*)\b/);
+  return match ? `${match[1]} ${match[2]}` : '';
+}
+
+function modelHintFromTitleCandidates(existingTitle, candidates) {
+  const matching = candidates.map(item => candidateIdentityPrefix(item.evidence))
+    .filter(identity => /\d/.test(identity.split(' ')[1] || '') && containsModel(existingTitle, identity));
+  const identities = [...new Set(matching.map(modelComparable))];
+  return identities.length === 1 ? matching[0] : '';
+}
+
 function validCalendarDate(month, day, year) {
   const fullYear = year < 100 ? (year >= 70 ? 1900 + year : 2000 + year) : year;
   const date = new Date(Date.UTC(fullYear, month - 1, day));
@@ -72,7 +94,7 @@ function validCalendarDate(month, day, year) {
 
 function detectMaterialFitmentIssues(partFitment) {
   const issues = [];
-  for (const rawClause of text(partFitment).split(/;|\n/)) {
+  for (const rawClause of String(partFitment || '').split(/;|\r?\n/)) {
     const evidence = text(rawClause).replace(/^Fits\s+/i, '');
     for (const match of evidence.matchAll(/\b(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})\b/g)) {
       const value = match[0];
@@ -101,7 +123,7 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
       'UNRESOLVED_MATERIAL_QUALIFIER_CONFLICT'
     ]
   };
-  const partFitment = text(listingResolution?.normalized?.titleAuthority?.partFitment?.value);
+  const partFitment = listingResolution?.normalized?.titleAuthority?.partFitment?.value || '';
   const existingTitle = text(
     listingResolution?.normalized?.fields?.existingTitle?.value ||
     listingResolution?.normalized?.fields?.legacyTitle?.value ||
@@ -130,7 +152,7 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
   const byApplication = new Map();
   for (const candidate of parsed) {
     const hasResolvedVehicle = make && model &&
-      containsPhrase(candidate.evidence, make) && containsPhrase(candidate.evidence, model);
+      containsPhrase(candidate.evidence, make) && containsModel(candidate.evidence, model);
     const key = hasResolvedVehicle
       ? `${candidate.startYear}-${candidate.endYear}|${comparable(make)}|${comparable(model)}`
       : candidate.canonicalKey;
@@ -143,21 +165,26 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
     existing.evidence = existing.variantEvidence.join('; ');
   }
   const candidates = [...byApplication.values()];
-  const hintedModel = advertisedHint?.modelText || '';
+  const titleModel = !advertisedHint
+    ? model && /\d/.test(model) && containsModel(existingTitle, model)
+      ? model
+      : modelHintFromTitleCandidates(existingTitle, candidates)
+    : '';
+  const hintedModel = advertisedHint?.modelText || titleModel;
   const matchedCandidates = hintedModel
-    ? candidates.filter(item => containsPhrase(item.evidence, hintedModel))
+    ? candidates.filter(item => containsModel(item.evidence, hintedModel))
     : [];
-  const eligibleCandidates = advertisedHint
+  const eligibleCandidates = hintedModel
     ? matchedCandidates
     : candidates;
   const selectionBasis = matchedCandidates.length
-    ? 'EXISTING_TITLE_FITS_APPLICATION'
-    : advertisedHint
-      ? 'EXISTING_TITLE_FITS_APPLICATION_UNMATCHED'
+    ? advertisedHint ? 'EXISTING_TITLE_FITS_APPLICATION' : 'EXISTING_TITLE_MODEL_APPLICATION'
+    : hintedModel
+      ? advertisedHint ? 'EXISTING_TITLE_FITS_APPLICATION_UNMATCHED' : 'EXISTING_TITLE_MODEL_APPLICATION_UNMATCHED'
       : candidates.length === 1
         ? 'ONLY_COMPATIBILITY_APPLICATION'
         : 'AI_APPLICATION_SELECTION';
-  const advertisedApplicationUnmatched = Boolean(advertisedHint && !matchedCandidates.length);
+  const advertisedApplicationUnmatched = Boolean(hintedModel && !matchedCandidates.length);
   const resolution = advertisedApplicationUnmatched
     ? 'UNRESOLVED'
     : eligibleCandidates.length === 1 ? 'UNAMBIGUOUS' : 'AMBIGUOUS';
@@ -172,7 +199,9 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
     candidates,
     distinctApplications: candidates,
     eligibleCandidates,
-    advertisedApplicationHint: advertisedHint,
+    advertisedApplicationHint: advertisedHint || (titleModel ? {
+      raw: existingTitle, yearRange: null, modelText: titleModel
+    } : null),
     selectionBasis,
     sourceIssues
   };

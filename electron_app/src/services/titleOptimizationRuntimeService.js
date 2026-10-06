@@ -1,9 +1,8 @@
 const { normalizeAndResolveListing } = require('./titleOptimizationRuntimeSourceResolutionService');
 const { resolveApplicableTitleOptimizationRules } = require('./titleOptimizationRuntimeRuleResolutionService');
 const { buildTitleOptimizationRuntimePrompt } = require('./titleOptimizationRuntimePromptBuilderService');
-const { validateTitleOptimizationRuntimeCandidate } = require('./titleOptimizationRuntimeValidatorService');
-const { decideTitleOptimizationRuntimeResult } = require('./titleOptimizationRuntimeDecisionService');
 const { buildFitmentReviewInput, checkedFitmentReview } = require('./titleOptimizationFitmentReviewService');
+const { validateMechanicalTitle, decideAiTitle } = require('./titleOptimizationAiDecisionService');
 
 const RUNTIME_STATUSES = Object.freeze({
   COMPLETED: 'COMPLETED',
@@ -85,18 +84,18 @@ function acceptedReviewNotes(aiResult = {}, decision = {}) {
   const vehicle = aiResult.vehicleDecision || {};
   const vehicleIdentity = [vehicle.yearRange, vehicle.make, vehicle.model].map(normalizeText).filter(Boolean).join(' ');
   if (vehicle.resolved === true && vehicleIdentity) {
-    notes.push(`Verified vehicle application: ${vehicleIdentity}.`);
+    notes.push(`${decision.aiLed ? 'AI-reviewed' : 'Verified'} vehicle application: ${vehicleIdentity}.`);
     const citedRows = normalizeText(vehicle.source).split(';').filter(Boolean).length;
     if (citedRows > 1) notes.push(`Combined ${citedRows} cited fitment rows into one supported range.`);
   }
   const side = aiResult.sideDecision || {};
   const placement = [side.placement, side.side].map(normalizeText).filter(Boolean).join(' ');
-  if (placement) notes.push(`Verified placement: ${placement}.`);
+  if (placement) notes.push(`${decision.aiLed ? 'AI-reviewed' : 'Verified'} placement: ${placement}.`);
   const details = (Array.isArray(aiResult.categoryPriorityDetails) ? aiResult.categoryPriorityDetails : [])
     .filter(item => item?.verified === true)
     .map(item => normalizeText(item.detail))
     .filter(detail => detail && !/missing|cannot|conflict|degrade|uncertain|review|too long/i.test(detail));
-  if (details.length) notes.push(`Applied verified category detail${details.length > 1 ? 's' : ''}: ${details.join(', ')}.`);
+  if (details.length) notes.push(`Applied ${decision.aiLed ? 'AI-supported' : 'verified'} category detail${details.length > 1 ? 's' : ''}: ${details.join(', ')}.`);
   if (!notes.length) notes.push('Generated title accepted after evidence and safety validation.');
   const finalTitle = normalizeText(decision.finalTitle);
   if (finalTitle) notes.push(`Final title: ${finalTitle}.`);
@@ -188,7 +187,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates || {};
   const blockingFitmentIssue = (fitmentSelection.sourceIssues || []).find(issue =>
     issue?.code === 'INVALID_FITMENT_DATE');
-  if (blockingFitmentIssue) {
+  if (blockingFitmentIssue && (dependencies.validate || dependencies.decide)) {
     const issueValue = normalizeText(blockingFitmentIssue.value);
     const issueEvidence = normalizeText(blockingFitmentIssue.evidence);
     const reviewNotes = `${normalizeText(blockingFitmentIssue.message)} Correct the source data before generating a title` +
@@ -248,7 +247,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   }
 
   try {
-    validation = (dependencies.validate || validateTitleOptimizationRuntimeCandidate)({
+    validation = (dependencies.validate || validateMechanicalTitle)({
       snapshot,
       sourceResolution,
       ruleResolution,
@@ -264,12 +263,13 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   }
 
   try {
-    decision = (dependencies.decide || decideTitleOptimizationRuntimeResult)({
+    decision = (dependencies.decide || decideAiTitle)({
       snapshot,
       sourceResolution,
       ruleResolution,
       promptArtifact,
-      validationResult: validation
+      validationResult: validation,
+      aiResult
     });
     result.decision = decision;
   } catch (error) {
@@ -284,7 +284,8 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   });
   if (promptArtifact?.kind !== 'title-generation-bypass') result.attempts.push(recordAttempt());
   const failures = (decision?.degradationChecks || []).filter(check => ['FAIL', 'BLOCK'].includes(check?.status));
-  if (generationCalls < 2 && promptArtifact?.kind !== 'title-generation-bypass' && failures.length && decision?.reviewRequired) {
+  if (generationCalls < 2 && promptArtifact?.kind !== 'title-generation-bypass' && failures.length && decision?.reviewRequired &&
+      normalizeText(aiResult.titleReviewStatus).toLowerCase() !== 'needs review') {
     const correctionPrompt = {
       ...promptArtifact,
       userPayload: {
@@ -293,20 +294,23 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
           previousTitle: normalizeText(aiResult.generatedTitle),
           verifiedVehicleDecision: validation?.vehicleVerification?.verified ? validation.vehicleVerification.decision : null,
           failures: failures.map(check => ({ checkId: check.checkId, field: check.field, message: check.message })),
-          instruction: 'Correct every listed failure using the original supplied evidence and rules. Audit the previous title against the selected Part Fitment application and current title. For an invented citation, return an exact supplied citation. For an unsupported year or year gap, select only continuously covered cited years. For a changed make or model, restore the advertised supported make and model. Add any missing selected vehicle identity. For a side failure, use only the authoritative cited side. Remove an unsupported optional MPN; do not choose between conflicting authoritative MPN values. Identify useful distinguishing qualifiers that were omitted, remove overlapping or repeated part-name wording first, then rebuild the title in the exact selectedTitleStructure order. Keep useful verified details whenever the result fits within 80 characters; remove optional redundant details only as needed to remain within 80 characters. Recount all characters including spaces and place the verified SKU exactly once at the end. Preserve a verifiedVehicleDecision and its citation when supplied. Check all failures again before returning; do not repeat the failed title unchanged. Return the complete original output contract. Do not invent facts. Mark only unresolved material uncertainty Needs Review.'
+          instruction: dependencies.validate || dependencies.decide
+            ? 'Correct every listed failure using the original supplied evidence and rules. Audit the previous title against the selected Part Fitment application and current title. For an invented citation, return an exact supplied citation. For an unsupported year or year gap, select only continuously covered cited years. For a changed make or model, restore the advertised supported make and model. Add any missing selected vehicle identity. For a side failure, use only the authoritative cited side. Remove an unsupported optional MPN; do not choose between conflicting authoritative MPN values. Identify useful distinguishing qualifiers that were omitted, remove overlapping or repeated part-name wording first, then rebuild the title in the exact selectedTitleStructure order. Keep useful verified details whenever the result fits within 80 characters; remove optional redundant details only as needed to remain within 80 characters. Recount all characters including spaces and place the verified SKU exactly once at the end. Preserve a verifiedVehicleDecision and its citation when supplied. Check all failures again before returning; do not repeat the failed title unchanged. Return the complete original output contract. Do not invent facts. Mark only unresolved material uncertainty Needs Review.'
+            : 'Correct only the listed mechanical title failures. The complete title must be 80 characters or fewer, with the verified SKU exactly once at the end. Remove optional repeated wording before useful fitment or product details. Preserve the advertised vehicle, supported fitment restrictions, and configured title structure. Decide any unresolved material uncertainty yourself as Needs Review. Return the complete JSON contract.'
         }
       }
     };
     try {
       const correctedAi = await executeAi(correctionPrompt);
       if (!normalizeText(correctedAi?.generatedTitle)) throw new Error('Correction response missing generatedTitle.');
-      const correctedValidation = (dependencies.validate || validateTitleOptimizationRuntimeCandidate)({
+      const correctedValidation = (dependencies.validate || validateMechanicalTitle)({
         snapshot, sourceResolution, ruleResolution, promptArtifact: correctionPrompt,
         candidateTitle: correctedAi.generatedTitle, categoryPriorityDetails: correctedAi.categoryPriorityDetails || [],
         sideDecision: correctedAi.sideDecision, vehicleDecision: correctedAi.vehicleDecision
       });
-      const correctedDecision = (dependencies.decide || decideTitleOptimizationRuntimeResult)({
-        snapshot, sourceResolution, ruleResolution, promptArtifact: correctionPrompt, validationResult: correctedValidation
+      const correctedDecision = (dependencies.decide || decideAiTitle)({
+        snapshot, sourceResolution, ruleResolution, promptArtifact: correctionPrompt, validationResult: correctedValidation,
+        aiResult: correctedAi
       });
       aiResult = correctedAi;
       validation = correctedValidation;
@@ -339,16 +343,16 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     try {
       const compressedAi = await executeAi(compressionPrompt);
       if (!normalizeText(compressedAi?.generatedTitle)) throw new Error('Compression response missing generatedTitle.');
-      const compressedValidation = (dependencies.validate || validateTitleOptimizationRuntimeCandidate)({
+      const compressedValidation = (dependencies.validate || validateMechanicalTitle)({
         snapshot, sourceResolution, ruleResolution, promptArtifact: compressionPrompt,
         candidateTitle: compressedAi.generatedTitle,
         categoryPriorityDetails: compressedAi.categoryPriorityDetails || [],
         sideDecision: compressedAi.sideDecision,
         vehicleDecision: compressedAi.vehicleDecision
       });
-      const compressedDecision = (dependencies.decide || decideTitleOptimizationRuntimeResult)({
+      const compressedDecision = (dependencies.decide || decideAiTitle)({
         snapshot, sourceResolution, ruleResolution, promptArtifact: compressionPrompt,
-        validationResult: compressedValidation
+        validationResult: compressedValidation, aiResult: compressedAi
       });
       aiResult = compressedAi;
       validation = compressedValidation;
@@ -368,8 +372,22 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     const input = buildFitmentReviewInput({
       title: decision.finalTitle, promptArtifact, vehicleDecision: aiResult.vehicleDecision
     });
-    const response = await dependencies.reviewTitleFitment({ ...input, listing, options });
-    return checkedFitmentReview(response, input);
+    let reviewFeedback = '';
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await dependencies.reviewTitleFitment({ ...input, listing, options, reviewFeedback });
+        return checkedFitmentReview(response, input);
+      } catch (error) {
+        if (attempt === 1) throw error;
+        const expectedScopes = input.selectedRows.map(row => {
+          const years = Number.isInteger(row.startYear) && Number.isInteger(row.endYear)
+            ? row.startYear === row.endYear ? String(row.startYear) : `${row.startYear}-${row.endYear}`
+            : 'use the supplied row evidence';
+          return `${row.id}: ${years}`;
+        }).join('; ');
+        reviewFeedback = `Previous review was invalid: ${sanitizeError(error)}. Reassess every selected row using its own source years (${expectedScopes}) and return the complete required response.`;
+      }
+    }
   };
   const requireFitmentReview = (reason, citedRowIds = []) => {
     const detail = normalizeText(reason) || 'Fitment review could not confirm the final title.';
@@ -397,23 +415,30 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     if (review?.verdict === 'REVIEW') {
       const reviewReason = review.reason;
       try {
+        const verifiedVehicleDecision = validation?.vehicleVerification?.verified
+          ? validation.vehicleVerification.decision : null;
         const correctedAi = await executeAi({
           ...promptArtifact,
           userPayload: { ...promptArtifact.userPayload, correction: {
             previousTitle: normalizeText(decision.finalTitle),
             fitmentReview: review,
-            instruction: 'An independent review found a material fitment problem in the final title. Correct the cited problem using the original listing evidence and configured title structure. A condition that applies only to some years must not be applied to every year or omitted so that restricted years appear unrestricted. Keep the advertised application and all required restrictions truthful. If no accurate title fits within 80 characters, return Needs Review with a precise explanation. Do not remove a material restriction merely to pass review. Return the complete original output contract.'
+            verifiedVehicleDecision,
+            instruction: 'An independent review found a material fitment problem in the final title. Correct the cited problem using the original listing evidence and configured title structure. A condition that applies only to some years must not be applied to every year or omitted so that restricted years appear unrestricted. Keep the advertised application and all required restrictions truthful. Remove optional MPN, repeated part terms, and filler before a material fitment condition. Preserve the supplied verifiedVehicleDecision and its exact citation when the corrected title keeps that same application. If no accurate title fits within 80 characters, return Needs Review with a precise explanation. Do not remove a material restriction merely to pass review. Return the complete original output contract.'
           } }
         });
         if (!normalizeText(correctedAi?.generatedTitle)) throw new Error('Fitment correction returned no title.');
-        const correctedValidation = (dependencies.validate || validateTitleOptimizationRuntimeCandidate)({
+        if (!correctedAi.vehicleDecision && verifiedVehicleDecision) {
+          correctedAi.vehicleDecision = verifiedVehicleDecision;
+        }
+        const correctedValidation = (dependencies.validate || validateMechanicalTitle)({
           snapshot, sourceResolution, ruleResolution, promptArtifact,
           candidateTitle: correctedAi.generatedTitle,
           categoryPriorityDetails: correctedAi.categoryPriorityDetails || [],
           sideDecision: correctedAi.sideDecision, vehicleDecision: correctedAi.vehicleDecision
         });
-        const correctedDecision = (dependencies.decide || decideTitleOptimizationRuntimeResult)({
-          snapshot, sourceResolution, ruleResolution, promptArtifact, validationResult: correctedValidation
+        const correctedDecision = (dependencies.decide || decideAiTitle)({
+          snapshot, sourceResolution, ruleResolution, promptArtifact, validationResult: correctedValidation,
+          aiResult: correctedAi
         });
         aiResult = correctedAi;
         validation = correctedValidation;
@@ -456,7 +481,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
       `generationCalls=${generationCalls} ` +
       `fitmentReview=${JSON.stringify(result.fitmentReview)} ` +
       `sideDecision=${JSON.stringify(aiResult.sideDecision || null)} ` +
-      `vehicleDecision=${JSON.stringify(validation.vehicleVerification || null)} ` +
+      `vehicleDecision=${JSON.stringify(validation.vehicleVerification || aiResult.vehicleDecision || null)} ` +
       `attempts=${JSON.stringify(result.attempts)} ` +
       `categoryPriorityDetails=${categoryPriorityDetailsSummary(aiResult)}`
   );

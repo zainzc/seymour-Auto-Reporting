@@ -1,5 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
   applyAcceptedRuntimeTitle,
@@ -102,4 +104,9 @@ test('does not replace a pre-generation source review with ai blank output', () 
       reviewReason: 'Invalid Part Fitment date'
     }
   }, false), null);
+});
+
+test('writer does not override the AI review decision with title-text deduplication', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/services/phase74TitleDescriptionService.js'), 'utf8');
+  assert.doesNotMatch(source, /duplicate_unresolved|usedTitleKeys/);
 });

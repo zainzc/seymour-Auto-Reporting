@@ -1377,24 +1377,36 @@ class Phase4AiEvaluatorService {
       'You independently review an automotive listing title against supplied fitment evidence.',
       'Judge the exact final title, not the generator reasoning or its review status. Use only supplied evidence.',
       'Check the advertised vehicle, complete year coverage, and every material fitment condition.',
+      'Check the generator vehicleDecision against the existing advertised title and eligible rows. Another compatible model in Part Fitment must not silently replace the advertised model. If the selected source IDs do not identify eligible rows or the advertised identity cannot be supported, return REVIEW.',
+      'Assess EVERY selected fitment row separately using its supplied startYear, endYear, and evidence. For each row, state its material conditions or none, whether the final title accurately covers that row, and why. Use the variant evidence within a grouped row rather than treating its combined text as one unrestricted application.',
+      'List each independently narrowing condition in the row assessment before deciding titleCoverage. Do not let one condition substitute for another: a trim does not imply a body style, and a generic product name does not imply a specific button count or function. If a condition is omitted, decide whether that omission broadens the advertised application; request correction when it does.',
+      'Do not treat an advertised model as interchangeable with a longer model name that merely contains it as a prefix; require explicit supplied evidence for that identity.',
+      'A title-level condition must not be projected onto years or variants whose rows do not support it. Conversely, do not omit a row-specific restriction so the title appears universally compatible. Check both false inclusions and false exclusions.',
+      'Compare the current title and other trusted evidence for material details lost by the final title. A supported displacement, market, body style, or equipment restriction takes priority over an optional part number or filler when space is tight.',
       'Pay particular attention when a condition applies to only some years or variants. A title must not apply that condition to other years, or omit it so restricted years appear unrestricted.',
       'Conditions can include VIN, build origin or date, engine, transmission, trim, body style, drivetrain, side, placement, and included or excluded features. These are examples, not an exhaustive list.',
       'Do not assume that a row without a restriction establishes unrestricted compatibility for another row. Do not accept a title that is made to look safe by simply removing a material condition.',
       'Inspect additional eligible rows for missing years or material conditions, but do not treat an alternate trim or compatible variant as an automatic conflict.',
-        'Other trusted listing evidence may support a product qualifier absent from the fitment rows. Do not use it to broaden fitment years or override a row-specific restriction.',
-      'Return PASS only if the exact title truthfully represents all selected rows and the advertised application without broadening or contradicting a material restriction. Cite every selected row ID for PASS.',
+      'Other trusted listing evidence may support a product qualifier absent from the fitment rows. Do not use it to broaden fitment years or override a row-specific restriction.',
+      'Return PASS only if every selected row assessment is ACCURATE and the exact title truthfully represents the advertised application without broadening, over-restricting, or contradicting a material condition. Cite every selected row ID for PASS.',
       'Return REVIEW with a specific explanation and relevant row IDs when a material claim is wrong, unsupported, missing, or cannot be expressed safely. Uncertainty is REVIEW.',
       'You are a reviewer only. Do not rewrite the title or use external knowledge.'
     ].join(' ');
     const reviewInput = {
       finalTitle: normalizeText(input.title),
+      reviewFeedback: normalizeText(input.reviewFeedback) || null,
       currentTitle: normalizeText(input.existingTitle),
       advertisedApplication: input.advertisedApplication || null,
+      vehicleDecision: input.vehicleDecision || null,
       selectedFitmentRows: Array.isArray(input.selectedRows) ? input.selectedRows.map(row => ({
-        id: normalizeText(row.id), evidence: normalizeText(row.evidence)
+        id: normalizeText(row.id), startYear: row.startYear ?? null, endYear: row.endYear ?? null,
+        evidence: normalizeText(row.evidence),
+        variantEvidence: Array.isArray(row.variantEvidence) ? row.variantEvidence.map(normalizeText) : []
       })) : [],
       additionalEligibleRows: Array.isArray(input.additionalEligibleRows) ? input.additionalEligibleRows.map(row => ({
-        id: normalizeText(row.id), evidence: normalizeText(row.evidence)
+        id: normalizeText(row.id), startYear: row.startYear ?? null, endYear: row.endYear ?? null,
+        evidence: normalizeText(row.evidence),
+        variantEvidence: Array.isArray(row.variantEvidence) ? row.variantEvidence.map(normalizeText) : []
       })) : [],
         otherTrustedEvidence: Array.isArray(input.otherTrustedEvidence) ? input.otherTrustedEvidence.map(row => ({
           id: normalizeText(row.id), source: normalizeText(row.source), evidence: normalizeText(row.evidence)
@@ -1412,11 +1424,19 @@ class Phase4AiEvaluatorService {
           strict: true,
           schema: {
             type: 'object', additionalProperties: false,
-            required: ['verdict', 'reason', 'citedRowIds'],
+            required: ['verdict', 'reason', 'citedRowIds', 'rowAssessments'],
             properties: {
               verdict: { type: 'string', enum: ['PASS', 'REVIEW'] },
               reason: { type: 'string' },
-              citedRowIds: { type: 'array', items: { type: 'string' } }
+              citedRowIds: { type: 'array', items: { type: 'string' } },
+              rowAssessments: { type: 'array', items: { type: 'object', additionalProperties: false,
+                required: ['rowId', 'conditions', 'titleCoverage', 'explanation'],
+                properties: {
+                  rowId: { type: 'string' },
+                  conditions: { type: 'string' },
+                  titleCoverage: { type: 'string', enum: ['ACCURATE', 'OMITTED', 'OVERAPPLIED', 'UNSUPPORTED', 'UNCLEAR'] },
+                  explanation: { type: 'string' }
+                } } }
             }
           }
         }
@@ -1436,13 +1456,15 @@ class Phase4AiEvaluatorService {
     const content = String(response?.data?.choices?.[0]?.message?.content || '').trim();
     const parsed = extractJsonObject(content);
     if (!parsed || !['PASS', 'REVIEW'].includes(parsed.verdict) ||
-        !normalizeText(parsed.reason) || !Array.isArray(parsed.citedRowIds)) {
+        !normalizeText(parsed.reason) || !Array.isArray(parsed.citedRowIds) ||
+        !Array.isArray(parsed.rowAssessments)) {
       throw new Error('Fitment review returned an invalid response.');
     }
     return {
       verdict: parsed.verdict,
       reason: normalizeText(parsed.reason),
-      citedRowIds: parsed.citedRowIds
+      citedRowIds: parsed.citedRowIds,
+      rowAssessments: parsed.rowAssessments
     };
   }
 

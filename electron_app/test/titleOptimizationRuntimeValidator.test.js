@@ -183,21 +183,21 @@ test('accepts AI semantic category verification when its citation exists in trus
 
 test('legacy safety approval cannot override category evidence validation', () => {
   const inputs = baseInputs({
-    candidateTitle: '2011 Honda Accord Illuminated Sun Visor Driver 00123',
+    candidateTitle: '2011 Honda Accord Heated Sun Visor Driver 00123',
     safetyDecision: {
       safeToPublish: true,
-      reason: 'Illuminated is directly supported by the supplied listing evidence.',
+      reason: 'Heated is directly supported by the supplied listing evidence.',
       concerns: []
     }
   });
   inputs.ruleResolution.categoryRules = [{ rule: {
-    id: 'cat-visor', categoryName: 'Sun Visor', priorityDetails: ['With / Without Illumination']
+    id: 'cat-visor', categoryName: 'Sun Visor', priorityDetails: ['Heated']
   }, matchedBy: ['category'] }];
   inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{
-    id: 'fitment', source: 'Part Fitment', evidence: 'Jetta illuminated driver sun visor'
+    id: 'fitment', source: 'Part Fitment', evidence: 'Jetta driver sun visor without heat'
   }] } };
   inputs.categoryPriorityDetails = [{
-    detail: 'With / Without Illumination', verified: true, source: 'fitment', evidence: 'illuminated'
+    detail: 'Heated', verified: true, source: 'fitment', evidence: 'without heat'
   }];
 
   const result = validateTitleOptimizationRuntimeCandidate(inputs);
@@ -842,7 +842,7 @@ test('rejects category verification citing real but unrelated evidence across ca
     ['Retractor', 'Seat Belt'],
     ['Heated', 'Unheated mirror']
   ]) {
-    const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Part ABS 00123' });
+    const inputs = baseInputs({ candidateTitle: `2011 Honda Accord ${detail} Part ABS 00123` });
     inputs.ruleResolution.categoryRules = [{ rule: { priorityDetails: [detail] } }];
     inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Item Specifics', evidence }] } };
     inputs.categoryPriorityDetails = [{ detail, verified: true, source: 'Item Specifics', evidence }];
@@ -852,7 +852,7 @@ test('rejects category verification citing real but unrelated evidence across ca
 });
 
 test('rejects category verification when the cited detail is explicitly absent', () => {
-  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Mirror ABS 00123' });
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Heated Mirror ABS 00123' });
   inputs.ruleResolution.categoryRules = [{ rule: { priorityDetails: ['Heated'] } }];
   const evidence = 'Mirror without heated glass';
   inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Part Fitment', evidence }] } };
@@ -860,14 +860,27 @@ test('rejects category verification when the cited detail is explicitly absent',
   assert.equal(validateTitleOptimizationRuntimeCandidate(inputs).violations.some(item => item.checkId === 'category-priority-verification'), true);
 });
 
-test('rejects citations attached to an unverified category priority detail', () => {
-  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Column Switch ABS 00123' });
+test('rejects a used unverified category priority detail', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Turn Signal Column Switch ABS 00123' });
   inputs.ruleResolution.categoryRules = [{ rule: { id: 'cat-switch', priorityDetails: ['Turn Signal'] }, matchedBy: ['category'] }];
   inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [{ source: 'Item Specifics', evidence: 'Column Switch' }] } };
   inputs.categoryPriorityDetails = [{ detail: 'Turn Signal', verified: false, source: 'Item Specifics', evidence: 'Column Switch' }];
 
   const result = validateTitleOptimizationRuntimeCandidate(inputs);
-  assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), true);
+  assert.equal(result.violations.some(item => item.checkId === 'unverified-category-priority-detail'), true);
+});
+
+test('optional category metadata cannot force review when its detail is absent from the title', () => {
+  const inputs = baseInputs({ candidateTitle: '2011 Honda Accord Mirror ABS 00123' });
+  inputs.ruleResolution.categoryRules = [{ rule: { priorityDetails: ['Heated', 'Power Folding'] } }];
+  inputs.promptArtifact.userPayload = { resolvedListing: { categoryPriorityEvidenceSources: [] } };
+  inputs.categoryPriorityDetails = [{ detail: 'Heated', verified: true,
+    source: 'missing-source', evidence: 'Heated' }];
+  const result = validateTitleOptimizationRuntimeCandidate(inputs);
+  assert.equal(result.violations.some(item => item.checkId === 'category-priority-verification'), false);
+  inputs.candidateTitle = '2011 Honda Accord Heated Mirror ABS 00123';
+  const used = validateTitleOptimizationRuntimeCandidate(inputs);
+  assert.equal(used.violations.some(item => item.checkId === 'category-priority-verification'), true);
 });
 
 test('accepts configured synonym evidence for category details', () => {

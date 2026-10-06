@@ -1019,26 +1019,6 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   const publishedIdentitySet = asIdentitySet(options.phase5PublishedIdentities || []);
   const titleMinLength = 65;
   const titleMaxLength = 80;
-  const usedTitleKeys = new Set();
-  const usedTitles = [];
-
-  for (const row of listingRows) {
-    const fields = row?.fields || {};
-    const existingOutputTitle = normalizeText(fields[LISTING_OUTPUT_TITLE_FIELD]);
-    if (existingOutputTitle) {
-      const key = normalizeTitleForKey(existingOutputTitle);
-      if (key) usedTitleKeys.add(key);
-      usedTitles.push(existingOutputTitle);
-      continue;
-    }
-    const existingLegacyTitle = normalizeText(fields[LISTING_LEGACY_TITLE_FIELD]);
-    if (existingLegacyTitle) {
-      const key = normalizeTitleForKey(existingLegacyTitle);
-      if (key) usedTitleKeys.add(key);
-      usedTitles.push(existingLegacyTitle);
-    }
-  }
-
   const rowsForGeneration = [];
   for (const row of listingRows) {
     const fields = row?.fields || {};
@@ -1278,12 +1258,6 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     const existingTitleNew = normalizeText(fields[LISTING_OUTPUT_TITLE_FIELD]);
     const existingDescriptionOut = normalizeText(fields[LISTING_OUTPUT_DESCRIPTION_FIELD]);
     const existingShort = hasShortDescriptionField ? normalizeText(fields[LISTING_SHORT_DESCRIPTION_FIELD]) : '';
-    const currentTitleKeysForRow = new Set(
-      [existingTitleNew, currentLegacyTitle]
-        .map(title => normalizeTitleForKey(title))
-        .filter(Boolean)
-    );
-
     const writeFields = {};
 
     if (titleManualOverride) {
@@ -1298,22 +1272,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       nextReviewNotes = nextReviewNotes || 'Title rules flagged this row for manual review.';
     }
 
-    const nextTitleKey = normalizeTitleForKey(nextTitle);
-    if (
-      !titleManualOverride &&
-      nextTitleKey &&
-      usedTitleKeys.has(nextTitleKey) &&
-      !currentTitleKeysForRow.has(nextTitleKey)
-    ) {
-      nextReviewStatus = TITLE_REVIEW_STATUS_NEEDS_REVIEW;
-      nextReviewReason = nextReviewReason || 'duplicate_unresolved';
-      nextReviewNotes = nextReviewNotes || 'Generated title matches another listing; client rules allow duplicates only when no truthful differentiator exists.';
-    }
-
     if (!titleManualOverride && applyAcceptedRuntimeTitle(writeFields, fields, runtimeResult)) {
       summary.titleGenerated += 1;
-      if (nextTitleKey) usedTitleKeys.add(nextTitleKey);
-      usedTitles.push(nextTitle);
     } else if (titleManualOverride) {
       summary.skippedManualOverride += 1;
     }

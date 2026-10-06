@@ -20,6 +20,26 @@ test('citation cannot bridge different applications or omit the selected identit
   assert.equal(resolveVehicleDecision(decision, prompt, '2010-2012 Mercury Fusion Control 123').verified, false);
 });
 
+test('rejected vehicle decisions identify the failed evidence boundary for correction', () => {
+  const title = '2010-2012 Ford Fusion Control 123';
+  assert.equal(resolveVehicleDecision({ ...decision, source: 'unknown-row' }, prompt, title).failureCode,
+    'UNKNOWN_SOURCE');
+  assert.equal(resolveVehicleDecision({ ...decision, evidence: '2010-2012 Ford Fusion invented qualifier' },
+    prompt, title).failureCode, 'UNSUPPORTED_CITATION');
+  assert.equal(resolveVehicleDecision({ ...decision, yearRange: '2010-2013' }, prompt,
+    '2010-2013 Ford Fusion Control 123').failureCode, 'UNSUPPORTED_YEAR_RANGE');
+  assert.equal(resolveVehicleDecision(decision, prompt, '2010-2012 Mercury Milan Control 123').failureCode,
+    'TITLE_IDENTITY_MISMATCH');
+});
+
+test('validator passes a specific vehicle evidence failure into correction checks', () => {
+  const result = validateTitleOptimizationRuntimeCandidate({ sourceResolution: { resolved: { fields: {} } },
+    promptArtifact: prompt, candidateTitle: '2010-2012 Ford Fusion Control 123',
+    vehicleDecision: { ...decision, source: 'unknown-row' } });
+  assert.match(result.checks.find(check => check.checkId === 'vehicle-evidence').message,
+    /UNKNOWN_SOURCE.*eligible trusted source IDs/);
+});
+
 test('AI may merge adjacent cited rows for the same advertised vehicle', () => {
   const same = 'Fits 2011-2014 Hyundai Sonata Seat Belt Driver Buckle; 2015 Hyundai Sonata Seat Belt Driver Buckle';
   const makePrompt = value => ({ userPayload: { resolvedListing: { categoryPriorityEvidenceSources: [
@@ -51,6 +71,22 @@ test('vehicle decision accepts multiple trusted source IDs for one continuous ap
 
   assert.equal(resolveVehicleDecision(selected, artifact,
     '2007-2012 Nissan Altima Master Window Switch Driver 1375500').verified, true);
+});
+
+test('eligible fitment row IDs supply canonical evidence without requiring AI to repeat it', () => {
+  const row = { id: 'title-fitment-001', evidence: '2010-2012 Ford Fusion 2.5L starter motor' };
+  const artifact = { userPayload: { resolvedListing: { titleFitmentCandidates: {
+    candidates: [row], eligibleCandidates: [row]
+  } } } };
+  const selected = { resolved: true, make: 'Ford', model: 'Fusion', yearRange: '2010-2012',
+    source: row.id, evidence: 'Fusion starter', reason: 'Advertised application.' };
+  const result = resolveVehicleDecision(selected, artifact, '2010-2012 Ford Fusion 2.5L Starter Motor 123');
+  assert.equal(result.verified, true);
+  assert.equal(result.decision.evidence, row.evidence);
+  assert.equal(resolveVehicleDecision({ ...selected, evidence: '' }, artifact,
+    '2010-2012 Ford Fusion 2.5L Starter Motor 123').verified, true);
+  assert.equal(resolveVehicleDecision({ ...selected, source: 'unknown-row' }, artifact,
+    '2010-2012 Ford Fusion 2.5L Starter Motor 123').verified, false);
 });
 
 test('vehicle decision accepts plus-separated cited candidate IDs', () => {
@@ -218,6 +254,49 @@ test('vehicle evidence supports multiword makes and models without positional pa
 
   assert.equal(resolveVehicleDecision(selected, artifact,
     '2009-2016 Ford Truck E350 Van Master Window Switch 1590577').verified, true);
+});
+
+test('vehicle citation accepts letter-number model spacing but not a different numeric model', () => {
+  const candidates = [
+    { id: 'fit-1', evidence: '2010-2011 Mazda 3 Instrument Cluster' },
+    { id: 'fit-2', evidence: '2010-2011 Mazda 6 Instrument Cluster' }
+  ];
+  const artifact = { userPayload: { resolvedListing: { titleFitmentCandidates: {
+    candidates, eligibleCandidates: [candidates[0]]
+  } } } };
+  const selected = { resolved: true, make: 'Mazda', model: 'Mazda3', yearRange: '2010-2011',
+    source: 'fit-1', evidence: candidates[0].evidence, reason: 'Supported by the cited application.' };
+  assert.equal(resolveVehicleDecision(selected, artifact,
+    '2010-2011 Mazda Mazda3 Instrument Cluster 1568656').verified, true);
+  assert.equal(resolveVehicleDecision({ ...selected, model: 'Mazda6' }, artifact,
+    '2010-2011 Mazda Mazda6 Instrument Cluster 1568656').verified, false);
+});
+
+test('a model that includes the make is not required to repeat the make in the title', () => {
+  const candidates = [{ id: 'fit-1', evidence: '2010-2013 Mazda Mazda3 driver window switch' }];
+  const artifact = { userPayload: { resolvedListing: { titleFitmentCandidates: {
+    candidates, eligibleCandidates: candidates
+  } } } };
+  const selected = { resolved: true, make: 'Mazda', model: 'Mazda3', yearRange: '2010-2013',
+    source: 'fit-1', evidence: null, reason: 'Advertised model.' };
+  assert.equal(resolveVehicleDecision(selected, artifact,
+    '2010-2013 Mazda 3 Master Window Switch 1592308').verified, true);
+  assert.equal(resolveVehicleDecision(selected, artifact,
+    '2010-2013 Mazda 6 Master Window Switch 1592308').verified, false);
+});
+
+test('another compatible model cannot replace the advertised model in a no-Fits title', () => {
+  const candidates = [
+    { id: 'fit-1', evidence: '1998-2005 Lexus GS300 right decklid tail light' },
+    { id: 'fit-2', evidence: '1998-2000 Lexus GS400 right decklid tail light' }
+  ];
+  const artifact = { userPayload: { resolvedListing: { titleFitmentCandidates: {
+    candidates, eligibleCandidates: [candidates[0]], selectionBasis: 'EXISTING_TITLE_MODEL_APPLICATION'
+  } } } };
+  const gs400 = { resolved: true, make: 'Lexus', model: 'GS400', yearRange: '1998-2000',
+    source: 'fit-2', evidence: null, reason: 'Another compatible model.' };
+  assert.equal(resolveVehicleDecision(gs400, artifact,
+    '1998-2000 Lexus GS400 Right Tail Light 1056292').verified, false);
 });
 
 test('vehicle decision may use another trusted source when Part Fitment is unavailable', () => {

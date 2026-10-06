@@ -344,7 +344,7 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
   const append = (record) => appendCheck({ checks }, record, { corrections, violations, warnings });
   if (vehicleDecision && !vehicleVerification.verified) {
     append(checkRecord({ checkId: 'vehicle-evidence', status: 'FAIL', severity: 'error',
-      message: 'Vehicle decision is unresolved or lacks a supported make/model/year application and matching title.' }));
+      message: `Vehicle decision failed ${vehicleVerification.failureCode || 'VERIFICATION'}: ${vehicleVerification.failureMessage || 'A supported make/model/year application and matching title are required.'}` }));
   }
 
   const beforeFormat = title;
@@ -435,16 +435,17 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
       const detail = normalizeText(decision?.detail);
       const key = normalizeKey(detail);
       if (!configuredByKey.has(key) || decisionByKey.has(key)) {
-        append(checkRecord({
-          checkId: 'category-priority-verification',
-          systemRuleId: systemRuleId(ruleResolution, 'SR-01'),
-          status: 'RETAIN_EXISTING_REQUIRED',
-          severity: 'error',
-          message: `AI returned an unknown or duplicate Category Rule detail '${detail || '(blank)'}'.`
-        }));
+        if (detail && titleContainsValue(title, detail) && !configuredByKey.has(key)) {
+          append(checkRecord({ checkId: 'category-priority-verification',
+            systemRuleId: systemRuleId(ruleResolution, 'SR-01'),
+            status: 'RETAIN_EXISTING_REQUIRED', severity: 'error',
+            message: `Candidate uses an unconfigured Category Rule detail '${detail}'.` }));
+        }
         continue;
       }
       decisionByKey.set(key, decision);
+      const detailInTitle = titleContainsValue(title, configuredByKey.get(key));
+      if (!detailInTitle) continue;
       if (decision.verified === true) {
         const source = normalizeText(decision.source);
         const evidence = normalizeCitationText(decision.evidence);
@@ -472,16 +473,6 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
           }));
         }
       } else {
-        if (normalizeText(decision.source) || normalizeText(decision.evidence)) {
-          append(checkRecord({
-            checkId: 'category-priority-verification',
-            systemRuleId: systemRuleId(ruleResolution, 'SR-01'),
-            status: 'RETAIN_EXISTING_REQUIRED',
-            severity: 'error',
-            message: `Unverified Category Rule detail '${detail}' must not include source or evidence citations.`
-          }));
-        }
-        const detailInTitle = titleContainsValue(title, configuredByKey.get(key));
         const prefixAuthorizes = prefixAuthority.includes(comparable(configuredByKey.get(key)));
         if (detailInTitle && !prefixAuthorizes) {
           append(checkRecord({
@@ -496,6 +487,7 @@ function validateTitleOptimizationRuntimeCandidate({ sourceResolution = {}, rule
     }
     for (const detail of configured) {
       if (decisionByKey.has(normalizeKey(detail))) continue;
+      if (!titleContainsValue(title, detail) || prefixAuthority.includes(comparable(detail))) continue;
       append(checkRecord({
         checkId: 'category-priority-verification',
         systemRuleId: systemRuleId(ruleResolution, 'SR-01'),

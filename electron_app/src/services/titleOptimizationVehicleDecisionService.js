@@ -16,6 +16,15 @@ function contains(value, term) {
   return Boolean(escaped && new RegExp(`(^|[^a-z0-9])${escaped}(?=$|[^a-z0-9])`, 'i').test(value));
 }
 
+function containsModel(value, model) {
+  const normalize = input => text(input).toLowerCase()
+    .replace(/([a-z])(?=\d)|([0-9])(?=[a-z])/g, '$1$2 ')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+  const haystack = ` ${normalize(value)} `;
+  const needle = normalize(model);
+  return Boolean(needle && haystack.includes(` ${needle} `));
+}
+
 function parseApplicationRanges(value) {
   return citationText(value).split(/;|\n/).map(clause => {
     const evidence = text(clause).replace(/^Fits\s+/i, '');
@@ -31,7 +40,7 @@ function parseApplicationRanges(value) {
 
 function applicationsCoverRange(citation, make, model, start, end) {
   const matches = parseApplicationRanges(citation)
-    .filter(item => contains(item.evidence, make) && contains(item.evidence, model))
+    .filter(item => contains(item.evidence, make) && containsModel(item.evidence, model))
     .sort((a, b) => a.start - b.start || a.end - b.end);
   let coveredThrough = null;
   for (const application of matches) {
@@ -49,7 +58,7 @@ function applicationsCoverRange(citation, make, model, start, end) {
 
 function completeApplicationRange(citation, make, model, selectedStart, selectedEnd) {
   const matches = parseApplicationRanges(citation)
-    .filter(item => contains(item.evidence, make) && contains(item.evidence, model))
+    .filter(item => contains(item.evidence, make) && containsModel(item.evidence, model))
     .sort((a, b) => a.start - b.start || a.end - b.end);
   const groups = [];
   for (const application of matches) {
@@ -78,40 +87,54 @@ function sourceReferences(value) {
 }
 
 function resolveVehicleDecision(decision, promptArtifact, title) {
-  const rejected = { verified: false, decision: decision || null };
-  if (decision?.resolved !== true) return rejected;
+  const reject = (failureCode, failureMessage) => ({ verified: false, decision: decision || null,
+    failureCode, failureMessage });
+  if (decision?.resolved !== true) return reject('UNRESOLVED_DECISION', 'AI did not resolve a supported vehicle application.');
   const { make, model, yearRange, source, evidence } = decision;
-  const citation = citationText(evidence);
-  if (![make, model, yearRange, source, evidence, decision.reason].every(value => text(value))) return rejected;
   const supplied = promptArtifact?.userPayload?.resolvedListing?.categoryPriorityEvidenceSources || [];
   const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates;
   const titleCandidates = Array.isArray(fitmentSelection?.eligibleCandidates)
     ? fitmentSelection.eligibleCandidates
     : fitmentSelection?.candidates || [];
   const hasParsedFitmentCandidates = Array.isArray(fitmentSelection?.candidates) && fitmentSelection.candidates.length > 0;
+  if (![make, model, yearRange, source, decision.reason].every(value => text(value)) ||
+      (!hasParsedFitmentCandidates && !text(evidence))) {
+    return reject('INCOMPLETE_DECISION', 'Vehicle decision is missing make, model, years, source, or reason.');
+  }
   const trustedApplications = hasParsedFitmentCandidates
     ? titleCandidates.map(item => ({ id: item.id, source: 'Title Fitment Candidate', evidence: item.evidence }))
     : [
         ...titleCandidates.map(item => ({ id: item.id, source: 'Title Fitment Candidate', evidence: item.evidence })),
         ...supplied
       ];
-  if (!citation || trustedApplications.length === 0) return rejected;
+  if (trustedApplications.length === 0) {
+    return reject('NO_TRUSTED_APPLICATION', 'No eligible trusted application supports this vehicle decision.');
+  }
   const years = text(yearRange).match(/^((?:19|20)\d{2})(?:-((?:19|20)\d{2}))?$/);
-  if (!years || Number(years[1]) > Number(years[2] || years[1])) return rejected;
+  if (!years || Number(years[1]) > Number(years[2] || years[1])) {
+    return reject('INVALID_YEAR_RANGE', 'Vehicle yearRange must be one valid four-digit year or ascending range.');
+  }
   const sourceRefs = sourceReferences(source);
-  const citationSegments = semicolonValues(citation);
   const cited = trustedApplications.filter(item => sourceRefs.includes(item.id) || sourceRefs.includes(item.source));
   const allSourcesExist = sourceRefs.length > 0 && sourceRefs.every(ref =>
     cited.some(item => item.id === ref || item.source === ref));
+  if (!allSourcesExist) return reject('UNKNOWN_SOURCE', 'Vehicle source must cite eligible trusted source IDs.');
+  const citation = hasParsedFitmentCandidates
+    ? cited.map(item => text(item.evidence)).join('; ') : citationText(evidence);
+  const citationSegments = semicolonValues(citation);
   const allCitationsExist = citationSegments.length > 0 && citationSegments.every(segment =>
     cited.some(item => sourceContainsCitation(item.evidence, segment)));
   const selectedStart = Number(years[1]);
   const selectedEnd = Number(years[2] || years[1]);
   const complete = completeApplicationRange(citation, make, model, selectedStart, selectedEnd);
-  const supported = allSourcesExist && allCitationsExist &&
-    applicationsCoverRange(citation, make, model, selectedStart, selectedEnd) &&
-    complete?.start === selectedStart && complete?.end === selectedEnd;
-  if (!supported || !contains(title, `${text(make)} ${text(model)}`) || !contains(title, yearRange)) return rejected;
+  if (!allCitationsExist) return reject('UNSUPPORTED_CITATION', 'Vehicle evidence must quote exact supported source text.');
+  if (!applicationsCoverRange(citation, make, model, selectedStart, selectedEnd) ||
+      complete?.start !== selectedStart || complete?.end !== selectedEnd) {
+    return reject('UNSUPPORTED_YEAR_RANGE', 'Cited rows do not cover exactly the selected make, model, and continuous year range.');
+  }
+  if (!contains(title, make) || !containsModel(title, model) || !contains(title, yearRange)) {
+    return reject('TITLE_IDENTITY_MISMATCH', 'Title must contain the selected year range, make, and model.');
+  }
   return { verified: true, decision: { ...decision, make: text(make), model: text(model), yearRange: text(yearRange),
     source: sourceRefs.join(';'), evidence: citationSegments.join('; ') } };
 }
