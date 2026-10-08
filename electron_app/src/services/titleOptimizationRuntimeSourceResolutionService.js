@@ -30,7 +30,7 @@ const SEMANTIC_SOURCE = Object.freeze({
 
 const ITEM_SPECIFIC_ALIASES = Object.freeze({
   brandMake: ['C:Brand', 'Brand', 'Make', 'C:Make'],
-  part: ['C:Part', 'Part', 'Part Type', 'Category', 'Category Name'],
+  part: ['C:Part', 'Part', 'Part Type', 'C:Type', 'Type', 'Category', 'Category Name'],
   manufacturerPartNumber: ['C:MPN', 'MPN', 'Manufacturer Part Number', 'C:Manufacturer Part Number'],
   side: ['Side', 'Placement on Vehicle', 'C:Side'],
   year: ['Year', 'C:Year', 'Year Range'],
@@ -351,7 +351,7 @@ function canonicalResolvedValue(field = '', value = '', terminologyRules = []) {
 }
 
 function derivePlacementFromText(value = '') {
-  const text = normalizeText(value).toUpperCase();
+  const text = normalizeText(value).toUpperCase().replace(/\bREAR[ -]+VIEW[ -]+MIRRORS?\b/g, '');
   if (/\b(FRNT|FRONT|FRT)\b/.test(text)) return 'Front';
   if (/\b(REAR|RR)\b/.test(text)) return 'Rear';
   return '';
@@ -359,6 +359,8 @@ function derivePlacementFromText(value = '') {
 
 function deriveKeyFitmentDetailFromText(value = '') {
   const text = normalizeText(value).toUpperCase();
+  // Leave negative/conditional equipment wording in raw evidence for AI interpretation.
+  if (/\b(?:NO|NON|NOT|WITHOUT|EXCEPT)\b|W\s*\/\s*O\b/.test(text)) return '';
   const details = [];
   if (/\b(PWR|POWER)\b/.test(text)) details.push('Power');
   if (/\bILLUM|ILLUMINATED|ILLUMINATION\b/.test(text)) details.push('With Illumination');
@@ -372,7 +374,7 @@ function cleanCategoryPartName(value = '') {
   const normalized = normalizeCompare(last);
   if (normalized.includes('seat belts')) return 'Seat Belt';
   if (normalized.includes('interior safety')) return 'Seat Belt';
-  if (normalized.includes('mirrors')) return 'Side View Mirror';
+  // A broad mirror category does not establish interior/exterior part identity.
   return last.replace(/\s*&\s*Parts\b/i, '').trim();
 }
 
@@ -566,11 +568,15 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
   const legacyTitle = normalizeText(out.fields.legacyTitle?.value || out.fields.rawSourceTitle?.value);
   const currentEbayFields = out.structured.currentEbayFields?.value || {};
   const itemSpecifics = out.structured.itemSpecifics?.value || {};
+  const legacyDonorNote = readDescriptionLabel(String(fields.Description || ''), 'Notes');
+  out.titleAuthority.legacyDonorNote = derivedEvidence(legacyDonorNote, 'rawHollander', 'Description',
+    legacyDonorNote, { logicalKey: 'donorNotes', titleEvidence: true });
   const donorNotes = normalizeText(
     currentEbayFields.donorNotes ||
     currentEbayFields.Notes ||
     currentEbayFields.notes ||
-    currentEbayFields['Donor Notes']
+    currentEbayFields['Donor Notes'] ||
+    legacyDonorNote
   );
   const donorModel = normalizeText(
     currentEbayFields.donorModel ||
@@ -700,6 +706,7 @@ function candidatesForField(field, normalized, priorities) {
   const add = (out, source, value, evidenceValue) => {
     const text = normalizeText(value);
     if (!text) return;
+    if (!['title', 'sku'].includes(field) && /^(?:does not apply|not applicable|n\/a|unknown|unspecified)$/i.test(text)) return;
     if (field === 'side' && !/\b(?:drivers?|passengers?|pass|left|right|lh|rh|center|centre)\b/i.test(text)) return;
     out.push(candidate(field, source, text, priorityBySource.get(source) || Number.MAX_SAFE_INTEGER, evidenceValue));
   };

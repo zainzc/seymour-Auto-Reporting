@@ -32,7 +32,7 @@ function applicationKey(value) {
 function expandTitleYear(value) {
   const year = Number(value);
   if (String(value).length === 4) return year;
-  return year >= 70 ? 1900 + year : 2000 + year;
+  return year >= 31 ? 1900 + year : 2000 + year;
 }
 
 function advertisedApplicationHint(existingTitle) {
@@ -60,14 +60,32 @@ function advertisedApplicationHint(existingTitle) {
 }
 
 function parseApplicationClauses(partFitment) {
-  return String(partFitment || '').split(/;|\r?\n/).map((raw, index) => {
+  const rawValue = String(partFitment || '');
+  const clauses = /<br\s*\/?\s*>/i.test(rawValue)
+    ? rawValue.replace(/<br\s*\/?\s*>/gi, '\n').split(/\r?\n/)
+    : rawValue.split(/;|\r?\n/);
+  const yearPattern = /(?<![\d/])\b((?:19|20)\d{2})(?:\s*-\s*((?:19|20)\d{2}|\d{2}))?\b(?![\d/])|(?<![\d/])\b(\d{2})\s*-\s*(\d{2})\b(?![\d/])/;
+  const applications = [];
+  for (const [index, raw] of clauses.entries()) {
+    if (yearPattern.test(raw)) applications.push({ raw, index });
+    else if (text(raw) && applications.length) applications[applications.length - 1].raw += `; ${text(raw)}`;
+  }
+  return applications.map(({ raw, index }) => {
     const evidence = text(raw).replace(/^Fits\s+/i, '');
-    const years = evidence.match(/\b((?:19|20)\d{2})(?:\s*-\s*((?:19|20)\d{2}))?\b/);
+    const years = evidence.match(yearPattern);
     if (!evidence || !years) return null;
+    const firstYear = years[1] || years[3];
+    const lastYear = years[2] || years[4] || firstYear;
+    const startYear = expandTitleYear(firstYear);
+    let endYear = expandTitleYear(lastYear);
+    if (endYear < startYear && String(lastYear).length === 2 && endYear + 100 - startYear <= 30) {
+      endYear += 100;
+    }
+    if (endYear < startYear || endYear - startYear > 30) return null;
     return {
       id: `title-fitment-${String(index + 1).padStart(3, '0')}`,
-      startYear: Number(years[1]),
-      endYear: Number(years[2] || years[1]),
+      startYear,
+      endYear,
       evidence,
       canonicalKey: applicationKey(evidence)
     };
@@ -117,7 +135,7 @@ function resolvedValue(listingResolution, field) {
 function selectTitleFitmentCandidates(listingResolution = {}) {
   const decisionPolicy = {
     owner: 'AI',
-    instruction: 'Evaluate every supplied Part Fitment row for the selected make/model. Combine all continuous rows whose qualifiers are compatible. If a material qualifier conflict prevents one safe application, return unresolved for review. Do not select a narrower subset merely because it matches the donor year or existing title year.',
+    instruction: 'Evaluate supplied rows under evidencePolicy and UI rules. Combine compatible continuous rows for the advertised application while retaining material restrictions. Additional alternative applications do not all have to appear in one title. Donor year alone cannot justify narrowing; unresolved material conflicts require review.',
     allowedOutcomes: [
       'COMBINE_COMPATIBLE_CONTINUOUS_ROWS',
       'UNRESOLVED_MATERIAL_QUALIFIER_CONFLICT'
@@ -174,9 +192,7 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
   const matchedCandidates = hintedModel
     ? candidates.filter(item => containsModel(item.evidence, hintedModel))
     : [];
-  const eligibleCandidates = hintedModel
-    ? matchedCandidates
-    : candidates;
+  const eligibleCandidates = matchedCandidates.length ? matchedCandidates : candidates;
   const selectionBasis = matchedCandidates.length
     ? advertisedHint ? 'EXISTING_TITLE_FITS_APPLICATION' : 'EXISTING_TITLE_MODEL_APPLICATION'
     : hintedModel
@@ -186,12 +202,12 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
         : 'AI_APPLICATION_SELECTION';
   const advertisedApplicationUnmatched = Boolean(hintedModel && !matchedCandidates.length);
   const resolution = advertisedApplicationUnmatched
-    ? 'UNRESOLVED'
+    ? 'AI_SELECTION_REQUIRED'
     : eligibleCandidates.length === 1 ? 'UNAMBIGUOUS' : 'AMBIGUOUS';
 
   return {
     status: advertisedApplicationUnmatched
-      ? 'ADVERTISED_APPLICATION_UNMATCHED'
+      ? 'ADVERTISED_APPLICATION_REQUIRES_NORMALIZATION'
       : resolution === 'UNAMBIGUOUS' ? 'ONE_DISTINCT_APPLICATION' : 'MULTIPLE_DISTINCT_APPLICATIONS',
     resolution,
     decisionPolicy,

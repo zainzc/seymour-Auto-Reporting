@@ -153,6 +153,8 @@ function phase74TitleResponseFormat() {
   return JSON.parse(JSON.stringify(PHASE74_TITLE_RESPONSE_FORMAT));
 }
 
+const { EVIDENCE_POLICY } = require('./titleOptimizationEvidencePolicy');
+
 class Phase4AiEvaluatorService {
   static sharedFieldResolutionCache = new Map();
 
@@ -172,6 +174,8 @@ class Phase4AiEvaluatorService {
     this.logPhase74AiPayload =
       config.logPhase74AiPayload === true ||
       String(process.env.PHASE74_LOG_AI_PAYLOAD || '').trim().toLowerCase() === 'true';
+    this.onPhase74Request = typeof config.onPhase74Request === 'function' ? config.onPhase74Request : null;
+    this.phase74RequestSequence = 0;
     this.lowConfidenceThreshold = clampConfidence(
       Number.isFinite(Number(config.lowConfidenceThreshold))
         ? Number(config.lowConfidenceThreshold)
@@ -1372,23 +1376,50 @@ class Phase4AiEvaluatorService {
     };
   }
 
+  async postPhase74Logged(kind, listing, requestBody) {
+    const attemptId = `${process.pid}-${Date.now()}-${++this.phase74RequestSequence}`;
+    const emit = entry => this.onPhase74Request?.({ attemptId, kind, listing, ...entry });
+    emit({ event: 'request', requestBody });
+    try {
+      const response = await this.client.post('/chat/completions', requestBody);
+      emit({ event: 'response', responseBody: response?.data || null });
+      return response;
+    } catch (error) {
+      emit({ event: 'error', error: {
+        message: String(error?.message || 'AI request failed').slice(0, 500),
+        status: error?.response?.status || null
+      } });
+      throw error;
+    }
+  }
+
   async reviewTitleFitment(input = {}) {
     const systemMessage = [
       'You independently review an automotive listing title against supplied fitment evidence.',
       'Judge the exact final title, not the generator reasoning or its review status. Use only supplied evidence.',
+      ...EVIDENCE_POLICY,
+      'Check the final title against applicableTitleRules as well as the source evidence. The selected title structure, authoritative prefix replacement, restricted terms, and active system rules remain binding; do not PASS a material rule violation.',
       'Check the advertised vehicle, complete year coverage, and every material fitment condition.',
+      'The current title\'s single year is not a ceiling on a supported fitment range. Adding years cited by matching, compatible Part Fitment rows is not by itself an identity conflict. Evaluate the truth of the stated application and preservation of verified advertised coverage separately from additional compatible applications.',
       'Check the generator vehicleDecision against the existing advertised title and eligible rows. Another compatible model in Part Fitment must not silently replace the advertised model. If the selected source IDs do not identify eligible rows or the advertised identity cannot be supported, return REVIEW.',
+      'Before assessing row coverage, identify the vehicle advertised in currentTitle even when it has no Fits phrase or a year/model appears elsewhere. Compare that identity with finalTitle and vehicleDecision. A compatibility row for a different make or model is not permission to switch the advertised product. If the advertised identity is ambiguous, explain that and return REVIEW; never silently choose a different compatible vehicle.',
       'Assess EVERY selected fitment row separately using its supplied startYear, endYear, and evidence. For each row, state its material conditions or none, whether the final title accurately covers that row, and why. Use the variant evidence within a grouped row rather than treating its combined text as one unrestricted application.',
       'List each independently narrowing condition in the row assessment before deciding titleCoverage. Do not let one condition substitute for another: a trim does not imply a body style, and a generic product name does not imply a specific button count or function. If a condition is omitted, decide whether that omission broadens the advertised application; request correction when it does.',
       'Do not treat an advertised model as interchangeable with a longer model name that merely contains it as a prefix; require explicit supplied evidence for that identity.',
       'A title-level condition must not be projected onto years or variants whose rows do not support it. Conversely, do not omit a row-specific restriction so the title appears universally compatible. Check both false inclusions and false exclusions.',
+      'For every qualifier stated in finalTitle, test its scope against EACH selected year and variant, including rows where the qualifier is absent. A VIN, build-date, trim, or equipment condition supported by one row is not automatically true for the whole title year range. Mark the other row OVERAPPLIED when the title makes that restricted condition appear to cover it. Do not PASS merely because every word appears somewhere in the combined fitment evidence.',
       'Compare the current title and other trusted evidence for material details lost by the final title. A supported displacement, market, body style, or equipment restriction takes priority over an optional part number or filler when space is tight.',
+      'Compare donor notes with product identity and placement using sourcePriority and sourceEvidence. A specific contrary part/location claim needs a hierarchy-based resolution or REVIEW; a broad category or duplicate derived value is not an equal-authority contradiction. Explain the decisive sources.',
+      'Report productIdentityAssessment separately from vehicle identity and qualifier scope. Use SUPPORTED when the actual part and placement are established under the configured source hierarchy, CONFLICT for an unresolved material disagreement, or UNCLEAR when identity cannot be established. PASS requires SUPPORTED.',
       'Pay particular attention when a condition applies to only some years or variants. A title must not apply that condition to other years, or omit it so restricted years appear unrestricted.',
       'Conditions can include VIN, build origin or date, engine, transmission, trim, body style, drivetrain, side, placement, and included or excluded features. These are examples, not an exhaustive list.',
       'Do not assume that a row without a restriction establishes unrestricted compatibility for another row. Do not accept a title that is made to look safe by simply removing a material condition.',
       'Inspect additional eligible rows for missing years or material conditions, but do not treat an alternate trim or compatible variant as an automatic conflict.',
       'Other trusted listing evidence may support a product qualifier absent from the fitment rows. Do not use it to broaden fitment years or override a row-specific restriction.',
+      'Return materialOmissions listing every verified material restriction absent from the final title without an accurate configured equivalent. Return unsupportedClaims listing unsupported or overapplied title claims. Both arrays must be empty for PASS. Do not describe omission of a material restriction as conservative: removing a restriction broadens the apparent application. Include a concise actionable correction in reason for REVIEW, and cite the source that makes it necessary.',
       'Return PASS only if every selected row assessment is ACCURATE and the exact title truthfully represents the advertised application without broadening, over-restricting, or contradicting a material condition. Cite every selected row ID for PASS.',
+      'In the PASS reason, name the advertised make/model and explain why it matches the final make/model; for multiple selected rows, explain why title-level qualifiers remain accurate across their full year range. If you cannot explain either, return REVIEW.',
+      'Set advertisedIdentityAssessment to SUPPORTED only when the final vehicle is the advertised vehicle and its identity is supported by the supplied evidence; otherwise use CHANGED or UNCLEAR. Set qualifierScopeAssessment to ACCURATE only when every title-level restriction applies to all years and variants that the title appears to cover; otherwise use INACCURATE or UNCLEAR. PASS requires SUPPORTED and ACCURATE.',
       'Return REVIEW with a specific explanation and relevant row IDs when a material claim is wrong, unsupported, missing, or cannot be expressed safely. Uncertainty is REVIEW.',
       'You are a reviewer only. Do not rewrite the title or use external knowledge.'
     ].join(' ');
@@ -1398,6 +1429,10 @@ class Phase4AiEvaluatorService {
       currentTitle: normalizeText(input.existingTitle),
       advertisedApplication: input.advertisedApplication || null,
       vehicleDecision: input.vehicleDecision || null,
+      applicableTitleRules: input.applicableTitleRules || null,
+      sourcePriority: input.sourcePriority || [],
+      authoritativeValues: input.authoritativeValues || {},
+      sourceEvidence: input.sourceEvidence || {},
       selectedFitmentRows: Array.isArray(input.selectedRows) ? input.selectedRows.map(row => ({
         id: normalizeText(row.id), startYear: row.startYear ?? null, endYear: row.endYear ?? null,
         evidence: normalizeText(row.evidence),
@@ -1407,6 +1442,9 @@ class Phase4AiEvaluatorService {
         id: normalizeText(row.id), startYear: row.startYear ?? null, endYear: row.endYear ?? null,
         evidence: normalizeText(row.evidence),
         variantEvidence: Array.isArray(row.variantEvidence) ? row.variantEvidence.map(normalizeText) : []
+      })) : [],
+      listingNoteEvidence: Array.isArray(input.listingNoteEvidence) ? input.listingNoteEvidence.map(row => ({
+        id: normalizeText(row.id), source: normalizeText(row.source), evidence: normalizeText(row.evidence)
       })) : [],
         otherTrustedEvidence: Array.isArray(input.otherTrustedEvidence) ? input.otherTrustedEvidence.map(row => ({
           id: normalizeText(row.id), source: normalizeText(row.source), evidence: normalizeText(row.evidence)
@@ -1424,11 +1462,16 @@ class Phase4AiEvaluatorService {
           strict: true,
           schema: {
             type: 'object', additionalProperties: false,
-            required: ['verdict', 'reason', 'citedRowIds', 'rowAssessments'],
+            required: ['verdict', 'reason', 'citedRowIds', 'advertisedIdentityAssessment', 'qualifierScopeAssessment', 'productIdentityAssessment', 'materialOmissions', 'unsupportedClaims', 'rowAssessments'],
             properties: {
               verdict: { type: 'string', enum: ['PASS', 'REVIEW'] },
               reason: { type: 'string' },
               citedRowIds: { type: 'array', items: { type: 'string' } },
+              advertisedIdentityAssessment: { type: 'string', enum: ['SUPPORTED', 'CHANGED', 'UNCLEAR'] },
+              qualifierScopeAssessment: { type: 'string', enum: ['ACCURATE', 'INACCURATE', 'UNCLEAR'] },
+              productIdentityAssessment: { type: 'string', enum: ['SUPPORTED', 'CONFLICT', 'UNCLEAR'] },
+              materialOmissions: { type: 'array', items: { type: 'string' } },
+              unsupportedClaims: { type: 'array', items: { type: 'string' } },
               rowAssessments: { type: 'array', items: { type: 'object', additionalProperties: false,
                 required: ['rowId', 'conditions', 'titleCoverage', 'explanation'],
                 properties: {
@@ -1450,25 +1493,34 @@ class Phase4AiEvaluatorService {
       console.log(`[Phase7.4 Fitment Review AI Payload]\n${JSON.stringify(requestBody, null, 2)}`);
     }
     const response = await retryWithBackoff(
-      async () => this.client.post('/chat/completions', requestBody),
+      async () => this.postPhase74Logged('fitment-review', input.listing, requestBody),
       { maxAttempts: this.maxAttempts, baseDelayMs: this.baseDelayMs }
     );
     const content = String(response?.data?.choices?.[0]?.message?.content || '').trim();
     const parsed = extractJsonObject(content);
     if (!parsed || !['PASS', 'REVIEW'].includes(parsed.verdict) ||
         !normalizeText(parsed.reason) || !Array.isArray(parsed.citedRowIds) ||
-        !Array.isArray(parsed.rowAssessments)) {
+        !Array.isArray(parsed.rowAssessments) ||
+        !Array.isArray(parsed.materialOmissions) || !Array.isArray(parsed.unsupportedClaims) ||
+        !['SUPPORTED', 'CHANGED', 'UNCLEAR'].includes(parsed.advertisedIdentityAssessment) ||
+        !['ACCURATE', 'INACCURATE', 'UNCLEAR'].includes(parsed.qualifierScopeAssessment) ||
+        !['SUPPORTED', 'CONFLICT', 'UNCLEAR'].includes(parsed.productIdentityAssessment)) {
       throw new Error('Fitment review returned an invalid response.');
     }
     return {
       verdict: parsed.verdict,
       reason: normalizeText(parsed.reason),
       citedRowIds: parsed.citedRowIds,
+      advertisedIdentityAssessment: parsed.advertisedIdentityAssessment,
+      qualifierScopeAssessment: parsed.qualifierScopeAssessment,
+      productIdentityAssessment: parsed.productIdentityAssessment,
+      materialOmissions: parsed.materialOmissions,
+      unsupportedClaims: parsed.unsupportedClaims,
       rowAssessments: parsed.rowAssessments
     };
   }
 
-  async generateTitleAndDescriptionFromRuntimePrompt(promptArtifact = {}) {
+  async generateTitleAndDescriptionFromRuntimePrompt(promptArtifact = {}, listing = null) {
     if (!promptArtifact || promptArtifact.kind === 'title-generation-bypass') {
       return {
         generatedTitle: '',
@@ -1536,11 +1588,12 @@ class Phase4AiEvaluatorService {
           `promptDigest='${promptDigest}'\n${JSON.stringify(requestBody, null, 2)}`
       );
     }
+    const postRuntimeRequest = async () => this.postPhase74Logged('title-generation', listing, requestBody);
 
     let response;
     try {
       response = await retryWithBackoff(
-        async () => this.client.post('/chat/completions', requestBody),
+        postRuntimeRequest,
         {
           maxAttempts: this.maxAttempts,
           baseDelayMs: this.baseDelayMs
@@ -1553,7 +1606,7 @@ class Phase4AiEvaluatorService {
       this.promptCacheEnabled = false;
       delete requestBody.prompt_cache_key;
       response = await retryWithBackoff(
-        async () => this.client.post('/chat/completions', requestBody),
+        postRuntimeRequest,
         {
           maxAttempts: this.maxAttempts,
           baseDelayMs: this.baseDelayMs

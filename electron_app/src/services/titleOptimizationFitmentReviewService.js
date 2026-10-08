@@ -23,6 +23,9 @@ function buildFitmentReviewInput({ title, promptArtifact, vehicleDecision } = {}
   const eligible = Array.isArray(selection.eligibleCandidates)
     ? selection.eligibleCandidates : selection.candidates || [];
   const selectedIds = sourceIds(vehicleDecision?.source);
+  const eligibleIds = new Set(eligible.map(row => row.id));
+  const invalidSelectedRowIds = selectedIds.filter(id =>
+    !eligibleIds.has(id) && (eligible.length > 0 || /^title-fitment-/i.test(id)));
   const selectedRows = selectedIds.length
     ? eligible.filter(row => selectedIds.includes(row.id)) : eligible;
   const selectedRowIds = new Set(selectedRows.map(row => row.id));
@@ -31,20 +34,39 @@ function buildFitmentReviewInput({ title, promptArtifact, vehicleDecision } = {}
     vehicleDecision: vehicleDecision || null,
     existingTitle: text(payload.existingTitle?.currentTitle),
     advertisedApplication: selection.advertisedApplicationHint || null,
+    applicableTitleRules: payload.titlePolicy || {},
+    sourcePriority: payload.sourcePriority || [],
+    authoritativeValues: listing.authoritativeValues || {},
+    sourceEvidence: listing.supportingAndConflictingEvidence || {},
+    invalidSelectedRowIds,
     selectedRows: selectedRows.map(reviewRow),
     additionalEligibleRows: eligible.filter(row => !selectedRowIds.has(row.id))
       .map(reviewRow),
     otherTrustedEvidence: (listing.categoryPriorityEvidenceSources || [])
-      .filter(row => /^(?:Item Specifics:|Conditions & Options$|Resolved:)/.test(row.source))
+      .filter(row => /^(?:Item Specifics:|Conditions & Options$|Resolved:|Source:)/.test(row.source) &&
+        row.source !== 'Source:partFitment')
+      .map(row => ({ id: row.id, source: row.source, evidence: row.evidence })),
+    listingNoteEvidence: (listing.listingNoteEvidence || [])
       .map(row => ({ id: row.id, source: row.source, evidence: row.evidence })),
     fallbackTitleEvidence: selectedRows.length ? null : listing.titleEvidence || null
   };
 }
 
 function checkedFitmentReview(response, input) {
+  if (input?.invalidSelectedRowIds?.length) {
+    throw new Error(`Fitment review has invalid selected fitment citation: ${input.invalidSelectedRowIds.join(', ')}.`);
+  }
   if (!response || !['PASS', 'REVIEW'].includes(response.verdict) || !text(response.reason) ||
       !Array.isArray(response.citedRowIds)) {
     throw new Error('Fitment review returned an incomplete decision.');
+  }
+  const materialOmissions = (response.materialOmissions || []).map(text).filter(Boolean);
+  const unsupportedClaims = (response.unsupportedClaims || []).map(text).filter(Boolean);
+  if (response.verdict === 'PASS' && (materialOmissions.length || unsupportedClaims.length)) {
+    response = { ...response, verdict: 'REVIEW', reason: [
+      materialOmissions.length ? `Missing material details: ${materialOmissions.join('; ')}.` : '',
+      unsupportedClaims.length ? `Unsupported claims: ${unsupportedClaims.join('; ')}.` : ''
+    ].filter(Boolean).join(' ') };
   }
   const allowed = new Set(input.selectedRows.map(row => row.id));
   const cited = response.citedRowIds.map(text);
@@ -66,8 +88,23 @@ function checkedFitmentReview(response, input) {
   if (response.verdict === 'PASS' && assessments.some(item => item.titleCoverage !== 'ACCURATE')) {
     throw new Error('Fitment review cannot pass a row with an unresolved title claim.');
   }
+  if (response.verdict === 'PASS' && response.advertisedIdentityAssessment &&
+      response.advertisedIdentityAssessment !== 'SUPPORTED') {
+    throw new Error('Fitment review cannot pass an unsupported advertised vehicle identity.');
+  }
+  if (response.verdict === 'PASS' && response.qualifierScopeAssessment &&
+      response.qualifierScopeAssessment !== 'ACCURATE') {
+    throw new Error('Fitment review cannot pass inaccurate qualifier scope.');
+  }
+  if (response.verdict === 'PASS' && response.productIdentityAssessment &&
+      response.productIdentityAssessment !== 'SUPPORTED') {
+    throw new Error('Fitment review cannot pass a conflicting product identity.');
+  }
   return { verdict: response.verdict, reason: text(response.reason), citedRowIds: cited,
-    rowAssessments: assessments };
+    advertisedIdentityAssessment: response.advertisedIdentityAssessment || null,
+    qualifierScopeAssessment: response.qualifierScopeAssessment || null,
+    productIdentityAssessment: response.productIdentityAssessment || null,
+    materialOmissions, unsupportedClaims, rowAssessments: assessments };
 }
 
 module.exports = { buildFitmentReviewInput, checkedFitmentReview };

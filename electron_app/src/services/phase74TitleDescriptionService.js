@@ -4,6 +4,7 @@ const Phase4AiEvaluatorService = require('./phase4AiEvaluatorService');
 const { asIdentitySet, isPublishedIdentity } = require('./phase5IdentityService');
 const { isManualOverrideForField: isManualOverrideFromGovernance } = require('./phase5GovernanceService');
 const { runTitleOptimizationRuntime } = require('./titleOptimizationRuntimeService');
+const { createPhase74AiRequestLog } = require('./phase74AiRequestLog');
 
 const DEFAULT_LISTINGS_TABLE = 'eBay Listings (API)';
 const DEFAULT_MASTER_TABLE = 'Master Parts Table';
@@ -885,6 +886,15 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   if (!airtableBaseId) throw new Error('Missing AIRTABLE_BASE_ID.');
   if (!openaiApiKey) throw new Error('Missing OpenAI API key for Phase 7.4.');
 
+  let aiRequestLog;
+  try {
+    aiRequestLog = createPhase74AiRequestLog(options.phase74AiRequestLogDirectory
+      ? { directory: options.phase74AiRequestLogDirectory } : {});
+    console.log(`[Phase7.4 AI Request Log] ${aiRequestLog.filePath}`);
+  } catch (error) {
+    console.warn(`[Phase7.4 AI Request Log] Unavailable: ${error.message}`);
+  }
+
   const airtableService = new AirtableService({
     token: airtableToken,
     baseId: airtableBaseId,
@@ -903,7 +913,16 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     baseDelayMs: 600,
     promptCacheEnabled,
     promptCacheKey,
-    logPhase74AiPayload: logAiPayload
+    logPhase74AiPayload: logAiPayload,
+    onPhase74Request: entry => {
+      if (!aiRequestLog) return;
+      try {
+        aiRequestLog.append(entry);
+      } catch (error) {
+        console.warn(`[Phase7.4 AI Request Log] Write failed: ${error.message}`);
+        aiRequestLog = null;
+      }
+    }
   });
 
   const summary = {
@@ -1158,6 +1177,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
           masterRecord: master
         },
         options: {
+          enableIndependentAiReview: false,
           fields: [
             'title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku',
             'componentType', 'color', 'placement', 'keyFitmentDetail', 'engineDisplacement',
@@ -1167,7 +1187,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         },
         dependencies: {
           loadSnapshot: options.titleOptimizationRuntimeLoadSnapshot,
-          executeAi: ({ promptArtifact }) => aiService.generateTitleAndDescriptionFromRuntimePrompt(promptArtifact),
+          executeAi: ({ promptArtifact, listing }) => aiService.generateTitleAndDescriptionFromRuntimePrompt(promptArtifact, listing),
           reviewTitleFitment: input => aiService.reviewTitleFitment(input)
         }
       });
@@ -1177,6 +1197,18 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         errors: [{ message: compactText(error.message, 180) }],
         output: null
       };
+    }
+
+    if (aiRequestLog) {
+      try {
+        aiRequestLog.append({ event: 'result', kind: 'runtime-result', listing: { recordId: row.id, ipn },
+          result: { status: runtimeResult.status, decision: runtimeResult.decision,
+            output: runtimeResult.output, attempts: runtimeResult.attempts,
+            fitmentReview: runtimeResult.fitmentReview, errors: runtimeResult.errors } });
+      } catch (error) {
+        console.warn(`[Phase7.4 AI Request Log] Result write failed: ${error.message}`);
+        aiRequestLog = null;
+      }
     }
 
     if (runtimeResult.status === 'COMPLETED') summary.titleOptimizationRuntime.completed += 1;

@@ -21,6 +21,37 @@ function mapping(logicalKey, sourceFieldName, extras = {}) {
   };
 }
 
+test('mirror category normalization does not invent an exterior mirror identity', () => {
+  for (const [category, expected] of [['Interior:Rear View Mirrors', 'Rear View Mirrors'],
+    ['Mirrors', 'Mirrors'], ['Exterior:Side View Mirrors', 'Side View Mirrors']]) {
+    const normalized = normalizeListingEvidence({ runtimeSnapshot: snapshot(),
+      listingRecord: listing({ 'Category Name': category }) });
+    assert.equal(normalized.derived.cleanedCategoryPart.value, expected);
+  }
+});
+
+test('structured part Type participates in configured source priority ahead of broad category', () => {
+  const result = normalizeAndResolveListing({ runtimeSnapshot: snapshot(), listingRecord: listing({
+    'Category Name': 'Mirrors',
+    'Item Specifics - All C: values relevant to item': JSON.stringify({ Type: 'Interior Rear View Mirror' })
+  }) });
+  assert.equal(result.resolved.fields.part.resolvedValue, 'Interior Rear View Mirror');
+  assert.equal(result.resolved.fields.part.resolvedSource, 'itemSpecifics');
+});
+
+test('source derivation does not turn negative equipment or part-name wording into positive facts', () => {
+  const result = normalizeAndResolveListing({ runtimeSnapshot: snapshot(), listingRecord: listing({
+    'Item Title': '2012 Example Interior Rear View Mirror 00155',
+    'Current eBay Fields': JSON.stringify({ donorNotes: 'NON-ILLUMINATED' }),
+    'Item Specifics - All C: values relevant to item': JSON.stringify({ Features: 'Does not apply' })
+  }) });
+  assert.equal(result.normalized.derived.keyFitmentDetailFromNotes.value, null);
+  assert.equal(result.resolved.fields.keyFitmentDetail.resolvedValue, null);
+  const mirror = normalizeListingEvidence({ runtimeSnapshot: snapshot(), listingRecord: listing({
+    'Item Title': '2012 Example Rear View Mirror 00155', 'Current eBay Fields': '{}' }) });
+  assert.equal(mirror.derived.placementFromNotes.value, null);
+});
+
 test('advertised application model is not replaced by a different donor model', () => {
   const result = normalizeAndResolveListing({
     runtimeSnapshot: snapshot(),
@@ -228,6 +259,15 @@ test('derives donor values from mapped HTML description source', () => {
   assert.equal(result.resolved.fields.year.resolvedValue, '2009');
   assert.equal(result.resolved.fields.model.resolvedValue, 'SPECTRA');
   assert.equal(result.resolved.fields.side.resolvedValue, 'Driver Left LH');
+});
+
+test('retains a donor note from legacy Description when current eBay fields are unmapped', () => {
+  const runtimeSnapshot = snapshot();
+  runtimeSnapshot.sections.sourceFields.items = runtimeSnapshot.sections.sourceFields.items.filter(item =>
+    item.logicalKey !== 'currentEbayFields');
+  const result = normalizeAndResolveListing({ runtimeSnapshot,
+    listingRecord: listing({ Description: '<div class="d_left">Notes :</div><div class="d_right">TRUNK LATCH ACTUATOR</div>' }) });
+  assert.equal(result.normalized.titleAuthority.legacyDonorNote.value, 'TRUNK LATCH ACTUATOR');
 });
 
 test('keeps two-digit partFitment ranges as raw AI evidence without resolving yearRange', () => {

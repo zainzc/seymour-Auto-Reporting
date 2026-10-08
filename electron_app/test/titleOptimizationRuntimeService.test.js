@@ -35,7 +35,7 @@ test('AI-led runtime log exposes the generator vehicle decision', async () => {
   await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({
     generatedTitle: '2010-2012 Ford Fusion Starter Motor 12345', titleReviewStatus: 'Completed',
     vehicleDecision: { resolved: true, make: 'Ford', model: 'Fusion', yearRange: '2010-2012',
-      source: 'title-fitment-001' }
+      source: 'currentEbay' }
   }, { logger: { info: message => { log = message; } } }) });
   assert.match(log, /vehicleDecision=\{"resolved":true,"make":"Ford"/);
   assert.match(log, /fitmentReview=.*PASS/);
@@ -52,6 +52,38 @@ test('AI Needs Review is preserved without calling the independent reviewer', as
   assert.equal(result.output.title, '');
   assert.equal(result.output.reviewStatus, 'Needs Review');
   assert.match(result.output.reviewNotes, /applications disagree/);
+});
+
+test('repairable AI Needs Review needs a corrected generator decision and final independent PASS', async () => {
+  let generations = 0;
+  let reviews = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({}, {
+    executeAi: async ({ promptArtifact }) => {
+      generations += 1;
+      if (generations === 2) assert.match(promptArtifact.userPayload.correction.instruction, /Reconsider your original Needs Review/i);
+      return { generatedTitle: '2010-2012 Ford Fusion Starter Motor 12345',
+        titleReviewStatus: generations === 1 ? 'Needs Review' : 'Completed',
+        titleReviewReason: generations === 1 ? 'Possible year mismatch' : 'completed' };
+    },
+    reviewTitleFitment: async () => { reviews += 1; return { verdict: 'PASS',
+      reason: 'Vehicle and title are supported.', citedRowIds: [] }; }
+  }) });
+  assert.equal(generations, 2);
+  assert.equal(reviews, 2);
+  assert.equal(result.output.reviewStatus, 'Completed');
+});
+
+test('independent PASS alone cannot overturn an AI Needs Review', async () => {
+  let reviews = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({}, {
+    executeAi: async () => ({ generatedTitle: '2010-2012 Ford Fusion Starter Motor 12345',
+      titleReviewStatus: 'Needs Review', titleReviewReason: 'Possible year mismatch' }),
+    reviewTitleFitment: async () => { reviews += 1; return { verdict: 'PASS',
+      reason: 'Fitment is supported.', citedRowIds: [] }; }
+  }) });
+  assert.equal(reviews, 1);
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.equal(result.output.title, '');
 });
 
 test('mechanical SKU check normalizes the verified SKU exactly once at the end', async () => {
@@ -97,6 +129,47 @@ test('independent AI review can still veto a generator-Completed title', async (
   assert.equal(result.output.title, '');
   assert.equal(result.output.reviewStatus, 'Needs Review');
   assert.match(result.output.reviewNotes, /VIN restriction/);
+});
+
+test('disabled independent AI review uses the generator decision without calling the reviewer', async () => {
+  let reviews = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({
+      generatedTitle: '2010-2012 Ford Fusion Starter Motor 12345',
+      titleReviewStatus: 'Completed'
+    }, {
+      reviewTitleFitment: async () => {
+        reviews += 1;
+        return { verdict: 'REVIEW', reason: 'Reviewer veto.', citedRowIds: [] };
+      }
+    })
+  });
+  assert.equal(reviews, 0);
+  assert.equal(result.output.title, '2010-2012 Ford Fusion Starter Motor 12345');
+  assert.equal(result.output.reviewStatus, 'Completed');
+});
+
+test('disabled independent AI review preserves the generator Needs Review decision', async () => {
+  let reviews = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({
+      generatedTitle: '2010-2012 Ford Fusion Starter Motor 12345',
+      titleReviewStatus: 'Needs Review',
+      titleReviewReason: 'Conflicting source data',
+      titleReviewNotes: 'The supplied evidence remains materially ambiguous.'
+    }, {
+      reviewTitleFitment: async () => {
+        reviews += 1;
+        return { verdict: 'PASS', reason: 'Reviewer pass.', citedRowIds: [] };
+      }
+    })
+  });
+  assert.equal(reviews, 0);
+  assert.equal(result.output.title, '');
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.match(result.output.reviewNotes, /materially ambiguous/);
 });
 
 test('manual title override still bypasses generation and writes no replacement', async () => {
@@ -243,6 +316,33 @@ test('independent fitment review accepts a corrected title only after reviewing 
   assert.equal(result.output.reviewStatus, 'Completed');
 });
 
+test('overlength fitment correction is compressed and its exact result independently reviewed', async () => {
+  let calls = 0;
+  const reviewed = [];
+  const longTitle = `2010-2012 Ford Fusion ${'Verified '.repeat(7)}Switch 12345`;
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({}, {
+    executeAi: async ({ promptArtifact }) => {
+      calls += 1;
+      if (calls === 3) {
+        assert.match(promptArtifact.userPayload.correction.instruction, /compression-only/i);
+        assert.match(promptArtifact.userPayload.correction.fitmentReview.reason, /Sedan/);
+        assert.equal(promptArtifact.userPayload.titleBudget.maximumCharactersBeforeSku, 74);
+        assert.equal(promptArtifact.userPayload.titleBudget.previousTitleCharactersAfterSku, longTitle.length);
+      }
+      return { generatedTitle: calls === 1 ? '2010-2012 Ford Fusion Switch 12345'
+        : calls === 2 ? longTitle : '2010-2012 Ford Fusion Sedan Switch 12345', titleReviewStatus: 'Completed' };
+    },
+    reviewTitleFitment: async input => {
+      reviewed.push(input.title);
+      return { verdict: reviewed.length === 1 ? 'REVIEW' : 'PASS',
+        reason: reviewed.length === 1 ? 'Sedan must be preserved.' : 'Sedan restriction preserved.', citedRowIds: [] };
+    }
+  }) });
+  assert.equal(calls, 3);
+  assert.deepEqual(reviewed, ['2010-2012 Ford Fusion Switch 12345', '2010-2012 Ford Fusion Sedan Switch 12345']);
+  assert.equal(result.output.reviewStatus, 'Completed');
+});
+
 test('fitment reviewer failure cannot write an accepted title', async () => {
   const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
     reviewTitleFitment: async () => { throw new Error('review unavailable'); }
@@ -287,6 +387,8 @@ test('a rejected fitment correction retains the review finding in Airtable notes
     })
   }) });
   assert.equal(result.output.title, '');
+  assert.match(result.output.reviewNotes, /Corrected title still requires review/);
+  assert.match(result.output.reviewNotes, /Correction did not meet title requirements/);
   assert.match(result.output.reviewNotes, /Later years require a build restriction/);
 });
 
@@ -407,6 +509,23 @@ test('invalid material fitment date stops before AI and returns a specific revie
   assert.match(messages[0], /invalid-fitment-date/);
 });
 
+test('production validation also blocks an invalid fitment date before AI', async () => {
+  let aiCalls = 0;
+  const deps = dependencies({
+    buildPrompt: () => ({ kind: 'prompt', userPayload: { resolvedListing: {
+      titleFitmentCandidates: { sourceIssues: [{ code: 'INVALID_FITMENT_DATE', value: '09/31/04',
+        evidence: 'built through 09/31/04', message: 'Invalid Part Fitment date.' }] }
+    } } }),
+    executeAi: async () => { aiCalls += 1; return { generatedTitle: 'Unsafe title' }; }
+  });
+  delete deps.validate;
+  delete deps.decide;
+  const result = await runTitleOptimizationRuntime({ dependencies: deps });
+  assert.equal(aiCalls, 0);
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.equal(result.output.reviewReason, 'Invalid Part Fitment date');
+});
+
 test('uses one focused compression call when the normal correction remains over 80 characters', async () => {
   let aiCalls = 0;
   const overLimit = '2003-2004 Honda Accord Master Power Window Switch Driver Front Door EX Coupe 1590671';
@@ -417,6 +536,9 @@ test('uses one focused compression call when the normal correction remains over 
       aiCalls += 1;
       if (aiCalls === 3) {
         assert.match(promptArtifact.userPayload.correction.instruction, /compression-only/i);
+        assert.doesNotMatch(promptArtifact.userPayload.correction.instruction, /removing Power when/i);
+        assert.match(promptArtifact.userPayload.correction.instruction, /Judge each phrase using this listing's evidence/i);
+        assert.match(promptArtifact.userPayload.correction.instruction, /optional manufacturer part number/i);
         assert.match(promptArtifact.userPayload.correction.instruction, /84 characters/i);
         assert.match(promptArtifact.userPayload.correction.instruction, /80 characters or fewer/i);
         return { generatedTitle: compressed, generatedDescription: 'Description' };
@@ -442,6 +564,28 @@ test('uses one focused compression call when the normal correction remains over 
   assert.equal(result.output.title, compressed);
   assert.equal(result.output.reviewStatus, 'Completed');
   assert.equal(result.attempts.length, 3);
+});
+
+test('overlength retry offers an exact optional MPN-free candidate for AI approval', async () => {
+  const longTitle = '2015-2016 Subaru Legacy Master Power Window Switch Driver Door 83071AL04A 1595206';
+  const shorterTitle = '2015-2016 Subaru Legacy Master Power Window Switch Driver Door 1595206';
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({}, {
+    resolveSource: () => ({ normalized: { recordId: 'rec-mpn' }, resolved: { fields: {
+      sku: { resolvedValue: '1595206' }, title: { resolvedValue: '2015 Subaru Legacy Switch 1595206' },
+      manufacturerPartNumber: { resolvedValue: '83071AL04A' }
+    } } }),
+    executeAi: async ({ promptArtifact }) => {
+      calls += 1;
+      if (calls === 3) {
+        assert.equal(promptArtifact.userPayload.correction.suggestedShorterTitle, shorterTitle);
+        return { generatedTitle: shorterTitle, titleReviewStatus: 'Completed' };
+      }
+      return { generatedTitle: longTitle, titleReviewStatus: 'Completed' };
+    }
+  }) });
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.output.title, shorterTitle);
 });
 
 test('needs review never exposes a writable title or inherits contradictory AI review text', async () => {
@@ -662,7 +806,7 @@ test('runtime review notes use retained vehicle decisions without removed audit 
         make: 'Nissan',
         model: 'Altima',
         yearRange: '2007-2012',
-        source: 'title-fitment-001;title-fitment-002',
+        source: 'partFitment',
         evidence: '2007 Nissan Altima driver front door switch; 2008-2012 Nissan Altima driver front door switch',
         reason: 'Continuous application.'
       },

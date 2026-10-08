@@ -130,6 +130,7 @@ function categoryPriorityDetailsSummary(aiResult = {}) {
 async function runTitleOptimizationRuntime({ listing = {}, options = {}, dependencies = {} } = {}) {
   const result = baseResult(listing);
   const logger = dependencies.logger || console;
+  const independentAiReviewEnabled = options.enableIndependentAiReview !== false;
   let snapshot;
   let sourceResolution;
   let ruleResolution;
@@ -140,7 +141,19 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   let generationCalls = 0;
   const executeAi = async artifact => {
     generationCalls += 1;
-    return dependencies.executeAi({ promptArtifact: artifact, listing, options });
+    const sku = normalizeText(sourceResolution?.resolved?.fields?.sku?.resolvedValue ||
+      sourceResolution?.normalized?.fields?.sku?.value || ruleResolution?.listingContext?.sku).replace(/^#+/, '');
+    const prefix = normalizeText(ruleResolution?.listingContext?.ipnPrefix || ruleResolution?.prefixRule?.normalizedPrefix);
+    const suffix = sku ? `${prefix === '257' ? '#' : ''}${sku}` : '';
+    const previousTitle = artifact?.userPayload?.correction?.previousTitle;
+    const previousNormalized = previousTitle ? validateMechanicalTitle({ sourceResolution, ruleResolution,
+      candidateTitle: previousTitle }).validatedTitle : null;
+    return dependencies.executeAi({ promptArtifact: { ...artifact, userPayload: { ...artifact.userPayload,
+      titleBudget: { maximumCharacters: 80, requiredSkuSuffix: suffix || null,
+        maximumCharactersBeforeSku: suffix ? Math.max(0, 80 - suffix.length - 1) : null,
+        previousTitleCharactersAfterSku: previousNormalized?.length ?? null,
+        instruction: 'Compose within this budget including spaces and the final SKU. Preserve configured mandatory terms and material fitment; optional MPN and enrichment yield first.' }
+    } }, listing, options });
   };
 
   try {
@@ -187,7 +200,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   const fitmentSelection = promptArtifact?.userPayload?.resolvedListing?.titleFitmentCandidates || {};
   const blockingFitmentIssue = (fitmentSelection.sourceIssues || []).find(issue =>
     issue?.code === 'INVALID_FITMENT_DATE');
-  if (blockingFitmentIssue && (dependencies.validate || dependencies.decide)) {
+  if (blockingFitmentIssue) {
     const issueValue = normalizeText(blockingFitmentIssue.value);
     const issueEvidence = normalizeText(blockingFitmentIssue.evidence);
     const reviewNotes = `${normalizeText(blockingFitmentIssue.message)} Correct the source data before generating a title` +
@@ -324,19 +337,32 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     }
   }
 
-  if (generationCalls < 3 && promptArtifact?.kind !== 'title-generation-bypass' && onlyLengthFailures(decision)) {
-    const overLimitTitle = normalizeText(aiResult.generatedTitle);
+  let compressionAttempted = false;
+  const compressIfNeeded = async (fitmentReview = null) => {
+    if (compressionAttempted || generationCalls >= 4 || promptArtifact?.kind === 'title-generation-bypass' ||
+        !onlyLengthFailures(decision)) return;
+    compressionAttempted = true;
+    const overLimitTitle = normalizeText(validation?.validatedTitle || aiResult.generatedTitle);
+    const mpn = normalizeText(sourceResolution?.resolved?.fields?.manufacturerPartNumber?.resolvedValue);
+    const sku = normalizeText(sourceResolution?.resolved?.fields?.sku?.resolvedValue);
+    const mpnFreeTitle = mpn && !/\s/.test(mpn) && mpn.toLowerCase() !== sku.toLowerCase()
+      ? overLimitTitle.split(' ').filter(token => token.toLowerCase() !== mpn.toLowerCase()).join(' ')
+      : '';
+    const suggestedShorterTitle = mpnFreeTitle && mpnFreeTitle !== overLimitTitle && mpnFreeTitle.length <= 80
+      ? mpnFreeTitle : null;
     const compressionPrompt = {
       ...promptArtifact,
       userPayload: {
         ...promptArtifact.userPayload,
         correction: {
           previousTitle: overLimitTitle,
+          fitmentReview,
+          suggestedShorterTitle,
           verifiedVehicleDecision: validation?.vehicleVerification?.verified ? validation.vehicleVerification.decision : null,
           failures: (decision.degradationChecks || [])
             .filter(check => ['FAIL', 'BLOCK'].includes(check?.status))
             .map(check => ({ checkId: check.checkId, field: check.field, message: check.message })),
-          instruction: `Compression-only correction. The previous title is ${overLimitTitle.length} characters and must be 80 characters or fewer including spaces and the final SKU. Return a different, shorter title. Preserve supported year/make/model, product identity, material fitment, side when verified, and SKU exactly once at the end. Remove only the least important redundant wording, duplicate concepts, optional generic descriptors, or optional MPN. Prefer concise equivalents such as removing a redundant Front when Driver Door already identifies placement, or removing Power when Master Window Switch remains accurate. Recount the complete title before returning JSON. Do not truncate words or invent facts.`
+          instruction: `Compression-only correction. The previous title is ${overLimitTitle.length} characters and must be 80 characters or fewer including spaces and the final SKU. Return a different, shorter title. Preserve supported year/make/model, product identity, material fitment, side when verified, and SKU exactly once at the end. Judge each phrase using this listing's evidence; remove only wording that is genuinely redundant or optional here. If suggestedShorterTitle is provided, evaluate it against every applicable rule and fitment condition; use it only if truthful, otherwise produce a different safe title. First check whether an optional manufacturer part number can be omitted without violating the selected structure or an applicable mandatory rule; do not sacrifice a material fitment detail to keep an optional MPN. Do not assume that a product-function or placement word is expendable because it seems redundant in another listing. Recount the complete title before returning JSON. Do not truncate words or invent facts.`
         }
       }
     };
@@ -364,14 +390,18 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     } catch (error) {
       result.errors.push({ stage: 'COMPRESSION_FAILURE', message: sanitizeError(error) });
     }
-  }
+  };
+  await compressIfNeeded();
 
   const accepted = () => decision?.decision === 'ACCEPT_CANDIDATE' && decision.reviewRequired !== true;
-  const withFitmentReview = async () => {
+  const withFitmentReview = async (title = decision.finalTitle) => {
     if (typeof dependencies.reviewTitleFitment !== 'function') throw new Error('Fitment review service is unavailable.');
     const input = buildFitmentReviewInput({
-      title: decision.finalTitle, promptArtifact, vehicleDecision: aiResult.vehicleDecision
+      title, promptArtifact, vehicleDecision: aiResult.vehicleDecision
     });
+    if (input.invalidSelectedRowIds.length) {
+      throw new Error(`Invalid selected fitment citation: ${input.invalidSelectedRowIds.join(', ')}.`);
+    }
     let reviewFeedback = '';
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -404,7 +434,48 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     };
     result.decision = decision;
   };
-  if (accepted() && promptArtifact?.kind !== 'title-generation-bypass') {
+  const repairableAiReview = independentAiReviewEnabled && !accepted() && promptArtifact?.kind !== 'title-generation-bypass' &&
+    generationCalls < 2 && normalizeText(aiResult.titleReviewStatus).toLowerCase() === 'needs review' &&
+    !/conflicting source data/i.test(normalizeText(aiResult.titleReviewReason)) &&
+    !(validation?.violations || []).length && normalizeText(validation?.validatedTitle);
+  if (repairableAiReview) {
+    try {
+      const preliminaryReview = await withFitmentReview(validation.validatedTitle);
+      result.fitmentReview = preliminaryReview;
+      if (preliminaryReview.verdict === 'PASS') {
+        const reconsideredAi = await executeAi({ ...promptArtifact,
+          userPayload: { ...promptArtifact.userPayload, correction: {
+            previousTitle: normalizeText(validation.validatedTitle),
+            originalReviewReason: normalizeText(aiResult.titleReviewReason),
+            originalReviewNotes: normalizeText(aiResult.titleReviewNotes),
+            independentReview: preliminaryReview,
+            instruction: 'Reconsider your original Needs Review using the supplied evidence and independent review. Address your own specific concern directly; the independent PASS alone does not prove it is resolved. Return Completed only if you can now support the complete final title under every applicable rule. Otherwise keep Needs Review with a precise remaining reason. Do not weaken fitment, product identity, or other material details merely to obtain Completed. Return the complete original output contract.'
+          } } });
+        if (!normalizeText(reconsideredAi?.generatedTitle)) throw new Error('Review recovery returned no title.');
+        const reconsideredValidation = (dependencies.validate || validateMechanicalTitle)({
+          snapshot, sourceResolution, ruleResolution, promptArtifact,
+          candidateTitle: reconsideredAi.generatedTitle,
+          categoryPriorityDetails: reconsideredAi.categoryPriorityDetails || [],
+          sideDecision: reconsideredAi.sideDecision, vehicleDecision: reconsideredAi.vehicleDecision
+        });
+        const reconsideredDecision = (dependencies.decide || decideAiTitle)({
+          snapshot, sourceResolution, ruleResolution, promptArtifact,
+          validationResult: reconsideredValidation, aiResult: reconsideredAi
+        });
+        aiResult = reconsideredAi;
+        validation = reconsideredValidation;
+        decision = reconsideredDecision;
+        result.aiResult = aiResult;
+        result.validation = validation;
+        result.decision = decision;
+        result.attempts.push(recordAttempt());
+        await compressIfNeeded(preliminaryReview);
+      }
+    } catch (error) {
+      result.errors.push({ stage: 'REVIEW_RECOVERY_FAILURE', message: sanitizeError(error) });
+    }
+  }
+  if (independentAiReviewEnabled && accepted() && promptArtifact?.kind !== 'title-generation-bypass') {
     let review;
     try {
       review = await withFitmentReview();
@@ -423,7 +494,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
             previousTitle: normalizeText(decision.finalTitle),
             fitmentReview: review,
             verifiedVehicleDecision,
-            instruction: 'An independent review found a material fitment problem in the final title. Correct the cited problem using the original listing evidence and configured title structure. A condition that applies only to some years must not be applied to every year or omitted so that restricted years appear unrestricted. Keep the advertised application and all required restrictions truthful. Remove optional MPN, repeated part terms, and filler before a material fitment condition. Preserve the supplied verifiedVehicleDecision and its exact citation when the corrected title keeps that same application. If no accurate title fits within 80 characters, return Needs Review with a precise explanation. Do not remove a material restriction merely to pass review. Return the complete original output contract.'
+            instruction: 'An independent review found a material fitment problem in the final title. Correct the cited problem using the original listing evidence and configured title structure. Keep the vehicle advertised in the current title; another compatible make or model is not an automatic replacement. A condition that applies only to some years must not be applied to every year or omitted so that restricted years appear unrestricted. Check every title-level restriction against each selected year and variant. Keep the advertised application and all required restrictions truthful. Remove optional MPN, repeated part terms, and filler before a material fitment condition. Preserve the supplied verifiedVehicleDecision and its exact citation when the corrected title keeps that same application. If no accurate title fits within 80 characters, return Needs Review with a precise explanation. Do not remove a material restriction merely to pass review. Return the complete original output contract.'
           } }
         });
         if (!normalizeText(correctedAi?.generatedTitle)) throw new Error('Fitment correction returned no title.');
@@ -447,6 +518,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
         result.validation = validation;
         result.decision = decision;
         result.attempts.push(recordAttempt());
+        await compressIfNeeded(review);
         if (accepted()) {
           const secondReview = await withFitmentReview();
           result.fitmentReview = secondReview;
@@ -457,15 +529,17 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
         requireFitmentReview(`Independent fitment review could not accept the title: ${sanitizeError(error)}`);
       }
       if (!accepted() && result.fitmentReview === review) {
-        requireFitmentReview([reviewReason, normalizeText(decision.reviewNotes)].filter(Boolean).join(' '), review.citedRowIds);
+        const correctedReason = normalizeText(decision.reviewNotes);
+        requireFitmentReview(correctedReason
+          ? `Corrected title still requires review: ${correctedReason} Earlier title finding: ${reviewReason}`
+          : `Corrected title still requires review. Earlier title finding: ${reviewReason}`, review.citedRowIds);
       }
     }
   }
 
   result.status = decision?.decision === 'BYPASSED_MANUAL_OVERRIDE' ? RUNTIME_STATUSES.BYPASSED : RUNTIME_STATUSES.COMPLETED;
   const existingTitle = normalizeText(sourceResolution?.resolved?.fields?.title?.resolvedValue || sourceResolution?.normalized?.fields?.existingTitle?.value);
-  const reviewProposal = [...result.attempts].reverse().find(attempt =>
-    normalizeText(attempt.proposedTitle) && normalizeText(attempt.proposedTitle) !== existingTitle)?.proposedTitle || aiResult.generatedTitle;
+  const reviewProposal = normalizeText(aiResult.generatedTitle);
   result.output = writableOutput(aiResult, decision, reviewProposal);
   const titleWriteAction = result.output.title ? 'WRITE_ITEM_TITLE' : 'PRESERVE_ITEM_TITLE';
   logger.info?.(

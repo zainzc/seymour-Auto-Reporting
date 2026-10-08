@@ -193,10 +193,9 @@ test('sends title-year fallback and general AI redundancy instructions', () => {
   assert.match(text, /Keep useful verified details when the title fits within 80 characters/);
   assert.match(text, /Do not rely on a fixed list of protected words/);
   assert.match(text, /exact field and literal segment order/);
-  assert.match(text, /final title audit against the selected Part Fitment application/);
-  assert.match(text, /same concept more than once/);
-  assert.match(text, /recount all characters including spaces and the final SKU/);
-  assert.match(text, /redundant part wording remains while a useful distinguishing qualifier was omitted/);
+  assert.match(text, /Final audit: compare every material vehicle, fitment, product, and side claim/);
+  assert.match(text, /Replace duplicate wording with useful verified details/);
+  assert.match(text, /recount the title including spaces and final SKU/);
   assert.match(text, /Never wrap an evidence citation in quotation marks/);
   assert.match(text, /remaining characters for the highest-impact useful qualifiers/);
   assert.equal(artifact.userPayload.outputContract.requiredJsonKeys.includes('detailAssessment'), false);
@@ -244,10 +243,11 @@ test('treats a structured single year as evidence while AI selects a supported f
   assert.match(text, /advertised application/i);
   assert.match(text, /cite.*supporting/i);
   assert.match(text, /adjacent/i);
-  assert.match(text, /evaluate every supplied Part Fitment row/i);
-  assert.match(text, /do not select a narrower subset merely because it matches the donor year/i);
-  assert.match(text, /restriction applies to only part of a combined range/i);
-  assert.match(text, /eligible titleFitmentCandidate ID in source.*trusted row evidence/i);
+  assert.match(text, /evaluate the supplied Part Fitment rows/i);
+  assert.match(text, /donor year alone cannot select or narrow/i);
+  assert.match(text, /restrictions that apply to only part of the combined range/i);
+  assert.match(text, /do not drop verified advertised years/i);
+  assert.match(text, /cite every selected row ID in source/i);
   assert.match(text, /build dates, VIN splits, engine or transmission variants, body styles, trims, cab types, door counts/i);
   assert.match(text, /malformed, impossible, or internally inconsistent/i);
   assert.match(text, /cannot be represented accurately within 80 characters/i);
@@ -396,7 +396,7 @@ test('a short model name does not automatically select a longer distinct model',
   assert.equal(selection.eligibleCandidates.length, 2);
 });
 
-test('a no-Fits advertised model without a matching fitment row remains unresolved', () => {
+test('an unmatched advertised model is left for AI assessment without discarding source rows', () => {
   const inputs = buildInputs({ 'Item Title': '1998-2005 Lexus GS300 Right Tail Light 1056292' });
   inputs.listingResolution.resolved.fields.model = {
     field: 'model', resolvedValue: 'GS300', resolvedSource: 'currentEbay', conflicts: [], missing: false
@@ -408,8 +408,8 @@ test('a no-Fits advertised model without a matching fitment row remains unresolv
 
   const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
   assert.equal(selection.selectionBasis, 'EXISTING_TITLE_MODEL_APPLICATION_UNMATCHED');
-  assert.equal(selection.resolution, 'UNRESOLVED');
-  assert.deepEqual(selection.eligibleCandidates, []);
+  assert.equal(selection.resolution, 'AI_SELECTION_REQUIRED');
+  assert.equal(selection.eligibleCandidates.length, 1);
 });
 
 test('advertised application selection supports alphanumeric and multiword models', () => {
@@ -470,7 +470,7 @@ test('advertised application matching ignores trailing product qualifiers', () =
   ]);
 });
 
-test('does not fall back to donor candidates when advertised application has no fitment match', () => {
+test('unmatched advertised application retains its hint while exposing rows for AI assessment', () => {
   const inputs = buildInputs({
     'Item Title': '2008 Jeep Liberty Starter Motor Fits 07-09 NITRO 1589513'
   });
@@ -482,9 +482,10 @@ test('does not fall back to donor candidates when advertised application has no 
   const selection = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing.titleFitmentCandidates;
 
   assert.equal(selection.selectionBasis, 'EXISTING_TITLE_FITS_APPLICATION_UNMATCHED');
-  assert.equal(selection.status, 'ADVERTISED_APPLICATION_UNMATCHED');
-  assert.equal(selection.resolution, 'UNRESOLVED');
-  assert.deepEqual(selection.eligibleCandidates, []);
+  assert.equal(selection.status, 'ADVERTISED_APPLICATION_REQUIRES_NORMALIZATION');
+  assert.equal(selection.resolution, 'AI_SELECTION_REQUIRED');
+  assert.equal(selection.advertisedApplicationHint.modelText, 'NITRO');
+  assert.equal(selection.eligibleCandidates.length, 1);
 });
 
 test('collapses equivalent duplicate fitment clauses into one unambiguous application', () => {
@@ -543,7 +544,7 @@ test('marks malformed fitment unavailable and requires another supplied source',
 
   assert.equal(selection.resolution, 'UNAVAILABLE');
   assert.deepEqual(selection.distinctApplications, []);
-  assert.match(instructions, /no supplied evidence supports/i);
+  assert.match(instructions, /cite approved source evidence/i);
 });
 
 test('reports impossible calendar dates as material fitment source issues', () => {
@@ -584,8 +585,8 @@ test('serializes selected structure, terminology, synonyms, prefix, categories, 
   assert.equal(artifact.userPayload.outputContract.requiredJsonKeys.includes('safetyDecision'), false);
   assert.equal(artifact.userPayload.outputContract.requiredJsonKeys.includes('selectedTitleFacts'), false);
   assert.equal(artifact.userPayload.outputContract.requiredJsonKeys.includes('removedTitleDetails'), false);
-  assert.match(JSON.stringify(policy.instructions), /internally review the complete final title/i);
-  assert.match(JSON.stringify(policy.instructions), /rebuild the title before returning it/i);
+  assert.match(JSON.stringify(policy.instructions), /Final audit: compare every material vehicle/i);
+  assert.match(JSON.stringify(policy.instructions), /correct any unsupported, contradictory, or meaning-changing wording/i);
   assert.match(JSON.stringify(policy.instructions), /Needs Review only when/i);
   assert.doesNotMatch(JSON.stringify(policy.instructions), /optional_omission|claims array|safeToPublish/i);
 });
@@ -763,4 +764,13 @@ test('exposes donor notes as optional material-detail evidence without making th
   assert.equal(listing.listingNoteEvidence.some(item => /06947|2007/.test(item.evidence)), false);
   assert.match(text, /materially changes fitment, configuration, function, or what is included/i);
   assert.match(text, /Do not automatically include every note/i);
+});
+
+test('includes extracted legacy Description donor notes without sending legacy HTML', () => {
+  const inputs = buildInputs();
+  inputs.listingResolution.normalized.titleAuthority.legacyDonorNote = { value: 'TRUNK LATCH ACTUATOR' };
+  const listing = buildTitleOptimizationRuntimePrompt(inputs).userPayload.resolvedListing;
+  assert.deepEqual(listing.listingNoteEvidence.map(item => item.evidence), ['TRUNK LATCH ACTUATOR']);
+  assert.equal(listing.categoryPriorityEvidenceSources.some(item =>
+    item.source === 'Legacy Description Donor Note' && item.evidence === 'TRUNK LATCH ACTUATOR'), true);
 });
