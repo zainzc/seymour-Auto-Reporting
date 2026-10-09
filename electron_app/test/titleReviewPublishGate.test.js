@@ -9,3 +9,18 @@ test('only completed or explicitly manual titles pass the publish gate', () => {
     assert.equal(isTitleApprovedForPublish({ 'Title Review Status': status }), false);
   }
 });
+
+test('an overlength review draft cannot publish after its status is changed', () => {
+  assert.equal(isTitleApprovedForPublish({
+    'Title Review Status': 'Completed',
+    'Item Title': 'X'.repeat(81)
+  }), false);
+  assert.equal(isTitleApprovedForPublish({
+    'Title Review Status': 'Completed',
+    'Item Title': 'X'.repeat(80)
+  }), true);
+  assert.equal(isTitleApprovedForPublish({
+    'Title Review Status': 'Skipped - Manual Override',
+    'Item Title': 'X'.repeat(81)
+  }), false);
+});

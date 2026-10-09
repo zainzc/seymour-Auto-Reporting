@@ -1,3 +1,12 @@
+const {
+  classifyTitleOptimizationListing
+} = require('./titleOptimizationListingClassificationService');
+const {
+  matchCategoryRule,
+  normalizedMatchKey,
+  splitPriorityDetails
+} = require('./titleOptimizationRuleMatchingService');
+
 class RuntimeRuleResolutionError extends Error {
   constructor(section, message, details = {}) {
     super(message);
@@ -117,12 +126,12 @@ function includesWord(text, word) {
   return Boolean(source && target && source.includes(target));
 }
 
-function isEngineContext(context) {
-  return /\bengine|engines\b/i.test(partIdentityText(context));
+function isEngineContext(context, classification) {
+  return classification?.family === 'engine' || /\bengine|engines\b/i.test(partIdentityText(context));
 }
 
-function isTransmissionContext(context) {
-  return /\btransmission|transmissions\b/i.test(partIdentityText(context));
+function isTransmissionContext(context, classification) {
+  return classification?.family === 'transmission' || /\btransmission|transmissions\b/i.test(partIdentityText(context));
 }
 
 function buildListingContext(listingResolution = {}) {
@@ -142,15 +151,15 @@ function buildListingContext(listingResolution = {}) {
   };
 }
 
-function terminologyApplies(rule, context) {
+function terminologyApplies(rule, context, classification) {
   if (!rule) return false;
-  if (rule.appliesTo === 'transmission' || rule.condition === 'transmission-context') return isTransmissionContext(context);
+  if (rule.appliesTo === 'transmission' || rule.condition === 'transmission-context') return isTransmissionContext(context, classification);
   if (rule.condition === 'context-verified') return includesWord(contextText(context), rule.sourceTerm);
   return true;
 }
 
-function selectTerminologyRules(snapshot, context) {
-  return enabledItems(snapshot, 'terminologyRules').filter(rule => terminologyApplies(rule, context));
+function selectTerminologyRules(snapshot, context, classification) {
+  return enabledItems(snapshot, 'terminologyRules').filter(rule => terminologyApplies(rule, context, classification));
 }
 
 function selectSynonyms(snapshot, context) {
@@ -176,16 +185,16 @@ function selectPrefixRule(snapshot, context, systemRules) {
   };
 }
 
-function restrictedScopeApplies(rule, context) {
+function restrictedScopeApplies(rule, context, classification) {
   if (rule.scope === 'all' || !rule.scope) return true;
-  if (rule.scope === 'engine') return isEngineContext(context);
+  if (rule.scope === 'engine') return isEngineContext(context, classification);
   return includesWord(contextText(context), rule.scope);
 }
 
-function selectRestrictedTerms(snapshot, context) {
+function selectRestrictedTerms(snapshot, context, classification) {
   const groups = {};
   for (const rule of enabledItems(snapshot, 'restrictedTerms')) {
-    if (!restrictedScopeApplies(rule, context)) continue;
+    if (!restrictedScopeApplies(rule, context, classification)) continue;
     const key = rule.ruleType || 'other';
     if (!groups[key]) groups[key] = [];
     groups[key].push(rule);
@@ -201,41 +210,62 @@ function exactListMatch(values = [], expected = '') {
   return (Array.isArray(values) ? values : []).some(value => normalizeKey(value) === target);
 }
 
-function categoryRuleMatch(rule, context) {
+function categoryRuleMatch(rule, context, terminologyRules, synonymRules) {
   const matchedBy = [];
-  if (normalizeKey(rule.categoryName) && (
-    normalizeKey(rule.categoryName) === normalizeKey(context.categoryPart) ||
-    normalizeKey(rule.categoryName) === normalizeKey(context.itemSpecificPart)
-  )) {
-    matchedBy.push('category');
-  }
+  const categoryMatch = matchCategoryRule({ rule, context, terminologyRules, synonymRules });
+  if (categoryMatch.matched) matchedBy.push('category');
   if (context.ipnPrefix && exactListMatch(rule.prefixRefs, context.ipnPrefix)) matchedBy.push('prefixRef');
   if (context.series && exactListMatch(rule.seriesRefs, context.series)) matchedBy.push('seriesRef');
-  return matchedBy;
+  return { matchedBy, categoryMatch };
 }
 
-function selectCategoryRules(snapshot, context) {
-  return enabledItems(snapshot, 'categoryRules')
-    .map(rule => ({ rule, matchedBy: categoryRuleMatch(rule, context) }))
+function selectCategoryRules(snapshot, context, terminologyRules, synonymRules, listingClassification) {
+  const matches = enabledItems(snapshot, 'categoryRules')
+    .map(rule => {
+      const { matchedBy, categoryMatch } = categoryRuleMatch(rule, context, terminologyRules, synonymRules);
+      const classificationMatch = listingClassification?.family && listingClassification.family !== 'general' &&
+        normalizedMatchKey(rule.categoryName) === normalizedMatchKey(listingClassification.family);
+      if (classificationMatch) matchedBy.push('classification');
+      return {
+        rule,
+        matchedBy,
+        matchEvidence: classificationMatch
+          ? [...categoryMatch.evidence, {
+            source: 'listing-classification',
+            value: listingClassification.family,
+            method: 'classification'
+          }]
+          : categoryMatch.evidence,
+        categorySpecificity: categoryMatch.specificity,
+        priorityDetails: splitPriorityDetails(rule.priorityDetails)
+      };
+    })
     .filter(entry => entry.matchedBy.length > 0);
+  const categoryMatches = matches.filter(entry => entry.matchedBy.includes('category'));
+  const highestSpecificity = Math.max(0, ...categoryMatches.map(entry => entry.categorySpecificity));
+  return matches.filter(entry => (
+    !entry.matchedBy.includes('category') ||
+    entry.categorySpecificity === highestSpecificity ||
+    entry.matchedBy.some(method => method !== 'category')
+  ));
 }
 
-function structureMatches(structure, context) {
+function structureMatches(structure, context, classification) {
   const applies = normalizeKey(structure.appliesTo || structure.structureName);
   if (!applies) return false;
   if (applies.includes('general')) return false;
-  if (applies.includes('engine')) return isEngineContext(context);
-  if (applies.includes('transmission')) return isTransmissionContext(context);
+  if (applies.includes('engine')) return isEngineContext(context, classification);
+  if (applies.includes('transmission')) return isTransmissionContext(context, classification);
   return normalizeKey(context.categoryPart) === applies || normalizeKey(context.itemSpecificPart) === applies;
 }
 
-function selectTitleStructure(snapshot, context) {
+function selectTitleStructure(snapshot, context, classification) {
   const structures = enabledItems(snapshot, 'titleStructures');
-  const custom = structures.find(item => item.origin === 'custom' && structureMatches(item, context));
+  const custom = structures.find(item => item.origin === 'custom' && structureMatches(item, context, classification));
   if (custom) {
     return { selected: custom, reason: 'custom-applies-to', evidence: ['appliesTo'], fallback: false };
   }
-  const seeded = structures.find(item => item.origin === 'client-v5' && structureMatches(item, context));
+  const seeded = structures.find(item => item.origin === 'client-v5' && structureMatches(item, context, classification));
   if (seeded) {
     return { selected: seeded, reason: normalizeKey(seeded.structureName).includes('engine') ? 'verified-engine-context' : normalizeKey(seeded.structureName).includes('transmission') ? 'verified-transmission-context' : 'verified-context', evidence: ['appliesTo'], fallback: false };
   }
@@ -271,6 +301,11 @@ function resolveApplicableTitleOptimizationRules({ runtimeSnapshot, listingResol
   const unresolved = [];
   const systemRules = selectSystemRules(runtimeSnapshot);
   const prefixRule = selectPrefixRule(runtimeSnapshot, context, systemRules);
+  const listingClassification = classifyTitleOptimizationListing({
+    listingResolution,
+    context,
+    prefixRule
+  });
   if (context.ipnPrefix && !prefixRule) {
     warnings.push({
       code: 'NO_PREFIX_RULE',
@@ -278,7 +313,15 @@ function resolveApplicableTitleOptimizationRules({ runtimeSnapshot, listingResol
       message: `No matching Prefix Rule for IPN prefix ${context.ipnPrefix}.`
     });
   }
-  const categoryRules = selectCategoryRules(runtimeSnapshot, context);
+  const terminologyRules = selectTerminologyRules(runtimeSnapshot, context, listingClassification);
+  const synonymRules = selectSynonyms(runtimeSnapshot, context);
+  const categoryRules = selectCategoryRules(
+    runtimeSnapshot,
+    context,
+    terminologyRules,
+    synonymRules,
+    listingClassification
+  );
   if (categoryRules.length > 1) {
     warnings.push({
       code: 'MULTIPLE_CATEGORY_RULES',
@@ -286,7 +329,7 @@ function resolveApplicableTitleOptimizationRules({ runtimeSnapshot, listingResol
       message: 'Multiple category rules matched; all matches are preserved.'
     });
   }
-  const titleStructure = selectTitleStructure(runtimeSnapshot, context);
+  const titleStructure = selectTitleStructure(runtimeSnapshot, context, listingClassification);
   const deterministicTitlePart = resolveDeterministicTitlePart(prefixRule, listingResolution);
 
   return {
@@ -294,10 +337,11 @@ function resolveApplicableTitleOptimizationRules({ runtimeSnapshot, listingResol
     runtimeMode: 'authoritative',
     runtimeReady: true,
     listingContext: context,
-    terminologyRules: selectTerminologyRules(runtimeSnapshot, context),
-    synonyms: selectSynonyms(runtimeSnapshot, context),
+    listingClassification,
+    terminologyRules,
+    synonyms: synonymRules,
     prefixRule,
-    restrictedTerms: selectRestrictedTerms(runtimeSnapshot, context),
+    restrictedTerms: selectRestrictedTerms(runtimeSnapshot, context, listingClassification),
     categoryRules,
     deterministicTitlePart,
     titleStructure,

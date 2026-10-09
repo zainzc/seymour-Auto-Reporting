@@ -171,6 +171,20 @@ test('serializes resolved evidence, conflicts, title-authority partFitment, and 
   assert.match(JSON.stringify(titlePolicy), /Part Fitment is title evidence/i);
 });
 
+test('AI payload prefers exact reuse only after checking the current title against all applicable rules', () => {
+  const artifact = buildTitleOptimizationRuntimePrompt(buildInputs());
+  const instructions = artifact.userPayload.titlePolicy.instructions.join(' ');
+
+  assert.equal(artifact.userPayload.existingTitle.currentTitle, '2011 Honda Door Mirror 00123');
+  assert.match(instructions, /assess the existing title before drafting a replacement/i);
+  assert.match(instructions, /exactly unchanged/i);
+  assert.match(instructions, /selectedTitleStructure/i);
+  assert.match(instructions, /applicable.*UI rules/i);
+  assert.match(instructions, /80.character.*SKU/i);
+  assert.match(instructions, /do not rewrite.*cosmetic/i);
+  assert.match(instructions, /rewrite.*only when/i);
+});
+
 test('sends title-year fallback and general AI redundancy instructions', () => {
   const inputs = buildInputs();
   inputs.listingResolution.normalized.titleAuthority = {
@@ -588,6 +602,7 @@ test('serializes selected structure, terminology, synonyms, prefix, categories, 
   assert.match(JSON.stringify(policy.instructions), /Final audit: compare every material vehicle/i);
   assert.match(JSON.stringify(policy.instructions), /correct any unsupported, contradictory, or meaning-changing wording/i);
   assert.match(JSON.stringify(policy.instructions), /Needs Review only when/i);
+  assert.match(JSON.stringify(policy.instructions), /included only when generatedTitle actually states/i);
   assert.doesNotMatch(JSON.stringify(policy.instructions), /optional_omission|claims array|safeToPublish/i);
 });
 
@@ -748,6 +763,46 @@ test('AI payload marks category details pending and supplies auditable evidence 
   assert.equal(new Set(evidenceSources.map(item => item.id)).size, evidenceSources.length);
   assert.match(JSON.stringify(artifact.userPayload.titlePolicy.instructions), /only verified Category Rule priority details/i);
   assert.match(JSON.stringify(artifact.userPayload.outputContract), /categoryPriorityDetails/);
+});
+
+test('AI payload uses independently normalized category details and includes match provenance', () => {
+  const inputs = buildInputs();
+  const mirrorRule = inputs.applicableRules.categoryRules.find(entry => entry.rule.id === 'cat-mirror');
+  mirrorRule.rule.priorityDetails = ['Wiper / Turn Signal / Multifunction'];
+  mirrorRule.priorityDetails = ['Wiper', 'Turn Signal', 'Multifunction'];
+  mirrorRule.matchEvidence = [{
+    source: 'resolved-category-part',
+    value: 'Mirrors',
+    method: 'normalized-exact'
+  }];
+
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  const category = artifact.userPayload.titlePolicy.categoryRules.find(rule => rule.id === 'cat-mirror');
+
+  assert.deepEqual(category.priorityDetails.map(item => item.detail), ['Wiper', 'Turn Signal', 'Multifunction']);
+  assert.deepEqual(category.matchEvidence, mirrorRule.matchEvidence);
+});
+
+test('AI payload requires structured rule decisions from the same generation call', () => {
+  const artifact = buildTitleOptimizationRuntimePrompt(buildInputs());
+  const required = artifact.userPayload.outputContract.requiredJsonKeys;
+  const instructions = JSON.stringify(artifact.userPayload.titlePolicy.instructions);
+
+  assert.equal(artifact.userPayload.titlePolicy.listingClassification.family, 'general');
+  for (const key of ['materialRestrictions', 'restrictedTermDecisions', 'titleSegments', 'ruleSelfAudit']) {
+    assert.equal(required.includes(key), true, key);
+  }
+  assert.match(instructions, /materialRestrictions/);
+  assert.match(instructions, /when no parsed fitment row exists.*evidence ID/i);
+  assert.match(instructions, /restrictedTermDecisions/);
+  assert.match(instructions, /ordinary listing evidence.*does not authorize/i);
+  assert.match(instructions, /authorizesRestrictedTerms/i);
+  assert.match(instructions, /only for configured terms actually used in generatedTitle/i);
+  assert.doesNotMatch(instructions, /Return exactly one restrictedTermDecisions entry for every term/i);
+  assert.match(instructions, /Do not request review solely for an omitted optional detail/i);
+  assert.match(instructions, /explicit side.*existing title.*conflict/i);
+  assert.match(instructions, /titleSegments/);
+  assert.match(instructions, /ruleSelfAudit/);
 });
 
 test('exposes donor notes as optional material-detail evidence without making them mandatory', () => {

@@ -8,7 +8,11 @@ const OUTPUT_KEYS = Object.freeze([
   'titleReviewNotes',
   'categoryPriorityDetails',
   'sideDecision',
-  'vehicleDecision'
+  'vehicleDecision',
+  'materialRestrictions',
+  'restrictedTermDecisions',
+  'titleSegments',
+  'ruleSelfAudit'
 ]);
 
 const PROMPT_SECTION_ORDER = Object.freeze([
@@ -68,7 +72,8 @@ function sourceEvidence(listingResolution = {}, field) {
       priority: candidate.priority,
       derived: candidate.evidence?.derived === true,
       sourceFieldName: candidate.evidence?.sourceFieldName || null,
-      role: candidate.evidence?.role || null
+      role: candidate.evidence?.role || null,
+      contentRole: candidate.evidence?.contentRole || 'listing-specific'
     })),
     conflicts: (item.conflicts || []).map(conflict => ({
       source: conflict.source,
@@ -152,7 +157,8 @@ function categoryRules(applicableRules = {}) {
     id: entry.rule.id,
     categoryName: entry.rule.categoryName,
     matchedBy: [...entry.matchedBy],
-    priorityDetails: (entry.rule.priorityDetails || []).map(detail => ({
+    matchEvidence: (entry.matchEvidence || []).map(item => ({ ...item })),
+    priorityDetails: (entry.priorityDetails || entry.rule.priorityDetails || []).map(detail => ({
       detail,
       verificationStatus: 'pending',
       instruction: 'Verify against categoryPriorityEvidenceSources before using this detail.'
@@ -308,7 +314,12 @@ function categoryPriorityEvidenceSources(listingResolution = {}) {
   const add = (source, evidence) => {
     const text = typeof evidence === 'string' ? normalizeText(evidence) : evidence && typeof evidence === 'object' ? JSON.stringify(evidence) : '';
     if (!text || sources.some(item => item.source === source && item.evidence === text)) return;
-    sources.push({ id: `evidence-${String(sources.length + 1).padStart(3, '0')}`, source, evidence: text });
+    sources.push({
+      id: `evidence-${String(sources.length + 1).padStart(3, '0')}`,
+      source,
+      evidence: text,
+      authorizesRestrictedTerms: false
+    });
   };
   for (const [field, resolved] of Object.entries(listingResolution?.resolved?.fields || {})) {
     if (resolved?.resolvedValue) add(`Resolved:${field}`, resolved.resolvedValue);
@@ -370,6 +381,7 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
       titleLength: titleLengthPolicy(),
       skuGuidance: skuGuidance(applicableRules),
       selectedTitleStructure: selected,
+      listingClassification: applicableRules.listingClassification || null,
       terminologyRules: terms,
       synonymEnrichment: { enabled: synonyms.enabled, optional: true, neverOverrideSafetyOrFitment: true },
       synonyms: synonyms.rules,
@@ -384,9 +396,9 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
           'Part Fitment remains available as verified title evidence for explanation only.'
         ]
         : [
-          'Create a title candidate using the selected structure and supplied evidence only.',
+          'First assess the existing title before drafting a replacement. Compare existingTitle.currentTitle with the supplied source evidence, material Part Fitment restrictions, source priority, all applicable UI rules (Terminology Rules, Synonyms, Prefix Rules, Restricted Terms, Category Rules, Title Structure, and System Rules), selectedTitleStructure, the 80-character limit, and SKU exactly once at the end. If the existing title already satisfies all mandatory requirements without losing a useful verified detail, return it exactly unchanged as generatedTitle with titleReviewStatus Completed; explain in titleReviewNotes that the existing title already complied. Do not rewrite a compliant title for cosmetic changes, stylistic variation, the 65-character target, or simply to demonstrate optimization. Rewrite only when an actual evidence or rule issue requires it; preserve all correct existing details and do not degrade the title.',
           'Before drafting generatedTitle, identify the advertised application and the material restrictions in each selected fitment row, including which years and variants each restriction covers. Compose the shortest truthful year/make/model/part claim with those restrictions first; only then add optional enrichment. Do not write a broad range and assume a qualifier is optional merely because the current title omits it.',
-          'Spend the 80-character budget on accurate fitment and product identity first. Remove an optional manufacturer part number, repeated category or part wording, synonyms, and generic filler before removing any fitment restriction. Use a concise supported equivalent where available; never imply that a restricted application is unrestricted.',
+          'Spend the 80-character budget on accurate fitment and product identity first. For every field segment present in selectedTitleStructure, include its verified resolved value in the exact configured position. Do not omit a verified Manufacturer Part Number or other configured field merely because it is optional in another listing; omit a configured field only when its value is unavailable or when retaining it would require removing a more important material fitment or identity detail. If space is constrained, remove an optional part number only before a material fitment restriction, never the other way around. Remove repeated category or part wording, synonyms, and generic filler first. Use a concise supported equivalent where available; never imply that a restricted application is unrestricted.',
           'Before finalizing generatedTitle, evaluate every candidate word or phrase in the context of this specific listing. Keep useful verified details when the title fits within 80 characters. Remove wording only when it is truly duplicated, redundant, filler, unnecessary for this listing, or must be removed to satisfy the 80-character maximum.',
           'Preserve any detail whose removal could change fitment, compatible vehicle/version, product identity, configuration, function, side, placement, appearance, or a buyer\'s ability to select the correct part. Do not rely on a fixed list of protected words.',
           'When the title would exceed 80 characters, remove the least important and most redundant wording first. Prefer repeated synonyms and duplicate concepts before any useful verified listing detail. Do not remove a useful detail merely to make the title shorter than 80 characters. If a safe title cannot fit, return Needs Review instead of silently removing an important detail.',
@@ -406,11 +418,12 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
           'Return Needs Review only when the supplied evidence contains a genuine material conflict or ambiguity that cannot be resolved safely under the configured rules. Do not request review for harmless abbreviation, capitalization, equivalent terminology, removal of generic connector words, or omission of nonmaterial redundant wording.',
           'Use professional title capitalization throughout generatedTitle while preserving conventional uppercase abbreviations, identifiers, part numbers, and SKU formatting.',
           'Donor vehicle year/model describe where the part came from, not every compatible application. Keep them separate from advertised fitment. Do not treat other compatible vehicles in Part Fitment as conflicting listing identities or require every application in the title. Select the application supported by the current title and approved identity fields; flag an unresolved actual identity conflict.',
-          'Follow the selectedTitleStructure segments strictly. Use its exact field and literal segment order as the required pattern for this listing, omitting only unavailable optional segments.',
+          'Follow the selectedTitleStructure segments strictly. Use its exact field and literal segment order as the required pattern for this listing. Include every verified resolved field value whose segment appears in the structure, including Manufacturer Part Number when present; omit a segment only when its value is unavailable or retaining it would force removal of a more important material fitment or identity detail.',
           'Use titleEvidence.partFitment to select rows matching the advertised application. Multiple rows do not require review merely because they contain other compatible vehicles, trims, body styles, or adjacent year segments.',
           'Treat a single structured year as evidence for vehicle identity, not as authority to narrow fitment. Use the existing title to identify the advertised make and model, evaluate all of their supplied rows, and merge cited adjacent or overlapping rows when AI finds their qualifiers compatible.',
           'A single donor year does not override compatible fitment years. Select the advertised application under evidencePolicy and explain any unresolved coverage conflict.',
           'Do not combine rows from different makes or models, expand beyond cited evidence, or bridge a gap between unsupported years. Qualifier differences matter only when they contradict the advertised item or would make the title inaccurate.',
+          'If an explicit side in generatedTitle differs from the existing title, treat the explicit side in the existing title as a conflict requiring manual confirmation. Do not silently swap Left/Right or Driver/Passenger, even when another source supports the proposed side.',
           'For compressed model identifiers, AI may normalize from current title and titleEvidence.partFitment only when the clear model names are corroborated; preserve all corroborated model names.',
           'Evaluate every Category Rule priority detail against categoryPriorityEvidenceSources and return one categoryPriorityDetails decision for each configured detail.',
           'Mark a Category Rule detail verified only when supplied trusted evidence supports it directly or through an applicable approved terminology rule or synonym.',
@@ -419,7 +432,12 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
           'For each verified Category Rule detail, put the exact supporting categoryPriorityEvidenceSources id in source and cite a verbatim evidence excerpt. Mark unsupported details unverified with null source and evidence.',
           'Use only verified Category Rule priority details in generatedTitle. Never infer or invent an unverified Category Rule detail.',
           'Category details are optional priorities: omit an unsupported optional detail without requesting review solely for its absence. Return only the exact configured detail names, each once; return an empty array when no Category Rule details are configured.',
+          'Do not request review solely for an omitted optional detail, unused restricted term, citation format, or a cosmetic descriptor that does not change the buyer\'s product or fitment decision. Keep the selected UI structure and every material fitment restriction accurate.',
           'An applicable deterministic Prefix Rule replacement remains authoritative independently of Category Rule detail verification.',
+          'Return materialRestrictions for every material qualifier considered for the selected application. Cite supplied fitment row IDs when parsed rows exist. When no parsed fitment row exists, cite the exact supporting categoryPriorityEvidenceSources evidence ID instead; never invent a logical source label. State the qualifier year or variant scope. Mark titleTreatment included only when generatedTitle actually states the material qualifier or a concise equivalent; mentioning it in description or notes is not enough. Mark nonmaterial details material=false, and use Needs Review only when an applicable material qualifier cannot be represented safely.',
+          'Return restrictedTermDecisions only for configured terms actually used in generatedTitle, using each exact configured term once. Never include a never-introduce or remove-noise term. For requires-authorization rules, ordinary listing evidence does not authorize the term: Item Specifics, fitment, descriptions, categories, existing titles, and resolved product values may support a fact but cannot grant authorization. Use an authorization term only when its cited categoryPriorityEvidenceSources entry has authorizesRestrictedTerms=true. Return an empty array when no restricted term is used.',
+          'Return titleSegments in the exact selectedTitleStructure order using the text actually present in generatedTitle. Do not hide extra title wording outside the segment list.',
+          'Return ruleSelfAudit after drafting: confirm structureFollowed, unresolvedSourceConflict, unsupportedClaim, and concise notes. Completed requires all three safety booleans to indicate a safe result.',
           'Do not keep raw fitment wording in generatedTitle when the selected structure has separate fields for that information.'
         ]
     },
@@ -453,7 +471,7 @@ function buildTitleOptimizationRuntimePrompt({ runtimeSnapshot = {}, listingReso
     'Return valid JSON only using the required output contract.',
     bypass
       ? 'Manual override is active: preserve title authority and do not create a replacement title.'
-      : 'Use an evidence-backed joint vehicleDecision for make/model/year and supplied authoritative remaining values and applicable rules to create a safe replacement title candidate.',
+      : 'Assess the existing title against supplied evidence and all applicable rules first; retain it exactly when compliant, otherwise create a safe corrected title.',
     'System Rules in the payload are mandatory.',
     'Apply evidencePolicy consistently when selecting facts, composing the title, and deciding review status.',
     '80 characters is the hard maximum; 65 characters is a target only, not a minimum.',

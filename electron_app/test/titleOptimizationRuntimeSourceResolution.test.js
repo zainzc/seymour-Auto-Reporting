@@ -350,6 +350,45 @@ test('treats plural and possessive structured side labels as equivalent to direc
   }
 });
 
+test('does not derive listing side from generic left and right explanatory boilerplate', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': '2012 Honda Door Mirror 1554743',
+      'Conditions & Options': '',
+      'Item Specifics - All C: values relevant to item': '{}',
+      'Current eBay Fields': JSON.stringify({
+        donorNotes: 'LEFT IS DRIVERS SIDE AND RIGHT IS THE PASSENGERS SIDE'
+      })
+    })
+  });
+
+  assert.equal(result.normalized.derived.sideFromNotes.value, null);
+  assert.equal(result.normalized.derived.sideFromNotes.contentRole, 'boilerplate');
+  assert.equal(result.resolved.fields.side.missing, true);
+});
+
+test('preserves opposite listing-specific title and fitment sides as an explicit conflict', () => {
+  const result = normalizeAndResolveListing({
+    runtimeSnapshot: snapshot(),
+    listingRecord: listing({
+      'Item Title': '2012 Honda Passenger Right Door Mirror 1554743',
+      'Conditions & Options': '',
+      'Item Specifics - All C: values relevant to item': '{}',
+      'Current eBay Fields': '{}'
+    }),
+    masterRecord: {
+      fields: {
+        'Part Fitment': 'Fits 2012 Honda Accord Driver Left Door Mirror'
+      }
+    }
+  });
+
+  assert.equal(result.resolved.fields.side.resolvedValue, 'Passenger Right RH');
+  assert.equal(result.resolved.fields.side.conflict, true);
+  assert.equal(result.resolved.fields.side.conflicts.some(item => item.source === 'partFitment' && item.value === 'Driver Left LH'), true);
+});
+
 test('uses an existing-title year range as fallback evidence only when Part Fitment is unavailable', () => {
   const withoutFitment = normalizeAndResolveListing({
     runtimeSnapshot: snapshot(),

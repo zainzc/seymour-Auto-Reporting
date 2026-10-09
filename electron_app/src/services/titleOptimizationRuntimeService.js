@@ -3,6 +3,7 @@ const { resolveApplicableTitleOptimizationRules } = require('./titleOptimization
 const { buildTitleOptimizationRuntimePrompt } = require('./titleOptimizationRuntimePromptBuilderService');
 const { buildFitmentReviewInput, checkedFitmentReview } = require('./titleOptimizationFitmentReviewService');
 const { validateMechanicalTitle, decideAiTitle } = require('./titleOptimizationAiDecisionService');
+const { validateTitleRuleContract } = require('./titleOptimizationRuleContractService');
 
 const RUNTIME_STATUSES = Object.freeze({
   COMPLETED: 'COMPLETED',
@@ -50,6 +51,7 @@ function baseResult(listing = {}) {
     decision: null,
     attempts: [],
     fitmentReview: null,
+    ruleDecision: null,
     errors: []
   };
 }
@@ -60,13 +62,24 @@ function fail(result, status, error) {
   return result;
 }
 
-function writableOutput(aiResult = {}, decision = {}, proposedTitle = '') {
+function writableOutput(aiResult = {}, decision = {}, proposedTitle = '', existingTitle = '') {
   const bypassed = decision.decision === 'BYPASSED_MANUAL_OVERRIDE';
   const accepted = decision.decision === 'ACCEPT_CANDIDATE' && decision.reviewRequired !== true;
   const proposal = normalizeText(proposedTitle || aiResult.generatedTitle);
+  const unsafeProposal = (decision.degradationChecks || []).some(check => [
+    'phase-e:existing-title-side-conflict',
+    'phase-e:restricted-term-prohibited',
+    'phase-e:restricted-term-authorization',
+    'phase-e:restricted-term-preservation',
+    'phase-e:unsupported-claim-self-audit'
+  ].includes(check?.checkId));
+  const reviewProposal = ['NEEDS_REVIEW', 'RETAIN_EXISTING'].includes(decision.decision) &&
+    !unsafeProposal
+    ? proposal
+    : '';
   const deterministicNotes = normalizeText(decision.reviewNotes) || failedCheckSummary(decision);
   return {
-    title: accepted ? normalizeText(decision.finalTitle) : '',
+    title: accepted ? normalizeText(decision.finalTitle) : reviewProposal,
     proposedTitle: proposal,
     description: normalizeText(aiResult.generatedDescription),
     shortDescription: normalizeText(aiResult.shortDescription),
@@ -74,13 +87,16 @@ function writableOutput(aiResult = {}, decision = {}, proposedTitle = '') {
     reviewReason: bypassed ? normalizeText(decision.reviewReason) || 'manual_override' :
       accepted ? 'completed' : normalizeText(decision.reviewReason) || 'manual_review_required',
     reviewNotes: bypassed ? normalizeText(decision.reviewNotes) || 'Automated title generation was skipped.' :
-      accepted ? acceptedReviewNotes(aiResult, decision) :
+      accepted ? acceptedReviewNotes(aiResult, decision, existingTitle) :
         [deterministicNotes, proposal ? `Proposed title: ${proposal}` : ''].filter(Boolean).join(' ')
   };
 }
 
-function acceptedReviewNotes(aiResult = {}, decision = {}) {
+function acceptedReviewNotes(aiResult = {}, decision = {}, existingTitle = '') {
   const notes = [];
+  if (existingTitle && String(existingTitle).trim() === normalizeText(decision.finalTitle)) {
+    notes.push('Existing title retained unchanged; AI found it meets the supplied evidence, applicable UI rules, and Title Structure.');
+  }
   const vehicle = aiResult.vehicleDecision || {};
   const vehicleIdentity = [vehicle.yearRange, vehicle.make, vehicle.model].map(normalizeText).filter(Boolean).join(' ');
   if (vehicle.resolved === true && vehicleIdentity) {
@@ -127,6 +143,73 @@ function categoryPriorityDetailsSummary(aiResult = {}) {
   })));
 }
 
+function compactValue(value, maximum = 180) {
+  return normalizeText(value).replace(/<[^>]+>/g, '').slice(0, maximum);
+}
+
+function buildRuleDecision({ sourceResolution = {}, ruleResolution = {}, validation = {}, decision = {}, aiResult = {} } = {}) {
+  const classification = ruleResolution.listingClassification || null;
+  const ignoredEvidence = Object.values(sourceResolution?.normalized?.derived || {})
+    .filter(item => item?.contentRole === 'boilerplate')
+    .map(item => ({
+      logicalKey: item.logicalKey || null,
+      sourceFieldName: compactValue(item.sourceFieldName) || null,
+      reason: 'boilerplate'
+    }));
+  return {
+    classification: classification ? {
+      family: classification.family,
+      resolved: classification.resolved === true,
+      reason: classification.reason || null,
+      sources: (classification.sources || []).map(item => ({
+        type: item.type,
+        value: compactValue(item.value),
+        family: item.family
+      })),
+      conflicts: (classification.conflicts || []).map(item => ({
+        type: item.type,
+        value: compactValue(item.value),
+        family: item.family
+      }))
+    } : null,
+    ignoredEvidence,
+    matchedCategoryRules: (ruleResolution.categoryRules || []).map(entry => ({
+      id: entry.rule?.id || null,
+      categoryName: entry.rule?.categoryName || null,
+      matchedBy: entry.matchedBy || [],
+      priorityDetails: entry.priorityDetails || entry.rule?.priorityDetails || []
+    })),
+    selectedStructure: ruleResolution.titleStructure?.selected ? {
+      id: ruleResolution.titleStructure.selected.id,
+      name: ruleResolution.titleStructure.selected.structureName,
+      reason: ruleResolution.titleStructure.reason
+    } : null,
+    applicableRestrictedTerms: (ruleResolution.restrictedTerms?.rules || []).map(rule => ({
+      id: rule.id || null,
+      term: rule.term,
+      ruleType: rule.ruleType,
+      scope: rule.scope || null
+    })),
+    sourceConflicts: (sourceResolution?.resolved?.conflicts || []).map(conflict => ({
+      field: conflict.field,
+      winner: compactValue(conflict.resolvedValue),
+      alternatives: (conflict.conflicts || []).map(item => ({
+        source: item.source,
+        value: compactValue(item.value)
+      }))
+    })),
+    aiRuleDecisions: {
+      categoryPriorityDetails: aiResult.categoryPriorityDetails || [],
+      materialRestrictions: aiResult.materialRestrictions || [],
+      restrictedTermDecisions: aiResult.restrictedTermDecisions || [],
+      ruleSelfAudit: aiResult.ruleSelfAudit || null
+    },
+    checks: validation.ruleContract?.checks || validation.violations || [],
+    finalDisposition: decision.decision || null,
+    reviewReason: decision.reviewReason || null
+  };
+}
+
 async function runTitleOptimizationRuntime({ listing = {}, options = {}, dependencies = {} } = {}) {
   const result = baseResult(listing);
   const logger = dependencies.logger || console;
@@ -154,6 +237,36 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
         previousTitleCharactersAfterSku: previousNormalized?.length ?? null,
         instruction: 'Compose within this budget including spaces and the final SKU. Preserve configured mandatory terms and material fitment; optional MPN and enrichment yield first.' }
     } }, listing, options });
+  };
+  const validateAiResult = (artifact, currentAiResult) => {
+    const validationInputs = {
+      snapshot,
+      sourceResolution,
+      ruleResolution,
+      promptArtifact: artifact,
+      candidateTitle: currentAiResult.generatedTitle || '',
+      categoryPriorityDetails: currentAiResult.categoryPriorityDetails || [],
+      sideDecision: currentAiResult.sideDecision,
+      vehicleDecision: currentAiResult.vehicleDecision
+    };
+    const mechanical = (dependencies.validate || validateMechanicalTitle)(validationInputs);
+    const contract = validateTitleRuleContract({
+      aiResult: currentAiResult,
+      sourceResolution,
+      ruleResolution,
+      promptArtifact: artifact,
+      candidateTitle: mechanical.validatedTitle || validationInputs.candidateTitle
+    });
+    if (contract.passed) return { ...mechanical, ruleContract: contract };
+    return {
+      ...mechanical,
+      outcome: 'RETAIN_EXISTING_REQUIRED',
+      valid: false,
+      safeToContinue: false,
+      checks: [...(mechanical.checks || []), ...contract.checks],
+      violations: [...(mechanical.violations || []), ...contract.violations],
+      ruleContract: contract
+    };
   };
 
   try {
@@ -260,16 +373,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   }
 
   try {
-    validation = (dependencies.validate || validateMechanicalTitle)({
-      snapshot,
-      sourceResolution,
-      ruleResolution,
-      promptArtifact,
-      candidateTitle: aiResult.generatedTitle || '',
-      categoryPriorityDetails: aiResult.categoryPriorityDetails || [],
-      sideDecision: aiResult.sideDecision,
-      vehicleDecision: aiResult.vehicleDecision
-    });
+    validation = validateAiResult(promptArtifact, aiResult);
     result.validation = validation;
   } catch (error) {
     return fail(result, RUNTIME_STATUSES.VALIDATOR_FAILURE, error);
@@ -297,7 +401,12 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   });
   if (promptArtifact?.kind !== 'title-generation-bypass') result.attempts.push(recordAttempt());
   const failures = (decision?.degradationChecks || []).filter(check => ['FAIL', 'BLOCK'].includes(check?.status));
+  const unretryableConflict = failures.some(check => [
+    'phase-e:existing-title-side-conflict',
+    'phase-e:source-conflict-self-audit'
+  ].includes(check?.checkId));
   if (generationCalls < 2 && promptArtifact?.kind !== 'title-generation-bypass' && failures.length && decision?.reviewRequired &&
+      !unretryableConflict &&
       normalizeText(aiResult.titleReviewStatus).toLowerCase() !== 'needs review') {
     const correctionPrompt = {
       ...promptArtifact,
@@ -309,18 +418,14 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
           failures: failures.map(check => ({ checkId: check.checkId, field: check.field, message: check.message })),
           instruction: dependencies.validate || dependencies.decide
             ? 'Correct every listed failure using the original supplied evidence and rules. Audit the previous title against the selected Part Fitment application and current title. For an invented citation, return an exact supplied citation. For an unsupported year or year gap, select only continuously covered cited years. For a changed make or model, restore the advertised supported make and model. Add any missing selected vehicle identity. For a side failure, use only the authoritative cited side. Remove an unsupported optional MPN; do not choose between conflicting authoritative MPN values. Identify useful distinguishing qualifiers that were omitted, remove overlapping or repeated part-name wording first, then rebuild the title in the exact selectedTitleStructure order. Keep useful verified details whenever the result fits within 80 characters; remove optional redundant details only as needed to remain within 80 characters. Recount all characters including spaces and place the verified SKU exactly once at the end. Preserve a verifiedVehicleDecision and its citation when supplied. Check all failures again before returning; do not repeat the failed title unchanged. Return the complete original output contract. Do not invent facts. Mark only unresolved material uncertainty Needs Review.'
-            : 'Correct only the listed mechanical title failures. The complete title must be 80 characters or fewer, with the verified SKU exactly once at the end. Remove optional repeated wording before useful fitment or product details. Preserve the advertised vehicle, supported fitment restrictions, and configured title structure. Decide any unresolved material uncertainty yourself as Needs Review. Return the complete JSON contract.'
+            : 'Correct the listed title failures using only the original supplied evidence. Preserve the advertised vehicle, explicit side, material fitment, and configured title structure. If a material restriction is already stated in the title, report it as included; otherwise add it without losing a more important detail or mark Needs Review when it cannot fit. Remove any prohibited or unauthorized restricted term; return restrictedTermDecisions only for terms used in the corrected title. Cite supplied evidence IDs accurately, but do not change an otherwise safe title merely to repair citation formatting. Keep the complete title within 80 characters and place the verified SKU exactly once at the end. Remove repeated wording and optional MPN before material fitment. Never silently change an explicit side from the existing title. Return the complete JSON contract.'
         }
       }
     };
     try {
       const correctedAi = await executeAi(correctionPrompt);
       if (!normalizeText(correctedAi?.generatedTitle)) throw new Error('Correction response missing generatedTitle.');
-      const correctedValidation = (dependencies.validate || validateMechanicalTitle)({
-        snapshot, sourceResolution, ruleResolution, promptArtifact: correctionPrompt,
-        candidateTitle: correctedAi.generatedTitle, categoryPriorityDetails: correctedAi.categoryPriorityDetails || [],
-        sideDecision: correctedAi.sideDecision, vehicleDecision: correctedAi.vehicleDecision
-      });
+      const correctedValidation = validateAiResult(correctionPrompt, correctedAi);
       const correctedDecision = (dependencies.decide || decideAiTitle)({
         snapshot, sourceResolution, ruleResolution, promptArtifact: correctionPrompt, validationResult: correctedValidation,
         aiResult: correctedAi
@@ -369,13 +474,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     try {
       const compressedAi = await executeAi(compressionPrompt);
       if (!normalizeText(compressedAi?.generatedTitle)) throw new Error('Compression response missing generatedTitle.');
-      const compressedValidation = (dependencies.validate || validateMechanicalTitle)({
-        snapshot, sourceResolution, ruleResolution, promptArtifact: compressionPrompt,
-        candidateTitle: compressedAi.generatedTitle,
-        categoryPriorityDetails: compressedAi.categoryPriorityDetails || [],
-        sideDecision: compressedAi.sideDecision,
-        vehicleDecision: compressedAi.vehicleDecision
-      });
+      const compressedValidation = validateAiResult(compressionPrompt, compressedAi);
       const compressedDecision = (dependencies.decide || decideAiTitle)({
         snapshot, sourceResolution, ruleResolution, promptArtifact: compressionPrompt,
         validationResult: compressedValidation, aiResult: compressedAi
@@ -452,12 +551,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
             instruction: 'Reconsider your original Needs Review using the supplied evidence and independent review. Address your own specific concern directly; the independent PASS alone does not prove it is resolved. Return Completed only if you can now support the complete final title under every applicable rule. Otherwise keep Needs Review with a precise remaining reason. Do not weaken fitment, product identity, or other material details merely to obtain Completed. Return the complete original output contract.'
           } } });
         if (!normalizeText(reconsideredAi?.generatedTitle)) throw new Error('Review recovery returned no title.');
-        const reconsideredValidation = (dependencies.validate || validateMechanicalTitle)({
-          snapshot, sourceResolution, ruleResolution, promptArtifact,
-          candidateTitle: reconsideredAi.generatedTitle,
-          categoryPriorityDetails: reconsideredAi.categoryPriorityDetails || [],
-          sideDecision: reconsideredAi.sideDecision, vehicleDecision: reconsideredAi.vehicleDecision
-        });
+        const reconsideredValidation = validateAiResult(promptArtifact, reconsideredAi);
         const reconsideredDecision = (dependencies.decide || decideAiTitle)({
           snapshot, sourceResolution, ruleResolution, promptArtifact,
           validationResult: reconsideredValidation, aiResult: reconsideredAi
@@ -501,12 +595,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
         if (!correctedAi.vehicleDecision && verifiedVehicleDecision) {
           correctedAi.vehicleDecision = verifiedVehicleDecision;
         }
-        const correctedValidation = (dependencies.validate || validateMechanicalTitle)({
-          snapshot, sourceResolution, ruleResolution, promptArtifact,
-          candidateTitle: correctedAi.generatedTitle,
-          categoryPriorityDetails: correctedAi.categoryPriorityDetails || [],
-          sideDecision: correctedAi.sideDecision, vehicleDecision: correctedAi.vehicleDecision
-        });
+        const correctedValidation = validateAiResult(promptArtifact, correctedAi);
         const correctedDecision = (dependencies.decide || decideAiTitle)({
           snapshot, sourceResolution, ruleResolution, promptArtifact, validationResult: correctedValidation,
           aiResult: correctedAi
@@ -540,7 +629,9 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   result.status = decision?.decision === 'BYPASSED_MANUAL_OVERRIDE' ? RUNTIME_STATUSES.BYPASSED : RUNTIME_STATUSES.COMPLETED;
   const existingTitle = normalizeText(sourceResolution?.resolved?.fields?.title?.resolvedValue || sourceResolution?.normalized?.fields?.existingTitle?.value);
   const reviewProposal = normalizeText(aiResult.generatedTitle);
-  result.output = writableOutput(aiResult, decision, reviewProposal);
+  result.output = writableOutput(aiResult, decision, reviewProposal,
+    promptArtifact?.userPayload?.existingTitle?.currentTitle || existingTitle);
+  result.ruleDecision = buildRuleDecision({ sourceResolution, ruleResolution, validation, decision, aiResult });
   const titleWriteAction = result.output.title ? 'WRITE_ITEM_TITLE' : 'PRESERVE_ITEM_TITLE';
   logger.info?.(
     `[Phase7.4 Runtime] recordId='${result.listing.recordId || ''}' ipn='${result.listing.ipn || ''}' ` +
@@ -557,7 +648,8 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
       `sideDecision=${JSON.stringify(aiResult.sideDecision || null)} ` +
       `vehicleDecision=${JSON.stringify(validation.vehicleVerification || aiResult.vehicleDecision || null)} ` +
       `attempts=${JSON.stringify(result.attempts)} ` +
-      `categoryPriorityDetails=${categoryPriorityDetailsSummary(aiResult)}`
+      `categoryPriorityDetails=${categoryPriorityDetailsSummary(aiResult)} ` +
+      `ruleDecision=${JSON.stringify(result.ruleDecision)}`
   );
   return result;
 }

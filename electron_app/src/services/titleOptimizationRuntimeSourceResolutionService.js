@@ -331,11 +331,25 @@ function modelAmbiguityResolvedByCandidate(sourceResolution = {}, candidateTitle
   return unique.length >= 2 && unique.every(value => title.includes(value));
 }
 
-function deriveSideFromText(value = '') {
+function analyzeSideText(value = '', { contentRole = 'listing-specific' } = {}) {
   const text = normalizeText(value).toUpperCase();
-  if (/\b(PASS|PASSENGERS?|RIGHT|RH)\b/.test(text)) return 'Passenger Right RH';
-  if (/\b(DRIVERS?|LEFT|LH)\b/.test(text)) return 'Driver Left LH';
-  return '';
+  const hasPassengerRight = /\b(PASS|PASSENGERS?|RIGHT|RH)\b/.test(text);
+  const hasDriverLeft = /\b(DRIVERS?|LEFT|LH)\b/.test(text);
+  if (hasPassengerRight && hasDriverLeft) {
+    return {
+      value: '',
+      contentRole: /\bLEFT\s+IS\b|\bRIGHT\s+IS\b|\bDRIVER'?S?\s+SIDE\b.*\bPASSENGER'?S?\s+SIDE\b/.test(text)
+        ? 'boilerplate'
+        : contentRole
+    };
+  }
+  if (hasPassengerRight) return { value: 'Passenger Right RH', contentRole };
+  if (hasDriverLeft) return { value: 'Driver Left LH', contentRole };
+  return { value: '', contentRole };
+}
+
+function deriveSideFromText(value = '', options = {}) {
+  return analyzeSideText(value, options).value;
 }
 
 const { normalizeVehicleMake, corroboratesAuthoritativeMake } = require('./titleOptimizationMakeNormalizationService');
@@ -584,6 +598,9 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
     currentEbayFields.model ||
     currentEbayFields['Donor Model']
   );
+  const titleSide = analyzeSideText(existingTitle);
+  const noteSide = analyzeSideText(donorNotes);
+  const fitmentSide = analyzeSideText(partFitment);
   const donorYear = normalizeText(
     currentEbayFields.donorYear ||
     currentEbayFields.Year ||
@@ -625,11 +642,14 @@ function normalizeListingEvidence({ runtimeSnapshot, listingRecord, masterRecord
   out.derived.yearFromDonor = derivedEvidence(donorYear, 'currentEbay', 'Current eBay Fields', currentEbayFields, {
     logicalKey: 'year', contextOnly: true, role: 'donor'
   });
-  out.derived.sideFromTitle = derivedEvidence(deriveSideFromText(existingTitle), 'currentEbay', 'Item Title', existingTitle, {
-    logicalKey: 'side'
+  out.derived.sideFromTitle = derivedEvidence(titleSide.value, 'currentEbay', 'Item Title', existingTitle, {
+    logicalKey: 'side', contentRole: titleSide.contentRole
   });
-  out.derived.sideFromNotes = derivedEvidence(deriveSideFromText(donorNotes), 'currentEbay', 'Current eBay Fields', donorNotes, {
-    logicalKey: 'side'
+  out.derived.sideFromNotes = derivedEvidence(noteSide.value, 'currentEbay', 'Current eBay Fields', donorNotes, {
+    logicalKey: 'side', contentRole: noteSide.contentRole
+  });
+  out.derived.sideFromFitment = derivedEvidence(fitmentSide.value, 'partFitment', 'Part Fitment', partFitment, {
+    logicalKey: 'side', contentRole: fitmentSide.contentRole, titleEvidence: true
   });
   out.derived.componentTypeFromNotes = derivedEvidence(
     deriveComponentTypeFromText(donorNotes || existingTitle),
@@ -740,6 +760,7 @@ function candidatesForField(field, normalized, priorities) {
     add(out, 'categoryConditions', normalized.fields.conditionsOptions?.value, normalized.fields.conditionsOptions);
     add(out, 'currentEbay', normalized.derived.sideFromNotes?.value, normalized.derived.sideFromNotes);
     add(out, 'currentEbay', normalized.derived.sideFromTitle?.value, normalized.derived.sideFromTitle);
+    add(out, 'partFitment', normalized.derived.sideFromFitment?.value, normalized.derived.sideFromFitment);
   } else if (field === 'year') {
     add(out, 'itemSpecifics', itemSpecificValue(itemSpecifics, ITEM_SPECIFIC_ALIASES.year), normalized.structured.itemSpecifics);
     add(out, 'otherStructuredFields', normalized.fields.year?.value || normalized.fields.structuredYear?.value, normalized.fields.year || normalized.fields.structuredYear);

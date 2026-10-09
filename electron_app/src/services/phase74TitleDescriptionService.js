@@ -812,9 +812,13 @@ function addFieldIfChanged(writeFields = {}, existingFields = {}, fieldName = ''
 }
 
 function applyAcceptedRuntimeTitle(writeFields = {}, existingFields = {}, runtimeResult = {}) {
-  if (runtimeResult?.decision?.decision !== 'ACCEPT_CANDIDATE') return false;
+  const decision = runtimeResult?.decision?.decision;
+  const reviewStatus = normalizeText(runtimeResult?.output?.reviewStatus);
+  const writableReview = reviewStatus === TITLE_REVIEW_STATUS_NEEDS_REVIEW &&
+    ['NEEDS_REVIEW', 'RETAIN_EXISTING'].includes(decision);
+  if (decision !== 'ACCEPT_CANDIDATE' && !writableReview) return false;
   const title = normalizeText(runtimeResult?.output?.title);
-  if (!title || title.length > 80) return false;
+  if (!title || (decision === 'ACCEPT_CANDIDATE' && title.length > 80)) return false;
   return addFieldIfChanged(writeFields, existingFields, LISTING_OUTPUT_TITLE_FIELD, title);
 }
 
@@ -1204,7 +1208,8 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         aiRequestLog.append({ event: 'result', kind: 'runtime-result', listing: { recordId: row.id, ipn },
           result: { status: runtimeResult.status, decision: runtimeResult.decision,
             output: runtimeResult.output, attempts: runtimeResult.attempts,
-            fitmentReview: runtimeResult.fitmentReview, errors: runtimeResult.errors } });
+            fitmentReview: runtimeResult.fitmentReview, ruleDecision: runtimeResult.ruleDecision,
+            errors: runtimeResult.errors } });
       } catch (error) {
         console.warn(`[Phase7.4 AI Request Log] Result write failed: ${error.message}`);
         aiRequestLog = null;

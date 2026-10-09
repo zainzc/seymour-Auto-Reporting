@@ -19,10 +19,10 @@ test('explicit IPN runs retry Needs Review rows without reprocessing completed r
   assert.equal(shouldSkipEnrichedListing({ ...fields, 'Title Review Status': 'Completed' }, true), true);
 });
 
-function runtime(decision, title) {
+function runtime(decision, title, reviewStatus = '') {
   return {
     decision: { decision },
-    output: { title }
+    output: { title, reviewStatus }
   };
 }
 
@@ -38,8 +38,21 @@ test('writes Item Title only for an accepted runtime candidate and never writes 
   assert.equal(Object.hasOwn(writeFields, 'Title'), false);
 });
 
-test('preserves Item Title for every nonaccepted runtime decision', () => {
-  for (const decision of ['NEEDS_REVIEW', 'RETAIN_EXISTING', 'BLOCKED', 'BYPASSED_MANUAL_OVERRIDE']) {
+test('writes the generated Item Title while retaining Needs Review status', () => {
+  for (const decision of ['NEEDS_REVIEW', 'RETAIN_EXISTING']) {
+    const fields = { Title: 'Existing eBay Title', 'Item Title': 'Previous generated title' };
+    const writeFields = {};
+
+    const changed = applyAcceptedRuntimeTitle(writeFields, fields,
+      runtime(decision, 'Review proposal 00123', 'Needs Review'));
+
+    assert.equal(changed, true, decision);
+    assert.equal(writeFields['Item Title'], 'Review proposal 00123', decision);
+  }
+});
+
+test('preserves Item Title for blocked and manual-override runtime decisions', () => {
+  for (const decision of ['BLOCKED', 'BYPASSED_MANUAL_OVERRIDE']) {
     const fields = { Title: 'Existing eBay Title', 'Item Title': 'Previous generated title' };
     const writeFields = {};
 
@@ -57,6 +70,16 @@ test('rejects blank and overlength accepted titles at the Airtable boundary', ()
     assert.equal(applyAcceptedRuntimeTitle(writeFields, {}, runtime('ACCEPT_CANDIDATE', title)), false);
     assert.deepEqual(writeFields, {});
   }
+});
+
+test('writes an overlength Needs Review draft but still rejects a blank title', () => {
+  const writeFields = {};
+  const title = 'X'.repeat(81);
+  assert.equal(applyAcceptedRuntimeTitle(writeFields, {},
+    runtime('NEEDS_REVIEW', title, 'Needs Review')), true);
+  assert.equal(writeFields['Item Title'], title);
+  assert.equal(applyAcceptedRuntimeTitle({}, {},
+    runtime('NEEDS_REVIEW', '', 'Needs Review')), false);
 });
 
 test('does not rewrite an unchanged accepted Item Title', () => {

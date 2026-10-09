@@ -230,6 +230,51 @@ test('engine and transmission structures are selected only from verified context
   assert.equal(fitmentOnly.titleStructure.selected.id, 'structure-general');
 });
 
+test('300 prefix classifies the listing as an engine and activates engine-scoped rules', () => {
+  const snapshot = baseSnapshot({
+    sections: {
+      ...baseSnapshot().sections,
+      prefixRules: section([
+        ...baseSnapshot().sections.prefixRules.items,
+        { id: 'prefix-300', prefix: '300', approvedPartTerms: ['Engine'], priority: 5, enabled: true }
+      ])
+    }
+  });
+  const listing = resolvedListing(snapshot, {
+    IPN: '300-12345',
+    'Category Name': 'Complete Assembly',
+    'Item Specifics': JSON.stringify({ 'C:Part': 'Complete Assembly' }),
+    'Conditions & Options': ''
+  });
+
+  const result = resolveApplicableTitleOptimizationRules({ runtimeSnapshot: snapshot, listingResolution: listing });
+
+  assert.equal(result.listingClassification.family, 'engine');
+  assert.equal(result.listingClassification.resolved, true);
+  assert.equal(result.listingClassification.sources.some(source => source.type === 'ipn-prefix' && source.value === '300'), true);
+  assert.equal(result.titleStructure.selected.id, 'structure-engine');
+  assert.equal(result.categoryRules.some(entry => entry.rule.id === 'cat-engine' && entry.matchedBy.includes('classification')), true);
+  assert.deepEqual(result.restrictedTerms.groups['never-introduce'].map(rule => rule.id), ['client-v5-long-block']);
+  assert.deepEqual(result.restrictedTerms.groups['requires-authorization'].map(rule => rule.id), ['auth']);
+});
+
+test('trusted existing-title product identity can classify a generic resolved part as an engine', () => {
+  const snapshot = baseSnapshot();
+  const listing = resolvedListing(snapshot, {
+    IPN: '999-12345',
+    'Item Title': '2014 Honda Accord Engine 2.4L 12345',
+    'Category Name': 'Complete Assembly',
+    'Item Specifics': JSON.stringify({ 'C:Part': 'Complete Assembly' }),
+    'Conditions & Options': ''
+  });
+
+  const result = resolveApplicableTitleOptimizationRules({ runtimeSnapshot: snapshot, listingResolution: listing });
+
+  assert.equal(result.listingClassification.family, 'engine');
+  assert.equal(result.listingClassification.sources.some(source => source.type === 'existing-title'), true);
+  assert.equal(result.titleStructure.selected.id, 'structure-engine');
+});
+
 test('wiper parts keep the general structure even when unrelated evidence mentions transmission', () => {
   const snapshot = baseSnapshot();
   const result = resolveApplicableTitleOptimizationRules({
@@ -243,6 +288,92 @@ test('wiper parts keep the general structure even when unrelated evidence mentio
 
   assert.equal(result.titleStructure.selected.id, 'structure-general');
   assert.equal(result.terminologyRules.some(rule => rule.appliesTo === 'transmission'), false);
+});
+
+test('matches configured category names across safe variants without partial-word matches', () => {
+  const categoryItems = [
+    { id: 'cat-mirrors', categoryName: 'Mirrors', prefixRefs: [], seriesRefs: [], priorityDetails: [], enabled: true },
+    { id: 'cat-tail-lights', categoryName: 'Tail Lights', prefixRefs: [], seriesRefs: [], priorityDetails: [], enabled: true },
+    { id: 'cat-seat-belts', categoryName: 'Seat Belts', prefixRefs: [], seriesRefs: [], priorityDetails: [], enabled: true },
+    { id: 'cat-headlights', categoryName: 'Headlights', prefixRefs: [], seriesRefs: [], priorityDetails: [], enabled: true },
+    { id: 'cat-fuel-doors', categoryName: 'Fuel Doors', prefixRefs: [], seriesRefs: [], priorityDetails: [], enabled: true },
+    { id: 'cat-rear-view', categoryName: 'Rear View Mirrors', prefixRefs: [], seriesRefs: [], priorityDetails: [], enabled: true }
+  ];
+  const snapshot = baseSnapshot({
+    sections: {
+      ...baseSnapshot().sections,
+      categoryRules: section(categoryItems)
+    }
+  });
+  const cases = [
+    ['Side View Mirror', 'cat-mirrors'],
+    ['Taillight Assembly', 'cat-tail-lights'],
+    ['Seat Belt', 'cat-seat-belts'],
+    ['Headlight Assembly', 'cat-headlights'],
+    ['Fuel Door', 'cat-fuel-doors'],
+    ['Rear-View Mirror', 'cat-rear-view']
+  ];
+
+  for (const [part, expectedRuleId] of cases) {
+    const result = resolveApplicableTitleOptimizationRules({
+      runtimeSnapshot: snapshot,
+      listingResolution: resolvedListing(snapshot, {
+        'Category Name': part,
+        'Item Specifics': JSON.stringify({ 'C:Part': part }),
+        'Conditions & Options': ''
+      })
+    });
+    assert.equal(result.categoryRules.some(entry => entry.rule.id === expectedRuleId), true, part);
+  }
+
+  const unrelated = resolveApplicableTitleOptimizationRules({
+    runtimeSnapshot: snapshot,
+    listingResolution: resolvedListing(snapshot, {
+      'Category Name': 'Mirror Control Module',
+      'Item Specifics': JSON.stringify({ 'C:Part': 'Mirror Control Module' }),
+      'Conditions & Options': ''
+    })
+  });
+  assert.deepEqual(unrelated.categoryRules, []);
+});
+
+test('splits legacy combined category details while preserving binary attribute labels', () => {
+  const snapshot = baseSnapshot({
+    sections: {
+      ...baseSnapshot().sections,
+      categoryRules: section([
+        {
+          id: 'cat-switch',
+          categoryName: 'Column Switches',
+          prefixRefs: [],
+          seriesRefs: [],
+          priorityDetails: [
+            'Wiper / Turn Signal / Multifunction',
+            'Speedometer / Tachometer',
+            'With / Without Illumination'
+          ],
+          enabled: true
+        }
+      ])
+    }
+  });
+  const result = resolveApplicableTitleOptimizationRules({
+    runtimeSnapshot: snapshot,
+    listingResolution: resolvedListing(snapshot, {
+      'Category Name': 'Column Switch',
+      'Item Specifics': JSON.stringify({ 'C:Part': 'Column Switch' }),
+      'Conditions & Options': ''
+    })
+  });
+
+  assert.deepEqual(result.categoryRules[0].priorityDetails, [
+    'Wiper',
+    'Turn Signal',
+    'Multifunction',
+    'Speedometer',
+    'Tachometer',
+    'With / Without Illumination'
+  ]);
 });
 
 test('missing valid General title structure is blocking and repeated execution is deterministic', () => {

@@ -1530,6 +1530,10 @@ class Phase4AiEvaluatorService {
         titleReviewStatus: 'Skipped - Manual Override',
         titleReviewReason: 'manual_override',
         titleReviewNotes: 'Manual override bypassed shadow title generation.',
+        materialRestrictions: [],
+        restrictedTermDecisions: [],
+        titleSegments: [],
+        ruleSelfAudit: null,
         rawContent: '',
         parsedKeys: [],
         recognizedKeys: []
@@ -1572,6 +1576,64 @@ class Phase4AiEvaluatorService {
       type: 'object', additionalProperties: false,
       required: ['side', 'placement', 'source', 'evidence'],
       properties: Object.fromEntries(['side', 'placement', 'source', 'evidence'].map(key => [key, { type: ['string', 'null'] }]))
+    };
+    runtimeSchema.required.push(
+      'materialRestrictions',
+      'restrictedTermDecisions',
+      'titleSegments',
+      'ruleSelfAudit'
+    );
+    runtimeSchema.properties.materialRestrictions = {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['detail', 'appliesTo', 'sourceRowIds', 'material', 'titleTreatment'],
+        properties: {
+          detail: { type: 'string' },
+          appliesTo: { type: ['string', 'null'] },
+          sourceRowIds: { type: 'array', items: { type: 'string' } },
+          material: { type: 'boolean' },
+          titleTreatment: {
+            type: 'string',
+            enum: ['included', 'not-applicable-to-selected-application', 'needs-review']
+          }
+        }
+      }
+    };
+    runtimeSchema.properties.restrictedTermDecisions = {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['term', 'used', 'authorized', 'source', 'evidence'],
+        properties: {
+          term: { type: 'string' },
+          used: { type: 'boolean' },
+          authorized: { type: 'boolean' },
+          source: { type: ['string', 'null'] },
+          evidence: { type: ['string', 'null'] }
+        }
+      }
+    };
+    runtimeSchema.properties.titleSegments = {
+      type: 'array',
+      items: {
+        type: 'object', additionalProperties: false,
+        required: ['key', 'value'],
+        properties: {
+          key: { type: 'string' },
+          value: { type: 'string' }
+        }
+      }
+    };
+    runtimeSchema.properties.ruleSelfAudit = {
+      type: 'object', additionalProperties: false,
+      required: ['structureFollowed', 'unresolvedSourceConflict', 'unsupportedClaim', 'notes'],
+      properties: {
+        structureFollowed: { type: 'boolean' },
+        unresolvedSourceConflict: { type: 'boolean' },
+        unsupportedClaim: { type: 'boolean' },
+        notes: { type: 'string' }
+      }
     };
     if (configuredDetails.length) {
       requestBody.response_format.json_schema.schema.properties.categoryPriorityDetails.items.properties.detail.enum = configuredDetails;
@@ -1637,7 +1699,11 @@ class Phase4AiEvaluatorService {
         'reviewReason',
         'titleReviewNotes',
         'reviewNotes',
-        'categoryPriorityDetails'
+        'categoryPriorityDetails',
+        'materialRestrictions',
+        'restrictedTermDecisions',
+        'titleSegments',
+        'ruleSelfAudit'
       ].includes(key)
     );
     return {
@@ -1656,6 +1722,30 @@ class Phase4AiEvaluatorService {
       })) : [],
       sideDecision: parsed.sideDecision && typeof parsed.sideDecision === 'object' ? parsed.sideDecision : null,
       vehicleDecision: parsed.vehicleDecision && typeof parsed.vehicleDecision === 'object' ? parsed.vehicleDecision : null,
+      materialRestrictions: Array.isArray(parsed.materialRestrictions) ? parsed.materialRestrictions.map(item => ({
+        detail: normalizeText(item?.detail),
+        appliesTo: item?.appliesTo == null ? null : normalizeText(item.appliesTo),
+        sourceRowIds: normalizeTextArray(item?.sourceRowIds),
+        material: item?.material === true,
+        titleTreatment: normalizeText(item?.titleTreatment)
+      })) : [],
+      restrictedTermDecisions: Array.isArray(parsed.restrictedTermDecisions) ? parsed.restrictedTermDecisions.map(item => ({
+        term: normalizeText(item?.term),
+        used: item?.used === true,
+        authorized: item?.authorized === true,
+        source: item?.source == null ? null : normalizeText(item.source),
+        evidence: item?.evidence == null ? null : normalizeText(item.evidence)
+      })) : [],
+      titleSegments: Array.isArray(parsed.titleSegments) ? parsed.titleSegments.map(item => ({
+        key: normalizeText(item?.key),
+        value: normalizeText(item?.value)
+      })) : [],
+      ruleSelfAudit: parsed.ruleSelfAudit && typeof parsed.ruleSelfAudit === 'object' ? {
+        structureFollowed: parsed.ruleSelfAudit.structureFollowed === true,
+        unresolvedSourceConflict: parsed.ruleSelfAudit.unresolvedSourceConflict === true,
+        unsupportedClaim: parsed.ruleSelfAudit.unsupportedClaim === true,
+        notes: normalizeText(parsed.ruleSelfAudit.notes)
+      } : null,
       rawContent: content,
       parsedKeys: Object.keys(parsed),
       recognizedKeys
