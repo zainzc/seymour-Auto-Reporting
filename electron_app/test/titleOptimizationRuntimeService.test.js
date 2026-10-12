@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const { runTitleOptimizationRuntime } = require('../src/services/titleOptimizationRuntimeService');
+const { decideAiTitle } = require('../src/services/titleOptimizationAiDecisionService');
 
 function aiLedDependencies(aiResult, overrides = {}) {
   return {
@@ -56,6 +57,7 @@ test('a compliant unchanged AI title is retained with a clear review note', asyn
       executeAi: async () => {
         calls += 1;
         return { generatedTitle: currentTitle, titleReviewStatus: 'Completed',
+          titleReviewNotes: 'The current title already uses the verified vehicle, part, and SKU in the selected structure.',
           generatedDescription: 'Accurate product description.' };
       }
     })
@@ -64,7 +66,194 @@ test('a compliant unchanged AI title is retained with a clear review note', asyn
   assert.equal(calls, 1);
   assert.equal(result.output.title, currentTitle);
   assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.output.reviewReason, 'Existing title retained - already compliant');
   assert.match(result.output.reviewNotes, /existing title retained unchanged/i);
+  assert.match(result.output.reviewNotes, /already uses the verified vehicle, part, and SKU/i);
+});
+
+test('an unchanged title with unresolved AI concerns remains Needs Review', async () => {
+  const currentTitle = '2010 Ford Fusion Starter Motor 12345';
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({
+      generatedTitle: currentTitle, titleReviewStatus: 'Needs Review',
+      titleReviewReason: 'Conflicting source data',
+      titleReviewNotes: 'Part Fitment conflicts with the advertised application.'
+    }, {
+      buildPrompt: () => ({ kind: 'prompt', userPayload: {
+        existingTitle: { currentTitle }, resolvedListing: { titleFitmentCandidates: { eligibleCandidates: [] } }
+      } })
+    })
+  });
+
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.equal(result.output.reviewReason, 'Conflicting source data');
+});
+
+test('an unsupported 80-character review gets one evidence-based title correction', async () => {
+  const currentTitle = '2015 Dodge Truck Caravan ECM PCM Engine Control Module 3.6L 5150876AD 12345';
+  const firstTitle = '2015 Dodge Truck Caravan Engine 3.6L Driver Left LH Front 12345';
+  const correctedTitle = '2015 Dodge Truck Caravan ECM 3.6L Behind LH Front Bumper Cover 12345';
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({}, {
+      resolveSource: () => ({ normalized: { recordId: 'rec-ai' }, resolved: { fields: {
+        sku: { resolvedValue: '12345' }, title: { resolvedValue: currentTitle }
+      }, conflicts: [], missing: [] } }),
+      buildPrompt: () => ({ kind: 'prompt', userPayload: {
+        existingTitle: { currentTitle }, resolvedListing: { titleFitmentCandidates: { eligibleCandidates: [] } }
+      } }),
+      executeAi: async ({ promptArtifact }) => {
+        calls += 1;
+        if (calls === 2) {
+          assert.match(promptArtifact.userPayload.correction.instruction, /product identity/i);
+          assert.equal(promptArtifact.userPayload.correction.previousTitle, firstTitle);
+          assert.equal(promptArtifact.userPayload.correction.previousTitleCharacters, firstTitle.length);
+        }
+        return calls === 1
+          ? { generatedTitle: firstTitle, titleReviewStatus: 'Needs Review',
+            titleReviewReason: 'Cannot preserve verified material restriction within 80 characters',
+            generatedDescription: 'ECM description.' }
+          : { generatedTitle: correctedTitle, titleReviewStatus: 'Completed',
+            generatedDescription: 'ECM description.', shortDescription: 'ECM.' };
+      }
+    })
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.output.title, correctedTitle);
+  assert.equal(result.output.reviewReason, 'completed');
+});
+
+test('length review correction preserves a verified fitment qualifier in the title', async () => {
+  const firstTitle = '2013-2015 Nissan Sentra Front Chrome Door Handle Driver Left 12345';
+  const correctedTitle = '2013-2015 Nissan Sentra Front Chrome Door Handle Keyless Ignition LH 12345';
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({}, {
+      executeAi: async () => {
+        calls += 1;
+        return calls === 1
+          ? { generatedTitle: firstTitle, titleReviewStatus: 'Needs Review',
+            titleReviewReason: 'Cannot preserve verified fitment within 80 characters' }
+          : { generatedTitle: correctedTitle, titleReviewStatus: 'Completed',
+            generatedDescription: 'Door handle description.', shortDescription: 'Door handle.' };
+      }
+    })
+  });
+
+  assert.equal(calls, 2);
+  assert.ok(correctedTitle.length <= 80);
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.output.title, correctedTitle);
+});
+
+test('a second unsupported length claim does not become Completed automatically', async () => {
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({}, {
+      executeAi: async () => {
+        calls += 1;
+        return { generatedTitle: '2013-2015 Nissan Sentra Front Chrome Door Handle Left 12345',
+          titleReviewStatus: 'Needs Review',
+          titleReviewReason: 'Cannot preserve verified fitment within 80 characters' };
+      }
+    })
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.equal(result.output.reviewReason, 'Unresolved material title detail');
+  assert.match(result.output.reviewNotes, /no over-limit title was demonstrated/i);
+});
+
+test('a compliant existing title is Completed after an unsupported length review is corrected', async () => {
+  const currentTitle = '2010 Ford Fusion Starter Motor 12345';
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({}, {
+      buildPrompt: () => ({ kind: 'prompt', userPayload: {
+        existingTitle: { currentTitle }, resolvedListing: { titleFitmentCandidates: { eligibleCandidates: [] } }
+      } }),
+      executeAi: async () => {
+        calls += 1;
+        return { generatedTitle: currentTitle,
+          titleReviewStatus: calls === 1 ? 'Needs Review' : 'Completed',
+          titleReviewReason: calls === 1 ? 'Cannot preserve fitment within 80 characters' : 'Existing title retained - already compliant',
+          titleReviewNotes: calls === 1 ? 'Length concern.' : 'The existing title follows the selected structure and evidence.',
+          generatedDescription: 'Accurate description.', shortDescription: 'Accurate summary.' };
+      }
+    })
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.output.title, currentTitle);
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.output.reviewReason, 'Existing title retained - already compliant');
+});
+
+test('an AI missing-year claim is reconsidered when its title contains a year', async () => {
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({}, {
+      buildPrompt: () => ({ kind: 'prompt', userPayload: { resolvedListing: { titleEvidence: {
+        partFitment: { value: '2010 Ford Fusion' }, currentTitleYearFallback: { value: null }
+      } } } }),
+      executeAi: async ({ promptArtifact }) => {
+        calls += 1;
+        if (calls === 2) assert.match(promptArtifact.userPayload.correction.instruction, /verify.*year.*evidence/i);
+        return { generatedTitle: '2010 Ford Fusion Starter Motor 12345',
+          titleReviewStatus: calls === 1 ? 'Needs Review' : 'Completed',
+          titleReviewReason: calls === 1 ? 'Missing verified year' : 'completed',
+          generatedDescription: 'Starter description.', shortDescription: 'Starter.' };
+      }
+    })
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.output.reviewStatus, 'Completed');
+});
+
+test('a year in the draft alone cannot trigger missing-year recovery without source evidence', async () => {
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({}, {
+      executeAi: async () => {
+        calls += 1;
+        return { generatedTitle: '2010 Ford Fusion Starter Motor 12345',
+          titleReviewStatus: 'Needs Review', titleReviewReason: 'Missing verified year' };
+      }
+    })
+  });
+  assert.equal(calls, 1);
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+});
+
+test('rule-contract failures are not mislabeled as mechanical validation failures', () => {
+  const decision = decideAiTitle({
+    aiResult: { generatedTitle: '2010 Ford Fusion Starter Motor 12345', titleReviewStatus: 'Completed' },
+    validationResult: { validatedTitle: '2010 Ford Fusion Starter Motor 12345', violations: [
+      { checkId: 'material-restriction-unresolved', message: 'Material restriction Keyless Ignition still requires review.' }
+    ] }
+  });
+  assert.equal(decision.reviewReason, 'Title rule validation failed');
+  assert.match(decision.reviewNotes, /Keyless Ignition/);
+});
+
+test('a truly missing verified SKU keeps a mechanical review reason', () => {
+  const decision = decideAiTitle({
+    aiResult: { generatedTitle: '2010 Ford Fusion Starter Motor', titleReviewStatus: 'Completed' },
+    validationResult: { validatedTitle: '2010 Ford Fusion Starter Motor', violations: [
+      { checkId: 'sku-missing-source', message: 'A verified SKU is unavailable.' }
+    ] }
+  });
+  assert.equal(decision.reviewReason, 'Title mechanical validation failed');
 });
 
 test('AI Needs Review is preserved without calling the independent reviewer', async () => {

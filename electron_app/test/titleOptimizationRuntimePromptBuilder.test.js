@@ -183,6 +183,24 @@ test('AI payload prefers exact reuse only after checking the current title again
   assert.match(instructions, /80.character.*SKU/i);
   assert.match(instructions, /do not rewrite.*cosmetic/i);
   assert.match(instructions, /rewrite.*only when/i);
+  assert.match(instructions, /titleReviewReason.*Existing title retained - already compliant/i);
+  assert.match(instructions, /retaining.*title.*generatedDescription.*shortDescription/i);
+  assert.match(instructions, /product identity.*existing title.*generatedTitle/i);
+  assert.match(instructions, /claimed.*80.character.*actual.*candidate/i);
+  assert.match(instructions, /generic.*Features.*optional evidence/i);
+  assert.match(instructions, /build.date.*cutoff.*year/i);
+  assert.match(instructions, /currentTitleYearFallback.*Part Fitment.*unavailable/i);
+  assert.match(instructions, /ruleSelfAudit.*existing title.*generatedTitle/i);
+});
+
+test('generic Features remain visible to AI without becoming a required title segment', () => {
+  const { runtimeSnapshot, listingResolution, applicableRules } = buildInputs({
+    'Item Specifics': JSON.stringify({ 'C:Brand': 'Honda', Features: 'Easy Installation' })
+  });
+  const prompt = buildTitleOptimizationRuntimePrompt({ runtimeSnapshot, listingResolution, applicableRules });
+  assert.equal(prompt.userPayload.resolvedListing.authoritativeValues.keyFitmentDetail, undefined);
+  assert.ok(prompt.userPayload.resolvedListing.categoryPriorityEvidenceSources.some(item =>
+    item.source === 'Item Specifics:Features' && item.evidence === 'Easy Installation'));
 });
 
 test('sends title-year fallback and general AI redundancy instructions', () => {

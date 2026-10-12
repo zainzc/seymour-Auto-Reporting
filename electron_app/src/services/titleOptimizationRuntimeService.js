@@ -65,6 +65,8 @@ function fail(result, status, error) {
 function writableOutput(aiResult = {}, decision = {}, proposedTitle = '', existingTitle = '') {
   const bypassed = decision.decision === 'BYPASSED_MANUAL_OVERRIDE';
   const accepted = decision.decision === 'ACCEPT_CANDIDATE' && decision.reviewRequired !== true;
+  const retainedExistingTitle = accepted && Boolean(existingTitle) &&
+    String(existingTitle).trim() === normalizeText(decision.finalTitle);
   const proposal = normalizeText(proposedTitle || aiResult.generatedTitle);
   const unsafeProposal = (decision.degradationChecks || []).some(check => [
     'phase-e:existing-title-side-conflict',
@@ -85,17 +87,20 @@ function writableOutput(aiResult = {}, decision = {}, proposedTitle = '', existi
     shortDescription: normalizeText(aiResult.shortDescription),
     reviewStatus: bypassed ? 'Skipped - Manual Override' : accepted ? 'Completed' : 'Needs Review',
     reviewReason: bypassed ? normalizeText(decision.reviewReason) || 'manual_override' :
-      accepted ? 'completed' : normalizeText(decision.reviewReason) || 'manual_review_required',
+      accepted ? retainedExistingTitle ? 'Existing title retained - already compliant' : 'completed' :
+        normalizeText(decision.reviewReason) || 'manual_review_required',
     reviewNotes: bypassed ? normalizeText(decision.reviewNotes) || 'Automated title generation was skipped.' :
-      accepted ? acceptedReviewNotes(aiResult, decision, existingTitle) :
+      accepted ? acceptedReviewNotes(aiResult, decision, retainedExistingTitle) :
         [deterministicNotes, proposal ? `Proposed title: ${proposal}` : ''].filter(Boolean).join(' ')
   };
 }
 
-function acceptedReviewNotes(aiResult = {}, decision = {}, existingTitle = '') {
+function acceptedReviewNotes(aiResult = {}, decision = {}, retainedExistingTitle = false) {
   const notes = [];
-  if (existingTitle && String(existingTitle).trim() === normalizeText(decision.finalTitle)) {
+  if (retainedExistingTitle) {
     notes.push('Existing title retained unchanged; AI found it meets the supplied evidence, applicable UI rules, and Title Structure.');
+    const assessment = normalizeText(aiResult.titleReviewNotes);
+    if (assessment) notes.push(`AI assessment: ${assessment}${/[.!?]$/.test(assessment) ? '' : '.'}`);
   }
   const vehicle = aiResult.vehicleDecision || {};
   const vehicleIdentity = [vehicle.yearRange, vehicle.make, vehicle.model].map(normalizeText).filter(Boolean).join(' ');
@@ -491,6 +496,68 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     }
   };
   await compressIfNeeded();
+
+  const originalReviewReason = normalizeText(aiResult.titleReviewReason);
+  const reviewedTitle = normalizeText(validation?.validatedTitle);
+  const claimedLengthReview = /(?:80\s*characters?|character\s*limit|length\s*limit)/i.test(originalReviewReason) &&
+    reviewedTitle.length <= 80;
+  const yearEvidence = promptArtifact?.userPayload?.resolvedListing?.titleEvidence;
+  const hasAdvertisedYearEvidence = Boolean(normalizeText(yearEvidence?.partFitment?.value) ||
+    normalizeText(yearEvidence?.currentTitleYearFallback?.value));
+  const claimedMissingYear = /^Missing verified year$/i.test(originalReviewReason) &&
+    /\b(?:19|20)\d{2}\b/.test(reviewedTitle) && hasAdvertisedYearEvidence;
+  if ((claimedLengthReview || claimedMissingYear) &&
+      normalizeText(aiResult.titleReviewStatus).toLowerCase() === 'needs review' &&
+      decision?.reviewRequired === true && !(validation?.violations || []).length &&
+      generationCalls < 2 && promptArtifact?.kind !== 'title-generation-bypass') {
+    const previousTitle = normalizeText(validation.validatedTitle);
+    const correctionPrompt = {
+      ...promptArtifact,
+      userPayload: {
+        ...promptArtifact.userPayload,
+        correction: {
+          previousTitle,
+          previousTitleCharacters: previousTitle.length,
+          originalReviewReason: normalizeText(aiResult.titleReviewReason),
+          instruction: claimedLengthReview
+            ? `Your previous title is ${previousTitle.length} characters including SKU, so its length does not establish that verified details cannot fit within 80. Reassess the existing title and all supplied evidence and UI rules. Preserve the verified product identity from the existing title; never substitute a broader or different part merely to shorten it. Rebuild the title with the selected vehicle, material fitment restrictions, and selectedTitleStructure before optional enrichment. Use remaining space for the most important verified details, removing only genuinely redundant or lower-priority wording. Count the complete corrected candidate including spaces and SKU. Return Completed only if it is accurate, supported, follows the configured rules, and is no worse than the existing title; otherwise keep Needs Review with a specific unresolved evidence issue, not an untested length claim. Return the full original output contract, including descriptions.`
+            : 'Your previous title contains a year, but you reported Missing verified year. Verify the advertised year or range against the supplied Part Fitment and source evidence, including the existing-title year fallback only when Part Fitment is unavailable. If the year is supported and all other rules pass, return a corrected Completed title. If it is not supported, keep Needs Review and explain precisely which year or coverage lacks evidence. Preserve product identity, material restrictions, the selected title structure, and the complete output contract.'
+        }
+      }
+    };
+    try {
+      const correctedAi = await executeAi(correctionPrompt);
+      if (!normalizeText(correctedAi?.generatedTitle)) throw new Error('AI review correction returned no title.');
+      const correctedValidation = validateAiResult(correctionPrompt, correctedAi);
+      let correctedDecision = (dependencies.decide || decideAiTitle)({
+        snapshot, sourceResolution, ruleResolution, promptArtifact: correctionPrompt,
+        validationResult: correctedValidation, aiResult: correctedAi
+      });
+      const correctedTitle = normalizeText(correctedValidation.validatedTitle);
+      if (correctedDecision.reviewRequired === true && correctedTitle.length <= 80 &&
+          /(?:80\s*characters?|character\s*limit|length\s*limit)/i.test(normalizeText(correctedAi.titleReviewReason)) &&
+          !(correctedValidation.violations || []).length) {
+        const specificNotes = normalizeText(correctedAi.titleReviewNotes);
+        correctedDecision = {
+          ...correctedDecision,
+          reviewReason: 'Unresolved material title detail',
+          reviewNotes: [
+            `The proposed title is ${correctedTitle.length} characters; no over-limit title was demonstrated. A required title detail remains unresolved.`,
+            /(?:80\s*characters?|character\s*limit|length\s*limit)/i.test(specificNotes) ? '' : specificNotes
+          ].filter(Boolean).join(' ')
+        };
+      }
+      aiResult = correctedAi;
+      validation = correctedValidation;
+      decision = correctedDecision;
+      result.aiResult = aiResult;
+      result.validation = validation;
+      result.decision = decision;
+      result.attempts.push(recordAttempt());
+    } catch (error) {
+      result.errors.push({ stage: 'AI_REVIEW_CORRECTION_FAILURE', message: sanitizeError(error) });
+    }
+  }
 
   const accepted = () => decision?.decision === 'ACCEPT_CANDIDATE' && decision.reviewRequired !== true;
   const withFitmentReview = async (title = decision.finalTitle) => {

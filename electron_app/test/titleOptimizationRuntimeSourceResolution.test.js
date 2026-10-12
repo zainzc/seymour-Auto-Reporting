@@ -52,6 +52,26 @@ test('source derivation does not turn negative equipment or part-name wording in
   assert.equal(mirror.derived.placementFromNotes.value, null);
 });
 
+test('generic item Features remain evidence but are not authoritative key fitment', () => {
+  const result = normalizeAndResolveListing({ runtimeSnapshot: snapshot(), listingRecord: listing({
+    'Item Specifics - All C: values relevant to item': JSON.stringify({
+      Features: 'Easy Installation', 'C:Features': 'Power Folding'
+    })
+  }) });
+  assert.equal(result.resolved.fields.keyFitmentDetail.resolvedValue, null);
+  assert.equal(result.normalized.structured.itemSpecifics.value.Features, 'Easy Installation');
+  assert.equal(result.normalized.structured.itemSpecifics.value['C:Features'], 'Power Folding');
+});
+
+test('an explicit Key Fitment Detail stays authoritative', () => {
+  const result = normalizeAndResolveListing({ runtimeSnapshot: snapshot(), listingRecord: listing({
+    'Item Specifics - All C: values relevant to item': JSON.stringify({
+      'Key Fitment Detail': 'Keyless Ignition', Features: 'Easy Installation'
+    })
+  }) });
+  assert.equal(result.resolved.fields.keyFitmentDetail.resolvedValue, 'Keyless Ignition');
+});
+
 test('advertised application model is not replaced by a different donor model', () => {
   const result = normalizeAndResolveListing({
     runtimeSnapshot: snapshot(),

@@ -45,6 +45,7 @@ function decideAiTitle({ validationResult = {}, aiResult = {}, promptArtifact = 
   const aiCompleted = text(aiResult.titleReviewStatus).toLowerCase() === 'completed';
   const accepted = aiCompleted && failures.length === 0 && text(validationResult.validatedTitle);
   const aiNotes = text(aiResult.titleReviewNotes || aiResult.titleReviewReason);
+  const mechanicalFailure = failures.some(item => ['phase-e:blank-title', 'phase-e:sku-missing-source'].includes(item.checkId));
   return {
     aiLed: true,
     decision: accepted ? 'ACCEPT_CANDIDATE' : 'NEEDS_REVIEW',
@@ -52,7 +53,7 @@ function decideAiTitle({ validationResult = {}, aiResult = {}, promptArtifact = 
     reviewRequired: !accepted,
     reviewReason: accepted ? 'completed' : failures.some(item => item.checkId === 'phase-e:length-80')
       ? 'Cannot preserve essential fitment within 80 characters'
-      : failures.length ? 'Title mechanical validation failed'
+      : failures.length ? mechanicalFailure ? 'Title mechanical validation failed' : 'Title rule validation failed'
         : text(aiResult.titleReviewReason) || 'manual_review_required',
     reviewNotes: [aiNotes, ...failures.map(item => item.message)].filter(Boolean).join(' '),
     degradationChecks: failures

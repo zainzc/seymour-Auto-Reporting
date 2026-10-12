@@ -38,7 +38,7 @@ const ITEM_SPECIFIC_ALIASES = Object.freeze({
   color: ['Color', 'C:Color', 'Paint Color'],
   componentType: ['Component Type', 'C:Component Type'],
   placement: ['Placement', 'Position', 'C:Placement', 'C:Position'],
-  keyFitmentDetail: ['Key Fitment Detail', 'Feature', 'Features', 'C:Features'],
+  keyFitmentDetail: ['Key Fitment Detail', 'C:Key Fitment Detail'],
   engineDisplacement: ['Engine Size', 'C:Engine Size', 'Engine Displacement', 'C:Engine Displacement', 'C:Engine (liters)'],
   engineCode: ['Engine Code', 'C:Engine Code'],
   transmissionCode: ['Transmission Code', 'C:Transmission Code'],
