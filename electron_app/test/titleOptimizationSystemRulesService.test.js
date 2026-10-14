@@ -22,5 +22,7 @@ test('canonical System Rules returns the exact locked SR-01 through SR-15 metada
   assert.match(rules[2].behavior, /Enforced by the runtime validator/i);
   assert.match(rules[14].behavior, /Missing verified year/i);
   assert.match(rules[14].behavior, /Make cannot be verified/i);
+  assert.match(rules[14].behavior, /title-generation AI checks the 80-character limit/i);
+  assert.match(rules[14].behavior, /publish gate blocks overlength titles/i);
   assert.notEqual(getTitleOptimizationSystemRules(), rules);
 });

@@ -129,7 +129,6 @@ test('selects applicable terminology, synonyms, prefix, restricted terms, catego
   assert.equal(result.prefixRule.matchType, 'exact');
   assert.deepEqual(Object.keys(result.restrictedTerms.groups).sort(), ['must-preserve', 'remove-noise']);
   assert.deepEqual(result.categoryRules.map(entry => [entry.rule.id, entry.matchedBy]), [
-    ['cat-engine', ['seriesRef']],
     ['cat-mirror', ['category']],
     ['cat-prefix', ['prefixRef']]
   ]);
@@ -203,11 +202,11 @@ test('257 prefix exposes SR-06 context without implementing SKU rewriting or inf
   assert.equal(result.titleStructure.selected.id, 'structure-general');
 });
 
-test('engine and transmission structures are selected only from verified context and partFitment cannot classify', () => {
+test('engine structure requires prefix 300 while transmission still uses part identity', () => {
   const snapshot = baseSnapshot();
   const engine = resolveApplicableTitleOptimizationRules({
     runtimeSnapshot: snapshot,
-    listingResolution: resolvedListing(snapshot, { 'Category Name': 'Engines', 'Item Specifics': JSON.stringify({ 'C:Part': 'Engines' }) })
+    listingResolution: resolvedListing(snapshot, { IPN: '300-12345', 'Category Name': 'Engines', 'Item Specifics': JSON.stringify({ 'C:Part': 'Engines' }) })
   });
   assert.equal(engine.titleStructure.selected.id, 'structure-engine');
   assert.equal(engine.restrictedTerms.groups['never-introduce'][0].id, 'client-v5-long-block');
@@ -258,7 +257,7 @@ test('300 prefix classifies the listing as an engine and activates engine-scoped
   assert.deepEqual(result.restrictedTerms.groups['requires-authorization'].map(rule => rule.id), ['auth']);
 });
 
-test('trusted existing-title product identity can classify a generic resolved part as an engine', () => {
+test('non-300 existing engine title does not activate engine-only rules', () => {
   const snapshot = baseSnapshot();
   const listing = resolvedListing(snapshot, {
     IPN: '999-12345',
@@ -270,9 +269,43 @@ test('trusted existing-title product identity can classify a generic resolved pa
 
   const result = resolveApplicableTitleOptimizationRules({ runtimeSnapshot: snapshot, listingResolution: listing });
 
-  assert.equal(result.listingClassification.family, 'engine');
-  assert.equal(result.listingClassification.sources.some(source => source.type === 'existing-title'), true);
-  assert.equal(result.titleStructure.selected.id, 'structure-engine');
+  assert.equal(result.listingClassification.family, 'general');
+  assert.equal(result.titleStructure.selected.id, 'structure-general');
+  assert.equal(result.categoryRules.some(entry => entry.rule.id === 'cat-engine'), false);
+  assert.equal(result.restrictedTerms.rules.some(rule => rule.scope === 'engine'), false);
+});
+
+test('engine-related components on other prefixes use their own categories, not engine rules', () => {
+  const snapshot = baseSnapshot({
+    sections: {
+      ...baseSnapshot().sections,
+      categoryRules: section([
+        ...baseSnapshot().sections.categoryRules.items,
+        { id: 'cat-ecm', categoryName: 'Engine Control Module', prefixRefs: ['590'], seriesRefs: [], priorityDetails: [], enabled: true },
+        { id: 'cat-fuse', categoryName: 'Engine Bay Fuse Box', prefixRefs: ['646'], seriesRefs: [], priorityDetails: [], enabled: true }
+      ])
+    }
+  });
+  for (const [ipn, part, categoryId] of [
+    ['590-12345', 'Engine Control Module', 'cat-ecm'],
+    ['646-12345', 'Engine Bay Fuse Box', 'cat-fuse']
+  ]) {
+    const result = resolveApplicableTitleOptimizationRules({
+      runtimeSnapshot: snapshot,
+      listingResolution: resolvedListing(snapshot, {
+        IPN: ipn,
+        'Item Title': `2014 Honda Accord ${part} 12345`,
+        'Category Name': part,
+        'Item Specifics': JSON.stringify({ 'C:Part': part }),
+        'Conditions & Options': ''
+      })
+    });
+    assert.equal(result.listingClassification.family, 'general', ipn);
+    assert.equal(result.titleStructure.selected.id, 'structure-general', ipn);
+    assert.equal(result.categoryRules.some(entry => entry.rule.id === 'cat-engine'), false, ipn);
+    assert.equal(result.categoryRules.some(entry => entry.rule.id === categoryId), true, ipn);
+    assert.equal(result.restrictedTerms.rules.some(rule => rule.scope === 'engine'), false, ipn);
+  }
 });
 
 test('wiper parts keep the general structure even when unrelated evidence mentions transmission', () => {

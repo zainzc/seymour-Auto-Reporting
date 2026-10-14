@@ -10,7 +10,6 @@ const PREFIX_FAMILIES = Object.freeze({
 
 function familyFromPartIdentity(value) {
   const text = normalizeText(value);
-  if (/\bengines?\b/i.test(text)) return 'engine';
   if (/\b(?:transmissions?|transaxles?)\b/i.test(text)) return 'transmission';
   return null;
 }

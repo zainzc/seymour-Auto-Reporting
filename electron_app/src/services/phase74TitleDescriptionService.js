@@ -818,7 +818,7 @@ function applyAcceptedRuntimeTitle(writeFields = {}, existingFields = {}, runtim
     ['NEEDS_REVIEW', 'RETAIN_EXISTING'].includes(decision);
   if (decision !== 'ACCEPT_CANDIDATE' && !writableReview) return false;
   const title = normalizeText(runtimeResult?.output?.title);
-  if (!title || (decision === 'ACCEPT_CANDIDATE' && title.length > 80)) return false;
+  if (!title) return false;
   return addFieldIfChanged(writeFields, existingFields, LISTING_OUTPUT_TITLE_FIELD, title);
 }
 
@@ -1181,7 +1181,9 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
           masterRecord: master
         },
         options: {
+          enableAiFollowupCalls: false,
           enableIndependentAiReview: false,
+          enforceLengthValidation: false,
           fields: [
             'title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku',
             'componentType', 'color', 'placement', 'keyFitmentDetail', 'engineDisplacement',
@@ -1191,7 +1193,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         },
         dependencies: {
           loadSnapshot: options.titleOptimizationRuntimeLoadSnapshot,
-          executeAi: ({ promptArtifact, listing }) => aiService.generateTitleAndDescriptionFromRuntimePrompt(promptArtifact, listing),
+          executeAi: ({ promptArtifact, listing }) => aiService.generateTitleAndDescriptionFromRuntimePrompt(promptArtifact, listing, { singleAttempt: true }),
           reviewTitleFitment: input => aiService.reviewTitleFitment(input)
         }
       });

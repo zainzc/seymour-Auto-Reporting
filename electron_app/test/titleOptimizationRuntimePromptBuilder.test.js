@@ -193,6 +193,18 @@ test('AI payload prefers exact reuse only after checking the current title again
   assert.match(instructions, /ruleSelfAudit.*existing title.*generatedTitle/i);
 });
 
+test('AI repairs an evidence-supported missing qualifier before its single final response', () => {
+  const artifact = buildTitleOptimizationRuntimePrompt(buildInputs());
+  const instructions = artifact.userPayload.titlePolicy.instructions.join(' ');
+
+  assert.match(instructions, /revise generatedTitle before returning JSON/i);
+  assert.match(instructions, /only the final title/i);
+  assert.match(instructions, /materialRestrictions.*sourceRowIds.*verbatim evidence excerpt.*year or variant scope/i);
+  assert.match(instructions, /recheck.*80.character.*SKU.*Title Structure/i);
+  assert.match(instructions, /Needs Review only when.*cannot.*truthfully.*fit.*80.characters|Needs Review only when.*genuine.*conflict/i);
+  assert.match(instructions, /description.*does not.*satisfy.*title/i);
+});
+
 test('generic Features remain visible to AI without becoming a required title segment', () => {
   const { runtimeSnapshot, listingResolution, applicableRules } = buildInputs({
     'Item Specifics': JSON.stringify({ 'C:Brand': 'Honda', Features: 'Easy Installation' })

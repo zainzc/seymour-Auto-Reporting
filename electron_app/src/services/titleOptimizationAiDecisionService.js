@@ -2,7 +2,7 @@ function text(value) {
   return value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
 }
 
-function validateMechanicalTitle({ sourceResolution = {}, ruleResolution = {}, candidateTitle = '' } = {}) {
+function validateMechanicalTitle({ sourceResolution = {}, ruleResolution = {}, candidateTitle = '', enforceLengthValidation = false } = {}) {
   const violations = [];
   let title = text(candidateTitle);
   const sku = text(sourceResolution?.resolved?.fields?.sku?.resolvedValue ||
@@ -21,7 +21,7 @@ function validateMechanicalTitle({ sourceResolution = {}, ruleResolution = {}, c
     const tokens = title.split(' ').filter(token => token.replace(/^#/, '').toLowerCase() !== bareSku.toLowerCase());
     title = `${tokens.join(' ')} ${suffix}`.trim();
   }
-  if (title.length > 80) {
+  if (enforceLengthValidation && title.length > 80) {
     violations.push({ checkId: 'length-80', status: 'RETAIN_EXISTING_REQUIRED',
       message: `Title is ${title.length} characters after SKU placement; maximum is 80.` });
   }

@@ -17,7 +17,7 @@ test('runtime generation schema requires structured rule decisions and parses th
     categoryPriorityDetails: [{ detail: 'Engine Code', verified: true, source: 'evidence-001', evidence: 'VIN J' }],
     vehicleDecision: { resolved: true, make: 'Honda', model: 'Accord', yearRange: '2014-2015', source: 'title-fitment-001', evidence: null, reason: 'Supported.' },
     sideDecision: { side: null, placement: null, source: null, evidence: null },
-    materialRestrictions: [{ detail: 'VIN J', appliesTo: '2014-2015', sourceRowIds: ['title-fitment-001'], material: true, titleTreatment: 'included' }],
+    materialRestrictions: [{ detail: 'VIN J', appliesTo: '2014-2015', sourceRowIds: ['title-fitment-001'], evidence: '2014-2015 Honda Accord VIN J', material: true, titleTreatment: 'included' }],
     restrictedTermDecisions: [{ term: 'Complete Assembly', used: false, authorized: false, source: null, evidence: null }],
     titleSegments: [{ key: 'yearOrRange', value: '2014-2015' }, { key: 'sku', value: '1234567' }],
     ruleSelfAudit: { structureFollowed: true, unresolvedSourceConflict: false, unsupportedClaim: false, notes: 'All checks passed.' }
@@ -48,9 +48,43 @@ test('runtime generation schema requires structured rule decisions and parses th
     'not-applicable-to-selected-application',
     'needs-review'
   ]);
+  assert.equal(schema.properties.materialRestrictions.items.required.includes('evidence'), true);
+  assert.deepEqual(schema.properties.materialRestrictions.items.properties.evidence.type, ['string', 'null']);
   assert.deepEqual(schema.properties.categoryPriorityDetails.items.properties.detail.enum, ['Engine Code']);
   assert.deepEqual(result.materialRestrictions, responsePayload.materialRestrictions);
   assert.deepEqual(result.restrictedTermDecisions, responsePayload.restrictedTermDecisions);
   assert.deepEqual(result.titleSegments, responsePayload.titleSegments);
   assert.deepEqual(result.ruleSelfAudit, responsePayload.ruleSelfAudit);
+});
+
+test('single-attempt runtime generation does not retry a transient HTTP failure', async () => {
+  const service = new Phase4AiEvaluatorService({ apiKey: 'test-key', maxAttempts: 4 });
+  let calls = 0;
+  service.client = { post: async () => {
+    calls += 1;
+    const error = new Error('Temporary server error');
+    error.response = { status: 503 };
+    throw error;
+  } };
+
+  await assert.rejects(service.generateTitleAndDescriptionFromRuntimePrompt(
+    { systemMessage: 'Return valid JSON.', userPayload: {} }, null, { singleAttempt: true }
+  ), /Temporary server error/);
+  assert.equal(calls, 1);
+});
+
+test('single-attempt runtime generation does not resend after a prompt-cache rejection', async () => {
+  const service = new Phase4AiEvaluatorService({ apiKey: 'test-key', maxAttempts: 4, promptCacheKey: 'runtime-test' });
+  let calls = 0;
+  service.client = { post: async () => {
+    calls += 1;
+    const error = new Error('Unknown parameter: prompt_cache_key');
+    error.response = { status: 400 };
+    throw error;
+  } };
+
+  await assert.rejects(service.generateTitleAndDescriptionFromRuntimePrompt(
+    { systemMessage: 'Return valid JSON.', userPayload: {} }, null, { singleAttempt: true }
+  ), /prompt_cache_key/);
+  assert.equal(calls, 1);
 });

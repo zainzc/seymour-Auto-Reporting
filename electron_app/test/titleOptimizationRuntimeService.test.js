@@ -1,8 +1,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { runTitleOptimizationRuntime } = require('../src/services/titleOptimizationRuntimeService');
+const { runTitleOptimizationRuntime: runRuntime } = require('../src/services/titleOptimizationRuntimeService');
 const { decideAiTitle } = require('../src/services/titleOptimizationAiDecisionService');
+
+const runTitleOptimizationRuntime = input => runRuntime({
+  ...input,
+  options: { enableAiFollowupCalls: true, enforceLengthValidation: true, ...input?.options }
+});
 
 function aiLedDependencies(aiResult, overrides = {}) {
   return {
@@ -20,6 +25,84 @@ function aiLedDependencies(aiResult, overrides = {}) {
     ...overrides
   };
 }
+
+test('default runtime uses the first AI review decision without requesting correction or independent review', async () => {
+  let calls = 0;
+  let reviews = 0;
+  const firstResponse = {
+    generatedTitle: '2010 Ford Fusion Starter Motor 12345',
+    titleReviewStatus: 'Needs Review',
+    titleReviewReason: 'Cannot preserve essential fitment within 80 characters'
+  };
+  const result = await runRuntime({ dependencies: aiLedDependencies(firstResponse, {
+    executeAi: async () => { calls += 1; return firstResponse; },
+    reviewTitleFitment: async () => { reviews += 1; return { verdict: 'PASS', reason: 'Safe', citedRowIds: [] }; }
+  }) });
+
+  assert.equal(calls, 1);
+  assert.equal(reviews, 0);
+  assert.equal(result.attempts.length, 1);
+  assert.equal(result.aiResult, firstResponse);
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+});
+
+test('default runtime does not independently review an AI-Completed title', async () => {
+  let calls = 0;
+  let reviews = 0;
+  const result = await runRuntime({ dependencies: aiLedDependencies({
+    generatedTitle: '2010 Ford Fusion Starter Motor 12345', titleReviewStatus: 'Completed'
+  }, {
+    executeAi: async () => { calls += 1; return {
+      generatedTitle: '2010 Ford Fusion Starter Motor 12345', titleReviewStatus: 'Completed'
+    }; },
+    reviewTitleFitment: async () => { reviews += 1; return { verdict: 'PASS', reason: 'Safe', citedRowIds: [] }; }
+  }) });
+
+  assert.equal(calls, 1);
+  assert.equal(reviews, 0);
+  assert.equal(result.output.reviewStatus, 'Completed');
+});
+
+test('default runtime accepts the first AI-Completed title without a length override or compression call', async () => {
+  let calls = 0;
+  const longTitle = `${'A'.repeat(82)} 12345`;
+  const result = await runRuntime({ dependencies: aiLedDependencies({
+    generatedTitle: longTitle, titleReviewStatus: 'Completed'
+  }, {
+    executeAi: async () => { calls += 1; return { generatedTitle: longTitle, titleReviewStatus: 'Completed' }; }
+  }) });
+
+  assert.equal(calls, 1);
+  assert.equal(result.attempts.length, 1);
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.output.title, longTitle);
+});
+
+test('default runtime does not retry a first response rejected by rule checks', async () => {
+  let calls = 0;
+  const firstResponse = {
+    generatedTitle: '2010 Ford Fusion Starter Motor 12345',
+    titleReviewStatus: 'Completed',
+    materialRestrictions: [{ detail: 'VIN J', material: true, titleTreatment: 'needs-review' }]
+  };
+  const result = await runRuntime({ dependencies: aiLedDependencies(firstResponse, {
+    executeAi: async () => { calls += 1; return firstResponse; }
+  }) });
+
+  assert.equal(calls, 1);
+  assert.equal(result.attempts.length, 1);
+  assert.equal(result.aiResult, firstResponse);
+});
+
+test('default runtime does not retry a malformed first AI response', async () => {
+  let calls = 0;
+  const result = await runRuntime({ dependencies: aiLedDependencies({}, {
+    executeAi: async () => { calls += 1; return {}; }
+  }) });
+
+  assert.equal(calls, 1);
+  assert.equal(result.status, 'AI_RESPONSE_PARSE_FAILURE');
+});
 
 test('AI Completed survives semantic code uncertainty after independent AI review', async () => {
   const result = await runTitleOptimizationRuntime({ dependencies: aiLedDependencies({
@@ -811,6 +894,114 @@ test('correction tells AI to remove only redundant wording and preserves verifie
       degradationChecks: calls === 1 ? [{ status: 'FAIL', message: 'Missing 8th Digit' }] : [] })
   }) });
   assert.equal(result.output.title, 'Ford Fusion VIN 3 8th Digit 123');
+});
+
+test('rule-contract correction focuses on unresolved fitment and category evidence without losing UI rules', async () => {
+  const originalInstructions = Array.from({ length: 12 }, (_, index) => `Original title instruction ${index}`);
+  const systemRules = [{ id: 'system-1', behavior: 'Keep verified fitment in the title.' }];
+  const title = '2004-2005 Ford Explorer Speedometer Cluster No Sport Trac #1592301';
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({}, {
+      resolveSource: () => ({ normalized: { recordId: 'rec-ai' }, resolved: { fields: {
+        sku: { resolvedValue: '1592301' }, title: { resolvedValue: '2004 Ford Explorer Speedometer Instrument Cluster 1592301' }
+      }, conflicts: [], missing: [] } }),
+      resolveRules: () => ({ listingContext: { ipnPrefix: '257' },
+        categoryRules: [{ priorityDetails: ['Speedometer'] }], restrictedTerms: { rules: [] } }),
+      buildPrompt: () => ({ kind: 'prompt', systemMessage: 'Follow all configured rules.', userPayload: {
+        titlePolicy: { instructions: originalInstructions, systemRules,
+          categoryRules: [{ priorityDetails: [{ detail: 'Speedometer' }] }] },
+        resolvedListing: {
+          titleFitmentCandidates: { eligibleCandidates: [{ id: 'title-fitment-001',
+            evidence: '2004-2005 Ford Explorer speedometer, except Sport Trac' }] },
+          categoryPriorityEvidenceSources: [{ id: 'evidence-001', source: 'Current eBay Title',
+            evidence: '2004 Ford Explorer Speedometer Instrument Cluster' }]
+        },
+        existingTitle: { currentTitle: '2004 Ford Explorer Speedometer Instrument Cluster 1592301' }
+      } }),
+      executeAi: async ({ promptArtifact }) => {
+        calls += 1;
+        if (calls === 2) {
+          assert.deepEqual(promptArtifact.userPayload.titlePolicy.systemRules, systemRules);
+          assert.ok(promptArtifact.userPayload.titlePolicy.instructions.length < originalInstructions.length);
+          assert.match(promptArtifact.systemMessage, /focused correction/i);
+          assert.deepEqual(promptArtifact.userPayload.correction.unresolvedMaterialRestrictions, [{
+            detail: 'Except Sport Trac', sourceRowIds: ['title-fitment-001'],
+            sourceRows: [{ id: 'title-fitment-001', evidence: '2004-2005 Ford Explorer speedometer, except Sport Trac' }]
+          }]);
+          assert.deepEqual(promptArtifact.userPayload.correction.unverifiedCategoryDetails, [{
+            detail: 'Speedometer', possibleEvidence: [{ id: 'evidence-001', source: 'Current eBay Title',
+              evidence: '2004 Ford Explorer Speedometer Instrument Cluster' }]
+          }]);
+          assert.match(promptArtifact.userPayload.correction.instruction, /description.*does not satisfy/i);
+        }
+        return calls === 1 ? {
+          generatedTitle: '2004-2005 Ford Explorer Speedometer Cluster #1592301',
+          titleReviewStatus: 'Completed',
+          materialRestrictions: [{ detail: 'Except Sport Trac', material: true,
+            titleTreatment: 'needs-review', sourceRowIds: ['title-fitment-001'] }],
+          categoryPriorityDetails: [{ detail: 'Speedometer', verified: false, source: null, evidence: null }]
+        } : {
+          generatedTitle: title, titleReviewStatus: 'Completed',
+          materialRestrictions: [{ detail: 'Except Sport Trac', material: true,
+            titleTreatment: 'included', sourceRowIds: ['title-fitment-001'] }],
+          categoryPriorityDetails: [{ detail: 'Speedometer', verified: true,
+            source: 'evidence-001', evidence: '2004 Ford Explorer Speedometer Instrument Cluster' }]
+        };
+      }
+    })
+  });
+  assert.equal(calls, 2);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.output.title, title);
+});
+
+test('focused correction cannot approve a repeated unresolved material restriction', async () => {
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({
+      generatedTitle: '2004-2005 Ford Explorer Cluster 12345', titleReviewStatus: 'Completed',
+      materialRestrictions: [{ detail: 'Except Sport Trac', material: true, titleTreatment: 'needs-review' }]
+    }, { executeAi: async () => {
+      calls += 1;
+      return { generatedTitle: '2004-2005 Ford Explorer Cluster 12345', titleReviewStatus: 'Completed',
+        materialRestrictions: [{ detail: 'Except Sport Trac', material: true, titleTreatment: 'needs-review' }] };
+    } })
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.match(result.output.reviewNotes, /Except Sport Trac/);
+});
+
+test('focused correction resolves unparsed fitment evidence IDs as source excerpts', async () => {
+  let calls = 0;
+  const result = await runTitleOptimizationRuntime({
+    options: { enableIndependentAiReview: false },
+    dependencies: aiLedDependencies({}, {
+      buildPrompt: () => ({ kind: 'prompt', systemMessage: 'Follow rules.', userPayload: {
+        titlePolicy: { instructions: ['Original instruction'] },
+        resolvedListing: { titleFitmentCandidates: { eligibleCandidates: [] },
+          categoryPriorityEvidenceSources: [{ id: 'evidence-003', source: 'Part Fitment',
+            evidence: '2015 Subaru Legacy 2.5L CVT without pre-crash system' }] }
+      } }),
+      executeAi: async ({ promptArtifact }) => {
+        calls += 1;
+        if (calls === 2) assert.deepEqual(promptArtifact.userPayload.correction.unresolvedMaterialRestrictions, [{
+          detail: 'without pre-crash system', sourceRowIds: ['evidence-003'],
+          sourceRows: [{ id: 'evidence-003', evidence: '2015 Subaru Legacy 2.5L CVT without pre-crash system' }]
+        }]);
+        return { generatedTitle: '2015 Subaru Legacy Cluster 12345', titleReviewStatus: 'Completed',
+          materialRestrictions: [{ detail: 'without pre-crash system', material: true,
+            titleTreatment: 'needs-review', sourceRowIds: ['evidence-003'] }] };
+      }
+    })
+  });
+  assert.equal(calls, 2);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.output.reviewStatus, 'Needs Review');
 });
 
 test('fitment correction reuses an already verified vehicle decision if the model omits it', async () => {

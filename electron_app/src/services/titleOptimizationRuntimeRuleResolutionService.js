@@ -127,7 +127,7 @@ function includesWord(text, word) {
 }
 
 function isEngineContext(context, classification) {
-  return classification?.family === 'engine' || /\bengine|engines\b/i.test(partIdentityText(context));
+  return classification?.family === 'engine';
 }
 
 function isTransmissionContext(context, classification) {
@@ -221,6 +221,7 @@ function categoryRuleMatch(rule, context, terminologyRules, synonymRules) {
 
 function selectCategoryRules(snapshot, context, terminologyRules, synonymRules, listingClassification) {
   const matches = enabledItems(snapshot, 'categoryRules')
+    .filter(rule => normalizedMatchKey(rule.categoryName) !== 'engine' || listingClassification?.family === 'engine')
     .map(rule => {
       const { matchedBy, categoryMatch } = categoryRuleMatch(rule, context, terminologyRules, synonymRules);
       const classificationMatch = listingClassification?.family && listingClassification.family !== 'general' &&

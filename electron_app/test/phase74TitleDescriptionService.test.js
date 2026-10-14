@@ -64,12 +64,14 @@ test('preserves Item Title for blocked and manual-override runtime decisions', (
   }
 });
 
-test('rejects blank and overlength accepted titles at the Airtable boundary', () => {
-  for (const title of ['', 'X'.repeat(81)]) {
-    const writeFields = {};
-    assert.equal(applyAcceptedRuntimeTitle(writeFields, {}, runtime('ACCEPT_CANDIDATE', title)), false);
-    assert.deepEqual(writeFields, {});
-  }
+test('rejects a blank title but writes an AI-accepted overlength title to Airtable', () => {
+  const writeFields = {};
+  assert.equal(applyAcceptedRuntimeTitle(writeFields, {}, runtime('ACCEPT_CANDIDATE', '')), false);
+  assert.deepEqual(writeFields, {});
+
+  const title = 'X'.repeat(81);
+  assert.equal(applyAcceptedRuntimeTitle(writeFields, {}, runtime('ACCEPT_CANDIDATE', title)), true);
+  assert.equal(writeFields['Item Title'], title);
 });
 
 test('writes an overlength Needs Review draft but still rejects a blank title', () => {

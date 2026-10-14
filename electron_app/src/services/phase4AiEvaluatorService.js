@@ -1520,7 +1520,7 @@ class Phase4AiEvaluatorService {
     };
   }
 
-  async generateTitleAndDescriptionFromRuntimePrompt(promptArtifact = {}, listing = null) {
+  async generateTitleAndDescriptionFromRuntimePrompt(promptArtifact = {}, listing = null, options = {}) {
     if (!promptArtifact || promptArtifact.kind === 'title-generation-bypass') {
       return {
         generatedTitle: '',
@@ -1587,11 +1587,12 @@ class Phase4AiEvaluatorService {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['detail', 'appliesTo', 'sourceRowIds', 'material', 'titleTreatment'],
+        required: ['detail', 'appliesTo', 'sourceRowIds', 'evidence', 'material', 'titleTreatment'],
         properties: {
           detail: { type: 'string' },
           appliesTo: { type: ['string', 'null'] },
           sourceRowIds: { type: 'array', items: { type: 'string' } },
+          evidence: { type: ['string', 'null'] },
           material: { type: 'boolean' },
           titleTreatment: {
             type: 'string',
@@ -1657,12 +1658,12 @@ class Phase4AiEvaluatorService {
       response = await retryWithBackoff(
         postRuntimeRequest,
         {
-          maxAttempts: this.maxAttempts,
+          maxAttempts: options.singleAttempt === true ? 1 : this.maxAttempts,
           baseDelayMs: this.baseDelayMs
         }
       );
     } catch (error) {
-      if (!shouldUsePromptCache || !isPromptCacheUnsupported(error)) {
+      if (options.singleAttempt === true || !shouldUsePromptCache || !isPromptCacheUnsupported(error)) {
         throw error;
       }
       this.promptCacheEnabled = false;
@@ -1726,6 +1727,7 @@ class Phase4AiEvaluatorService {
         detail: normalizeText(item?.detail),
         appliesTo: item?.appliesTo == null ? null : normalizeText(item.appliesTo),
         sourceRowIds: normalizeTextArray(item?.sourceRowIds),
+        evidence: item?.evidence == null ? null : normalizeText(item.evidence),
         material: item?.material === true,
         titleTreatment: normalizeText(item?.titleTreatment)
       })) : [],
