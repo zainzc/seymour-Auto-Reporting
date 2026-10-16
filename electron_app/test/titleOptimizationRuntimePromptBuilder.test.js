@@ -197,10 +197,12 @@ test('AI repairs an evidence-supported missing qualifier before its single final
   const artifact = buildTitleOptimizationRuntimePrompt(buildInputs());
   const instructions = artifact.userPayload.titlePolicy.instructions.join(' ');
 
-  assert.match(instructions, /revise generatedTitle before returning JSON/i);
+  assert.match(instructions, /If a supported qualifier is needed to keep the title's implied fitment accurate, revise generatedTitle before returning JSON/i);
   assert.match(instructions, /only the final title/i);
-  assert.match(instructions, /materialRestrictions.*sourceRowIds.*verbatim evidence excerpt.*year or variant scope/i);
-  assert.match(instructions, /recheck.*80.character.*SKU.*Title Structure/i);
+  assert.match(instructions, /materialRestrictions.*sourceRowIds.*verbatim evidence excerpt.*year\/variant scope/i);
+  assert.match(instructions, /omitted-safe.*omissionReason/i);
+  assert.match(instructions, /Do not use needs-review merely to mean a detail was considered or is absent/i);
+  assert.match(instructions, /After any revision.*recount.*80.character.*SKU.*Title Structure/i);
   assert.match(instructions, /Needs Review only when.*cannot.*truthfully.*fit.*80.characters|Needs Review only when.*genuine.*conflict/i);
   assert.match(instructions, /description.*does not.*satisfy.*title/i);
 });
@@ -287,15 +289,15 @@ test('treats a structured single year as evidence while AI selects a supported f
   assert.match(text, /advertised application/i);
   assert.match(text, /cite.*supporting/i);
   assert.match(text, /adjacent/i);
-  assert.match(text, /evaluate the supplied Part Fitment rows/i);
+  assert.match(text, /evaluate each original clause in sourceRows/i);
   assert.match(text, /donor year alone cannot select or narrow/i);
-  assert.match(text, /restrictions that apply to only part of the combined range/i);
+  assert.match(text, /restrictions that apply to only some selected years or variants/i);
   assert.match(text, /do not drop verified advertised years/i);
   assert.match(text, /cite every selected row ID in source/i);
   assert.match(text, /build dates, VIN splits, engine or transmission variants, body styles, trims, cab types, door counts/i);
   assert.match(text, /malformed, impossible, or internally inconsistent/i);
   assert.match(text, /cannot be represented accurately within 80 characters/i);
-  assert.match(text, /before drafting generatedTitle.*material restrictions/i);
+  assert.match(text, /before drafting generatedTitle.*qualifier/i);
   assert.match(text, /optional.*part number.*before.*fitment restriction/i);
   assert.equal(listing.titleFitmentCandidates.decisionPolicy.owner, 'AI');
   assert.deepEqual(listing.titleFitmentCandidates.decisionPolicy.allowedOutcomes, [
@@ -304,6 +306,44 @@ test('treats a structured single year as evidence while AI selects a supported f
   ]);
   assert.match(text, /ordinary compatibility rows/i);
   assert.match(text, /genuine contradiction/i);
+});
+
+test('separates an advertised Fits range from a single structured year and preserves it only when supported', () => {
+  const inputs = buildInputs({
+    'Item Title': 'Door Switch Fits 07-12 ALTIMA 1588507',
+    'C:Brand': 'Nissan',
+    'Item Specifics': JSON.stringify({ 'C:Brand': 'Nissan', 'C:Model': 'Altima' })
+  });
+  inputs.listingResolution.normalized.fields.existingTitle.value = 'Door Switch Fits 07-12 ALTIMA 1588507';
+  inputs.listingResolution.normalized.titleAuthority.partFitment.value =
+    'Fits 2007-2009 Nissan Altima Door Switch; Fits 2010-2012 Nissan Altima Door Switch';
+  inputs.listingResolution.resolved.fields.year = {
+    field: 'year', candidates: [], conflicts: [], resolvedValue: '2009',
+    resolvedSource: 'currentEbay', missing: false
+  };
+  inputs.listingResolution.resolved.fields.brandMake = {
+    field: 'brandMake', candidates: [], conflicts: [], resolvedValue: 'Nissan',
+    resolvedSource: 'itemSpecifics', missing: false
+  };
+  inputs.listingResolution.resolved.fields.model = {
+    field: 'model', candidates: [], conflicts: [], resolvedValue: 'Altima',
+    resolvedSource: 'itemSpecifics', missing: false
+  };
+
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  const selection = artifact.userPayload.resolvedListing.titleFitmentCandidates;
+  const prompt = artifact.userPayload.titlePolicy.instructions.join(' ');
+
+  assert.equal(selection.advertisedApplicationHint.yearRange, '2007-2012');
+  assert.equal(selection.advertisedApplicationHint.role, 'advertised-compatibility');
+  assert.equal(selection.advertisedApplicationHint.source, 'existingTitle Fits application');
+  assert.equal(selection.selectionFacts.year, 2009);
+  assert.equal(selection.eligibleCandidates.length, 2);
+  assert.match(selection.decisionPolicy.instruction, /preserve.*complete.*range.*continuously support/i);
+  assert.match(selection.decisionPolicy.instruction, /do not narrow.*donor year/i);
+  assert.match(prompt, /existing title Fits clause/i);
+  assert.match(prompt, /year.*restrictions scoped/i);
+  assert.match(prompt, /never expand beyond continuously cited fitment/i);
 });
 
 test('keeps distinct fitment applications ambiguous even when donor facts match one candidate', () => {
@@ -574,8 +614,48 @@ test('collapses same vehicle and year fitment variants into one title applicatio
   assert.equal(selection.candidates[0].startYear, 2009);
   assert.equal(selection.candidates[0].endYear, 2009);
   assert.equal(selection.candidates[0].variantEvidence.length, 4);
+  assert.deepEqual(selection.candidates[0].sourceRows.map(row => row.id), [
+    'title-fitment-001', 'title-fitment-002', 'title-fitment-003', 'title-fitment-004'
+  ]);
+  assert.match(selection.candidates[0].sourceRows[0].evidence, /Sedan Base/);
+  assert.match(selection.candidates[0].sourceRows[3].evidence, /Sedan SL/);
   assert.match(selection.candidates[0].evidence, /Sedan Base/);
   assert.match(selection.candidates[0].evidence, /Sedan SL/);
+});
+
+test('fitment instructions compare original application rows without treating variant alternatives as cumulative restrictions', () => {
+  const artifact = buildTitleOptimizationRuntimePrompt(buildInputs());
+  const instructions = artifact.userPayload.titlePolicy.instructions.join(' ');
+
+  assert.match(instructions, /inspect every original clause in titleFitmentCandidates.sourceRows/i);
+  assert.match(instructions, /qualifiers in separate clauses describe separate alternatives and are not automatically cumulative/i);
+  assert.match(instructions, /titleReviewStatus is the sole final title disposition/i);
+  assert.match(instructions, /revise generatedTitle before returning JSON/i);
+});
+
+test('requires the exact authoritative make in its own title segment', () => {
+  const inputs = buildInputs({
+    'Item Title': '2004 Ford Truck Explorer Speedometer 12345',
+    'C:Brand': 'Ford Truck',
+    'Item Specifics': JSON.stringify({ 'C:Brand': 'Ford Truck', 'C:Model': 'Explorer' })
+  });
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  const instructions = artifact.userPayload.titlePolicy.instructions.join(' ');
+
+  assert.equal(artifact.userPayload.resolvedListing.authoritativeValues.brandMake.value, 'Ford Truck');
+  assert.match(instructions, /exact resolved brandMake value.*make segment/i);
+  assert.match(instructions, /keep the selected model in its own Model segment/i);
+  assert.match(instructions, /do not shorten, remove, reorder, or merge words from the authoritative make/i);
+});
+
+test('requires omission reasons to stay within supplied fitment evidence', () => {
+  const artifact = buildTitleOptimizationRuntimePrompt(buildInputs());
+  const instructions = artifact.userPayload.titlePolicy.instructions.join(' ');
+
+  assert.match(instructions, /do not justify an omission with general automotive or product knowledge/i);
+  assert.match(instructions, /absence of a qualifier from a row is unknown, not proof that the qualifier applies or does not apply/i);
+  assert.match(instructions, /do not claim a qualifier applies to every selected row unless each cited row supports it/i);
+  assert.match(instructions, /if available evidence cannot resolve whether omitting it would materially change compatibility or buyer part selection.*return Needs Review/i);
 });
 
 test('marks malformed fitment unavailable and requires another supplied source', () => {
@@ -632,8 +712,25 @@ test('serializes selected structure, terminology, synonyms, prefix, categories, 
   assert.match(JSON.stringify(policy.instructions), /Final audit: compare every material vehicle/i);
   assert.match(JSON.stringify(policy.instructions), /correct any unsupported, contradictory, or meaning-changing wording/i);
   assert.match(JSON.stringify(policy.instructions), /Needs Review only when/i);
-  assert.match(JSON.stringify(policy.instructions), /included only when generatedTitle actually states/i);
+  assert.match(JSON.stringify(policy.instructions), /Use included when the final title states/i);
   assert.doesNotMatch(JSON.stringify(policy.instructions), /optional_omission|claims array|safeToPublish/i);
+});
+
+test('sends optional segment metadata and clear omission rules to the AI', () => {
+  const inputs = buildInputs();
+  const part = inputs.applicableRules.titleStructure.selected.segments.find(segment => segment.key === 'part');
+  part.optional = true;
+  const artifact = buildTitleOptimizationRuntimePrompt(inputs);
+  const selected = artifact.userPayload.titlePolicy.selectedTitleStructure.segments.find(segment => segment.key === 'part');
+  const instructions = artifact.userPayload.titlePolicy.instructions.join(' ');
+
+  assert.equal(selected.optional, true);
+  assert.equal(selected.required, false);
+  assert.equal(selected.omitIfUnavailable, true);
+  assert.match(instructions, /optional=true segments.*include the verified value/i);
+  assert.match(instructions, /Return exactly one titleSegments entry for every required segment/i);
+  assert.match(instructions, /An optional=true segment may be omitted from titleSegments/i);
+  assert.doesNotMatch(instructions, /Return exactly one titleSegments entry for every configured segment/i);
 });
 
 test('omits synonym and prefix instructions when unavailable or unmatched without inventing fallback rules', () => {
@@ -825,13 +922,16 @@ test('AI payload requires structured rule decisions from the same generation cal
   assert.match(instructions, /materialRestrictions/);
   assert.match(instructions, /when no parsed fitment row exists.*evidence ID/i);
   assert.match(instructions, /restrictedTermDecisions/);
-  assert.match(instructions, /ordinary listing evidence.*does not authorize/i);
-  assert.match(instructions, /authorizesRestrictedTerms/i);
+  assert.match(instructions, /AI Evidence Check.*does not require separate human approval/i);
+  assert.match(instructions, /evidenceVerified=true/i);
+  assert.doesNotMatch(instructions, /authorizesRestrictedTerms/);
   assert.match(instructions, /only for configured terms actually used in generatedTitle/i);
   assert.doesNotMatch(instructions, /Return exactly one restrictedTermDecisions entry for every term/i);
   assert.match(instructions, /Do not request review solely for an omitted optional detail/i);
-  assert.match(instructions, /explicit side.*existing title.*conflict/i);
+  assert.match(instructions, /existing title is evidence to assess, not an automatic override/i);
   assert.match(instructions, /titleSegments/);
+  assert.match(instructions, /runtime assembles generatedTitle from titleSegments in the configured order/i);
+  assert.match(instructions, /one titleSegments entry for every required segment/i);
   assert.match(instructions, /ruleSelfAudit/);
 });
 

@@ -25,9 +25,12 @@
 .segments-fieldset legend { padding: 0 5px; color: var(--color-text); font-size: 13px; font-weight: 700; }
 .field-help { margin: 0 0 12px; color: var(--color-muted); font-size: 13px; }
 .segments-list { display: grid; gap: 8px; max-height: 300px; overflow-y: auto; }
-.segment-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) 90px auto; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
+.segment-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) 90px auto auto; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); }
+.segment-row > strong { font-weight: 400; }
 .segment-number { color: var(--color-muted); font-variant-numeric: tabular-nums; }
 .segment-kind { justify-self: start; padding: 3px 8px; border-radius: 999px; background: var(--slate-100); color: var(--color-primary); font-size: 12px; text-transform: capitalize; }
+.segment-optional { display: inline-flex; align-items: center; gap: 6px; color: var(--color-muted); font-size: 12px; white-space: nowrap; }
+.segment-optional input { width: auto; margin: 0; }
 .segment-actions { display: flex; gap: 6px; }
 .segment-actions button { min-width: 36px; min-height: 34px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--color-primary); cursor: pointer; }
 .segment-actions button:disabled { opacity: .4; cursor: not-allowed; }
@@ -39,5 +42,5 @@
 @media (max-width: 720px) {
   .segment-entry { grid-template-columns: 1fr; }
   .segment-row { grid-template-columns: 32px minmax(0, 1fr); }
-  .segment-kind, .segment-actions { grid-column: 2; }
+  .segment-kind, .segment-optional, .segment-actions { grid-column: 2; }
 }

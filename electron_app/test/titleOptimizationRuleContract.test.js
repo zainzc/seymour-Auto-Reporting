@@ -84,6 +84,24 @@ test('unknown material restriction citations are diagnostic when the title is ot
   assert.equal(result.checks.some(item => item.checkId === 'material-restriction-citation' && item.status === 'WARN'), true);
 });
 
+test('material restrictions may cite an original fitment clause nested in a grouped application', () => {
+  const value = inputs();
+  value.promptArtifact.userPayload.resolvedListing.titleFitmentCandidates.eligibleCandidates = [{
+    id: 'title-fitment-001',
+    sourceRows: [{ id: 'title-fitment-001', evidence: '2014 Honda Accord sedan' },
+      { id: 'title-fitment-002', evidence: '2014 Honda Accord coupe' }]
+  }];
+  value.aiResult.materialRestrictions = [{
+    detail: 'Coupe', appliesTo: '2014 Honda Accord', sourceRowIds: ['title-fitment-002'],
+    material: true, titleTreatment: 'included'
+  }];
+
+  const result = validateTitleRuleContract(value);
+
+  assert.equal(result.passed, true);
+  assert.equal(result.checks.some(item => item.checkId === 'material-restriction-citation'), false);
+});
+
 test('material restriction already stated in the title does not force review because of AI treatment metadata', () => {
   const value = inputs();
   value.candidateTitle = '2014 Engine Keyless Ignition 12345';
@@ -183,7 +201,7 @@ test('compatible alternative identifiers do not block a resolved completed title
   assert.equal(result.checks.some(item => item.checkId === 'material-restriction-alternative-identifier'), true);
 });
 
-test('unresolved material restrictions still block completed titles', () => {
+test('AI final status is not overridden by a contradictory detail-level fitment flag', () => {
   const value = inputs();
   value.aiResult.vehicleDecision = { resolved: true };
   value.aiResult.materialRestrictions = [{
@@ -196,11 +214,31 @@ test('unresolved material restrictions still block completed titles', () => {
 
   const result = validateTitleRuleContract(value);
 
-  assert.equal(result.passed, false);
-  assert.equal(result.violations.some(item => item.checkId === 'material-restriction-unresolved'), true);
+  assert.equal(result.passed, true);
+  assert.equal(result.violations.some(item => item.checkId === 'material-restriction-unresolved'), false);
+  assert.equal(result.checks.some(item => item.checkId === 'material-decision-contradiction' && item.status === 'WARN'), true);
 });
 
-test('ordinary listing evidence cannot authorize a Requires Authorization term', () => {
+test('an explicitly safe omission does not escalate a completed title', () => {
+  const value = inputs();
+  value.aiResult.materialRestrictions = [{
+    detail: 'Quarter panel mounted',
+    appliesTo: '2014-2017 Mazda 6',
+    sourceRowIds: ['title-fitment-001'],
+    evidence: '2014-2017 Mazda 6 tail lamp, quarter panel mounted',
+    material: true,
+    titleTreatment: 'omitted-safe',
+    omissionReason: 'This mounting description is common to the selected application and its omission does not broaden fitment.'
+  }];
+
+  const result = validateTitleRuleContract(value);
+
+  assert.equal(result.passed, true);
+  assert.equal(result.violations.some(item => item.checkId === 'material-restriction-unresolved'), false);
+  assert.equal(result.checks.some(item => item.checkId === 'material-restriction-safe-omission' && item.status === 'PASS'), true);
+});
+
+test('AI may substantiate a restricted term from ordinary supplied listing evidence', () => {
   const value = inputs();
   value.candidateTitle = '2014 Engine Complete Assembly 12345';
   value.aiResult.titleSegments[1].value = 'Engine Complete Assembly';
@@ -212,21 +250,20 @@ test('ordinary listing evidence cannot authorize a Requires Authorization term',
   value.promptArtifact.userPayload.resolvedListing.categoryPriorityEvidenceSources = [{
     id: 'evidence-001',
     source: 'Item Specifics:Type',
-    evidence: 'Complete Assembly',
-    authorizesRestrictedTerms: false
+    evidence: 'Complete Assembly'
   }];
   value.aiResult.restrictedTermDecisions = [{
     term: 'Complete Assembly',
     used: true,
-    authorized: true,
+    evidenceVerified: true,
     source: 'evidence-001',
     evidence: 'Complete Assembly'
   }];
 
   const result = validateTitleRuleContract(value);
 
-  assert.equal(result.passed, false);
-  assert.equal(result.violations.some(item => item.checkId === 'restricted-term-authorization'), true);
+  assert.equal(result.passed, true);
+  assert.equal(result.violations.some(item => item.checkId === 'restricted-term-authorization'), false);
 });
 
 test('unused restricted terms need no AI decision and cannot create a review', () => {
@@ -256,7 +293,7 @@ test('an existing UI must-preserve term cannot silently disappear from a Complet
   assert.equal(result.violations.filter(item => item.checkId === 'restricted-term-preservation').length, 2);
 });
 
-test('a used authorization term still blocks without explicit approval', () => {
+test('an AI-evidence-check term blocks without a supplied evidence citation', () => {
   const value = inputs();
   value.candidateTitle = '2014 Complete Assembly 12345';
   value.ruleResolution.restrictedTerms.rules = [{
@@ -269,7 +306,7 @@ test('a used authorization term still blocks without explicit approval', () => {
   assert.equal(result.violations.some(item => item.checkId === 'restricted-term-authorization'), true);
 });
 
-test('explicit authorization evidence can authorize a Requires Authorization term', () => {
+test('a cited supplied source can support an AI-evidence-check term', () => {
   const value = inputs();
   value.candidateTitle = '2014 Engine Complete Assembly 12345';
   value.aiResult.titleSegments[1].value = 'Engine Complete Assembly';
@@ -279,16 +316,15 @@ test('explicit authorization evidence can authorize a Requires Authorization ter
     ruleType: 'requires-authorization'
   }];
   value.promptArtifact.userPayload.resolvedListing.categoryPriorityEvidenceSources = [{
-    id: 'authorization-001',
-    source: 'Manual Restricted Term Authorization',
-    evidence: 'Complete Assembly',
-    authorizesRestrictedTerms: true
+    id: 'evidence-001',
+    source: 'Resolved:condition',
+    evidence: 'Complete Assembly'
   }];
   value.aiResult.restrictedTermDecisions = [{
     term: 'Complete Assembly',
     used: true,
-    authorized: true,
-    source: 'authorization-001',
+    evidenceVerified: true,
+    source: 'evidence-001',
     evidence: 'Complete Assembly'
   }];
 
@@ -297,7 +333,24 @@ test('explicit authorization evidence can authorize a Requires Authorization ter
   assert.equal(result.passed, true);
 });
 
-test('directly used category priority details require a verified supplied citation', () => {
+test('an evidence-verified restricted term still blocks when its source ID was not supplied', () => {
+  const value = inputs();
+  value.candidateTitle = '2014 Complete Assembly 12345';
+  value.ruleResolution.restrictedTerms.rules = [{
+    id: 'complete', term: 'Complete Assembly', ruleType: 'requires-authorization'
+  }];
+  value.aiResult.restrictedTermDecisions = [{
+    term: 'Complete Assembly', used: true, evidenceVerified: true,
+    source: 'invented-evidence-id', evidence: 'Complete Assembly'
+  }];
+
+  const result = validateTitleRuleContract(value);
+
+  assert.equal(result.passed, false);
+  assert.equal(result.violations.some(item => item.checkId === 'restricted-term-authorization'), true);
+});
+
+test('AI owns category-detail evidence decisions; missing verification is diagnostic, not a code blocker', () => {
   const value = inputs();
   value.candidateTitle = '2014 Wiper Engine 12345';
   value.aiResult.titleSegments[1].value = 'Wiper Engine';
@@ -311,8 +364,9 @@ test('directly used category priority details require a verified supplied citati
 
   const result = validateTitleRuleContract(value);
 
-  assert.equal(result.passed, false);
-  assert.equal(result.violations.some(item => item.checkId === 'category-detail-unverified-use'), true);
+  assert.equal(result.passed, true);
+  assert.equal(result.violations.some(item => item.checkId.startsWith('category-detail-')), false);
+  assert.equal(result.checks.some(item => item.checkId === 'category-detail-unverified-use' && item.status === 'WARN'), true);
 });
 
 test('unused category priority details do not need individual AI decisions', () => {
@@ -360,7 +414,7 @@ test('an AI structure checkbox is diagnostic, but a reported unsupported claim r
   assert.equal(claimResult.violations.some(item => item.checkId === 'unsupported-claim-self-audit'), true);
 });
 
-test('a candidate reversing an explicit existing Left/Right title is held for review', () => {
+test('AI owns semantic side-conflict decisions rather than a keyword code gate', () => {
   const value = inputs();
   value.candidateTitle = '2008 Infiniti G35 Seat Belt Buckle Driver Left 12345';
   value.promptArtifact.userPayload.existingTitle = {
@@ -369,8 +423,8 @@ test('a candidate reversing an explicit existing Left/Right title is held for re
 
   const result = validateTitleRuleContract(value);
 
-  assert.equal(result.passed, false);
-  assert.equal(result.violations.some(item => item.checkId === 'existing-title-side-conflict'), true);
+  assert.equal(result.passed, true);
+  assert.equal(result.checks.some(item => item.checkId === 'existing-title-side-conflict'), false);
 });
 
 test('missing title segments and self-audit do not alone make a title Needs Review', () => {

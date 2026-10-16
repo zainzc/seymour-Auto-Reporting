@@ -1,6 +1,12 @@
 (function initRestrictedTerms(globalScope) {
   const blankForm = () => ({ term: '', ruleType: 'never-introduce', scope: 'all', note: '', enabled: true });
-  const labels = { 'never-introduce': 'Never Introduce', 'remove-noise': 'Remove as Noise', 'requires-authorization': 'Requires Authorization', 'must-preserve': 'Protected / Must Preserve' };
+  const labels = { 'never-introduce': 'Never Introduce', 'remove-noise': 'Remove as Noise', 'requires-authorization': 'AI Evidence Check', 'must-preserve': 'Protected / Must Preserve' };
+  const typeHelp = {
+    'never-introduce': 'The AI must not add this term to the title.',
+    'remove-noise': 'The AI should remove this term when it is not legitimate product information.',
+    'requires-authorization': 'The AI checks the listing evidence supplied for each item. It includes this term only when the evidence supports the claim; no separate manual approval is required.',
+    'must-preserve': 'The AI should preserve this term when listing evidence confirms it is relevant; this rule does not add it automatically.'
+  };
 
   function createRestrictedTermsController(options = {}) {
     const api = options.api || {};
@@ -180,6 +186,7 @@
       renderedFormRevision = state.formRevision;
     }
     elements.formError.hidden = !state.error || !state.dirty; elements.formError.textContent = state.dirty ? state.error : '';
+    elements.ruleTypeHelp.textContent = typeHelp[state.form.ruleType] || '';
     for (const field of ['term', 'ruleType', 'scope', 'note']) {
       const target = document.getElementById(`${field}-error`);
       target.textContent = state.formErrors[field] || ''; target.hidden = !state.formErrors[field];
@@ -203,6 +210,7 @@
       editor: document.querySelector('#restricted-editor'), heading: document.querySelector('#editor-heading'),
       form: document.querySelector('#rule-form'), formError: document.querySelector('#form-error'),
       save: document.querySelector('#save-rule'), lockedHelp: document.querySelector('#locked-help'),
+      ruleTypeHelp: document.querySelector('#rule-type-help'),
       discard: document.querySelector('#discard-changes-dialog'), deletion: document.querySelector('#delete-rule-dialog')
     });
     controller = createRestrictedTermsController({

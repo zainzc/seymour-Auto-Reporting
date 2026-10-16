@@ -55,12 +55,37 @@ test('authoritative seeds preserve exact ordered details references and multilin
   assert.equal(byName.Actuators.note, 'Use Side only when verified.');
   assert.deepEqual(byName.Airbags.priorityDetails, ['Verified Driver / Passenger Placement', 'Airbag']);
   assert.match(byName.Airbags.note, /authorized to sell applicable airbags/);
+  assert.match(byName.Airbags.note, /source Title contains "airbag" or "air bag"/);
+  assert.doesNotMatch(byName.Airbags.note, /Do not automatically exclude airbag titles from optimization/i);
   assert.deepEqual(byName['Fuse Boxes'].prefixRefs, ['646', '663']);
   assert.deepEqual(byName['Fuse Boxes'].priorityDetails, ['Engine Bay vs Interior according to verified prefix']);
   assert.equal(byName['Fuse Boxes'].note, 'Do not infer Engine Bay vs Interior without verified prefix data.');
   assert.deepEqual(byName.Consoles.priorityDetails, ['Lid Only when applicable', 'Roof / Floor', 'Color']);
   assert.deepEqual(byName['Seat Belts'].priorityDetails, ['Buckle / Retractor / Receiver', 'Side', 'Color']);
   assert.deepEqual(byName['Car Stereos'].priorityDetails, ['Manufacturer Part Number', 'Stereo Receiver']);
+});
+
+test('hydration updates only the exact legacy Airbags note and preserves customized notes', () => {
+  const original = seed();
+  const legacyNote = 'Seymour Auto is authorized to sell applicable airbags.\nDo not automatically exclude airbag titles from optimization.';
+  const updatedNote = 'Seymour Auto is authorized to sell applicable airbags.\nAirbag title lock: when source Title contains "airbag" or "air bag", skip Phase 7.4 title and description generation and preserve Item Title and description. Pricing automation remains separate.';
+  const legacyConfig = {
+    ...original,
+    rules: original.rules.map(rule => rule.id === 'client-v5-airbags' ? { ...rule, note: legacyNote } : rule)
+  };
+  const customConfig = {
+    ...legacyConfig,
+    rules: legacyConfig.rules.map(rule => rule.id === 'client-v5-airbags' ? { ...rule, note: 'Custom Airbags guidance.' } : rule)
+  };
+
+  assert.equal(
+    hydrateCategoryRulesConfiguration(legacyConfig).rules.find(rule => rule.id === 'client-v5-airbags').note,
+    updatedNote
+  );
+  assert.equal(
+    hydrateCategoryRulesConfiguration(customConfig).rules.find(rule => rule.id === 'client-v5-airbags').note,
+    'Custom Airbags guidance.'
+  );
 });
 
 test('validation normalizes category uniqueness and validates each list independently', () => {

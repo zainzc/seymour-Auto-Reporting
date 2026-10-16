@@ -1587,16 +1587,17 @@ class Phase4AiEvaluatorService {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['detail', 'appliesTo', 'sourceRowIds', 'evidence', 'material', 'titleTreatment'],
+        required: ['detail', 'appliesTo', 'sourceRowIds', 'evidence', 'material', 'titleTreatment', 'omissionReason'],
         properties: {
           detail: { type: 'string' },
           appliesTo: { type: ['string', 'null'] },
           sourceRowIds: { type: 'array', items: { type: 'string' } },
           evidence: { type: ['string', 'null'] },
           material: { type: 'boolean' },
+          omissionReason: { type: 'string' },
           titleTreatment: {
             type: 'string',
-            enum: ['included', 'not-applicable-to-selected-application', 'needs-review']
+            enum: ['included', 'not-applicable-to-selected-application', 'omitted-safe', 'needs-review']
           }
         }
       }
@@ -1605,11 +1606,11 @@ class Phase4AiEvaluatorService {
       type: 'array',
       items: {
         type: 'object', additionalProperties: false,
-        required: ['term', 'used', 'authorized', 'source', 'evidence'],
+        required: ['term', 'used', 'evidenceVerified', 'source', 'evidence'],
         properties: {
           term: { type: 'string' },
           used: { type: 'boolean' },
-          authorized: { type: 'boolean' },
+          evidenceVerified: { type: 'boolean' },
           source: { type: ['string', 'null'] },
           evidence: { type: ['string', 'null'] }
         }
@@ -1729,12 +1730,13 @@ class Phase4AiEvaluatorService {
         sourceRowIds: normalizeTextArray(item?.sourceRowIds),
         evidence: item?.evidence == null ? null : normalizeText(item.evidence),
         material: item?.material === true,
-        titleTreatment: normalizeText(item?.titleTreatment)
+        titleTreatment: normalizeText(item?.titleTreatment),
+        omissionReason: normalizeText(item?.omissionReason)
       })) : [],
       restrictedTermDecisions: Array.isArray(parsed.restrictedTermDecisions) ? parsed.restrictedTermDecisions.map(item => ({
         term: normalizeText(item?.term),
         used: item?.used === true,
-        authorized: item?.authorized === true,
+        evidenceVerified: item?.evidenceVerified === true || item?.authorized === true,
         source: item?.source == null ? null : normalizeText(item.source),
         evidence: item?.evidence == null ? null : normalizeText(item.evidence)
       })) : [],

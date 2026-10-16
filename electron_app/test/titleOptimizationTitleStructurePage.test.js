@@ -44,8 +44,13 @@ test('Title Structure popup follows the shared Add/Edit editor pattern', () => {
   assert.match(html, /class="editor-actions"/);
   assert.match(css, /\.structure-form-body \.form-field > label\s*\{[^}]*font-size:\s*13px/s);
   assert.match(css, /\.structure-form-body \.form-field > label\s*\{[^}]*color:\s*var\(--color-text\)/s);
+  assert.match(css, /\.segment-row > strong\s*\{[^}]*font-weight:\s*400/s);
   assert.doesNotMatch(css, /\.structure-editor::backdrop/);
   assert.match(css, /\.segments-fieldset\s*\{[^}]*background:\s*var\(--color-surface\)/s);
+  assert.match(read('title-structure.js'), /Mark a segment optional when its value may be omitted if unavailable, unsupported, or not authorized by applicable rules\./);
+  assert.match(read('title-structure.js'), /className = 'segment-optional'/);
+  assert.match(read('title-structure.js'), /checkbox\.className = 'segment-optional-input'/);
+  assert.match(read('title-structure.js'), /setSegmentOptional\(Number\(event\.target\.dataset\.optional\), event\.target\.checked\)/);
 });
 
 test('Title Structure navigation uses the unsaved-change guard', () => {

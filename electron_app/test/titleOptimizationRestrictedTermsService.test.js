@@ -22,6 +22,30 @@ test('first-run seed has exactly the approved twenty client-v5 terms in determin
   assert.deepEqual({ ruleType: shortBlock.ruleType, scope: shortBlock.scope, enabled: shortBlock.enabled, locked: shortBlock.locked }, { ruleType: 'never-introduce', scope: 'engine', enabled: true, locked: true });
   assert.ok(config.rules.every(rule => rule.origin === 'client-v5' && rule.createdAt === NOW && rule.createdBy === 'Gary'));
   assert.deepEqual(config.rules.filter(rule => rule.ruleType === 'must-preserve').map(rule => rule.term), ['ECM', 'ABS', 'BCM', 'PCM', 'TCM', 'EVAP', 'HVAC', 'TPMS']);
+  for (const term of ['Complete', 'Complete Engine', 'Complete Assembly', 'Rebuilt', 'Remanufactured', 'Tested', '6 Mo Warranty']) {
+    assert.match(config.rules.find(rule => rule.term === term).note, /listing evidence/i);
+    assert.doesNotMatch(config.rules.find(rule => rule.term === term).note, /authorize|approval|Seymour/i);
+  }
+});
+
+test('legacy seeded manual-authorization notes are migrated while custom notes are preserved', () => {
+  const seed = seedRestrictedTermsConfiguration({ now: NOW, actor: 'Gary' });
+  const tested = seed.rules.find(rule => rule.term === 'Tested');
+  const warranty = seed.rules.find(rule => rule.term === '6 Mo Warranty');
+  const custom = { ...tested, id: 'custom-tested', origin: 'custom', locked: false,
+    term: 'Tested Elsewhere', note: 'Custom client instruction.' };
+  const legacy = {
+    ...seed,
+    rules: seed.rules.map(rule => ['Tested', '6 Mo Warranty'].includes(rule.term)
+      ? { ...rule, note: 'May only be used when explicitly authorized by Seymour Auto for applicable engine listings.' }
+      : rule).concat(custom)
+  };
+
+  const hydrated = hydrateRestrictedTermsConfiguration(legacy);
+
+  assert.match(hydrated.rules.find(rule => rule.id === tested.id).note, /listing evidence/i);
+  assert.match(hydrated.rules.find(rule => rule.id === warranty.id).note, /listing evidence/i);
+  assert.equal(hydrated.rules.find(rule => rule.id === custom.id).note, 'Custom client instruction.');
 });
 
 test('validation requires complete fields and rejects normalized duplicates including disabled rules', () => {

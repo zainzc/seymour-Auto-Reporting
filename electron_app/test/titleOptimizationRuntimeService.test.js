@@ -63,7 +63,57 @@ test('default runtime does not independently review an AI-Completed title', asyn
   assert.equal(result.output.reviewStatus, 'Completed');
 });
 
-test('default runtime accepts the first AI-Completed title without a length override or compression call', async () => {
+test('an AI-approved safe material omission completes without another API call', async () => {
+  let calls = 0;
+  const firstResponse = {
+    generatedTitle: '2014-2017 Mazda 6 Left Tail Light GJR951160A 12345',
+    titleReviewStatus: 'Completed',
+    materialRestrictions: [{
+      detail: 'Quarter panel mounted tail light',
+      appliesTo: '2014-2017 Mazda 6',
+      sourceRowIds: [],
+      evidence: null,
+      material: true,
+      titleTreatment: 'omitted-safe',
+      omissionReason: 'The mounting description is common to the selected application and its omission does not broaden fitment.'
+    }]
+  };
+  const result = await runRuntime({ dependencies: aiLedDependencies(firstResponse, {
+    executeAi: async () => { calls += 1; return firstResponse; }
+  }) });
+
+  assert.equal(calls, 1);
+  assert.equal(result.output.reviewStatus, 'Completed');
+});
+
+test('a detail-level fitment flag does not override the first AI final status', async () => {
+  let calls = 0;
+  const response = {
+    generatedTitle: '2014 Nissan Altima Door Switch 12345',
+    titleReviewStatus: 'Completed',
+    materialRestrictions: [{
+      detail: 'Keyless ignition', appliesTo: '2014 Nissan Altima',
+      sourceRowIds: ['title-fitment-001'], evidence: '2014 Nissan Altima keyless ignition',
+      material: true, titleTreatment: 'needs-review', omissionReason: ''
+    }]
+  };
+  const result = await runRuntime({
+    options: { enableAiFollowupCalls: false, enforceLengthValidation: true },
+    dependencies: aiLedDependencies(response, {
+      executeAi: async () => { calls += 1; return response; },
+      buildPrompt: () => ({ kind: 'prompt', userPayload: { resolvedListing: {
+        titleFitmentCandidates: { eligibleCandidates: [{ id: 'title-fitment-001', evidence: '2014 Nissan Altima keyless ignition' }] }
+      } } })
+    })
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.ruleDecision.aiRuleDecisions.materialRestrictions[0].titleTreatment, 'needs-review');
+  assert.match(JSON.stringify(result.ruleDecision.checks), /material-decision-contradiction/);
+});
+
+test('default runtime sends an overlength AI-Completed title to review without a compression call', async () => {
   let calls = 0;
   const longTitle = `${'A'.repeat(82)} 12345`;
   const result = await runRuntime({ dependencies: aiLedDependencies({
@@ -74,8 +124,130 @@ test('default runtime accepts the first AI-Completed title without a length over
 
   assert.equal(calls, 1);
   assert.equal(result.attempts.length, 1);
-  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.output.reviewStatus, 'Needs Review');
   assert.equal(result.output.title, longTitle);
+});
+
+test('runtime assembles AI-selected title segment content in the configured UI order', async () => {
+  const aiResult = {
+    generatedTitle: 'Left Tail Light 2014 Mazda 6 12345',
+    titleReviewStatus: 'Completed',
+    titleSegments: [
+      { key: 'side', value: 'Left' },
+      { key: 'part', value: 'Tail Light' },
+      { key: 'model', value: '6' },
+      { key: 'make', value: 'Mazda' },
+      { key: 'yearOrRange', value: '2014' },
+      { key: 'keyFitmentDetail', value: '' },
+      { key: 'sku', value: '12345' }
+    ],
+    materialRestrictions: [],
+    restrictedTermDecisions: [],
+    ruleSelfAudit: {
+      structureFollowed: true, unresolvedSourceConflict: false, unsupportedClaim: false, notes: 'Checked.'
+    }
+  };
+  const result = await runRuntime({
+    options: { enableAiFollowupCalls: false },
+    dependencies: aiLedDependencies(aiResult, {
+      resolveRules: () => ({
+        listingContext: { ipnPrefix: '641' },
+        restrictedTerms: { rules: [] },
+        categoryRules: [],
+        titleStructure: { selected: { id: 'custom-structure', segments: [
+          { key: 'yearOrRange', label: 'Year / Year Range', kind: 'field' },
+          { key: 'make', label: 'Make', kind: 'field' },
+          { key: 'model', label: 'Model', kind: 'field' },
+          { key: 'part', label: 'Part', kind: 'field' },
+          { key: 'keyFitmentDetail', label: 'Key Fitment Detail', kind: 'field' },
+          { key: 'sku', label: 'SKU', kind: 'field' },
+          { key: 'side', label: 'Side', kind: 'field' },
+        ] } },
+        flagReasons: [], systemRules: []
+      })
+    })
+  });
+
+  assert.equal(result.aiResult.generatedTitle, '2014 Mazda 6 Tail Light Left 12345');
+  assert.equal(result.output.title, '2014 Mazda 6 Tail Light Left 12345');
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.equal(result.ruleDecision.aiRuleDecisions.titleStructureAssembly.status, 'assembled');
+});
+
+test('runtime uses configured literal text and keeps the 257 SKU suffix at the end', async () => {
+  const result = await runRuntime({
+    options: { enableAiFollowupCalls: false },
+    dependencies: aiLedDependencies({
+      generatedTitle: '2.5L Engine 2015 Toyota Camry 12345',
+      titleReviewStatus: 'Completed',
+      titleSegments: [
+        { key: 'engineSize', value: '2.5L' },
+        { key: 'engineLiteral', value: 'Engine' },
+        { key: 'model', value: 'Camry' },
+        { key: 'make', value: 'Toyota' },
+        { key: 'year', value: '2015' },
+        { key: 'sku', value: '12345' }
+      ],
+      materialRestrictions: [], restrictedTermDecisions: [],
+      ruleSelfAudit: {
+        structureFollowed: true, unresolvedSourceConflict: false, unsupportedClaim: false, notes: 'Checked.'
+      }
+    }, {
+      resolveRules: () => ({
+        listingContext: { ipnPrefix: '257' }, restrictedTerms: { rules: [] }, categoryRules: [],
+        titleStructure: { selected: { id: 'custom-engine', segments: [
+          { key: 'year', label: 'Year', kind: 'field' },
+          { key: 'make', label: 'Make', kind: 'field' },
+          { key: 'model', label: 'Model', kind: 'field' },
+          { key: 'engineLiteral', label: 'Engine', kind: 'literal' },
+          { key: 'engineSize', label: 'Size', kind: 'field' },
+          { key: 'sku', label: 'SKU', kind: 'field' }
+        ] } },
+        flagReasons: [], systemRules: []
+      })
+    })
+  });
+
+  assert.equal(result.output.title, '2015 Toyota Camry Engine 2.5L #12345');
+  assert.equal(result.output.reviewStatus, 'Completed');
+});
+
+test('runtime reviews a title when configured segment content does not cover the AI title content', async () => {
+  const result = await runRuntime({
+    options: { enableAiFollowupCalls: false },
+    dependencies: aiLedDependencies({
+      generatedTitle: '2014 Mazda 6 Tail Light Left 12345',
+      titleReviewStatus: 'Completed',
+      titleSegments: [
+        { key: 'yearOrRange', value: '2014' },
+        { key: 'make', value: 'Mazda' },
+        { key: 'model', value: '6' },
+        { key: 'part', value: 'Tail Light' },
+        { key: 'side', value: '' },
+        { key: 'sku', value: '12345' }
+      ],
+      materialRestrictions: [], restrictedTermDecisions: [],
+      ruleSelfAudit: {
+        structureFollowed: true, unresolvedSourceConflict: false, unsupportedClaim: false, notes: 'Checked.'
+      }
+    }, {
+      resolveRules: () => ({
+        listingContext: { ipnPrefix: '641' }, restrictedTerms: { rules: [] }, categoryRules: [],
+        titleStructure: { selected: { id: 'custom-structure', segments: [
+          { key: 'yearOrRange', label: 'Year / Year Range', kind: 'field' },
+          { key: 'make', label: 'Make', kind: 'field' },
+          { key: 'model', label: 'Model', kind: 'field' },
+          { key: 'part', label: 'Part', kind: 'field' },
+          { key: 'side', label: 'Side', kind: 'field' },
+          { key: 'sku', label: 'SKU', kind: 'field' }
+        ] } },
+        flagReasons: [], systemRules: []
+      })
+    })
+  });
+
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.match(result.output.reviewReason, /title structure/i);
 });
 
 test('default runtime does not retry a first response rejected by rule checks', async () => {
@@ -150,8 +322,9 @@ test('a compliant unchanged AI title is retained with a clear review note', asyn
   assert.equal(result.output.title, currentTitle);
   assert.equal(result.output.reviewStatus, 'Completed');
   assert.equal(result.output.reviewReason, 'Existing title retained - already compliant');
-  assert.match(result.output.reviewNotes, /existing title retained unchanged/i);
-  assert.match(result.output.reviewNotes, /already uses the verified vehicle, part, and SKU/i);
+  assert.match(result.output.reviewNotes, /existing title retained:/i);
+  assert.match(result.output.reviewNotes, /already meets the supplied evidence/i);
+  assert.ok(result.output.reviewNotes.length <= 240);
 });
 
 test('an unchanged title with unresolved AI concerns remains Needs Review', async () => {
@@ -352,7 +525,7 @@ test('AI Needs Review is preserved without calling the independent reviewer', as
   assert.match(result.output.reviewNotes, /applications disagree/);
 });
 
-test('a side reversal is held before a retry can mark it Completed or write it into Item Title', async () => {
+test('AI Needs Review for a side conflict keeps its candidate available as a draft', async () => {
   let calls = 0;
   const proposedTitle = '2008 Infiniti G35 Seat Belt Buckle Driver Left 12345';
   const result = await runTitleOptimizationRuntime({
@@ -366,7 +539,9 @@ test('a side reversal is held before a retry can mark it Completed or write it i
         calls += 1;
         return {
           generatedTitle: proposedTitle,
-          titleReviewStatus: 'Completed',
+          titleReviewStatus: 'Needs Review',
+          titleReviewReason: 'Conflicting source data',
+          titleReviewNotes: 'Existing title indicates passenger right, while current fitment evidence indicates driver left. Confirm the correct side before publishing.',
           materialRestrictions: [], restrictedTermDecisions: [], titleSegments: [],
           ruleSelfAudit: { structureFollowed: true, unresolvedSourceConflict: false, unsupportedClaim: false }
         };
@@ -376,9 +551,10 @@ test('a side reversal is held before a retry can mark it Completed or write it i
 
   assert.equal(calls, 1);
   assert.equal(result.output.reviewStatus, 'Needs Review');
-  assert.equal(result.output.title, '');
+  assert.equal(result.output.title, proposedTitle);
   assert.equal(result.output.proposedTitle, proposedTitle);
-  assert.match(result.output.reviewNotes, /side.*conflict|conflict.*side/i);
+  assert.match(result.output.reviewNotes, /passenger right|driver left/i);
+  assert.ok(result.output.reviewNotes.length <= 240);
 });
 
 test('AI Completed is not downgraded by a material wording match', async () => {
@@ -572,14 +748,14 @@ test('disabled independent AI review preserves the generator Needs Review decisi
   assert.match(result.output.reviewNotes, /materially ambiguous/);
 });
 
-test('explicit restricted-term contract blocks an unauthorized AI-Completed title', async () => {
+test('AI Evidence Check blocks a restricted claim without AI-supported cited evidence but keeps a draft', async () => {
   const result = await runTitleOptimizationRuntime({
     options: { enableIndependentAiReview: false },
     dependencies: aiLedDependencies({
       generatedTitle: '2014 Honda Accord Complete Assembly 12345',
       titleReviewStatus: 'Completed',
       restrictedTermDecisions: [{
-        term: 'Complete Assembly', used: true, authorized: false, source: null, evidence: null
+        term: 'Complete Assembly', used: true, evidenceVerified: false, source: null, evidence: null
       }],
       materialRestrictions: [],
       titleSegments: [{ key: 'part', value: '2014 Honda Accord Complete Assembly' }, { key: 'sku', value: '12345' }],
@@ -600,26 +776,26 @@ test('explicit restricted-term contract blocks an unauthorized AI-Completed titl
         titleFitmentCandidates: { eligibleCandidates: [] },
         categoryPriorityEvidenceSources: [{
           id: 'evidence-001', source: 'Item Specifics',
-          evidence: 'Complete Assembly', authorizesRestrictedTerms: false
+          evidence: 'Complete Assembly'
         }]
       } } })
     })
   });
 
-  assert.equal(result.output.title, '');
+  assert.equal(result.output.title, '2014 Honda Accord Complete Assembly 12345');
   assert.equal(result.output.proposedTitle, '2014 Honda Accord Complete Assembly 12345');
   assert.equal(result.output.reviewStatus, 'Needs Review');
-  assert.match(result.output.reviewNotes, /Complete Assembly.*authorization/i);
+  assert.match(result.output.reviewNotes, /Complete Assembly.*supporting listing evidence/i);
 });
 
-test('explicit restricted-term contract accepts a cited authorization', async () => {
+test('AI Evidence Check accepts a supported term with a valid ordinary listing source citation', async () => {
   const result = await runTitleOptimizationRuntime({
     options: { enableIndependentAiReview: false },
     dependencies: aiLedDependencies({
       generatedTitle: '2014 Honda Accord Complete Assembly 12345',
       titleReviewStatus: 'Completed',
       restrictedTermDecisions: [{
-        term: 'Complete Assembly', used: true, authorized: true,
+        term: 'Complete Assembly', used: true, evidenceVerified: true,
         source: 'evidence-001', evidence: 'Complete Assembly'
       }],
       materialRestrictions: [],
@@ -640,8 +816,8 @@ test('explicit restricted-term contract accepts a cited authorization', async ()
       buildPrompt: () => ({ kind: 'prompt', userPayload: { resolvedListing: {
         titleFitmentCandidates: { eligibleCandidates: [] },
         categoryPriorityEvidenceSources: [{
-          id: 'evidence-001', source: 'Manual Restricted Term Authorization',
-          evidence: 'Complete Assembly', authorizesRestrictedTerms: true
+          id: 'evidence-001', source: 'Item Specifics:Condition',
+          evidence: 'Complete Assembly'
         }]
       } } })
     })
@@ -896,7 +1072,7 @@ test('correction tells AI to remove only redundant wording and preserves verifie
   assert.equal(result.output.title, 'Ford Fusion VIN 3 8th Digit 123');
 });
 
-test('rule-contract correction focuses on unresolved fitment and category evidence without losing UI rules', async () => {
+test('category evidence diagnostics do not overrule the first AI completion or trigger a code retry', async () => {
   const originalInstructions = Array.from({ length: 12 }, (_, index) => `Original title instruction ${index}`);
   const systemRules = [{ id: 'system-1', behavior: 'Keep verified fitment in the title.' }];
   const title = '2004-2005 Ford Explorer Speedometer Cluster No Sport Trac #1592301';
@@ -926,6 +1102,7 @@ test('rule-contract correction focuses on unresolved fitment and category eviden
           assert.deepEqual(promptArtifact.userPayload.titlePolicy.systemRules, systemRules);
           assert.ok(promptArtifact.userPayload.titlePolicy.instructions.length < originalInstructions.length);
           assert.match(promptArtifact.systemMessage, /focused correction/i);
+          assert.match(promptArtifact.userPayload.correction.instruction, /safely omitted.*omitted-safe/i);
           assert.deepEqual(promptArtifact.userPayload.correction.unresolvedMaterialRestrictions, [{
             detail: 'Except Sport Trac', sourceRowIds: ['title-fitment-001'],
             sourceRows: [{ id: 'title-fitment-001', evidence: '2004-2005 Ford Explorer speedometer, except Sport Trac' }]
@@ -952,16 +1129,16 @@ test('rule-contract correction focuses on unresolved fitment and category eviden
       }
     })
   });
-  assert.equal(calls, 2);
+  assert.equal(calls, 1);
   assert.deepEqual(result.errors, []);
   assert.equal(result.output.reviewStatus, 'Completed');
-  assert.equal(result.output.title, title);
+  assert.equal(result.output.title, '2004-2005 Ford Explorer Speedometer Cluster #1592301');
 });
 
-test('focused correction cannot approve a repeated unresolved material restriction', async () => {
+test('the AI final status remains authoritative when a detail flag contradicts it', async () => {
   let calls = 0;
   const result = await runTitleOptimizationRuntime({
-    options: { enableIndependentAiReview: false },
+    options: { enableAiFollowupCalls: false, enforceLengthValidation: true },
     dependencies: aiLedDependencies({
       generatedTitle: '2004-2005 Ford Explorer Cluster 12345', titleReviewStatus: 'Completed',
       materialRestrictions: [{ detail: 'Except Sport Trac', material: true, titleTreatment: 'needs-review' }]
@@ -971,18 +1148,20 @@ test('focused correction cannot approve a repeated unresolved material restricti
         materialRestrictions: [{ detail: 'Except Sport Trac', material: true, titleTreatment: 'needs-review' }] };
     } })
   });
-  assert.equal(calls, 2);
-  assert.equal(result.output.reviewStatus, 'Needs Review');
-  assert.match(result.output.reviewNotes, /Except Sport Trac/);
+  assert.equal(calls, 1);
+  assert.equal(result.output.reviewStatus, 'Completed');
+  assert.match(JSON.stringify(result.ruleDecision.checks), /material-decision-contradiction/);
 });
 
-test('focused correction resolves unparsed fitment evidence IDs as source excerpts', async () => {
+test('material restriction metadata does not trigger a second semantic validation call', async () => {
   let calls = 0;
   const result = await runTitleOptimizationRuntime({
     options: { enableIndependentAiReview: false },
     dependencies: aiLedDependencies({}, {
+      resolveRules: () => ({ listingContext: { ipnPrefix: '641' }, restrictedTerms: { rules: [] },
+        categoryRules: [{ priorityDetails: ['Legacy'] }], flagReasons: [], systemRules: [] }),
       buildPrompt: () => ({ kind: 'prompt', systemMessage: 'Follow rules.', userPayload: {
-        titlePolicy: { instructions: ['Original instruction'] },
+        titlePolicy: { instructions: ['Original instruction'], categoryRules: [{ priorityDetails: [{ detail: 'Legacy' }] }] },
         resolvedListing: { titleFitmentCandidates: { eligibleCandidates: [] },
           categoryPriorityEvidenceSources: [{ id: 'evidence-003', source: 'Part Fitment',
             evidence: '2015 Subaru Legacy 2.5L CVT without pre-crash system' }] }
@@ -993,15 +1172,18 @@ test('focused correction resolves unparsed fitment evidence IDs as source excerp
           detail: 'without pre-crash system', sourceRowIds: ['evidence-003'],
           sourceRows: [{ id: 'evidence-003', evidence: '2015 Subaru Legacy 2.5L CVT without pre-crash system' }]
         }]);
-        return { generatedTitle: '2015 Subaru Legacy Cluster 12345', titleReviewStatus: 'Completed',
+        return { generatedTitle: '2015 Subaru Legacy Cluster 12345',
+          titleReviewStatus: 'Completed',
           materialRestrictions: [{ detail: 'without pre-crash system', material: true,
-            titleTreatment: 'needs-review', sourceRowIds: ['evidence-003'] }] };
+            titleTreatment: calls === 1 ? 'needs-review' : 'included', sourceRowIds: ['evidence-003'] }],
+          categoryPriorityDetails: calls === 1 ? [] : [{ detail: 'Legacy', verified: true,
+            source: 'evidence-003', evidence: '2015 Subaru Legacy 2.5L CVT without pre-crash system' }] };
       }
     })
   });
-  assert.equal(calls, 2);
+  assert.equal(calls, 1);
   assert.deepEqual(result.errors, []);
-  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.equal(result.output.reviewStatus, 'Completed');
 });
 
 test('fitment correction reuses an already verified vehicle decision if the model omits it', async () => {
@@ -1045,7 +1227,7 @@ test('failed correction preserves the original safe decision and stops after two
   assert.equal(result.output.title, 'Initial title');
   assert.equal(result.output.proposedTitle, 'Initial title');
   assert.equal(result.output.reviewStatus, 'Needs Review');
-  assert.match(result.output.reviewNotes, /Proposed title: Initial title/);
+  assert.match(result.output.reviewNotes, /Needs Review: Missing detail/);
 });
 
 test('malformed first response gets one retry within the same two-call budget', async () => {
@@ -1057,7 +1239,7 @@ test('malformed first response gets one retry within the same two-call budget', 
   assert.equal(calls, 2);
   assert.equal(result.output.title, 'Corrected title');
   assert.equal(result.output.proposedTitle, 'Corrected title');
-  assert.match(result.output.reviewNotes, /Proposed title: Corrected title/);
+  assert.match(result.output.reviewNotes, /Needs Review: Unresolved/);
 });
 
 test('invalid material fitment date stops before AI and returns a specific review reason', async () => {
@@ -1216,11 +1398,31 @@ test('accepted output clears stale model review text', async () => {
   assert.equal(result.output.title, 'Accepted title 00123');
   assert.equal(result.output.reviewStatus, 'Completed');
   assert.equal(result.output.reviewReason, 'completed');
-  assert.equal(result.output.reviewNotes,
-    'Generated title accepted after evidence and safety validation. Final title: Accepted title 00123.');
+  assert.match(result.output.reviewNotes, /AI marked the title complete after reviewing supplied evidence/i);
+  assert.ok(result.output.reviewNotes.length <= 240);
 });
 
-test('accepted output explains verified vehicle, side, and category decisions', async () => {
+test('AI review notes are concise and do not copy long internal reasoning into Airtable', async () => {
+  const longNotes = `${'The listing has several details to check. '.repeat(40)} Confirm the correct fitment.`;
+  const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
+    executeAi: async () => ({
+      generatedTitle: '2010 Ford Fusion Starter Motor 12345',
+      titleReviewStatus: 'Needs Review',
+      titleReviewReason: 'Conflicting source data',
+      titleReviewNotes: longNotes,
+      generatedDescription: 'Description'
+    }),
+    validate: () => ({ outcome: 'PASS', validatedTitle: '2010 Ford Fusion Starter Motor 12345', violations: [], warnings: [] }),
+    decide: () => ({ decision: 'NEEDS_REVIEW', finalTitle: '', reviewRequired: true,
+      reviewReason: 'Conflicting source data', reviewNotes: longNotes, degradationChecks: [] })
+  }) });
+
+  assert.equal(result.output.reviewStatus, 'Needs Review');
+  assert.ok(result.output.reviewNotes.length <= 240);
+  assert.doesNotMatch(result.output.reviewNotes, /The listing has several details to check\. The listing has several details/);
+});
+
+test('accepted output uses concise user-facing notes', async () => {
   const result = await runTitleOptimizationRuntime({ dependencies: dependencies({
     executeAi: async () => ({
       generatedTitle: '2007-2013 Suzuki SX4 Steering Column No Shaft 1448110',
@@ -1233,10 +1435,9 @@ test('accepted output explains verified vehicle, side, and category decisions', 
       reviewReason: null, reviewNotes: '', degradationChecks: [] })
   }) });
 
-  assert.match(result.output.reviewNotes, /Verified vehicle application: 2007-2013 Suzuki SX4/);
-  assert.match(result.output.reviewNotes, /combined 2 cited fitment rows/i);
-  assert.match(result.output.reviewNotes, /Verified placement: Front Driver/);
-  assert.match(result.output.reviewNotes, /Applied verified category detail: Steering Column/);
+  assert.match(result.output.reviewNotes, /AI marked the title complete/i);
+  assert.ok(result.output.reviewNotes.length <= 240);
+  assert.doesNotMatch(result.output.reviewNotes, /internal|cited fitment rows/i);
 });
 
 test('authoritative runtime executes the configured pipeline and returns writable output', async () => {
@@ -1400,7 +1601,7 @@ test('runtime does not pass or log removed semantic audit metadata', async () =>
   assert.doesNotMatch(messages[0], /Equivalent brand wording/);
 });
 
-test('runtime review notes use retained vehicle decisions without removed audit metadata', async () => {
+test('runtime accepted notes stay concise instead of reproducing structured audit detail', async () => {
   const selectedTitleFacts = {
     yearRange: '2007-2012',
     make: 'Nissan',
@@ -1453,7 +1654,8 @@ test('runtime review notes use retained vehicle decisions without removed audit 
   }) });
 
   assert.equal(result.output.reviewStatus, 'Completed');
-  assert.match(result.output.reviewNotes, /Verified vehicle application: 2007-2012 Nissan Altima/);
+  assert.match(result.output.reviewNotes, /AI marked the title complete/i);
+  assert.ok(result.output.reviewNotes.length <= 240);
   assert.doesNotMatch(result.output.reviewNotes, /Selected facts|Kept key detail|Safely omitted/);
   assert.doesNotMatch(result.output.reviewNotes, /deterministic validation/i);
 });

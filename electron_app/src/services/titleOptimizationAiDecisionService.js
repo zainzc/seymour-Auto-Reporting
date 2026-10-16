@@ -2,7 +2,7 @@ function text(value) {
   return value == null ? '' : String(value).replace(/\s+/g, ' ').trim();
 }
 
-function validateMechanicalTitle({ sourceResolution = {}, ruleResolution = {}, candidateTitle = '', enforceLengthValidation = false } = {}) {
+function validateMechanicalTitle({ sourceResolution = {}, ruleResolution = {}, candidateTitle = '' } = {}) {
   const violations = [];
   let title = text(candidateTitle);
   const sku = text(sourceResolution?.resolved?.fields?.sku?.resolvedValue ||
@@ -21,7 +21,7 @@ function validateMechanicalTitle({ sourceResolution = {}, ruleResolution = {}, c
     const tokens = title.split(' ').filter(token => token.replace(/^#/, '').toLowerCase() !== bareSku.toLowerCase());
     title = `${tokens.join(' ')} ${suffix}`.trim();
   }
-  if (enforceLengthValidation && title.length > 80) {
+  if (title.length > 80) {
     violations.push({ checkId: 'length-80', status: 'RETAIN_EXISTING_REQUIRED',
       message: `Title is ${title.length} characters after SKU placement; maximum is 80.` });
   }
@@ -46,6 +46,7 @@ function decideAiTitle({ validationResult = {}, aiResult = {}, promptArtifact = 
   const accepted = aiCompleted && failures.length === 0 && text(validationResult.validatedTitle);
   const aiNotes = text(aiResult.titleReviewNotes || aiResult.titleReviewReason);
   const mechanicalFailure = failures.some(item => ['phase-e:blank-title', 'phase-e:sku-missing-source'].includes(item.checkId));
+  const structureAssemblyFailure = failures.some(item => item.checkId === 'phase-e:title-structure-assembly');
   return {
     aiLed: true,
     decision: accepted ? 'ACCEPT_CANDIDATE' : 'NEEDS_REVIEW',
@@ -53,7 +54,8 @@ function decideAiTitle({ validationResult = {}, aiResult = {}, promptArtifact = 
     reviewRequired: !accepted,
     reviewReason: accepted ? 'completed' : failures.some(item => item.checkId === 'phase-e:length-80')
       ? 'Cannot preserve essential fitment within 80 characters'
-      : failures.length ? mechanicalFailure ? 'Title mechanical validation failed' : 'Title rule validation failed'
+      : structureAssemblyFailure ? 'Title structure could not be assembled safely'
+        : failures.length ? mechanicalFailure ? 'Title mechanical validation failed' : 'Title rule validation failed'
         : text(aiResult.titleReviewReason) || 'manual_review_required',
     reviewNotes: [aiNotes, ...failures.map(item => item.message)].filter(Boolean).join(' '),
     degradationChecks: failures

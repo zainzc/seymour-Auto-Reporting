@@ -1,13 +1,127 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const {
   applyAcceptedRuntimeTitle,
+  buildAirbagTitleLockUpdate,
   runtimeOutputFailure,
-  shouldSkipEnrichedListing
+  shouldSkipEnrichedListing,
+  runPhase74TitleDescription
 } = require('../src/services/phase74TitleDescriptionService');
+const AirtableService = require('../src/services/airtableService');
+const AirtableSchemaService = require('../src/services/airtableSchemaService');
+
+test('airbag title lock is triggered only by the source Title field', () => {
+  const locked = buildAirbagTitleLockUpdate({
+    Title: '2009 Nissan Altima Air Bag Control Module 1569517',
+    'Item Title': 'Existing generated title',
+    'Item Description': 'Existing description'
+  });
+
+  assert.deepEqual(locked, {
+    matched: true,
+    fields: {
+      'Title Review Status': 'Airbag - Locked',
+      'Title Review Reason': 'Airbag title locked',
+      'Title Review Notes': 'Source Title identifies an airbag; Phase 7.4 left title and description unchanged.'
+    }
+  });
+  assert.equal(Object.hasOwn(locked.fields, 'Title'), false);
+  assert.equal(Object.hasOwn(locked.fields, 'Item Title'), false);
+  assert.equal(Object.hasOwn(locked.fields, 'Item Description'), false);
+});
+
+test('airbag in generated Item Title alone does not activate the source-title lock', () => {
+  assert.equal(buildAirbagTitleLockUpdate({
+    Title: '2009 Nissan Altima Control Module 1569517',
+    'Item Title': '2009 Nissan Altima Air Bag Control Module 1569517'
+  }), null);
+});
+
+test('airbag lock skips enriched listings without calling AI or changing title content', async () => {
+  const originalFetchAllRecords = AirtableService.prototype.fetchAllRecords;
+  const originalRequest = AirtableService.prototype.request;
+  const originalListTables = AirtableSchemaService.prototype.listTables;
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase74-airbag-lock-'));
+  const patches = [];
+  let masterFetches = 0;
+  let runtimeCalls = 0;
+  const listing = {
+    id: 'recAirbagLock',
+    fields: {
+      'IPN (Interchange Part Number)': '1569517',
+      Title: '2009 Nissan Altima Air Bag Control Module 1569517',
+      'Item Title': 'Existing generated title 1569517',
+      'Item Description': 'Existing generated description',
+      'Title Review Status': 'Completed',
+      'Title Review Reason': '',
+      'Title Review Notes': ''
+    }
+  };
+
+  AirtableService.prototype.fetchAllRecords = async tableName => {
+    assert.equal(tableName, 'Listings');
+    return [listing];
+  };
+  AirtableService.prototype.request = async (method, url, options = {}) => {
+    if (method === 'GET') {
+      masterFetches += 1;
+      return { records: [] };
+    }
+    if (method === 'PATCH') patches.push(options.data);
+    return {};
+  };
+  AirtableSchemaService.prototype.listTables = async () => [{
+    id: 'tblListings',
+    name: 'Listings',
+    fields: [
+      { name: 'Item Title' },
+      { name: 'Item Description' },
+      { name: 'Title Review Status' },
+      { name: 'Title Review Reason' },
+      { name: 'Title Review Notes' }
+    ]
+  }];
+
+  try {
+    const summary = await runPhase74TitleDescription({
+      airtableToken: 'test-token',
+      airtableBaseId: 'test-base',
+      phase74ListingsTable: 'Listings',
+      airtableMasterTable: 'Master',
+      openaiApiKey: 'test-key',
+      phase74AiRequestLogDirectory: tempDir,
+      phase74LogAiPayload: false,
+      titleOptimizationRuntimeService: {
+        async run() {
+          runtimeCalls += 1;
+          throw new Error('Airbag-locked listing must not call AI');
+        }
+      }
+    });
+
+    assert.equal(runtimeCalls, 0);
+    assert.equal(masterFetches, 0);
+    assert.equal(summary.titleReviewAirbagLocked, 1);
+    assert.equal(patches.length, 1);
+    assert.deepEqual(patches[0].records, [{
+      id: 'recAirbagLock',
+      fields: {
+        'Title Review Status': 'Airbag - Locked',
+        'Title Review Reason': 'Airbag title locked',
+        'Title Review Notes': 'Source Title identifies an airbag; Phase 7.4 left title and description unchanged.'
+      }
+    }]);
+  } finally {
+    AirtableService.prototype.fetchAllRecords = originalFetchAllRecords;
+    AirtableService.prototype.request = originalRequest;
+    AirtableSchemaService.prototype.listTables = originalListTables;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 test('explicit IPN runs retry Needs Review rows without reprocessing completed rows', () => {
   const fields = {

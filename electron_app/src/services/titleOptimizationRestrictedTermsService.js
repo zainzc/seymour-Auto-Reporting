@@ -1,13 +1,13 @@
 const SEED_DEFINITIONS = [
   ['long-block', 'Long Block', 'never-introduce', 'engine', true, 'Never introduce Long Block into an optimized engine title. Do not infer it from category, interchange prefix, engine size, engine code, VIN, item specifics, description, fitment, or general automotive knowledge.'],
   ['short-block', 'Short Block', 'never-introduce', 'engine', true, 'Never introduce Short Block into an optimized engine title. Do not infer it from category, interchange prefix, engine size, engine code, VIN, item specifics, description, fitment, or general automotive knowledge.'],
-  ['complete', 'Complete', 'requires-authorization', 'engine', false, null],
-  ['complete-engine', 'Complete Engine', 'requires-authorization', 'engine', false, null],
-  ['complete-assembly', 'Complete Assembly', 'requires-authorization', 'engine', false, null],
-  ['rebuilt', 'Rebuilt', 'requires-authorization', 'engine', false, null],
-  ['remanufactured', 'Remanufactured', 'requires-authorization', 'engine', false, null],
-  ['tested', 'Tested', 'requires-authorization', 'engine', false, 'May only be used when explicitly authorized by Seymour Auto for applicable engine listings.'],
-  ['6-mo-warranty', '6 Mo Warranty', 'requires-authorization', 'engine', false, 'May only be used when explicitly authorized by Seymour Auto for applicable engine listings.'],
+  ['complete', 'Complete', 'requires-authorization', 'engine', false, 'Include only when supplied listing evidence confirms the engine is complete.'],
+  ['complete-engine', 'Complete Engine', 'requires-authorization', 'engine', false, 'Include only when supplied listing evidence confirms a complete engine.'],
+  ['complete-assembly', 'Complete Assembly', 'requires-authorization', 'engine', false, 'Include only when supplied listing evidence confirms a complete assembly.'],
+  ['rebuilt', 'Rebuilt', 'requires-authorization', 'engine', false, 'Include only when supplied listing evidence confirms the engine was rebuilt.'],
+  ['remanufactured', 'Remanufactured', 'requires-authorization', 'engine', false, 'Include only when supplied listing evidence confirms the engine was remanufactured.'],
+  ['tested', 'Tested', 'requires-authorization', 'engine', false, 'Include only when supplied listing evidence confirms the engine was tested.'],
+  ['6-mo-warranty', '6 Mo Warranty', 'requires-authorization', 'engine', false, 'Include only when supplied listing evidence confirms this warranty applies.'],
   ['oem-part', 'OEM Part', 'remove-noise', 'all', false, 'Do not prepend OEM Part; remove it when it is not legitimate product information.'],
   ['used-auto', 'Used Auto', 'remove-noise', 'all', false, null],
   ['redundant-part', 'Redundant Part', 'remove-noise', 'all', false, null],
@@ -26,6 +26,7 @@ const SCOPES = new Set(['all', 'engine']);
 const LOCKED_DEFINITIONS = SEED_DEFINITIONS.filter(([, , , , locked]) => locked);
 const SEED_ORDER = new Map(SEED_DEFINITIONS.map(([slug], index) => [`client-v5-${slug}`, index]));
 const SEED_BY_ID = new Map(SEED_DEFINITIONS.map(definition => [`client-v5-${definition[0]}`, definition]));
+const LEGACY_MANUAL_AUTHORIZATION_NOTE = 'May only be used when explicitly authorized by Seymour Auto for applicable engine listings.';
 
 function normalizedTerm(value) {
   return typeof value === 'string' ? value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US') : '';
@@ -129,7 +130,13 @@ function hydrateRestrictedTermsConfiguration(raw) {
       issues.push({ id, message: `${id}: ${errors.map(issue => issue.message).join(' ')}` });
       quarantined.push(entry);
     } else {
-      rules.push(entry);
+      const definition = SEED_BY_ID.get(entry.id);
+      const [, , , , , currentNote] = definition || [];
+      const normalizedEntry = entry.origin === 'client-v5' && entry.ruleType === 'requires-authorization' &&
+        entry.note === LEGACY_MANUAL_AUTHORIZATION_NOTE && currentNote
+        ? { ...entry, note: currentNote }
+        : entry;
+      rules.push(normalizedEntry);
       seenIds.add(entry.id);
       if (!entry.deletedAt) seenTerms.add(normalized);
     }

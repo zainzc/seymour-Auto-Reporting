@@ -4,6 +4,7 @@ const { buildTitleOptimizationRuntimePrompt } = require('./titleOptimizationRunt
 const { buildFitmentReviewInput, checkedFitmentReview } = require('./titleOptimizationFitmentReviewService');
 const { validateMechanicalTitle, decideAiTitle } = require('./titleOptimizationAiDecisionService');
 const { validateTitleRuleContract } = require('./titleOptimizationRuleContractService');
+const { assembleTitleFromConfiguredSegments } = require('./titleOptimizationTitleAssemblyService');
 
 const RUNTIME_STATUSES = Object.freeze({
   COMPLETED: 'COMPLETED',
@@ -27,9 +28,9 @@ function normalizeText(value) {
 const FOCUSED_RULE_REPAIR_INSTRUCTIONS = Object.freeze([
   'Apply supplied source priority and all UI System, Prefix, Terminology, Synonym, Restricted Term, Category, and Title Structure rules. Do not invent facts or override an authoritative Prefix Rule with a Category detail.',
   'Choose only the advertised application supported by supplied evidence. For each selected fitment row, decide whether each restriction applies to the advertised years and variant; do not import restrictions from unrelated applications, broaden a restricted year, or bridge a year gap. Use an existing-title year fallback only when Part Fitment is unavailable.',
-  'If a material restriction applies, state it or a truthful concise equivalent in generatedTitle. A description or review note does not satisfy a missing title restriction. Do not return Completed while any applicable material restriction still has titleTreatment needs-review.',
+  'If a qualifier genuinely limits the selected application, state it or a truthful concise equivalent in generatedTitle; description or review notes do not satisfy it. Do not label a safe omission needs-review: when omission does not broaden fitment or mislead part selection, use titleTreatment omitted-safe and provide a concise omissionReason. Keep titleReviewStatus consistent: Completed cannot leave an unresolved needs-review restriction.',
   'Keep the specific product identity, verified side, material fitment, and useful existing-title details. Fit within 80 characters including the required final SKU by removing genuinely redundant wording and optional enrichment or MPN before important details. Follow the selected Title Structure; do not silently change an explicit side or degrade the existing title.',
-  'Verify a Category Rule detail only from supplied evidence or an applicable configured equivalent; cite its exact evidence ID and verbatim excerpt. Otherwise omit that optional detail. Never introduce a prohibited Restricted Term or treat ordinary listing evidence as authorization for a requires-authorization term; retain configured must-preserve terms.',
+  'Verify a Category Rule detail only from supplied evidence or an applicable configured equivalent; cite its exact evidence ID and verbatim excerpt. Otherwise omit that optional detail. Never introduce a prohibited Restricted Term. For AI Evidence Check terms, decide from the supplied listing evidence and cite the supporting source; no separate manual approval is required. Retain configured must-preserve terms.',
   'Return the complete JSON contract, including descriptions, materialRestrictions, categoryPriorityDetails, titleSegments, and an honest ruleSelfAudit. A Completed decision must agree with every returned structured decision.'
 ]);
 
@@ -99,24 +100,15 @@ function fail(result, status, error) {
   return result;
 }
 
-function writableOutput(aiResult = {}, decision = {}, proposedTitle = '', existingTitle = '') {
+function writableOutput(aiResult = {}, decision = {}, proposedTitle = '', existingTitle = '', fitmentReview = null) {
   const bypassed = decision.decision === 'BYPASSED_MANUAL_OVERRIDE';
   const accepted = decision.decision === 'ACCEPT_CANDIDATE' && decision.reviewRequired !== true;
   const retainedExistingTitle = accepted && Boolean(existingTitle) &&
     String(existingTitle).trim() === normalizeText(decision.finalTitle);
   const proposal = normalizeText(proposedTitle || aiResult.generatedTitle);
-  const unsafeProposal = (decision.degradationChecks || []).some(check => [
-    'phase-e:existing-title-side-conflict',
-    'phase-e:restricted-term-prohibited',
-    'phase-e:restricted-term-authorization',
-    'phase-e:restricted-term-preservation',
-    'phase-e:unsupported-claim-self-audit'
-  ].includes(check?.checkId));
-  const reviewProposal = ['NEEDS_REVIEW', 'RETAIN_EXISTING'].includes(decision.decision) &&
-    !unsafeProposal
+  const reviewProposal = ['NEEDS_REVIEW', 'RETAIN_EXISTING'].includes(decision.decision)
     ? proposal
     : '';
-  const deterministicNotes = normalizeText(decision.reviewNotes) || failedCheckSummary(decision);
   return {
     title: accepted ? normalizeText(decision.finalTitle) : reviewProposal,
     proposedTitle: proposal,
@@ -127,37 +119,73 @@ function writableOutput(aiResult = {}, decision = {}, proposedTitle = '', existi
       accepted ? retainedExistingTitle ? 'Existing title retained - already compliant' : 'completed' :
         normalizeText(decision.reviewReason) || 'manual_review_required',
     reviewNotes: bypassed ? normalizeText(decision.reviewNotes) || 'Automated title generation was skipped.' :
-      accepted ? acceptedReviewNotes(aiResult, decision, retainedExistingTitle) :
-        [deterministicNotes, proposal ? `Proposed title: ${proposal}` : ''].filter(Boolean).join(' ')
+      accepted ? acceptedReviewNotes(aiResult, decision, retainedExistingTitle) : conciseReviewNotes(aiResult, decision, fitmentReview)
   };
 }
 
-function acceptedReviewNotes(aiResult = {}, decision = {}, retainedExistingTitle = false) {
-  const notes = [];
-  if (retainedExistingTitle) {
-    notes.push('Existing title retained unchanged; AI found it meets the supplied evidence, applicable UI rules, and Title Structure.');
-    const assessment = normalizeText(aiResult.titleReviewNotes);
-    if (assessment) notes.push(`AI assessment: ${assessment}${/[.!?]$/.test(assessment) ? '' : '.'}`);
+function conciseText(value, maximum = 220) {
+  const text = normalizeText(value).replace(/<[^>]+>/g, '');
+  if (text.length <= maximum) return text;
+  return `${text.slice(0, Math.max(0, maximum - 3)).trimEnd()}...`;
+}
+
+function acceptedReviewNotes(_aiResult = {}, _decision = {}, retainedExistingTitle = false) {
+  return retainedExistingTitle
+    ? 'Existing title retained: it already meets the supplied evidence and configured title rules.'
+    : 'AI marked the title complete after reviewing supplied evidence and rules; SKU and 80-character checks passed.';
+}
+
+function conciseReviewNotes(aiResult = {}, decision = {}, fitmentReview = null) {
+  const failures = (decision.degradationChecks || [])
+    .filter(check => ['FAIL', 'BLOCK', 'RETAIN_EXISTING_REQUIRED'].includes(check?.status));
+  const failure = failures[0];
+  if (failure?.checkId?.endsWith('length-80')) {
+    const length = normalizeText(failure.message).match(/(\d+)\s+characters?/i)?.[1];
+    return `Needs Review: Title is ${length || 'over'} characters (80 max). Shorten without removing verified fitment.`;
   }
-  const vehicle = aiResult.vehicleDecision || {};
-  const vehicleIdentity = [vehicle.yearRange, vehicle.make, vehicle.model].map(normalizeText).filter(Boolean).join(' ');
-  if (vehicle.resolved === true && vehicleIdentity) {
-    notes.push(`${decision.aiLed ? 'AI-reviewed' : 'Verified'} vehicle application: ${vehicleIdentity}.`);
-    const citedRows = normalizeText(vehicle.source).split(';').filter(Boolean).length;
-    if (citedRows > 1) notes.push(`Combined ${citedRows} cited fitment rows into one supported range.`);
+  if (failure?.checkId?.endsWith('restricted-term-authorization')) {
+    const term = normalizeText(failure.message).match(/verify\s+(.+?)\s+from/i)?.[1];
+    return `Needs Review: ${term ? `"${term}"` : 'A restricted claim'} lacks supporting listing evidence. Confirm it or remove it.`;
   }
-  const side = aiResult.sideDecision || {};
-  const placement = [side.placement, side.side].map(normalizeText).filter(Boolean).join(' ');
-  if (placement) notes.push(`${decision.aiLed ? 'AI-reviewed' : 'Verified'} placement: ${placement}.`);
-  const details = (Array.isArray(aiResult.categoryPriorityDetails) ? aiResult.categoryPriorityDetails : [])
-    .filter(item => item?.verified === true)
-    .map(item => normalizeText(item.detail))
-    .filter(detail => detail && !/missing|cannot|conflict|degrade|uncertain|review|too long/i.test(detail));
-  if (details.length) notes.push(`Applied ${decision.aiLed ? 'AI-supported' : 'verified'} category detail${details.length > 1 ? 's' : ''}: ${details.join(', ')}.`);
-  if (!notes.length) notes.push('Generated title accepted after evidence and safety validation.');
-  const finalTitle = normalizeText(decision.finalTitle);
-  if (finalTitle) notes.push(`Final title: ${finalTitle}.`);
-  return notes.join(' ');
+  if (failure?.checkId?.endsWith('restricted-term-prohibited')) {
+    return `Needs Review: A configured prohibited term appears in the title. Remove it before publishing.`;
+  }
+  if (failure?.checkId?.endsWith('unsupported-claim-self-audit')) {
+    return 'Needs Review: AI flagged an unsupported title claim. Verify it against the listing evidence.';
+  }
+  if (failure?.checkId?.endsWith('source-conflict-self-audit')) {
+    return 'Needs Review: AI found conflicting source evidence. Confirm the correct listing detail.';
+  }
+  if (failure?.checkId?.endsWith('title-structure-assembly')) {
+    return 'Needs Review: The AI title could not be assembled from the configured structure. Check its title fields.';
+  }
+  if (failure?.checkId?.endsWith('invalid-fitment-date')) {
+    const date = normalizeText(failure.message).match(/\(([^)]+)\)/)?.[1];
+    return `Needs Review: Part Fitment has an invalid date${date ? ` (${date})` : ''}. Correct the source data before rerunning.`;
+  }
+  if (failure?.checkId?.endsWith('ai-fitment-review')) {
+    const detail = normalizeText(failure.message);
+    return conciseText(`Needs Review: Fitment could not be confirmed. ${detail}`, 240);
+  }
+
+  const reason = normalizeText(decision.reviewReason || aiResult.titleReviewReason)
+    .replace(/[_-]+/g, ' ');
+  const aiNeedsReview = normalizeText(aiResult.titleReviewStatus).toLowerCase() === 'needs review';
+  const fitmentNote = fitmentReview?.verdict === 'REVIEW'
+    ? normalizeText(fitmentReview.reason).match(/Earlier title finding:\s*(.+)$/i)?.[1] || fitmentReview.reason
+    : '';
+  const sourceNote = normalizeText(fitmentNote || (aiNeedsReview ? aiResult.titleReviewNotes : '') ||
+    decision.reviewNotes || aiResult.titleReviewNotes || failedCheckSummary(decision))
+    .replace(/\b(?:Runtime accepted|No issues identified)\.?/gi, ' ')
+    .replace(/\s+/g, ' ').trim();
+  const sentence = sourceNote.match(/^(.+?[.!?])(?:\s|$)/)?.[1] || sourceNote;
+  const details = conciseText(sentence, 160);
+  const normalizedReason = reason && !['manual review required', 'manual_review_required'].includes(reason.toLowerCase())
+    ? conciseText(reason, 65)
+    : '';
+  const content = [normalizedReason, details && normalizedReason && details.toLowerCase().includes(normalizedReason.toLowerCase())
+    ? '' : details].filter(Boolean).join('. ');
+  return conciseText(`Needs Review: ${content || 'Check the listing evidence and confirm the unresolved title detail.'}`, 240);
 }
 
 function failedCheckSummary(decision = {}) {
@@ -244,6 +272,7 @@ function buildRuleDecision({ sourceResolution = {}, ruleResolution = {}, validat
       categoryPriorityDetails: aiResult.categoryPriorityDetails || [],
       materialRestrictions: aiResult.materialRestrictions || [],
       restrictedTermDecisions: aiResult.restrictedTermDecisions || [],
+      titleStructureAssembly: aiResult.titleStructureAssembly || null,
       ruleSelfAudit: aiResult.ruleSelfAudit || null
     },
     checks: validation.ruleContract?.checks || validation.violations || [],
@@ -274,12 +303,13 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
     const previousTitle = artifact?.userPayload?.correction?.previousTitle;
     const previousNormalized = previousTitle ? validateMechanicalTitle({ sourceResolution, ruleResolution,
       candidateTitle: previousTitle }).validatedTitle : null;
-    return dependencies.executeAi({ promptArtifact: { ...artifact, userPayload: { ...artifact.userPayload,
+    const response = await dependencies.executeAi({ promptArtifact: { ...artifact, userPayload: { ...artifact.userPayload,
       titleBudget: { maximumCharacters: 80, requiredSkuSuffix: suffix || null,
         maximumCharactersBeforeSku: suffix ? Math.max(0, 80 - suffix.length - 1) : null,
         previousTitleCharactersAfterSku: previousNormalized?.length ?? null,
         instruction: 'Compose within this budget including spaces and the final SKU. Preserve configured mandatory terms and material fitment; optional MPN and enrichment yield first.' }
     } }, listing, options });
+    return assembleTitleFromConfiguredSegments(response, ruleResolution, sourceResolution);
   };
   const validateAiResult = (artifact, currentAiResult) => {
     const validationInputs = {
@@ -293,7 +323,16 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
       sideDecision: currentAiResult.sideDecision,
       vehicleDecision: currentAiResult.vehicleDecision
     };
-    const mechanical = (dependencies.validate || validateMechanicalTitle)(validationInputs);
+    const mechanical = { ...(dependencies.validate || validateMechanicalTitle)(validationInputs) };
+    if (currentAiResult?.titleStructureAssembly?.status === 'invalid') {
+      const violation = {
+        checkId: 'title-structure-assembly',
+        status: 'RETAIN_EXISTING_REQUIRED',
+        message: currentAiResult.titleStructureAssembly.errors.join(' ')
+      };
+      mechanical.outcome = 'RETAIN_EXISTING_REQUIRED';
+      mechanical.violations = [...(mechanical.violations || []), violation];
+    }
     const contract = validateTitleRuleContract({
       aiResult: currentAiResult,
       sourceResolution,
@@ -472,10 +511,10 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
           failures: failures.map(check => ({ checkId: check.checkId, field: check.field, message: check.message })),
           ...(focusedEvidence || {}),
           instruction: ruleContractFailure
-            ? 'Repair the exact listed failures using the cited source rows and all configured UI rules. Check whether each restriction applies to the selected advertised application. If it applies, fit a concise truthful equivalent into generatedTitle by removing repeated wording and optional enrichment before material detail. The description does not satisfy a missing title restriction. Do not repeat an unchanged title with the same unresolved material decisions. For a used Category Rule detail, cite supporting evidence if verified; otherwise remove the optional detail unless a Prefix Rule independently establishes it. Preserve mandatory restricted terms and the specific product identity. Return Completed only when the title and every structured decision agree; otherwise return Needs Review with a precise remaining source conflict or genuine 80-character limitation. Return the complete JSON contract.'
+            ? 'Repair the exact listed failures using the cited source rows and all configured UI rules. Check whether each qualifier actually restricts the selected advertised application. If omitting it would broaden fitment or mislead buyer part selection, fit a concise truthful equivalent into generatedTitle by removing repeated wording and optional enrichment first; the description does not satisfy it. If it can be safely omitted without changing fitment or buyer selection, classify it omitted-safe and provide omissionReason instead of forcing it into the title. Do not repeat an unchanged title with the same unresolved material decisions. For a used Category Rule detail, cite supporting evidence if verified; otherwise remove the optional detail unless a Prefix Rule independently establishes it. Preserve mandatory restricted terms and the specific product identity. Return Completed only when the title and every structured decision agree; otherwise return Needs Review with a precise remaining source conflict or genuine 80-character limitation. Return the complete JSON contract.'
             : dependencies.validate || dependencies.decide
             ? 'Correct every listed failure using the original supplied evidence and rules. Audit the previous title against the selected Part Fitment application and current title. For an invented citation, return an exact supplied citation. For an unsupported year or year gap, select only continuously covered cited years. For a changed make or model, restore the advertised supported make and model. Add any missing selected vehicle identity. For a side failure, use only the authoritative cited side. Remove an unsupported optional MPN; do not choose between conflicting authoritative MPN values. Identify useful distinguishing qualifiers that were omitted, remove overlapping or repeated part-name wording first, then rebuild the title in the exact selectedTitleStructure order. Keep useful verified details whenever the result fits within 80 characters; remove optional redundant details only as needed to remain within 80 characters. Recount all characters including spaces and place the verified SKU exactly once at the end. Preserve a verifiedVehicleDecision and its citation when supplied. Check all failures again before returning; do not repeat the failed title unchanged. Return the complete original output contract. Do not invent facts. Mark only unresolved material uncertainty Needs Review.'
-            : 'Correct the listed title failures using only the original supplied evidence. Preserve the advertised vehicle, explicit side, material fitment, and configured title structure. If a material restriction is already stated in the title, report it as included; otherwise add it without losing a more important detail or mark Needs Review when it cannot fit. Remove any prohibited or unauthorized restricted term; return restrictedTermDecisions only for terms used in the corrected title. Cite supplied evidence IDs accurately, but do not change an otherwise safe title merely to repair citation formatting. Keep the complete title within 80 characters and place the verified SKU exactly once at the end. Remove repeated wording and optional MPN before material fitment. Never silently change an explicit side from the existing title. Return the complete JSON contract.'
+            : 'Correct the listed title failures using only the original supplied evidence. Preserve the advertised vehicle, supported side, genuinely limiting fitment, and configured title structure. If a material restriction is already stated in the title, report it as included. If an applicable qualifier can be safely omitted without broadening fitment or misleading part selection, mark it omitted-safe and provide omissionReason; otherwise add a truthful concise qualifier or mark Needs Review when unresolved or impossible to fit. Remove any prohibited or evidence-unsupported restricted term; return restrictedTermDecisions only for terms used in the corrected title. Cite supplied evidence IDs accurately, but do not change an otherwise safe title merely to repair citation formatting. Keep the complete title within 80 characters and place the verified SKU exactly once at the end. Remove repeated wording and optional MPN before material fitment. Return the complete JSON contract.'
         }
       }
     };
@@ -749,7 +788,7 @@ async function runTitleOptimizationRuntime({ listing = {}, options = {}, depende
   const existingTitle = normalizeText(sourceResolution?.resolved?.fields?.title?.resolvedValue || sourceResolution?.normalized?.fields?.existingTitle?.value);
   const reviewProposal = normalizeText(aiResult.generatedTitle);
   result.output = writableOutput(aiResult, decision, reviewProposal,
-    promptArtifact?.userPayload?.existingTitle?.currentTitle || existingTitle);
+    promptArtifact?.userPayload?.existingTitle?.currentTitle || existingTitle, result.fitmentReview);
   result.ruleDecision = buildRuleDecision({ sourceResolution, ruleResolution, validation, decision, aiResult });
   const titleWriteAction = result.output.title ? 'WRITE_ITEM_TITLE' : 'PRESERVE_ITEM_TITLE';
   logger.info?.(

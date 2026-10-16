@@ -22,3 +22,13 @@ test('Restricted Terms page uses popup editor and responsive, vertically scrolli
   assert.match(css, /overflow-x:\s*hidden/);
   assert.match(css, /overflow-y:\s*auto/);
 });
+
+test('Restricted Terms explains the AI evidence check without implying manual approval', () => {
+  const html = read('restricted-terms.html');
+  const controller = read('restricted-terms.js');
+  assert.match(html, /AI Evidence Check/);
+  assert.match(html, /AI checks the listing evidence supplied for each item/i);
+  assert.match(html, /No separate manual approval is required/i);
+  assert.doesNotMatch(html, /separate approved Seymour Auto rule|Runtime title enforcement is not implemented/i);
+  assert.match(controller, /'requires-authorization': 'AI Evidence Check'/);
+});

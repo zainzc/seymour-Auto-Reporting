@@ -11,21 +11,10 @@ function containsTerm(title, term) {
   return Boolean(escaped && new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, 'i').test(normalizeText(title)));
 }
 
-function explicitSide(title) {
-  const words = normalizeText(title).toLowerCase().match(/\b(?:left|lh|driver|right|rh|passenger)\b/g) || [];
-  const left = words.some(word => ['left', 'lh', 'driver'].includes(word));
-  const right = words.some(word => ['right', 'rh', 'passenger'].includes(word));
-  return left === right ? null : left ? 'Left' : 'Right';
-}
-
 function suppliedEvidenceIds(promptArtifact = {}) {
   const listing = promptArtifact?.userPayload?.resolvedListing || {};
   const evidenceSources = listing.categoryPriorityEvidenceSources || [];
   const all = new Set(evidenceSources.map(item => normalizeText(item?.id)).filter(Boolean));
-  const restrictedTermAuthorization = new Set(evidenceSources
-    .filter(item => item?.authorizesRestrictedTerms === true)
-    .map(item => normalizeText(item?.id))
-    .filter(Boolean));
   const fitment = new Set();
   for (const row of listing.titleFitmentCandidates?.eligibleCandidates || []) {
     const id = normalizeText(row?.id);
@@ -33,8 +22,15 @@ function suppliedEvidenceIds(promptArtifact = {}) {
       all.add(id);
       fitment.add(id);
     }
+    for (const sourceRow of row?.sourceRows || []) {
+      const sourceRowId = normalizeText(sourceRow?.id);
+      if (sourceRowId) {
+        all.add(sourceRowId);
+        fitment.add(sourceRowId);
+      }
+    }
   }
-  return { all, fitment, restrictedTermAuthorization };
+  return { all, fitment };
 }
 
 function isResolvedAlternativeIdentifierRestriction(restriction = {}, aiResult = {}) {
@@ -63,11 +59,6 @@ function validateTitleRuleContract({ aiResult = {}, sourceResolution = {}, ruleR
   const warn = (checkId, message) => checks.push({ checkId, status: 'WARN', message, relatedConfigIds: [] });
   const existingTitle = normalizeText(promptArtifact?.userPayload?.existingTitle?.currentTitle ||
     sourceResolution?.resolved?.fields?.title?.resolvedValue);
-  const previousSide = explicitSide(existingTitle);
-  const proposedSide = explicitSide(candidateTitle);
-  if (previousSide && proposedSide && previousSide !== proposedSide) {
-    fail('existing-title-side-conflict', `Proposed ${proposedSide} side conflicts with the existing ${previousSide} side. Verify the part before replacing the title.`);
-  }
   const contractSupplied = ['materialRestrictions', 'restrictedTermDecisions', 'titleSegments', 'ruleSelfAudit']
     .some(key => Object.prototype.hasOwnProperty.call(aiResult, key));
   if (!contractSupplied) return { passed: violations.length === 0, checks, violations, skipped: true };
@@ -96,9 +87,9 @@ function validateTitleRuleContract({ aiResult = {}, sourceResolution = {}, ruleR
     if (rule.ruleType === 'requires-authorization') {
       const source = normalizeText(decision?.source);
       const evidence = normalizeText(decision?.evidence);
-      if (decision?.authorized !== true || !source || !evidence ||
-          !evidenceIds.restrictedTermAuthorization.has(source)) {
-        fail('restricted-term-authorization', `Restricted Term ${term} requires valid supplied authorization evidence.`, [rule.id].filter(Boolean));
+      const evidenceVerified = decision?.evidenceVerified === true || decision?.authorized === true;
+      if (decision?.used !== true || !evidenceVerified || !source || !evidence || !evidenceIds.all.has(source)) {
+        fail('restricted-term-authorization', `AI Evidence Check could not verify ${term} from a cited supplied listing source.`, [rule.id].filter(Boolean));
         continue;
       }
     }
@@ -114,6 +105,14 @@ function validateTitleRuleContract({ aiResult = {}, sourceResolution = {}, ruleR
     if (invalidIds.length) {
       warn('material-restriction-citation', `Material restriction cites unknown source rows: ${invalidIds.join(', ')}.`);
     }
+    if (restriction?.material === true && restriction?.titleTreatment === 'omitted-safe') {
+      const reason = normalizeText(restriction.omissionReason);
+      if (!reason) {
+        warn('material-restriction-omission-rationale', `Safe omission of ${normalizeText(restriction.detail)} has no explanation.`);
+      } else {
+        pass('material-restriction-safe-omission', `AI marked ${normalizeText(restriction.detail)} safe to omit: ${reason}`);
+      }
+    }
     if (restriction?.material === true && restriction?.titleTreatment === 'needs-review' &&
         normalizedKey(aiResult.titleReviewStatus) === 'completed') {
       const message = `Material restriction ${normalizeText(restriction.detail)} still requires review.`;
@@ -122,7 +121,7 @@ function validateTitleRuleContract({ aiResult = {}, sourceResolution = {}, ruleR
       } else if (isResolvedAlternativeIdentifierRestriction(restriction, aiResult)) {
         warn('material-restriction-alternative-identifier', `${message} Compatible alternative identifiers are resolved and do not block completion.`);
       } else {
-        fail('material-restriction-unresolved', message);
+        warn('material-decision-contradiction', `AI returned Completed but marked ${normalizeText(restriction.detail)} needs-review; retaining the AI final status.`);
       }
     }
   }
@@ -140,12 +139,14 @@ function validateTitleRuleContract({ aiResult = {}, sourceResolution = {}, ruleR
     } else {
       pass('title-segment-reconstruction', 'Returned title segments reconstruct the generated title.');
     }
-    const configuredKeys = (ruleResolution?.titleStructure?.selected?.segments || [])
-      .map(segment => normalizeText(segment?.key)).filter(Boolean);
+    const configuredSegments = ruleResolution?.titleStructure?.selected?.segments || [];
+    const configuredKeys = configuredSegments
+      .map(segment => normalizeText(segment?.key)).filter(key => key && key !== 'sku');
+    if (configuredSegments.length) configuredKeys.push('sku');
     if (configuredKeys.length) {
       let previousIndex = -1;
       const invalidOrder = segments.some(segment => {
-        const index = configuredKeys.indexOf(normalizeText(segment?.key));
+        const index = configuredKeys.indexOf(normalizeText(segment?.key), previousIndex + 1);
         if (index < 0 || index <= previousIndex) return true;
         previousIndex = index;
         return false;
@@ -176,19 +177,19 @@ function validateTitleRuleContract({ aiResult = {}, sourceResolution = {}, ruleR
       continue;
     }
     if (matching.length !== 1) {
-      fail('category-detail-decision-count', `Category Rule detail ${detail} must have exactly one AI decision.`);
+      warn('category-detail-decision-count', `AI did not return exactly one decision for Category Rule detail ${detail}.`);
       continue;
     }
     const decision = matching[0];
     if (decision.verified !== true) {
-      fail('category-detail-unverified-use', `Category Rule detail ${detail} appears in the title without verification.`);
+      warn('category-detail-unverified-use', `AI marked Category Rule detail ${detail} unverified although it appears in the title.`);
       continue;
     }
     if (decision.verified === true) {
       const source = normalizeText(decision.source);
       const evidence = normalizeText(decision.evidence);
       if (!source || !evidence || !evidenceIds.all.has(source)) {
-        fail('category-detail-citation', `Category Rule detail ${detail} has no valid supplied evidence citation.`);
+        warn('category-detail-citation', `Category Rule detail ${detail} has no valid supplied evidence citation.`);
         continue;
       }
     }

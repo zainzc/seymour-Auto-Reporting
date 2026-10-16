@@ -1,3 +1,6 @@
+const LEGACY_AIRBAG_RULE_NOTE = 'Seymour Auto is authorized to sell applicable airbags.\nDo not automatically exclude airbag titles from optimization.';
+const AIRBAG_TITLE_LOCK_NOTE = 'Seymour Auto is authorized to sell applicable airbags.\nAirbag title lock: when source Title contains "airbag" or "air bag", skip Phase 7.4 title and description generation and preserve Item Title and description. Pricing automation remains separate.';
+
 const SEEDS = [
   ['engines', 'Engines', [], ['300 Series'], ['Size', 'Engine Code', 'VIN Identifier', 'Authorized Tested/Warranty Terminology'], 'Engine-specific Restricted Terms remain controlled by Restricted Terms.\nDo not introduce Long Block or Short Block.\nTested/Warranty terminology requires applicable Seymour Auto authorization.'],
   ['transmissions', 'Transmissions', [], ['400 Series'], ['Transmission Code', 'Speed / Type', 'Drivetrain'], 'Future title behavior prefers "Automatic", not "Auto".\nIf expected transmission code cannot be verified, future runtime may flag it.'],
@@ -14,7 +17,7 @@ const SEEDS = [
   ['evap-canisters', 'EVAP Canisters', ['375'], [], ['EVAP Charcoal Canister', 'Manufacturer Part Number'], null],
   ['pedals', 'Pedals', ['234'], [], ['Gas Pedal', 'Accelerator Pedal'], null],
   ['actuators', 'Actuators', ['285'], [], ['Front / Rear', 'Side'], 'Use Side only when verified.'],
-  ['airbags', 'Airbags', [], [], ['Verified Driver / Passenger Placement', 'Airbag'], 'Seymour Auto is authorized to sell applicable airbags.\nDo not automatically exclude airbag titles from optimization.'],
+  ['airbags', 'Airbags', [], [], ['Verified Driver / Passenger Placement', 'Airbag'], AIRBAG_TITLE_LOCK_NOTE],
   ['fuse-boxes', 'Fuse Boxes', ['646', '663'], [], ['Engine Bay vs Interior according to verified prefix'], 'Do not infer Engine Bay vs Interior without verified prefix data.'],
   ['consoles', 'Consoles', [], [], ['Lid Only when applicable', 'Roof / Floor', 'Color'], null],
   ['seat-belts', 'Seat Belts', [], [], ['Buckle / Retractor / Receiver', 'Side', 'Color'], 'Do not infer component type when not verified.'],
@@ -138,7 +141,13 @@ function hydrateCategoryRulesConfiguration(raw) {
     if (item.errors.length) {
       issues.push({ id, message: `${id}: ${item.errors.map(error => error.message).join(' ')}` });
       quarantined.push(item.entry);
-    } else rules.push({ ...item.entry, priorityDetails: normalizePriorityDetails(item.entry.priorityDetails) });
+    } else {
+      const rule = { ...item.entry, priorityDetails: normalizePriorityDetails(item.entry.priorityDetails) };
+      if (rule.id === 'client-v5-airbags' && rule.origin === 'client-v5' && rule.note === LEGACY_AIRBAG_RULE_NOTE) {
+        rule.note = AIRBAG_TITLE_LOCK_NOTE;
+      }
+      rules.push(rule);
+    }
   }
   return { rules: rules.sort(compareCategoryRules), issues, quarantined };
 }

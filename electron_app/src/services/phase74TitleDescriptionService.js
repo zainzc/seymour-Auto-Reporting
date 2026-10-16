@@ -811,6 +811,24 @@ function addFieldIfChanged(writeFields = {}, existingFields = {}, fieldName = ''
   return true;
 }
 
+function isAirbagSourceTitle(fields = {}) {
+  return isAirbagTitleEvidence(getFieldValueByName(fields, LISTING_LEGACY_TITLE_FIELD));
+}
+
+function buildAirbagTitleLockUpdate(fields = {}) {
+  if (!isAirbagSourceTitle(fields)) return null;
+  const writeFields = {};
+  addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_STATUS_FIELD, TITLE_REVIEW_STATUS_AIRBAG_LOCKED);
+  addFieldIfChanged(writeFields, fields, LISTING_TITLE_REVIEW_REASON_FIELD, 'Airbag title locked');
+  addFieldIfChanged(
+    writeFields,
+    fields,
+    LISTING_TITLE_REVIEW_NOTES_FIELD,
+    'Source Title identifies an airbag; Phase 7.4 left title and description unchanged.'
+  );
+  return { matched: true, fields: writeFields };
+}
+
 function applyAcceptedRuntimeTitle(writeFields = {}, existingFields = {}, runtimeResult = {}) {
   const decision = runtimeResult?.decision?.decision;
   const reviewStatus = normalizeText(runtimeResult?.output?.reviewStatus);
@@ -912,7 +930,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     apiKey: openaiApiKey,
     model: openaiModel,
     baseUrl: openaiBaseUrl || undefined,
-    timeoutMs: Number(options.aiTimeoutMs || process.env.PHASE74_AI_TIMEOUT_MS || 30000) || 30000,
+    timeoutMs: Number(options.aiTimeoutMs || process.env.PHASE74_AI_TIMEOUT_MS || 90000) || 90000,
     maxAttempts: Number(options.aiMaxAttempts || process.env.PHASE74_AI_MAX_ATTEMPTS || 3) || 3,
     baseDelayMs: 600,
     promptCacheEnabled,
@@ -1053,6 +1071,11 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
       continue;
     }
 
+    if (isAirbagSourceTitle(fields)) {
+      rowsForGeneration.push(row);
+      continue;
+    }
+
     if (shouldSkipEnrichedListing(fields, testIpnSet.size > 0)) {
       summary.skippedAlreadyEnriched += 1;
       continue;
@@ -1065,7 +1088,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
   const neededIpns = [];
   for (const row of rowsForGeneration) {
     const ipn = normalizeIpn(row?.fields?.[LISTING_IPN_FIELD]);
-    if (!ipn) continue;
+    if (!ipn || isAirbagSourceTitle(row?.fields || {})) continue;
     neededIpns.push(ipn);
   }
 
@@ -1135,6 +1158,26 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
     processedEligible += 1;
     if (maxListings > 0 && processedEligible > maxListings) break;
 
+    const airbagLock = buildAirbagTitleLockUpdate(fields);
+    if (airbagLock) {
+      summary.titleReviewAirbagLocked += 1;
+      if (Object.hasOwn(airbagLock.fields, LISTING_TITLE_REVIEW_STATUS_FIELD)) {
+        summary.titleReviewWritten += 1;
+      }
+      if (Object.keys(airbagLock.fields).length > 0) {
+        updates.push({ id: row.id, fields: airbagLock.fields });
+      } else {
+        summary.skippedNoChange += 1;
+      }
+      emitProgress(progressCallback, {
+        stage: 'phase74_generate',
+        percent: Math.min(88, 20 + Math.floor(((i + 1) / Math.max(1, rowsForGeneration.length)) * 68)),
+        counts: summary,
+        message: `Airbag safety lock for listing ${i + 1}/${rowsForGeneration.length} (IPN '${ipn}'); title generation skipped.`
+      });
+      continue;
+    }
+
     const master = masterByIpn.get(ipn);
     if (!master) {
       summary.masterMissing += 1;
@@ -1183,7 +1226,6 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
         options: {
           enableAiFollowupCalls: false,
           enableIndependentAiReview: false,
-          enforceLengthValidation: false,
           fields: [
             'title', 'brandMake', 'model', 'part', 'manufacturerPartNumber', 'side', 'year', 'sku',
             'componentType', 'color', 'placement', 'keyFitmentDetail', 'engineDisplacement',
@@ -1430,6 +1472,7 @@ async function runPhase74TitleDescription(options = {}, progressCallback = () =>
 module.exports = {
   runPhase74TitleDescription,
   applyAcceptedRuntimeTitle,
+  buildAirbagTitleLockUpdate,
   runtimeOutputFailure,
   shouldSkipEnrichedListing
 };

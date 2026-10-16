@@ -104,6 +104,14 @@ function modelHintFromTitleCandidates(existingTitle, candidates) {
   return identities.length === 1 ? matching[0] : '';
 }
 
+function advertisedApplicationContext(hint) {
+  return hint ? {
+    ...hint,
+    source: 'existingTitle Fits application',
+    role: 'advertised-compatibility'
+  } : null;
+}
+
 function validCalendarDate(month, day, year) {
   const fullYear = year < 100 ? (year >= 70 ? 1900 + year : 2000 + year) : year;
   const date = new Date(Date.UTC(fullYear, month - 1, day));
@@ -135,7 +143,7 @@ function resolvedValue(listingResolution, field) {
 function selectTitleFitmentCandidates(listingResolution = {}) {
   const decisionPolicy = {
     owner: 'AI',
-    instruction: 'Evaluate supplied rows under evidencePolicy and UI rules. Combine compatible continuous rows for the advertised application while retaining material restrictions. Additional alternative applications do not all have to appear in one title. Donor year alone cannot justify narrowing; unresolved material conflicts require review.',
+    instruction: 'Evaluate each original clause in sourceRows as a separate Part Fitment application record. Qualifiers within one clause apply together; qualifiers from separate clauses are alternatives and must not be treated as cumulative requirements. Select the row or compatible rows supporting the advertised application, then compare the title claim with their year and variant scope. A title may omit a qualifier only when that omission does not broaden the compatibility the title implies beyond the selected evidence or mislead part selection. Treat the existing title Fits year range as advertised compatibility, not donor identity. Preserve its complete range when same-application rows continuously support it; do not narrow it to a single structured or donor year, or expand beyond cited support. Keep year- or variant-scoped restrictions attached only to the affected rows. Combine compatible continuous rows while retaining only restrictions that genuinely limit the selected application. Additional alternative applications do not all have to appear in one title. Review only unresolved material conflicts.',
     allowedOutcomes: [
       'COMBINE_COMPATIBLE_CONTINUOUS_ROWS',
       'UNRESOLVED_MATERIAL_QUALIFIER_CONFLICT'
@@ -158,7 +166,7 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
     candidates: [],
     distinctApplications: [],
     eligibleCandidates: [],
-    advertisedApplicationHint: advertisedHint,
+    advertisedApplicationHint: advertisedApplicationContext(advertisedHint),
     selectionBasis: advertisedHint ? 'EXISTING_TITLE_FITS_APPLICATION_UNMATCHED' : 'NO_PART_FITMENT',
     sourceIssues
   };
@@ -169,6 +177,12 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
   const model = resolvedValue(listingResolution, 'model');
   const byApplication = new Map();
   for (const candidate of parsed) {
+    const sourceRow = {
+      id: candidate.id,
+      startYear: candidate.startYear,
+      endYear: candidate.endYear,
+      evidence: candidate.evidence
+    };
     const hasResolvedVehicle = make && model &&
       containsPhrase(candidate.evidence, make) && containsModel(candidate.evidence, model);
     const key = hasResolvedVehicle
@@ -176,9 +190,10 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
       : candidate.canonicalKey;
     const existing = byApplication.get(key);
     if (!existing) {
-      byApplication.set(key, { ...candidate, variantEvidence: [candidate.evidence] });
+      byApplication.set(key, { ...candidate, sourceRows: [sourceRow], variantEvidence: [candidate.evidence] });
       continue;
     }
+    existing.sourceRows.push(sourceRow);
     existing.variantEvidence.push(candidate.evidence);
     existing.evidence = existing.variantEvidence.join('; ');
   }
@@ -215,8 +230,9 @@ function selectTitleFitmentCandidates(listingResolution = {}) {
     candidates,
     distinctApplications: candidates,
     eligibleCandidates,
-    advertisedApplicationHint: advertisedHint || (titleModel ? {
-      raw: existingTitle, yearRange: null, modelText: titleModel
+    advertisedApplicationHint: advertisedApplicationContext(advertisedHint) || (titleModel ? {
+      raw: existingTitle, yearRange: null, modelText: titleModel,
+      source: 'existingTitle', role: 'advertised-model'
     } : null),
     selectionBasis,
     sourceIssues

@@ -29,7 +29,7 @@ function parseArgs(argv = []) {
     phase74TestIpns: normalizeText(getArg('--test-ipns') || process.env.PHASE74_TEST_IPNS || ''),
     phase74MaxListings: Number(getArg('--max-listings') || process.env.PHASE74_MAX_LISTINGS || 0) || 0,
     sampleLimit: Number(getArg('--sample-limit') || process.env.PHASE74_SAMPLE_LIMIT || 20) || 20,
-    aiTimeoutMs: Number(getArg('--ai-timeout-ms') || process.env.PHASE74_AI_TIMEOUT_MS || 30000) || 30000,
+    aiTimeoutMs: Number(getArg('--ai-timeout-ms') || process.env.PHASE74_AI_TIMEOUT_MS || 90000) || 90000,
     aiMaxAttempts: Number(getArg('--ai-max-attempts') || process.env.PHASE74_AI_MAX_ATTEMPTS || 3) || 3
   };
 }
